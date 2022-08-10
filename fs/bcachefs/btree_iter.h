@@ -31,14 +31,18 @@ static inline void __btree_path_get(struct btree_trans *trans, struct btree_path
 
 	path->ref++;
 	path->intent_ref += intent;
+	trace_btree_path_get_ll(trans, path);
 }
 
 static inline bool __btree_path_put(struct btree_trans *trans, struct btree_path *path, bool intent)
 {
-	EBUG_ON(!test_bit(path - trans->paths, trans->paths_allocated));
+	unsigned idx = path - trans->paths;
+
+	EBUG_ON(!test_bit(idx, trans->paths_allocated));
 	EBUG_ON(!path->ref);
 	EBUG_ON(!path->intent_ref && intent);
 
+	trace_btree_path_put_ll(trans, path);
 	path->intent_ref -= intent;
 	return --path->ref == 0;
 }
