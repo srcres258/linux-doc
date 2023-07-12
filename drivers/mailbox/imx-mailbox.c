@@ -532,8 +532,12 @@ static irqreturn_t imx_mu_isr(int irq, void *p)
 		return IRQ_NONE;
 	}
 
-	if (priv->suspend)
-		pm_system_wakeup();
+	if (priv->suspend) {
+		if (priv->dcfg->type & IMX_MU_V2_IRQ)
+			pm_system_wakeup();
+		else
+			pm_system_irq_wakeup(priv->irq[0]);
+	}
 
 	return IRQ_HANDLED;
 }
