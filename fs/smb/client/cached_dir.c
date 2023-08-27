@@ -582,7 +582,7 @@ cifs_cfids_laundromat_thread(void *p)
 			return 0;
 		spin_lock(&cfids->cfid_list_lock);
 		list_for_each_entry_safe(cfid, q, &cfids->entries, entry) {
-			if (time_after(jiffies, cfid->time + HZ * 30)) {
+			if (time_after(jiffies, cfid->time + HZ * max_dir_cache)) {
 				list_del(&cfid->entry);
 				list_add(&cfid->entry, &entry);
 				cfids->num_entries--;
