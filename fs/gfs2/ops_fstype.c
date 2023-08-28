@@ -1098,6 +1098,27 @@ void gfs2_online_uevent(struct gfs2_sbd *sdp)
 	kobject_uevent_env(&sdp->sd_kobj, KOBJ_ONLINE, envp);
 }
 
+static void gfs2_assign_thread(struct gfs2_sbd *sdp, struct task_struct **p,
+			       struct task_struct *t)
+{
+	spin_lock(&sdp->sd_log_lock);
+	*p = t;
+	spin_unlock(&sdp->sd_log_lock);
+}
+
+void gfs2_destroy_thread(struct gfs2_sbd *sdp, struct task_struct **p)
+{
+	struct task_struct *t;
+
+	spin_lock(&sdp->sd_log_lock);
+	t = *p;
+	*p = NULL;
+	spin_unlock(&sdp->sd_log_lock);
+
+	if (t)
+		kthread_stop(t);
+}
+
 static int init_threads(struct gfs2_sbd *sdp)
 {
 	struct task_struct *p;
@@ -1109,7 +1130,7 @@ static int init_threads(struct gfs2_sbd *sdp)
 		fs_err(sdp, "can't start logd thread: %d\n", error);
 		return error;
 	}
-	sdp->sd_logd_process = p;
+	gfs2_assign_thread(sdp, &sdp->sd_logd_process, p);
 
 	p = kthread_run(gfs2_quotad, sdp, "gfs2_quotad");
 	if (IS_ERR(p)) {
@@ -1117,12 +1138,11 @@ static int init_threads(struct gfs2_sbd *sdp)
 		fs_err(sdp, "can't start quotad thread: %d\n", error);
 		goto fail;
 	}
-	sdp->sd_quotad_process = p;
+	gfs2_assign_thread(sdp, &sdp->sd_quotad_process, p);
 	return 0;
 
 fail:
-	kthread_stop(sdp->sd_logd_process);
-	sdp->sd_logd_process = NULL;
+	gfs2_destroy_thread(sdp, &sdp->sd_logd_process);
 	return error;
 }
 
@@ -1276,12 +1296,8 @@ static int gfs2_fill_super(struct super_block *sb, struct fs_context *fc)
 
 	if (error) {
 		gfs2_freeze_unlock(&sdp->sd_freeze_gh);
-		if (sdp->sd_quotad_process)
-			kthread_stop(sdp->sd_quotad_process);
-		sdp->sd_quotad_process = NULL;
-		if (sdp->sd_logd_process)
-			kthread_stop(sdp->sd_logd_process);
-		sdp->sd_logd_process = NULL;
+		gfs2_destroy_thread(sdp, &sdp->sd_logd_process);
+		gfs2_destroy_thread(sdp, &sdp->sd_quotad_process);
 		fs_err(sdp, "can't make FS RW: %d\n", error);
 		goto fail_per_node;
 	}
