@@ -87,7 +87,7 @@ static struct gfs2_sbd *init_sbd(struct super_block *sb)
 	set_bit(SDF_NOJOURNALID, &sdp->sd_flags);
 	gfs2_tune_init(&sdp->sd_tune);
 
-	init_waitqueue_head(&sdp->sd_glock_wait);
+	init_waitqueue_head(&sdp->sd_kill_wait);
 	init_waitqueue_head(&sdp->sd_async_glock_wait);
 	atomic_set(&sdp->sd_glock_disposal, 0);
 	init_completion(&sdp->sd_locking_init);
@@ -1098,6 +1098,27 @@ void gfs2_online_uevent(struct gfs2_sbd *sdp)
 	kobject_uevent_env(&sdp->sd_kobj, KOBJ_ONLINE, envp);
 }
 
+static void gfs2_assign_thread(struct gfs2_sbd *sdp, struct task_struct **p,
+			       struct task_struct *t)
+{
+	spin_lock(&sdp->sd_log_lock);
+	*p = t;
+	spin_unlock(&sdp->sd_log_lock);
+}
+
+void gfs2_destroy_thread(struct gfs2_sbd *sdp, struct task_struct **p)
+{
+	struct task_struct *t;
+
+	spin_lock(&sdp->sd_log_lock);
+	t = *p;
+	*p = NULL;
+	spin_unlock(&sdp->sd_log_lock);
+
+	if (t)
+		kthread_stop(t);
+}
+
 static int init_threads(struct gfs2_sbd *sdp)
 {
 	struct task_struct *p;
@@ -1109,7 +1130,7 @@ static int init_threads(struct gfs2_sbd *sdp)
 		fs_err(sdp, "can't start logd thread: %d\n", error);
 		return error;
 	}
-	sdp->sd_logd_process = p;
+	gfs2_assign_thread(sdp, &sdp->sd_logd_process, p);
 
 	p = kthread_run(gfs2_quotad, sdp, "gfs2_quotad");
 	if (IS_ERR(p)) {
@@ -1117,12 +1138,11 @@ static int init_threads(struct gfs2_sbd *sdp)
 		fs_err(sdp, "can't start quotad thread: %d\n", error);
 		goto fail;
 	}
-	sdp->sd_quotad_process = p;
+	gfs2_assign_thread(sdp, &sdp->sd_quotad_process, p);
 	return 0;
 
 fail:
-	kthread_stop(sdp->sd_logd_process);
-	sdp->sd_logd_process = NULL;
+	gfs2_destroy_thread(sdp, &sdp->sd_logd_process);
 	return error;
 }
 
@@ -1276,12 +1296,8 @@ static int gfs2_fill_super(struct super_block *sb, struct fs_context *fc)
 
 	if (error) {
 		gfs2_freeze_unlock(&sdp->sd_freeze_gh);
-		if (sdp->sd_quotad_process)
-			kthread_stop(sdp->sd_quotad_process);
-		sdp->sd_quotad_process = NULL;
-		if (sdp->sd_logd_process)
-			kthread_stop(sdp->sd_logd_process);
-		sdp->sd_logd_process = NULL;
+		gfs2_destroy_thread(sdp, &sdp->sd_logd_process);
+		gfs2_destroy_thread(sdp, &sdp->sd_quotad_process);
 		fs_err(sdp, "can't make FS RW: %d\n", error);
 		goto fail_per_node;
 	}
@@ -1786,9 +1802,9 @@ static void gfs2_kill_sb(struct super_block *sb)
 	/*
 	 * Flush and then drain the delete workqueue here (via
 	 * destroy_workqueue()) to ensure that any delete work that
-	 * may be running will also see the SDF_DEACTIVATING flag.
+	 * may be running will also see the SDF_KILL flag.
 	 */
-	set_bit(SDF_DEACTIVATING, &sdp->sd_flags);
+	set_bit(SDF_KILL, &sdp->sd_flags);
 	gfs2_flush_delete_work(sdp);
 	destroy_workqueue(sdp->sd_delete_wq);
 
