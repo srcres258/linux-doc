@@ -185,6 +185,8 @@ static inline uint32_t atoi_non_negative(const char *name, const char *num_str)
 	return num;
 }
 
+char *strdup_printf(const char *fmt, ...) __attribute__((format(printf, 1, 2), nonnull(1)));
+
 int guest_vsnprintf(char *buf, int n, const char *fmt, va_list args);
 int guest_snprintf(char *buf, int n, const char *fmt, ...);
 
