@@ -117,6 +117,10 @@ module_param(cifs_max_pending, uint, 0444);
 MODULE_PARM_DESC(cifs_max_pending, "Simultaneous requests to server for "
 				   "CIFS/SMB1 dialect (N/A for SMB3) "
 				   "Default: 32767 Range: 2 to 32767.");
+unsigned int max_dir_cache = 60;
+module_param(max_dir_cache, uint, 0644);
+MODULE_PARM_DESC(max_dir_cache, "Number of seconds to cache directory contents for which we have a lease. Default: 60 "
+				 "Range: 1 to 65000 seconds");
 #ifdef CONFIG_CIFS_STATS2
 unsigned int slow_rsp_threshold = 1;
 module_param(slow_rsp_threshold, uint, 0644);
@@ -1679,6 +1683,14 @@ init_cifs(void)
 			 CIFS_MAX_REQ);
 	}
 
+	if (max_dir_cache < 1) {
+		max_dir_cache = 1;
+		cifs_dbg(VFS, "max_dir_cache timeout set to min of 1 second\n");
+	} else if (max_dir_cache > 65000) {
+		max_dir_cache = 65000;
+		cifs_dbg(VFS, "max_dir_cache timeout set to max of 65000 seconds\n");
+	}
+
 	cifsiod_wq = alloc_workqueue("cifsiod", WQ_FREEZABLE|WQ_MEM_RECLAIM, 0);
 	if (!cifsiod_wq) {
 		rc = -ENOMEM;
@@ -1805,7 +1817,7 @@ exit_cifs(void)
 	cifs_dbg(NOISY, "exit_smb3\n");
 	unregister_filesystem(&cifs_fs_type);
 	unregister_filesystem(&smb3_fs_type);
-	cifs_dfs_release_automount_timer();
+	cifs_release_automount_timer();
 	exit_cifs_idmap();
 #ifdef CONFIG_CIFS_SWN_UPCALL
 	cifs_genl_exit();
