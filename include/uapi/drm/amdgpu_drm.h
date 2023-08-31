@@ -586,7 +586,8 @@ struct drm_amdgpu_gem_va {
  */
 #define AMDGPU_HW_IP_VCN_ENC      7
 #define AMDGPU_HW_IP_VCN_JPEG     8
-#define AMDGPU_HW_IP_NUM          9
+#define AMDGPU_HW_IP_VPE          9
+#define AMDGPU_HW_IP_NUM          10
 
 #define AMDGPU_HW_IP_INSTANCE_MAX_COUNT 1
 
@@ -1238,6 +1239,7 @@ struct drm_amdgpu_info_video_caps {
 #define AMDGPU_FAMILY_GC_11_0_1			148 /* GC 11.0.1 */
 #define AMDGPU_FAMILY_GC_10_3_6			149 /* GC 10.3.6 */
 #define AMDGPU_FAMILY_GC_10_3_7			151 /* GC 10.3.7 */
+#define AMDGPU_FAMILY_GC_11_5_0			150 /* GC 11.5.0 */
 
 #if defined(__cplusplus)
 }
