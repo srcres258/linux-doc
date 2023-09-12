@@ -11,6 +11,7 @@
 
 #include <linux/kthread.h>
 #include <linux/pagemap.h>
+#include <linux/prefetch.h>
 #include <linux/task_io_accounting_ops.h>
 
 /* O_DIRECT reads */
