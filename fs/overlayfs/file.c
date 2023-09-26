@@ -400,6 +400,12 @@ static ssize_t ovl_write_iter(struct kiocb *iocb, struct iov_iter *iter)
 	if (!ovl_should_sync(OVL_FS(inode->i_sb)))
 		flags &= ~(IOCB_DSYNC | IOCB_SYNC);
 
+	/*
+	 * Overlayfs doesn't support deferred completions, don't copy
+	 * this property in case it is set by the issuer.
+	 */
+	flags &= ~IOCB_DIO_CALLER_COMP;
+
 	old_cred = ovl_override_creds(inode->i_sb);
 	if (is_sync_kiocb(iocb)) {
 		rwf_t rwf = iocb_to_rw_flags(flags);
