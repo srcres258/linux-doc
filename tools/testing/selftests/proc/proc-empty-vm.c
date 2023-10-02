@@ -303,6 +303,37 @@ static int test_proc_pid_smaps_rollup(pid_t pid)
 	}
 }
 
+static const char g_statm[] = "0 0 0 * 0 0 0\n";
+
+static int test_proc_pid_statm(pid_t pid)
+{
+	char buf[4096];
+
+	snprintf(buf, sizeof(buf), "/proc/%u/statm", pid);
+
+	int fd = open(buf, O_RDONLY);
+
+	if (fd == -1) {
+		if (errno == ENOENT) {
+			/*
+			 * /proc/${pid}/statm is under CONFIG_PROC_PAGE_MONITOR,
+			 * it doesn't necessarily exist.
+			 */
+			return EXIT_SUCCESS;
+		}
+		perror("open /proc/${pid}/statm");
+		return EXIT_FAILURE;
+	} else {
+		ssize_t rv = read(fd, buf, sizeof(buf));
+
+		close(fd);
+		size_t len = strlen(g_statm);
+
+		assert(rv >= len);
+		return EXIT_SUCCESS;
+	}
+}
+
 int main(void)
 {
 	int rv = EXIT_SUCCESS;
@@ -389,11 +420,8 @@ int main(void)
 		if (rv == EXIT_SUCCESS) {
 			rv = test_proc_pid_smaps_rollup(pid);
 		}
-		/*
-		 * TODO test /proc/${pid}/statm, task_statm()
-		 * ->start_code, ->end_code aren't updated by munmap().
-		 * Output can be "0 0 0 2 0 0 0\n" where "2" can be anything.
-		 */
+		if (rv == EXIT_SUCCESS)
+			rv = test_proc_pid_statm(pid);
 
 		/* Cut the rope. */
 		int wstatus;

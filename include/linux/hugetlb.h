@@ -60,7 +60,6 @@ struct resv_map {
 	long adds_in_progress;
 	struct list_head region_cache;
 	long region_cache_count;
-	struct rw_semaphore rw_sema;
 #ifdef CONFIG_CGROUP_HUGETLB
 	/*
 	 * On private mappings, the counter to uncharge reservations is stored
@@ -105,12 +104,6 @@ struct file_region {
 	struct page_counter *reservation_counter;
 	struct cgroup_subsys_state *css;
 #endif
-};
-
-struct hugetlb_vma_lock {
-	struct kref refs;
-	struct rw_semaphore rw_sema;
-	struct vm_area_struct *vma;
 };
 
 extern struct resv_map *resv_map_alloc(void);
@@ -280,6 +273,7 @@ long hugetlb_change_protection(struct vm_area_struct *vma,
 		unsigned long cp_flags);
 
 bool is_hugetlb_entry_migration(pte_t pte);
+bool is_hugetlb_entry_hwpoisoned(pte_t pte);
 void hugetlb_unshare_all_pmds(struct vm_area_struct *vma);
 
 #else /* !CONFIG_HUGETLB_PAGE */
@@ -844,6 +838,12 @@ static inline unsigned int blocks_per_huge_page(struct hstate *h)
 	return huge_page_size(h) / 512;
 }
 
+static inline struct folio *filemap_lock_hugetlb_folio(struct hstate *h,
+				struct address_space *mapping, pgoff_t idx)
+{
+	return filemap_lock_folio(mapping, idx << huge_page_order(h));
+}
+
 #include <asm/hugetlb.h>
 
 #ifndef is_hugepage_only_range
@@ -1036,6 +1036,12 @@ bool is_raw_hwpoison_page_in_hugepage(struct page *page);
 struct hstate {};
 
 static inline struct hugepage_subpool *hugetlb_folio_subpool(struct folio *folio)
+{
+	return NULL;
+}
+
+static inline struct folio *filemap_lock_hugetlb_folio(struct hstate *h,
+				struct address_space *mapping, pgoff_t idx)
 {
 	return NULL;
 }
@@ -1279,17 +1285,9 @@ hugetlb_walk(struct vm_area_struct *vma, unsigned long addr, unsigned long sz)
 {
 #if defined(CONFIG_HUGETLB_PAGE) && \
 	defined(CONFIG_ARCH_WANT_HUGE_PMD_SHARE) && defined(CONFIG_LOCKDEP)
-	struct hugetlb_vma_lock *vma_lock = vma->vm_private_data;
-
-	/*
-	 * If pmd sharing possible, locking needed to safely walk the
-	 * hugetlb pgtables.  More information can be found at the comment
-	 * above huge_pte_offset() in the same file.
-	 *
-	 * NOTE: lockdep_is_held() is only defined with CONFIG_LOCKDEP.
-	 */
-	if (__vma_shareable_lock(vma))
-		WARN_ON_ONCE(!lockdep_is_held(&vma_lock->rw_sema) &&
+	if (vma->vm_file)
+		WARN_ON_ONCE(!lockdep_is_held(
+				 &vma->vm_file->f_mapping->invalidate_lock) &&
 			     !lockdep_is_held(
 				 &vma->vm_file->f_mapping->i_mmap_rwsem));
 #endif
