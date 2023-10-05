@@ -415,6 +415,15 @@ static inline void folio_set_order(struct folio *folio, unsigned int order)
 
 void folio_undo_large_rmappable(struct folio *folio);
 
+static inline struct folio *page_rmappable_folio(struct page *page)
+{
+	struct folio *folio = (struct folio *)page;
+
+	if (folio && folio_order(folio) > 1)
+		folio_prep_large_rmappable(folio);
+	return folio;
+}
+
 static inline void prep_compound_head(struct page *page, unsigned int order)
 {
 	struct folio *folio = (struct folio *)page;
@@ -429,7 +438,8 @@ static inline void prep_compound_tail(struct page *head, int tail_idx)
 {
 	struct page *p = head + tail_idx;
 
-	p->mapping = TAIL_MAPPING;
+	if (tail_idx > TAIL_MAPPING_REUSED_MAX)
+		p->mapping = TAIL_MAPPING;
 	set_compound_head(p, head);
 	set_page_private(p, 0);
 }
@@ -983,7 +993,7 @@ void vunmap_range_noflush(unsigned long start, unsigned long end);
 
 void __vunmap_range_noflush(unsigned long start, unsigned long end);
 
-int numa_migrate_prep(struct page *page, struct vm_area_struct *vma,
+int numa_migrate_prep(struct folio *folio, struct vm_area_struct *vma,
 		      unsigned long addr, int page_nid, int *flags);
 
 void free_zone_device_page(struct page *page);
@@ -1016,6 +1026,9 @@ enum {
 	/* allow unlocking the mmap lock */
 	FOLL_UNLOCKABLE = 1 << 21,
 };
+
+#define INTERNAL_GUP_FLAGS (FOLL_TOUCH | FOLL_TRIED | FOLL_REMOTE | FOLL_PIN | \
+			    FOLL_FAST_ONLY | FOLL_UNLOCKABLE)
 
 /*
  * Indicates for which pages that are write-protected in the page table,
