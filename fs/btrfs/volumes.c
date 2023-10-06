@@ -597,7 +597,7 @@ static struct btrfs_fs_devices *find_fsid_by_device(
 	if (found_by_devt) {
 		/* Existing device. */
 		if (fsid_fs_devices == NULL) {
-			if (devt_fs_devices->opened == 0) {
+			if (devt_fs_devices->in_use == 0) {
 				/* Stale device. */
 				return NULL;
 			} else {
