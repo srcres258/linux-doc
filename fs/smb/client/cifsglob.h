@@ -255,7 +255,6 @@ struct cifs_fattr;
 struct smb3_fs_context;
 struct cifs_fid;
 struct cifs_io_subrequest;
-struct cifs_writedata;
 struct cifs_io_parms;
 struct cifs_search_info;
 struct cifsInodeInfo;
@@ -434,8 +433,7 @@ struct smb_version_operations {
 	/* async read from the server */
 	int (*async_readv)(struct cifs_io_subrequest *);
 	/* async write to the server */
-	int (*async_writev)(struct cifs_writedata *,
-			    void (*release)(struct kref *));
+	int (*async_writev)(struct cifs_io_subrequest *);
 	/* sync read from the server */
 	int (*sync_read)(const unsigned int, struct cifs_fid *,
 			 struct cifs_io_parms *, unsigned int *, char **,
@@ -1474,6 +1472,10 @@ struct cifs_io_subrequest {
 #endif
 	struct cifs_credits		credits;
 
+	enum writeback_sync_modes	sync_mode;
+	bool				uncached;
+	struct bio_vec			*bv;
+
 	// TODO: Remove following elements
 	struct list_head		list;
 	struct completion		done;
@@ -1481,28 +1483,6 @@ struct cifs_io_subrequest {
 	struct iov_iter			iter;
 	__u64				offset;
 	unsigned int			bytes;
-};
-
-/* asynchronous write support */
-struct cifs_writedata {
-	struct kref			refcount;
-	struct list_head		list;
-	struct completion		done;
-	enum writeback_sync_modes	sync_mode;
-	struct work_struct		work;
-	struct cifsFileInfo		*cfile;
-	struct cifs_aio_ctx		*ctx;
-	struct iov_iter			iter;
-	struct bio_vec			*bv;
-	__u64				offset;
-	pid_t				pid;
-	unsigned int			bytes;
-	int				result;
-	struct TCP_Server_Info		*server;
-#ifdef CONFIG_CIFS_SMB_DIRECT
-	struct smbd_mr			*mr;
-#endif
-	struct cifs_credits		credits;
 };
 
 /*
