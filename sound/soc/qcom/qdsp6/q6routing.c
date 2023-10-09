@@ -2,6 +2,8 @@
 // Copyright (c) 2011-2017, The Linux Foundation. All rights reserved.
 // Copyright (c) 2018, Linaro Limited
 
+#include <dt-bindings/sound/qcom,q6asm.h>
+#include <dt-bindings/sound/qcom,q6afe.h>
 #include <linux/init.h>
 #include <linux/err.h>
 #include <linux/module.h>
@@ -1048,9 +1050,9 @@ static int routing_hw_params(struct snd_soc_component *component,
 			     struct snd_pcm_substream *substream,
 			     struct snd_pcm_hw_params *params)
 {
-	struct snd_soc_pcm_runtime *rtd = asoc_substream_to_rtd(substream);
+	struct snd_soc_pcm_runtime *rtd = snd_soc_substream_to_rtd(substream);
 	struct msm_routing_data *data = dev_get_drvdata(component->dev);
-	unsigned int be_id = asoc_rtd_to_cpu(rtd, 0)->id;
+	unsigned int be_id = snd_soc_rtd_to_cpu(rtd, 0)->id;
 	struct session_data *session;
 	int path_type;
 
