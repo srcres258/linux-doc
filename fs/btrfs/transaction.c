@@ -386,7 +386,7 @@ loop:
 			IO_TREE_TRANS_DIRTY_PAGES);
 	extent_io_tree_init(fs_info, &cur_trans->pinned_extents,
 			IO_TREE_FS_PINNED_EXTENTS);
-	fs_info->generation++;
+	btrfs_set_fs_generation(fs_info, fs_info->generation + 1);
 	cur_trans->transid = fs_info->generation;
 	fs_info->running_transaction = cur_trans;
 	cur_trans->aborted = 0;
@@ -980,7 +980,7 @@ int btrfs_wait_for_commit(struct btrfs_fs_info *fs_info, u64 transid)
 	int ret = 0;
 
 	if (transid) {
-		if (transid <= fs_info->last_trans_committed)
+		if (transid <= btrfs_get_last_trans_committed(fs_info))
 			goto out;
 
 		/* find specified transaction */
@@ -1004,7 +1004,7 @@ int btrfs_wait_for_commit(struct btrfs_fs_info *fs_info, u64 transid)
 		 * raced with btrfs_commit_transaction
 		 */
 		if (!cur_trans) {
-			if (transid > fs_info->last_trans_committed)
+			if (transid > btrfs_get_last_trans_committed(fs_info))
 				ret = -EINVAL;
 			goto out;
 		}
@@ -2135,7 +2135,7 @@ static void btrfs_cleanup_pending_block_groups(struct btrfs_trans_handle *trans)
        struct btrfs_block_group *block_group, *tmp;
 
        list_for_each_entry_safe(block_group, tmp, &trans->new_bgs, bg_list) {
-               btrfs_delayed_refs_rsv_release(fs_info, 1, 0);
+               btrfs_dec_delayed_refs_rsv_bg_inserts(fs_info);
                list_del_init(&block_group->bg_list);
        }
 }
@@ -2587,7 +2587,7 @@ int btrfs_commit_transaction(struct btrfs_trans_handle *trans)
 	if (test_bit(BTRFS_TRANS_HAVE_FREE_BGS, &cur_trans->flags))
 		btrfs_clear_space_info_full(fs_info);
 
-	fs_info->last_trans_committed = cur_trans->transid;
+	btrfs_set_last_trans_committed(fs_info, cur_trans->transid);
 	/*
 	 * We needn't acquire the lock here because there is no other task
 	 * which can change it.

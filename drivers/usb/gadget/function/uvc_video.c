@@ -256,12 +256,6 @@ uvc_video_complete(struct usb_ep *ep, struct usb_request *req)
 	struct uvc_device *uvc = video->uvc;
 	unsigned long flags;
 
-	if (uvc->state == UVC_STATE_CONNECTED) {
-		usb_ep_free_request(video->ep, ureq->req);
-		ureq->req = NULL;
-		return;
-	}
-
 	switch (req->status) {
 	case 0:
 		break;
@@ -390,14 +384,13 @@ static void uvcg_video_pump(struct work_struct *work)
 	struct uvc_video_queue *queue = &video->queue;
 	/* video->max_payload_size is only set when using bulk transfer */
 	bool is_bulk = video->max_payload_size;
-	struct uvc_device *uvc = video->uvc;
 	struct usb_request *req = NULL;
 	struct uvc_buffer *buf;
 	unsigned long flags;
 	bool buf_done;
 	int ret;
 
-	if (video->ep->enabled && uvc->state == UVC_STATE_STREAMING) {
+	while (video->ep->enabled) {
 		/*
 		 * Retrieve the first available USB request, protected by the
 		 * request lock.
@@ -409,11 +402,6 @@ static void uvcg_video_pump(struct work_struct *work)
 		}
 		req = list_first_entry(&video->req_free, struct usb_request,
 					list);
-		if (!req) {
-			spin_unlock_irqrestore(&video->req_lock, flags);
-			return;
-		}
-
 		list_del(&req->list);
 		spin_unlock_irqrestore(&video->req_lock, flags);
 
@@ -442,7 +430,7 @@ static void uvcg_video_pump(struct work_struct *work)
 			 * further.
 			 */
 			spin_unlock_irqrestore(&queue->irqlock, flags);
-			goto out;
+			break;
 		}
 
 		/*
@@ -475,23 +463,20 @@ static void uvcg_video_pump(struct work_struct *work)
 		/* Queue the USB request */
 		ret = uvcg_video_ep_queue(video, req);
 		spin_unlock_irqrestore(&queue->irqlock, flags);
+
 		if (ret < 0) {
 			uvcg_queue_cancel(queue, 0);
-			goto out;
+			break;
 		}
 
 		/* Endpoint now owns the request */
 		req = NULL;
 		video->req_int_count++;
-	} else {
-		return;
 	}
 
-	if (uvc->state == UVC_STATE_STREAMING)
-		queue_work(video->async_wq, &video->pump);
+	if (!req)
+		return;
 
-	return;
-out:
 	spin_lock_irqsave(&video->req_lock, flags);
 	list_add_tail(&req->list, &video->req_free);
 	spin_unlock_irqrestore(&video->req_lock, flags);
@@ -503,7 +488,6 @@ out:
  */
 int uvcg_video_enable(struct uvc_video *video, int enable)
 {
-	struct uvc_device *uvc = video->uvc;
 	unsigned int i;
 	int ret;
 
@@ -514,8 +498,6 @@ int uvcg_video_enable(struct uvc_video *video, int enable)
 	}
 
 	if (!enable) {
-		uvc->state = UVC_STATE_CONNECTED;
-
 		cancel_work_sync(&video->pump);
 		uvcg_queue_cancel(&video->queue, 0);
 
@@ -540,8 +522,6 @@ int uvcg_video_enable(struct uvc_video *video, int enable)
 	} else
 		video->encode = video->queue.use_sg ?
 			uvc_video_encode_isoc_sg : uvc_video_encode_isoc;
-
-	uvc->state = UVC_STATE_STREAMING;
 
 	video->req_int_count = 0;
 

@@ -327,7 +327,6 @@ static struct attribute *btrfs_supported_feature_attrs[] = {
 	BTRFS_FEAT_ATTR_PTR(raid1c34),
 	BTRFS_FEAT_ATTR_PTR(block_group_tree),
 	BTRFS_FEAT_ATTR_PTR(simple_quota),
-	BTRFS_FEAT_ATTR_PTR(temp_fsid),
 #ifdef CONFIG_BLK_DEV_ZONED
 	BTRFS_FEAT_ATTR_PTR(zoned),
 #endif
@@ -427,6 +426,13 @@ static ssize_t acl_show(struct kobject *kobj, struct kobj_attribute *a, char *bu
 }
 BTRFS_ATTR(static_feature, acl, acl_show);
 
+static ssize_t temp_fsid_supported_show(struct kobject *kobj,
+					struct kobj_attribute *a, char *buf)
+{
+	return sysfs_emit(buf, "0\n");
+}
+BTRFS_ATTR(static_feature, temp_fsid, temp_fsid_supported_show);
+
 /*
  * Features which only depend on kernel version.
  *
@@ -440,6 +446,7 @@ static struct attribute *btrfs_supported_static_feature_attrs[] = {
 	BTRFS_ATTR_PTR(static_feature, send_stream_version),
 	BTRFS_ATTR_PTR(static_feature, supported_rescue_options),
 	BTRFS_ATTR_PTR(static_feature, supported_sectorsizes),
+	BTRFS_ATTR_PTR(static_feature, temp_fsid),
 	NULL
 };
 
@@ -1203,9 +1210,18 @@ static ssize_t btrfs_generation_show(struct kobject *kobj,
 {
 	struct btrfs_fs_info *fs_info = to_fs_info(kobj);
 
-	return sysfs_emit(buf, "%llu\n", fs_info->generation);
+	return sysfs_emit(buf, "%llu\n", btrfs_get_fs_generation(fs_info));
 }
 BTRFS_ATTR(, generation, btrfs_generation_show);
+
+static ssize_t btrfs_temp_fsid_show(struct kobject *kobj,
+				    struct kobj_attribute *a, char *buf)
+{
+	struct btrfs_fs_info *fs_info = to_fs_info(kobj);
+
+	return sysfs_emit(buf, "%d\n", fs_info->fs_devices->temp_fsid);
+}
+BTRFS_ATTR(, temp_fsid, btrfs_temp_fsid_show);
 
 static const char * const btrfs_read_policy_name[] = { "pid" };
 
@@ -1309,6 +1325,7 @@ static const struct attribute *btrfs_attrs[] = {
 	BTRFS_ATTR_PTR(, read_policy),
 	BTRFS_ATTR_PTR(, bg_reclaim_threshold),
 	BTRFS_ATTR_PTR(, commit_stats),
+	BTRFS_ATTR_PTR(, temp_fsid),
 	NULL,
 };
 

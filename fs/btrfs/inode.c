@@ -2239,8 +2239,7 @@ static bool should_nocow(struct btrfs_inode *inode, u64 start, u64 end)
 {
 	if (inode->flags & (BTRFS_INODE_NODATACOW | BTRFS_INODE_PREALLOC)) {
 		if (inode->defrag_bytes &&
-		    test_range_bit(&inode->io_tree, start, end, EXTENT_DEFRAG,
-				   0, NULL))
+		    test_range_bit_exists(&inode->io_tree, start, end, EXTENT_DEFRAG))
 			return false;
 		return true;
 	}
@@ -3291,7 +3290,7 @@ bool btrfs_data_csum_ok(struct btrfs_bio *bbio, struct btrfs_device *dev,
 
 	if (btrfs_is_data_reloc_root(inode->root) &&
 	    test_range_bit(&inode->io_tree, file_offset, end, EXTENT_NODATASUM,
-			   1, NULL)) {
+			   NULL)) {
 		/* Skip the range without csum for data reloc inode */
 		clear_extent_bits(&inode->io_tree, file_offset, end,
 				  EXTENT_NODATASUM);
@@ -3801,7 +3800,7 @@ cache_index:
 	 * This is required for both inode re-read from disk and delayed inode
 	 * in delayed_nodes_tree.
 	 */
-	if (BTRFS_I(inode)->last_trans == fs_info->generation)
+	if (BTRFS_I(inode)->last_trans == btrfs_get_fs_generation(fs_info))
 		set_bit(BTRFS_INODE_NEEDS_FULL_SYNC,
 			&BTRFS_I(inode)->runtime_flags);
 
@@ -4924,7 +4923,7 @@ int btrfs_cont_expand(struct btrfs_inode *inode, loff_t oldsize, loff_t size)
 			hole_em->orig_block_len = 0;
 			hole_em->ram_bytes = hole_size;
 			hole_em->compress_type = BTRFS_COMPRESS_NONE;
-			hole_em->generation = fs_info->generation;
+			hole_em->generation = btrfs_get_fs_generation(fs_info);
 
 			err = btrfs_replace_extent_map_range(inode, hole_em, true);
 			free_extent_map(hole_em);
@@ -7111,8 +7110,7 @@ noinline int can_nocow_extent(struct inode *inode, u64 offset, u64 *len,
 
 		range_end = round_up(offset + nocow_args.num_bytes,
 				     root->fs_info->sectorsize) - 1;
-		ret = test_range_bit(io_tree, offset, range_end,
-				     EXTENT_DELALLOC, 0, NULL);
+		ret = test_range_bit_exists(io_tree, offset, range_end, EXTENT_DELALLOC);
 		if (ret) {
 			ret = -EAGAIN;
 			goto out;
@@ -8013,11 +8011,11 @@ static void btrfs_invalidate_folio(struct folio *folio, size_t offset,
 					 EXTENT_LOCKED | EXTENT_DO_ACCOUNTING |
 					 EXTENT_DEFRAG, &cached_state);
 
-		spin_lock_irq(&inode->ordered_tree.lock);
+		spin_lock_irq(&inode->ordered_tree_lock);
 		set_bit(BTRFS_ORDERED_TRUNCATED, &ordered->flags);
 		ordered->truncated_len = min(ordered->truncated_len,
 					     cur - ordered->file_offset);
-		spin_unlock_irq(&inode->ordered_tree.lock);
+		spin_unlock_irq(&inode->ordered_tree_lock);
 
 		/*
 		 * If the ordered extent has finished, we're safe to delete all
@@ -8499,7 +8497,9 @@ struct inode *btrfs_alloc_inode(struct super_block *sb)
 	extent_io_tree_init(fs_info, &ei->file_extent_tree,
 			    IO_TREE_INODE_FILE_EXTENT);
 	mutex_init(&ei->log_mutex);
-	btrfs_ordered_inode_tree_init(&ei->ordered_tree);
+	spin_lock_init(&ei->ordered_tree_lock);
+	ei->ordered_tree = RB_ROOT;
+	ei->ordered_tree_last = NULL;
 	INIT_LIST_HEAD(&ei->delalloc_inodes);
 	INIT_LIST_HEAD(&ei->delayed_iput);
 	RB_CLEAR_NODE(&ei->rb_node);

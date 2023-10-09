@@ -298,10 +298,9 @@ struct btrfs_fs_devices {
 	 *       fs_devices->fsid == sb->fsid
 	 *       fs_devices->metadata_uuid == sb->metadata_uuid
 	 *
-	 *   - When the BTRFS_FEATURE_COMPAT_RO_TEMP_FSID flag is set:
-	 *       fs_devices->fsid == random;		(see prepare_random_fsid)
-	 *       fs_devices->metadata_uuid = sb->fsid;
-	 *       sb->metadata_uuid == 0;
+	 *   - When in-memory fs_devices->temp_fsid is true
+	 *	 fs_devices->fsid = random
+	 *	 fs_devices->metadata_uuid == sb->fsid
 	 */
 	u8 metadata_uuid[BTRFS_FSID_SIZE];
 
@@ -369,6 +368,8 @@ struct btrfs_fs_devices {
 	bool discardable;
 	/* The filesystem is a seed filesystem. */
 	bool seeding;
+	/* The mount needs to use a randomly generated fsid. */
+	bool temp_fsid;
 
 	struct btrfs_fs_info *fs_info;
 	/* sysfs kobjects */

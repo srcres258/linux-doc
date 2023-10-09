@@ -165,7 +165,10 @@ static int rtd_pinctrl_set_one_mux(struct pinctrl_dev *pcdev,
 		return 0;
 
 	if (!mux->functions) {
-		dev_err(pcdev->dev, "No functions available for pin %s\n", mux->name);
+		if (!mux->name)
+			dev_err(pcdev->dev, "NULL pin has no functions\n");
+		else
+			dev_err(pcdev->dev, "No functions available for pin %s\n", mux->name);
 		return -ENOTSUPP;
 	}
 
@@ -175,6 +178,11 @@ static int rtd_pinctrl_set_one_mux(struct pinctrl_dev *pcdev,
 		ret = regmap_update_bits(data->regmap_pinctrl, mux->mux_offset, mux->mux_mask,
 					mux->functions[i].mux_value);
 		return ret;
+	}
+
+	if (!mux->name) {
+		dev_err(pcdev->dev, "NULL pin provided for function %s\n", func_name);
+		return -EINVAL;
 	}
 
 	dev_err(pcdev->dev, "No function %s available for pin %s\n", func_name, mux->name);
@@ -535,14 +543,15 @@ static struct regmap_config rtd_pinctrl_regmap_config = {
 int rtd_pinctrl_probe(struct platform_device *pdev, const struct rtd_pinctrl_desc *desc)
 {
 	struct rtd_pinctrl *data;
+	int ret;
 
 	data = devm_kzalloc(&pdev->dev, sizeof(*data), GFP_KERNEL);
 	if (!data)
 		return -ENOMEM;
 
 	data->base = of_iomap(pdev->dev.of_node, 0);
-	if (IS_ERR(data->base))
-		return PTR_ERR(data->base);
+	if (!data->base)
+		return -ENOMEM;
 
 	data->dev = &pdev->dev;
 	data->info = desc;
@@ -561,18 +570,25 @@ int rtd_pinctrl_probe(struct platform_device *pdev, const struct rtd_pinctrl_des
 	if (IS_ERR(data->regmap_pinctrl)) {
 		dev_err(data->dev, "failed to init regmap: %ld\n",
 			PTR_ERR(data->regmap_pinctrl));
-		return PTR_ERR(data->regmap_pinctrl);
+		ret = PTR_ERR(data->regmap_pinctrl);
+		goto unmap;
 	}
 
 	data->pcdev = pinctrl_register(&data->desc, &pdev->dev, data);
-	if (!data->pcdev)
-		return -ENOMEM;
+	if (IS_ERR(data->pcdev)) {
+		ret = PTR_ERR(data->pcdev);
+		goto unmap;
+	}
 
 	platform_set_drvdata(pdev, data);
 
 	dev_dbg(&pdev->dev, "probed\n");
 
 	return 0;
+
+unmap:
+	iounmap(data->base);
+	return ret;
 }
 EXPORT_SYMBOL(rtd_pinctrl_probe);
 

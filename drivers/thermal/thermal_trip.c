@@ -15,8 +15,6 @@ int for_each_thermal_trip(struct thermal_zone_device *tz,
 {
 	int i, ret;
 
-	lockdep_assert_held(&tz->lock);
-
 	for (i = 0; i < tz->num_trips; i++) {
 		ret = cb(&tz->trips[i], data);
 		if (ret)
@@ -26,6 +24,20 @@ int for_each_thermal_trip(struct thermal_zone_device *tz,
 	return 0;
 }
 EXPORT_SYMBOL_GPL(for_each_thermal_trip);
+
+int thermal_zone_for_each_trip(struct thermal_zone_device *tz,
+			       int (*cb)(struct thermal_trip *, void *),
+			       void *data)
+{
+	int ret;
+
+	mutex_lock(&tz->lock);
+	ret = for_each_thermal_trip(tz, cb, data);
+	mutex_unlock(&tz->lock);
+
+	return ret;
+}
+EXPORT_SYMBOL_GPL(thermal_zone_for_each_trip);
 
 int thermal_zone_get_num_trips(struct thermal_zone_device *tz)
 {

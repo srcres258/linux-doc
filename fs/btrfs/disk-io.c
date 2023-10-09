@@ -234,6 +234,7 @@ blk_status_t btree_csum_one_bio(struct btrfs_bio *bbio)
 	struct extent_buffer *eb = bbio->private;
 	struct btrfs_fs_info *fs_info = eb->fs_info;
 	u64 found_start = btrfs_header_bytenr(eb);
+	u64 last_trans;
 	u8 result[BTRFS_CSUM_SIZE];
 	int ret;
 
@@ -271,12 +272,12 @@ blk_status_t btree_csum_one_bio(struct btrfs_bio *bbio)
 	 * Also check the generation, the eb reached here must be newer than
 	 * last committed. Or something seriously wrong happened.
 	 */
-	if (unlikely(btrfs_header_generation(eb) <= fs_info->last_trans_committed)) {
+	last_trans = btrfs_get_last_trans_committed(fs_info);
+	if (unlikely(btrfs_header_generation(eb) <= last_trans)) {
 		ret = -EUCLEAN;
 		btrfs_err(fs_info,
 			"block=%llu bad generation, have %llu expect > %llu",
-			  eb->start, btrfs_header_generation(eb),
-			  fs_info->last_trans_committed);
+			  eb->start, btrfs_header_generation(eb), last_trans);
 		goto error;
 	}
 	write_extent_buffer(eb, result, 0, fs_info->csum_size);
@@ -665,9 +666,9 @@ static void __setup_root(struct btrfs_root *root, struct btrfs_fs_info *fs_info,
 	refcount_set(&root->refs, 1);
 	atomic_set(&root->snapshot_force_cow, 0);
 	atomic_set(&root->nr_swapfiles, 0);
-	root->log_transid = 0;
+	btrfs_set_root_log_transid(root, 0);
 	root->log_transid_committed = -1;
-	root->last_log_commit = 0;
+	btrfs_set_root_last_log_commit(root, 0);
 	root->anon_dev = 0;
 	if (!dummy) {
 		extent_io_tree_init(fs_info, &root->dirty_log_pages,
@@ -994,9 +995,9 @@ int btrfs_add_log_tree(struct btrfs_trans_handle *trans,
 
 	WARN_ON(root->log_root);
 	root->log_root = log_root;
-	root->log_transid = 0;
+	btrfs_set_root_log_transid(root, 0);
 	root->log_transid_committed = -1;
-	root->last_log_commit = 0;
+	btrfs_set_root_last_log_commit(root, 0);
 	return 0;
 }
 
@@ -2392,22 +2393,8 @@ int btrfs_validate_super(struct btrfs_fs_info *fs_info,
 		ret = -EINVAL;
 	}
 
-	/*
-	 * For TEMP_FSID devices, btrfs creates a random fsid and makes use of
-	 * the metadata_uuid infrastructure in order to allow, for example, two
-	 * devices with same fsid getting mounted at the same time. But notice
-	 * no changes happen at the disk level, the random generated fsid is a
-	 * driver abstraction, not written to the disk.  That's the reason
-	 * we're required here to compare the fsid  with the metadata_uuid for
-	 * such devices. See volumes.h for a more descriptive analysis of the
-	 * relation between fsid/metadata_uuid.
-	 */
-	if (btrfs_fs_compat_ro(fs_info, TEMP_FSID))
-		fsid = fs_info->fs_devices->metadata_uuid;
-	else
-		fsid = fs_info->fs_devices->fsid;
-
-	if (memcmp(fsid, sb->fsid, BTRFS_FSID_SIZE) != 0) {
+	if (!fs_info->fs_devices->temp_fsid &&
+	    memcmp(fs_info->fs_devices->fsid, sb->fsid, BTRFS_FSID_SIZE) != 0) {
 		btrfs_err(fs_info,
 		"superblock fsid doesn't match fsid of fs_devices: %pU != %pU",
 			  sb->fsid, fs_info->fs_devices->fsid);
@@ -2660,7 +2647,7 @@ static int __cold init_tree_roots(struct btrfs_fs_info *fs_info)
 
 		/* All successful */
 		fs_info->generation = btrfs_header_generation(tree_root->node);
-		fs_info->last_trans_committed = fs_info->generation;
+		btrfs_set_last_trans_committed(fs_info, fs_info->generation);
 		fs_info->last_reloc_trans = 0;
 
 		/* Always begin writing backup roots after the one being used */
@@ -4780,7 +4767,7 @@ void btrfs_cleanup_dirty_bgs(struct btrfs_transaction *cur_trans,
 
 		spin_unlock(&cur_trans->dirty_bgs_lock);
 		btrfs_put_block_group(cache);
-		btrfs_delayed_refs_rsv_release(fs_info, 1, 0);
+		btrfs_dec_delayed_refs_rsv_bg_updates(fs_info);
 		spin_lock(&cur_trans->dirty_bgs_lock);
 	}
 	spin_unlock(&cur_trans->dirty_bgs_lock);

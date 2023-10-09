@@ -9,6 +9,7 @@
 #include <linux/pagemap.h>
 #include "locking.h"
 #include "fs.h"
+#include "accessors.h"
 
 struct btrfs_trans_handle;
 struct btrfs_transaction;
@@ -190,10 +191,22 @@ struct btrfs_root {
 	atomic_t log_commit[2];
 	/* Used only for log trees of subvolumes, not for the log root tree */
 	atomic_t log_batch;
+	/*
+	 * Protected by the 'log_mutex' lock but can be read without holding
+	 * that lock to avoid unnecessary lock contention, in which case it
+	 * should be read using btrfs_get_root_log_transid() except if it's a
+	 * log tree in which case it can be directly accessed. Updates to this
+	 * field should always use btrfs_set_root_log_transid(), except for log
+	 * trees where the field can be updated directly.
+	 */
 	int log_transid;
 	/* No matter the commit succeeds or not*/
 	int log_transid_committed;
-	/* Just be updated when the commit succeeds. */
+	/*
+	 * Just be updated when the commit succeeds. Use
+	 * btrfs_get_root_last_log_commit() and btrfs_set_root_last_log_commit()
+	 * to access this field.
+	 */
 	int last_log_commit;
 	pid_t log_start_pid;
 
@@ -325,6 +338,26 @@ static inline bool btrfs_root_dead(const struct btrfs_root *root)
 static inline u64 btrfs_root_id(const struct btrfs_root *root)
 {
 	return root->root_key.objectid;
+}
+
+static inline int btrfs_get_root_log_transid(const struct btrfs_root *root)
+{
+	return READ_ONCE(root->log_transid);
+}
+
+static inline void btrfs_set_root_log_transid(struct btrfs_root *root, int log_transid)
+{
+	WRITE_ONCE(root->log_transid, log_transid);
+}
+
+static inline int btrfs_get_root_last_log_commit(const struct btrfs_root *root)
+{
+	return READ_ONCE(root->last_log_commit);
+}
+
+static inline void btrfs_set_root_last_log_commit(struct btrfs_root *root, int commit_id)
+{
+	WRITE_ONCE(root->last_log_commit, commit_id);
 }
 
 /*
@@ -464,6 +497,36 @@ int btrfs_bin_search(struct extent_buffer *eb, int first_slot,
 		     const struct btrfs_key *key, int *slot);
 
 int __pure btrfs_comp_cpu_keys(const struct btrfs_key *k1, const struct btrfs_key *k2);
+
+#ifdef __LITTLE_ENDIAN
+
+/*
+ * Compare two keys, on little-endian the disk order is same as CPU order and
+ * we can avoid the conversion.
+ */
+static inline int btrfs_comp_keys(const struct btrfs_disk_key *disk_key,
+				  const struct btrfs_key *k2)
+{
+	const struct btrfs_key *k1 = (const struct btrfs_key *)disk_key;
+
+	return btrfs_comp_cpu_keys(k1, k2);
+}
+
+#else
+
+/* Compare two keys in a memcmp fashion. */
+static inline int btrfs_comp_keys(const struct btrfs_disk_key *disk,
+				  const struct btrfs_key *k2)
+{
+	struct btrfs_key k1;
+
+	btrfs_disk_key_to_cpu(&k1, disk);
+
+	return btrfs_comp_cpu_keys(&k1, k2);
+}
+
+#endif
+
 int btrfs_previous_item(struct btrfs_root *root,
 			struct btrfs_path *path, u64 min_objectid,
 			int type);
@@ -487,6 +550,13 @@ int btrfs_cow_block(struct btrfs_trans_handle *trans,
 		    struct extent_buffer *parent, int parent_slot,
 		    struct extent_buffer **cow_ret,
 		    enum btrfs_lock_nesting nest);
+int btrfs_force_cow_block(struct btrfs_trans_handle *trans,
+			  struct btrfs_root *root,
+			  struct extent_buffer *buf,
+			  struct extent_buffer *parent, int parent_slot,
+			  struct extent_buffer **cow_ret,
+			  u64 search_start, u64 empty_size,
+			  enum btrfs_lock_nesting nest);
 int btrfs_copy_root(struct btrfs_trans_handle *trans,
 		      struct btrfs_root *root,
 		      struct extent_buffer *buf,
@@ -519,10 +589,6 @@ int btrfs_search_slot_for_read(struct btrfs_root *root,
 			       const struct btrfs_key *key,
 			       struct btrfs_path *p, int find_higher,
 			       int return_any);
-int btrfs_realloc_node(struct btrfs_trans_handle *trans,
-		       struct btrfs_root *root, struct extent_buffer *parent,
-		       int start_slot, u64 *last_ret,
-		       struct btrfs_key *progress);
 void btrfs_release_path(struct btrfs_path *p);
 struct btrfs_path *btrfs_alloc_path(void);
 void btrfs_free_path(struct btrfs_path *p);

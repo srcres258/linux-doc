@@ -156,11 +156,15 @@ int dp_panel_read_sink_caps(struct dp_panel *dp_panel,
 	if (drm_dp_is_branch(dp_panel->dpcd)) {
 		count = drm_dp_read_sink_count(panel->aux);
 		if (!count) {
-			DRM_ERROR("no downstream ports connected\n");
 			panel->link->sink_count = 0;
 			return -ENOTCONN;
 		}
 	}
+
+	rc = drm_dp_read_downstream_info(panel->aux, dp_panel->dpcd,
+					 dp_panel->downstream_ports);
+	if (rc)
+		return rc;
 
 	kfree(dp_panel->edid);
 	dp_panel->edid = NULL;

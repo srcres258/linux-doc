@@ -134,7 +134,7 @@ int rtllib_wx_set_wap(struct rtllib_device *ieee,
 	}
 
 	if (ifup)
-		rtllib_stop_protocol(ieee, true);
+		rtllib_stop_protocol(ieee);
 
 	/* just to avoid to give inconsistent infos in the
 	 * get wx method. not really needed otherwise
@@ -277,7 +277,7 @@ int rtllib_wx_set_mode(struct rtllib_device *ieee, struct iw_request_info *a,
 	if (!ieee->proto_started) {
 		ieee->iw_mode = wrqu->mode;
 	} else {
-		rtllib_stop_protocol(ieee, true);
+		rtllib_stop_protocol(ieee);
 		ieee->iw_mode = wrqu->mode;
 		rtllib_start_protocol(ieee);
 	}
@@ -317,7 +317,7 @@ void rtllib_wx_sync_scan_wq(void *data)
 
 	ieee->ScanOperationBackupHandler(ieee->dev, SCAN_OPT_BACKUP);
 
-	if (ieee->ht_info->bCurrentHTSupport && ieee->ht_info->enable_ht &&
+	if (ieee->ht_info->current_ht_support && ieee->ht_info->enable_ht &&
 	    ieee->ht_info->bCurBW40MHz) {
 		b40M = 1;
 		chan_offset = ieee->ht_info->CurSTAExtChnlOffset;
@@ -401,7 +401,7 @@ int rtllib_wx_set_essid(struct rtllib_device *ieee,
 	}
 
 	if (proto_started)
-		rtllib_stop_protocol(ieee, true);
+		rtllib_stop_protocol(ieee);
 
 	/* this is just to be sure that the GET wx callback
 	 * has consistent infos. not needed otherwise
@@ -435,38 +435,6 @@ int rtllib_wx_get_mode(struct rtllib_device *ieee, struct iw_request_info *a,
 	return 0;
 }
 EXPORT_SYMBOL(rtllib_wx_get_mode);
-
-int rtllib_wx_set_rawtx(struct rtllib_device *ieee,
-			struct iw_request_info *info,
-			union iwreq_data *wrqu, char *extra)
-{
-	int *parms = (int *)extra;
-	int enable = (parms[0] > 0);
-	short prev = ieee->raw_tx;
-
-	mutex_lock(&ieee->wx_mutex);
-
-	if (enable)
-		ieee->raw_tx = 1;
-	else
-		ieee->raw_tx = 0;
-
-	netdev_info(ieee->dev, "raw TX is %s\n",
-		    ieee->raw_tx ? "enabled" : "disabled");
-
-	if (ieee->iw_mode == IW_MODE_MONITOR) {
-		if (prev == 0 && ieee->raw_tx)
-			netif_carrier_on(ieee->dev);
-
-		if (prev && ieee->raw_tx == 1)
-			netif_carrier_off(ieee->dev);
-	}
-
-	mutex_unlock(&ieee->wx_mutex);
-
-	return 0;
-}
-EXPORT_SYMBOL(rtllib_wx_set_rawtx);
 
 int rtllib_wx_get_name(struct rtllib_device *ieee, struct iw_request_info *info,
 		       union iwreq_data *wrqu, char *extra)

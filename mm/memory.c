@@ -3050,7 +3050,7 @@ static inline void wp_page_reuse(struct vm_fault *vmf)
  * vm_ops that have a ->map_pages have been audited and don't need
  * the mmap_lock to be held.
  */
-static inline vm_fault_t vmf_maybe_unlock_vma(const struct vm_fault *vmf)
+static inline vm_fault_t vmf_can_call_fault(const struct vm_fault *vmf)
 {
 	struct vm_area_struct *vma = vmf->vma;
 
@@ -3304,7 +3304,7 @@ static vm_fault_t wp_pfn_shared(struct vm_fault *vmf)
 		vm_fault_t ret;
 
 		pte_unmap_unlock(vmf->pte, vmf->ptl);
-		ret = vmf_maybe_unlock_vma(vmf);
+		ret = vmf_can_call_fault(vmf);
 		if (ret)
 			return ret;
 
@@ -3330,7 +3330,7 @@ static vm_fault_t wp_page_shared(struct vm_fault *vmf, struct folio *folio)
 		vm_fault_t tmp;
 
 		pte_unmap_unlock(vmf->pte, vmf->ptl);
-		tmp = vmf_maybe_unlock_vma(vmf);
+		tmp = vmf_can_call_fault(vmf);
 		if (tmp) {
 			folio_put(folio);
 			return tmp;
@@ -4712,7 +4712,7 @@ static vm_fault_t do_read_fault(struct vm_fault *vmf)
 			return ret;
 	}
 
-	ret = vmf_maybe_unlock_vma(vmf);
+	ret = vmf_can_call_fault(vmf);
 	if (ret)
 		return ret;
 
@@ -4733,7 +4733,7 @@ static vm_fault_t do_cow_fault(struct vm_fault *vmf)
 	struct vm_area_struct *vma = vmf->vma;
 	vm_fault_t ret;
 
-	ret = vmf_maybe_unlock_vma(vmf);
+	ret = vmf_can_call_fault(vmf);
 	if (!ret)
 		ret = vmf_anon_prepare(vmf);
 	if (ret)
@@ -4776,7 +4776,7 @@ static vm_fault_t do_shared_fault(struct vm_fault *vmf)
 	vm_fault_t ret, tmp;
 	struct folio *folio;
 
-	ret = vmf_maybe_unlock_vma(vmf);
+	ret = vmf_can_call_fault(vmf);
 	if (ret)
 		return ret;
 

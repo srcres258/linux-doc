@@ -406,49 +406,6 @@ void rtllib_DisableNetMonitorMode(struct net_device *dev,
 	ieee->AllowAllDestAddrHandler(dev, false, !bInitState);
 }
 
-/* Enables the specialized promiscuous mode required by Intel.
- * In this mode, Intel intends to hear traffics from/to other STAs in the
- * same BSS. Therefore we don't have to disable checking BSSID and we only need
- * to allow all dest. BUT: if we enable checking BSSID then we can't recv
- * packets from other STA.
- */
-void rtllib_EnableIntelPromiscuousMode(struct net_device *dev,
-		bool bInitState)
-{
-	bool bFilterOutNonAssociatedBSSID = false;
-
-	struct rtllib_device *ieee = netdev_priv_rsl(dev);
-
-	netdev_info(dev, "========>Enter Intel Promiscuous Mode\n");
-
-	ieee->AllowAllDestAddrHandler(dev, true, !bInitState);
-	ieee->SetHwRegHandler(dev, HW_VAR_CECHK_BSSID,
-			     (u8 *)&bFilterOutNonAssociatedBSSID);
-
-	ieee->net_promiscuous_md = true;
-}
-EXPORT_SYMBOL(rtllib_EnableIntelPromiscuousMode);
-
-/* Disables the specialized promiscuous mode required by Intel.
- * See MgntEnableIntelPromiscuousMode for detail.
- */
-void rtllib_DisableIntelPromiscuousMode(struct net_device *dev,
-		bool bInitState)
-{
-	bool bFilterOutNonAssociatedBSSID = true;
-
-	struct rtllib_device *ieee = netdev_priv_rsl(dev);
-
-	netdev_info(dev, "========>Exit Intel Promiscuous Mode\n");
-
-	ieee->AllowAllDestAddrHandler(dev, false, !bInitState);
-	ieee->SetHwRegHandler(dev, HW_VAR_CECHK_BSSID,
-			     (u8 *)&bFilterOutNonAssociatedBSSID);
-
-	ieee->net_promiscuous_md = false;
-}
-EXPORT_SYMBOL(rtllib_DisableIntelPromiscuousMode);
-
 static void rtllib_send_probe(struct rtllib_device *ieee)
 {
 	struct sk_buff *skb;
@@ -462,8 +419,7 @@ static void rtllib_send_probe(struct rtllib_device *ieee)
 
 static void rtllib_send_probe_requests(struct rtllib_device *ieee)
 {
-	if (ieee->active_scan && (ieee->softmac_features &
-	    IEEE_SOFTMAC_PROBERQ)) {
+	if (ieee->softmac_features & IEEE_SOFTMAC_PROBERQ) {
 		rtllib_send_probe(ieee);
 		rtllib_send_probe(ieee);
 	}
@@ -769,7 +725,7 @@ static struct sk_buff *rtllib_probe_resp(struct rtllib_device *ieee,
 	crypt = ieee->crypt_info.crypt[ieee->crypt_info.tx_keyidx];
 	encrypt = crypt && crypt->ops &&
 		((strcmp(crypt->ops->name, "R-WEP") == 0 || wpa_ie_len));
-	if (ieee->ht_info->bCurrentHTSupport) {
+	if (ieee->ht_info->current_ht_support) {
 		tmp_ht_cap_buf = (u8 *)&(ieee->ht_info->SelfHTCap);
 		tmp_ht_cap_len = sizeof(ieee->ht_info->SelfHTCap);
 		tmp_ht_info_buf = (u8 *)&(ieee->ht_info->SelfHTInfo);
@@ -976,7 +932,7 @@ rtllib_association_req(struct rtllib_network *beacon,
 		ieee->mode = WIRELESS_MODE_G;
 	}
 
-	if (ieee->ht_info->bCurrentHTSupport && ieee->ht_info->enable_ht) {
+	if (ieee->ht_info->current_ht_support && ieee->ht_info->enable_ht) {
 		ht_cap_buf = (u8 *)&(ieee->ht_info->SelfHTCap);
 		ht_cap_len = sizeof(ieee->ht_info->SelfHTCap);
 		HTConstructCapabilityElement(ieee, ht_cap_buf, &ht_cap_len,
@@ -1114,7 +1070,7 @@ rtllib_association_req(struct rtllib_network *beacon,
 		memcpy(tag, osCcxVerNum.Octet, osCcxVerNum.Length);
 		tag += osCcxVerNum.Length;
 	}
-	if (ieee->ht_info->bCurrentHTSupport && ieee->ht_info->enable_ht) {
+	if (ieee->ht_info->current_ht_support && ieee->ht_info->enable_ht) {
 		if (ieee->ht_info->ePeerHTSpecVer != HT_SPEC_VER_EWC) {
 			tag = skb_put(skb, ht_cap_len);
 			*tag++ = MFIE_TYPE_HT_CAP;
@@ -1148,7 +1104,7 @@ rtllib_association_req(struct rtllib_network *beacon,
 		rtllib_TURBO_Info(ieee, &tag);
 	}
 
-	if (ieee->ht_info->bCurrentHTSupport && ieee->ht_info->enable_ht) {
+	if (ieee->ht_info->current_ht_support && ieee->ht_info->enable_ht) {
 		if (ieee->ht_info->ePeerHTSpecVer == HT_SPEC_VER_EWC) {
 			tag = skb_put(skb, ht_cap_len);
 			*tag++ = MFIE_TYPE_GENERIC;
@@ -1298,10 +1254,8 @@ static void rtllib_associate_complete_wq(void *data)
 
 	netdev_info(ieee->dev, "Associated successfully with %pM\n",
 		    ieee->current_network.bssid);
-	if (!ieee->is_silent_reset) {
-		netdev_info(ieee->dev, "normal associate\n");
-		notify_wx_assoc_event(ieee);
-	}
+	netdev_info(ieee->dev, "normal associate\n");
+	notify_wx_assoc_event(ieee);
 
 	netif_carrier_on(ieee->dev);
 	ieee->is_roaming = false;
@@ -1313,13 +1267,13 @@ static void rtllib_associate_complete_wq(void *data)
 		ieee->set_wireless_mode(ieee->dev, WIRELESS_MODE_B);
 		netdev_info(ieee->dev, "Using B rates:%d\n", ieee->rate);
 	}
-	if (ieee->ht_info->bCurrentHTSupport && ieee->ht_info->enable_ht) {
+	if (ieee->ht_info->current_ht_support && ieee->ht_info->enable_ht) {
 		netdev_info(ieee->dev, "Successfully associated, ht enabled\n");
 		HTOnAssocRsp(ieee);
 	} else {
 		netdev_info(ieee->dev,
 			    "Successfully associated, ht not enabled(%d, %d)\n",
-			    ieee->ht_info->bCurrentHTSupport,
+			    ieee->ht_info->current_ht_support,
 			    ieee->ht_info->enable_ht);
 		memset(ieee->dot11ht_oper_rate_set, 0, 16);
 	}
@@ -1334,10 +1288,6 @@ static void rtllib_associate_complete_wq(void *data)
 	psc->LpsIdleCount = 0;
 	ieee->link_change(ieee->dev);
 
-	if (ieee->is_silent_reset) {
-		netdev_info(ieee->dev, "silent reset associate\n");
-		ieee->is_silent_reset = false;
-	}
 }
 
 static void rtllib_sta_send_associnfo(struct rtllib_device *ieee)
@@ -1477,8 +1427,7 @@ inline void rtllib_softmac_new_net(struct rtllib_device *ieee,
 					HTResetSelfAndSavePeerSetting(ieee,
 						 &(ieee->current_network));
 				else
-					ieee->ht_info->bCurrentHTSupport =
-								 false;
+					ieee->ht_info->current_ht_support = false;
 
 				ieee->link_state = RTLLIB_ASSOCIATING;
 				schedule_delayed_work(
@@ -1638,16 +1587,10 @@ static short rtllib_sta_ps_sleep(struct rtllib_device *ieee, u64 *time)
 		if (ieee->bAwakePktSent) {
 			psc->LPSAwakeIntvl = 1;
 		} else {
-			u8 MaxPeriod = 1;
+			u8 MaxPeriod = 5;
 
 			if (psc->LPSAwakeIntvl == 0)
 				psc->LPSAwakeIntvl = 1;
-			if (psc->reg_max_lps_awake_intvl == 0)
-				MaxPeriod = 1;
-			else if (psc->reg_max_lps_awake_intvl == 0xFF)
-				MaxPeriod = ieee->current_network.dtim_period;
-			else
-				MaxPeriod = psc->reg_max_lps_awake_intvl;
 			psc->LPSAwakeIntvl = (psc->LPSAwakeIntvl >=
 					       MaxPeriod) ? MaxPeriod :
 					       (psc->LPSAwakeIntvl + 1);
@@ -2142,13 +2085,6 @@ void rtllib_wake_all_queues(struct rtllib_device *ieee)
 	netif_tx_wake_all_queues(ieee->dev);
 }
 
-static void rtllib_start_monitor_mode(struct rtllib_device *ieee)
-{
-	/* reset hardware status */
-	if (ieee->raw_tx)
-		netif_carrier_on(ieee->dev);
-}
-
 /* this is called only in user context, with wx_mutex held */
 static void rtllib_start_bss(struct rtllib_device *ieee)
 {
@@ -2285,26 +2221,23 @@ struct sk_buff *rtllib_get_beacon(struct rtllib_device *ieee)
 }
 EXPORT_SYMBOL(rtllib_get_beacon);
 
-void rtllib_softmac_stop_protocol(struct rtllib_device *ieee, u8 mesh_flag,
-				  u8 shutdown)
+void rtllib_softmac_stop_protocol(struct rtllib_device *ieee)
 {
 	rtllib_stop_scan_syncro(ieee);
 	mutex_lock(&ieee->wx_mutex);
-	rtllib_stop_protocol(ieee, shutdown);
+	rtllib_stop_protocol(ieee);
 	mutex_unlock(&ieee->wx_mutex);
 }
 EXPORT_SYMBOL(rtllib_softmac_stop_protocol);
 
-void rtllib_stop_protocol(struct rtllib_device *ieee, u8 shutdown)
+void rtllib_stop_protocol(struct rtllib_device *ieee)
 {
 	if (!ieee->proto_started)
 		return;
 
-	if (shutdown) {
-		ieee->proto_started = 0;
-		ieee->proto_stoppping = 1;
-		ieee->rtllib_ips_leave(ieee->dev);
-	}
+	ieee->proto_started = 0;
+	ieee->proto_stoppping = 1;
+	ieee->rtllib_ips_leave(ieee->dev);
 
 	del_timer_sync(&ieee->associate_timer);
 	mutex_unlock(&ieee->wx_mutex);
@@ -2322,10 +2255,9 @@ void rtllib_stop_protocol(struct rtllib_device *ieee, u8 shutdown)
 		rtllib_disassociate(ieee);
 	}
 
-	if (shutdown) {
-		RemoveAllTS(ieee);
-		ieee->proto_stoppping = 0;
-	}
+	RemoveAllTS(ieee);
+	ieee->proto_stoppping = 0;
+
 	kfree(ieee->assocreq_ies);
 	ieee->assocreq_ies = NULL;
 	ieee->assocreq_ies_len = 0;
@@ -2334,7 +2266,7 @@ void rtllib_stop_protocol(struct rtllib_device *ieee, u8 shutdown)
 	ieee->assocresp_ies_len = 0;
 }
 
-void rtllib_softmac_start_protocol(struct rtllib_device *ieee, u8 mesh_flag)
+void rtllib_softmac_start_protocol(struct rtllib_device *ieee)
 {
 	mutex_lock(&ieee->wx_mutex);
 	rtllib_start_protocol(ieee);
@@ -2381,9 +2313,6 @@ void rtllib_start_protocol(struct rtllib_device *ieee)
 	switch (ieee->iw_mode) {
 	case IW_MODE_INFRA:
 		rtllib_start_bss(ieee);
-		break;
-	case IW_MODE_MONITOR:
-		rtllib_start_monitor_mode(ieee);
 		break;
 	}
 }

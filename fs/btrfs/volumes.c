@@ -556,6 +556,74 @@ static int btrfs_free_stale_devices(dev_t devt, struct btrfs_device *skip_device
 	return ret;
 }
 
+static struct btrfs_fs_devices *find_fsid_by_device(
+					struct btrfs_super_block *disk_super,
+					dev_t devt, bool *same_fsid_diff_dev)
+{
+	struct btrfs_fs_devices *fsid_fs_devices;
+	struct btrfs_fs_devices *devt_fs_devices;
+	const bool has_metadata_uuid = (btrfs_super_incompat_flags(disk_super) &
+					BTRFS_FEATURE_INCOMPAT_METADATA_UUID);
+	bool found_by_devt = false;
+
+	/* Find the fs_device by the usual method, if found use it. */
+	fsid_fs_devices = find_fsid(disk_super->fsid,
+		    has_metadata_uuid ? disk_super->metadata_uuid : NULL);
+
+	/* The temp_fsid feature is supported only with single device filesystem. */
+	if (btrfs_super_num_devices(disk_super) != 1)
+		return fsid_fs_devices;
+
+	/*
+	 * A seed device is an integral component of the sprout device, which
+	 * functions as a multi-device filesystem. So, temp-fsid feature is
+	 * not supported.
+	 */
+	if (btrfs_super_flags(disk_super) & BTRFS_SUPER_FLAG_SEEDING)
+		return fsid_fs_devices;
+
+	/* Try to find a fs_devices by matching devt. */
+	list_for_each_entry(devt_fs_devices, &fs_uuids, fs_list) {
+		struct btrfs_device *device;
+
+		list_for_each_entry(device, &devt_fs_devices->devices, dev_list) {
+			if (device->devt == devt) {
+				found_by_devt = true;
+				break;
+			}
+		}
+		if (found_by_devt)
+			break;
+	}
+
+	if (found_by_devt) {
+		/* Existing device. */
+		if (fsid_fs_devices == NULL) {
+			if (devt_fs_devices->in_use == 0) {
+				/* Stale device. */
+				return NULL;
+			} else {
+				/* temp_fsid is mounting a subvol. */
+				return devt_fs_devices;
+			}
+		} else {
+			/* Regular or temp_fsid device mounting a subvol. */
+			return devt_fs_devices;
+		}
+	} else {
+		/* New device. */
+		if (fsid_fs_devices == NULL) {
+			return NULL;
+		} else {
+			/* sb::fsid is already used create a new temp_fsid. */
+			*same_fsid_diff_dev = true;
+			return NULL;
+		}
+	}
+
+	/* Not reached. */
+}
+
 /*
  * This is only used on mount, and we are protected from competing things
  * messing with our fs_devices by the uuid_mutex, thus we do not need the
@@ -641,35 +709,6 @@ u8 *btrfs_sb_fsid_ptr(struct btrfs_super_block *sb)
 	return has_metadata_uuid ? sb->metadata_uuid : sb->fsid;
 }
 
-static void prepare_random_fsid(struct btrfs_super_block *disk_super, const char *path)
-{
-	struct btrfs_fs_devices *fs_devices;
-	u8 temp_fsid[BTRFS_FSID_SIZE];
-	bool dup_fsid = true;
-
-	while (dup_fsid) {
-		dup_fsid = false;
-		generate_random_uuid(temp_fsid);
-
-		list_for_each_entry(fs_devices, &fs_uuids, fs_list) {
-			if (memcmp(temp_fsid, fs_devices->fsid,
-				   BTRFS_FSID_SIZE) == 0 ||
-			    memcmp(temp_fsid, fs_devices->metadata_uuid,
-				   BTRFS_FSID_SIZE) == 0) {
-				dup_fsid = true;
-				break;
-			}
-		}
-	}
-
-	memcpy(disk_super->metadata_uuid, disk_super->fsid, BTRFS_FSID_SIZE);
-	memcpy(disk_super->fsid, temp_fsid, BTRFS_FSID_SIZE);
-
-	btrfs_info(NULL,
-		"random fsid (%pU) set for TEMP_FSID device %s (real fsid %pU)",
-		disk_super->fsid, path, disk_super->metadata_uuid);
-}
-
 /*
  * Add new device to list of registered devices
  *
@@ -688,10 +727,9 @@ static noinline struct btrfs_device *device_list_add(const char *path,
 	u64 devid = btrfs_stack_device_id(&disk_super->dev_item);
 	dev_t path_devt;
 	int error;
+	bool same_fsid_diff_dev = false;
 	bool has_metadata_uuid = (btrfs_super_incompat_flags(disk_super) &
 		BTRFS_FEATURE_INCOMPAT_METADATA_UUID);
-	const bool temp_fsid = (btrfs_super_compat_ro_flags(disk_super) &
-				BTRFS_FEATURE_COMPAT_RO_TEMP_FSID);
 
 	if (btrfs_super_flags(disk_super) & BTRFS_SUPER_FLAG_CHANGING_FSID_V2) {
 		btrfs_err(NULL,
@@ -707,28 +745,23 @@ static noinline struct btrfs_device *device_list_add(const char *path,
 		return ERR_PTR(error);
 	}
 
-	if (temp_fsid) {
-		if (unlikely(has_metadata_uuid)) {
-			btrfs_err(NULL,
-			"TEMP_FSID devices don't support the metadata_uuid feature");
-			return ERR_PTR(-EINVAL);
-		}
-		prepare_random_fsid(disk_super, path);
-	} else {
-		if (has_metadata_uuid)
-			fs_devices = find_fsid(disk_super->fsid, disk_super->metadata_uuid);
-		else
-			fs_devices = find_fsid(disk_super->fsid, NULL);
-	}
+	fs_devices = find_fsid_by_device(disk_super, path_devt, &same_fsid_diff_dev);
 
 	if (!fs_devices) {
 		fs_devices = alloc_fs_devices(disk_super->fsid);
-		if (has_metadata_uuid || temp_fsid)
+		if (has_metadata_uuid)
 			memcpy(fs_devices->metadata_uuid,
 			       disk_super->metadata_uuid, BTRFS_FSID_SIZE);
 
 		if (IS_ERR(fs_devices))
 			return ERR_CAST(fs_devices);
+
+		if (same_fsid_diff_dev) {
+			generate_random_uuid(fs_devices->fsid);
+			fs_devices->temp_fsid = true;
+			pr_info("BTRFS: device %s using temp-fsid %pU\n",
+				path, fs_devices->fsid);
+		}
 
 		mutex_lock(&fs_devices->device_list_mutex);
 		list_add(&fs_devices->fs_list, &fs_uuids);
@@ -1293,9 +1326,9 @@ struct btrfs_device *btrfs_scan_one_device(const char *path,
 	 * values temporarily, as the device paths of the fsid are the only
 	 * required information for assembling the volume.
 	 */
-	bdev_handle = bdev_open_by_path(path, BLK_OPEN_READ, NULL, NULL);
-	if (IS_ERR(bdev_handle))
-		return ERR_CAST(bdev_handle);
+	bdev = blkdev_get_by_path(path, BLK_OPEN_READ, NULL, NULL);
+	if (IS_ERR(bdev))
+		return ERR_CAST(bdev);
 
 	bytenr_orig = btrfs_sb_offset(0);
 	ret = btrfs_sb_log_location_bdev(bdev_handle->bdev, 0, READ, &bytenr);
@@ -2861,6 +2894,7 @@ int btrfs_grow_device(struct btrfs_trans_handle *trans,
 	btrfs_set_super_total_bytes(super_copy,
 			round_down(old_total + diff, fs_info->sectorsize));
 	device->fs_devices->total_rw_bytes += diff;
+	atomic64_add(diff, &fs_info->free_chunk_space);
 
 	btrfs_device_set_total_bytes(device, new_size);
 	btrfs_device_set_disk_total_bytes(device, new_size);
@@ -4771,6 +4805,7 @@ int btrfs_shrink_device(struct btrfs_device *device, u64 new_size)
 	u64 old_size = btrfs_device_get_total_bytes(device);
 	u64 diff;
 	u64 start;
+	u64 free_diff = 0;
 
 	new_size = round_down(new_size, fs_info->sectorsize);
 	start = new_size;
@@ -4796,7 +4831,19 @@ int btrfs_shrink_device(struct btrfs_device *device, u64 new_size)
 	btrfs_device_set_total_bytes(device, new_size);
 	if (test_bit(BTRFS_DEV_STATE_WRITEABLE, &device->dev_state)) {
 		device->fs_devices->total_rw_bytes -= diff;
-		atomic64_sub(diff, &fs_info->free_chunk_space);
+
+		/*
+		 * The new free_chunk_space is new_size - used, so we have to
+		 * subtract the delta of the old free_chunk_space which included
+		 * old_size - used.  If used > new_size then just subtract this
+		 * entire device's free space.
+		 */
+		if (device->bytes_used < new_size)
+			free_diff = (old_size - device->bytes_used) -
+				    (new_size - device->bytes_used);
+		else
+			free_diff = old_size - device->bytes_used;
+		atomic64_sub(free_diff, &fs_info->free_chunk_space);
 	}
 
 	/*
@@ -4931,9 +4978,10 @@ done:
 	if (ret) {
 		mutex_lock(&fs_info->chunk_mutex);
 		btrfs_device_set_total_bytes(device, old_size);
-		if (test_bit(BTRFS_DEV_STATE_WRITEABLE, &device->dev_state))
+		if (test_bit(BTRFS_DEV_STATE_WRITEABLE, &device->dev_state)) {
 			device->fs_devices->total_rw_bytes += diff;
-		atomic64_add(diff, &fs_info->free_chunk_space);
+			atomic64_add(free_diff, &fs_info->free_chunk_space);
+		}
 		mutex_unlock(&fs_info->chunk_mutex);
 	}
 	return ret;

@@ -1267,6 +1267,7 @@ MODULE_DEVICE_TABLE(of, of_max77693_muic_dt_match);
 static struct platform_driver max77693_muic_driver = {
 	.driver		= {
 		.name	= DEV_NAME,
+		.of_match_table = of_max77693_muic_dt_match,
 	},
 	.probe		= max77693_muic_probe,
 };

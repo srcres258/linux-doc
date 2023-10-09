@@ -964,7 +964,10 @@ static void smp_cross_call(const struct cpumask *target, unsigned int ipinr)
 
 static bool ipi_should_be_nmi(enum ipi_msg_type ipi)
 {
-	if (!system_uses_irq_prio_masking())
+	DECLARE_STATIC_KEY_FALSE(supports_pseudo_nmis);
+
+	if (!system_uses_irq_prio_masking() ||
+	    !static_branch_likely(&supports_pseudo_nmis))
 		return false;
 
 	switch (ipi) {
@@ -1058,7 +1061,7 @@ void arch_send_wakeup_ipi(unsigned int cpu)
 	 * We use a scheduler IPI to wake the CPU as this avoids the need for a
 	 * dedicated IPI and we can safely handle spurious scheduler IPIs.
 	 */
-	arch_smp_send_reschedule(cpu);
+	smp_send_reschedule(cpu);
 }
 #endif
 

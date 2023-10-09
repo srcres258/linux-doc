@@ -956,31 +956,19 @@ static int rtllib_rx_data_filter(struct rtllib_device *ieee, struct ieee80211_hd
 		return -1;
 	}
 
-	/* Filter packets sent by an STA that will be forwarded by AP */
-	if (ieee->intel_promiscuous_md_info.promiscuous_on  &&
-		ieee->intel_promiscuous_md_info.fltr_src_sta_frame) {
-		if ((fc & IEEE80211_FCTL_TODS) && !(fc & IEEE80211_FCTL_FROMDS) &&
-		    !ether_addr_equal(dst, ieee->current_network.bssid) &&
-		    ether_addr_equal(bssid, ieee->current_network.bssid)) {
-			return -1;
-		}
-	}
-
 	/* Nullfunc frames may have PS-bit set, so they must be passed to
 	 * hostap_handle_sta_rx() before being dropped here.
 	 */
-	if (!ieee->intel_promiscuous_md_info.promiscuous_on) {
-		if (stype != IEEE80211_STYPE_DATA &&
-		    stype != IEEE80211_STYPE_DATA_CFACK &&
-		    stype != IEEE80211_STYPE_DATA_CFPOLL &&
-		    stype != IEEE80211_STYPE_DATA_CFACKPOLL &&
-		    stype != IEEE80211_STYPE_QOS_DATA) {
-			if (stype != IEEE80211_STYPE_NULLFUNC)
-				netdev_dbg(ieee->dev,
-					   "RX: dropped data frame with no data (type=0x%02x, subtype=0x%02x)\n",
-					   type, stype);
-			return -1;
-		}
+	if (stype != IEEE80211_STYPE_DATA &&
+	    stype != IEEE80211_STYPE_DATA_CFACK &&
+	    stype != IEEE80211_STYPE_DATA_CFPOLL &&
+	    stype != IEEE80211_STYPE_DATA_CFACKPOLL &&
+	    stype != IEEE80211_STYPE_QOS_DATA) {
+		if (stype != IEEE80211_STYPE_NULLFUNC)
+			netdev_dbg(ieee->dev,
+				   "RX: dropped data frame with no data (type=0x%02x, subtype=0x%02x)\n",
+				   type, stype);
+		return -1;
 	}
 
 	/* packets from our adapter are dropped (echo) */
@@ -1256,7 +1244,6 @@ static int rtllib_rx_InfraAdhoc(struct rtllib_device *ieee, struct sk_buff *skb,
 	u8 bssid[ETH_ALEN] = {0};
 
 	size_t hdrlen = 0;
-	bool bToOtherSTA = false;
 	int ret = 0, i = 0;
 
 	fc = le16_to_cpu(hdr->frame_control);
@@ -1267,12 +1254,8 @@ static int rtllib_rx_InfraAdhoc(struct rtllib_device *ieee, struct sk_buff *skb,
 	/*Filter pkt not to me*/
 	multicast = is_multicast_ether_addr(hdr->addr1);
 	unicast = !multicast;
-	if (unicast && !ether_addr_equal(dev->dev_addr, hdr->addr1)) {
-		if (ieee->net_promiscuous_md)
-			bToOtherSTA = true;
-		else
-			goto rx_dropped;
-	}
+	if (unicast && !ether_addr_equal(dev->dev_addr, hdr->addr1))
+		goto rx_dropped;
 
 	/*Filter pkt has too small length */
 	hdrlen = rtllib_rx_get_hdrlen(ieee, skb, rx_stats);
@@ -1294,8 +1277,6 @@ static int rtllib_rx_InfraAdhoc(struct rtllib_device *ieee, struct sk_buff *skb,
 
 	/* Filter MGNT Frame */
 	if (type == RTLLIB_FTYPE_MGMT) {
-		if (bToOtherSTA)
-			goto rx_dropped;
 		if (rtllib_rx_frame_mgmt(ieee, skb, rx_stats, type, stype))
 			goto rx_dropped;
 		else
@@ -1305,10 +1286,8 @@ static int rtllib_rx_InfraAdhoc(struct rtllib_device *ieee, struct sk_buff *skb,
 	/* Filter WAPI DATA Frame */
 
 	/* Update statstics for AP roaming */
-	if (!bToOtherSTA) {
-		ieee->link_detect_info.NumRecvDataInPeriod++;
-		ieee->link_detect_info.NumRxOkInPeriod++;
-	}
+	ieee->link_detect_info.NumRecvDataInPeriod++;
+	ieee->link_detect_info.NumRxOkInPeriod++;
 
 	/* Data frame - extract src/dst addresses */
 	rtllib_rx_extract_addr(ieee, hdr, dst, src, bssid);
@@ -1324,7 +1303,7 @@ static int rtllib_rx_InfraAdhoc(struct rtllib_device *ieee, struct sk_buff *skb,
 	/* Send pspoll based on moredata */
 	if ((ieee->iw_mode == IW_MODE_INFRA)  &&
 	    (ieee->sta_sleep == LPS_IS_SLEEP) &&
-	    (ieee->polling) && (!bToOtherSTA)) {
+	    (ieee->polling)) {
 		if (WLAN_FC_MORE_DATA(fc)) {
 			/* more data bit is set, let's request a new frame
 			 * from the AP
@@ -1350,8 +1329,7 @@ static int rtllib_rx_InfraAdhoc(struct rtllib_device *ieee, struct sk_buff *skb,
 	/* Get TS for Rx Reorder  */
 	hdr = (struct ieee80211_hdr *)skb->data;
 	if (ieee->current_network.qos_data.active && IsQoSDataFrame(skb->data)
-		&& !is_multicast_ether_addr(hdr->addr1)
-		&& (!bToOtherSTA)) {
+		&& !is_multicast_ether_addr(hdr->addr1)) {
 		TID = Frame_QoSTID(skb->data);
 		SeqNum = WLAN_GET_SEQ_SEQ(sc);
 		rtllib_get_ts(ieee, (struct ts_common_info **)&ts, hdr->addr2, TID,
@@ -1382,18 +1360,16 @@ static int rtllib_rx_InfraAdhoc(struct rtllib_device *ieee, struct sk_buff *skb,
 	/* Update WAPI PN */
 
 	/* Check if leave LPS */
-	if (!bToOtherSTA) {
-		if (ieee->bIsAggregateFrame)
-			nr_subframes = rxb->nr_subframes;
-		else
-			nr_subframes = 1;
-		if (unicast)
-			ieee->link_detect_info.NumRxUnicastOkInPeriod += nr_subframes;
-		rtllib_rx_check_leave_lps(ieee, unicast, nr_subframes);
-	}
+	if (ieee->bIsAggregateFrame)
+		nr_subframes = rxb->nr_subframes;
+	else
+		nr_subframes = 1;
+	if (unicast)
+		ieee->link_detect_info.NumRxUnicastOkInPeriod += nr_subframes;
+	rtllib_rx_check_leave_lps(ieee, unicast, nr_subframes);
 
 	/* Indicate packets to upper layer or Rx Reorder */
-	if (!ieee->ht_info->cur_rx_reorder_enable || ts == NULL || bToOtherSTA)
+	if (!ieee->ht_info->cur_rx_reorder_enable || ts == NULL)
 		rtllib_rx_indicate_pkt_legacy(ieee, rx_stats, rxb, dst, src);
 	else
 		RxReorderIndicatePacket(ieee, rxb, ts, SeqNum);

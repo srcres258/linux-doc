@@ -483,7 +483,6 @@ static void hugetlb_unmap_file_folio(struct hstate *h,
 
 		unmap_hugepage_range(vma, v_start, v_end, NULL,
 				     ZAP_FLAG_DROP_MARKER);
-		hugetlb_vma_unlock_write(vma);
 	}
 
 	filemap_invalidate_unlock(mapping);

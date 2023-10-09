@@ -59,7 +59,7 @@ struct scmi_msg_resp_clock_possible_parents {
 	__le32 num_parent_flags;
 #define NUM_PARENTS_RETURNED(x)		((x) & 0xff)
 #define NUM_PARENTS_REMAINING(x)	((x) >> 24)
-	u32 possible_parents[];
+	__le32 possible_parents[];
 };
 
 struct scmi_msg_clock_set_parent {
@@ -231,9 +231,8 @@ static int iter_clk_possible_parents_update_state(struct scmi_iterator_state *st
 			p->clk->num_parents = 0;
 			return -ENOMEM;
 		}
-
 		st->max_resources = st->num_returned + st->num_remaining;
-	};
+	}
 
 	return 0;
 }

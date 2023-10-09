@@ -1286,7 +1286,7 @@ out:
 	/* Once for the lookup reference */
 	btrfs_put_block_group(block_group);
 	if (remove_rsv)
-		btrfs_delayed_refs_rsv_release(fs_info, 1, 0);
+		btrfs_dec_delayed_refs_rsv_bg_updates(fs_info);
 	btrfs_free_path(path);
 	return ret;
 }
@@ -2709,7 +2709,7 @@ void btrfs_create_pending_block_groups(struct btrfs_trans_handle *trans)
 
 		/* Already aborted the transaction if it failed. */
 next:
-		btrfs_delayed_refs_rsv_release(fs_info, 1, 0);
+		btrfs_dec_delayed_refs_rsv_bg_inserts(fs_info);
 		list_del_init(&block_group->bg_list);
 		clear_bit(BLOCK_GROUP_FLAG_NEW, &block_group->runtime_flags);
 	}
@@ -2819,8 +2819,7 @@ struct btrfs_block_group *btrfs_make_block_group(struct btrfs_trans_handle *tran
 #endif
 
 	list_add_tail(&cache->bg_list, &trans->new_bgs);
-	trans->delayed_ref_updates++;
-	btrfs_update_delayed_refs_rsv(trans);
+	btrfs_inc_delayed_refs_rsv_bg_inserts(fs_info);
 
 	set_avail_alloc_bits(fs_info, type);
 	return cache;
@@ -3369,7 +3368,7 @@ again:
 		if (should_put)
 			btrfs_put_block_group(cache);
 		if (drop_reserve)
-			btrfs_delayed_refs_rsv_release(fs_info, 1, 0);
+			btrfs_dec_delayed_refs_rsv_bg_updates(fs_info);
 		/*
 		 * Avoid blocking other tasks for too long. It might even save
 		 * us from writing caches for block groups that are going to be
@@ -3516,7 +3515,7 @@ int btrfs_write_dirty_block_groups(struct btrfs_trans_handle *trans)
 		/* If its not on the io list, we need to put the block group */
 		if (should_put)
 			btrfs_put_block_group(cache);
-		btrfs_delayed_refs_rsv_release(fs_info, 1, 0);
+		btrfs_dec_delayed_refs_rsv_bg_updates(fs_info);
 		spin_lock(&cur_trans->dirty_bgs_lock);
 	}
 	spin_unlock(&cur_trans->dirty_bgs_lock);
@@ -3545,6 +3544,7 @@ int btrfs_update_block_group(struct btrfs_trans_handle *trans,
 	struct btrfs_block_group *cache;
 	u64 old_val;
 	bool reclaim = false;
+	bool bg_already_dirty = true;
 	int factor;
 
 	/* Block accounting for super block */
@@ -3613,7 +3613,7 @@ int btrfs_update_block_group(struct btrfs_trans_handle *trans,
 	spin_lock(&trans->transaction->dirty_bgs_lock);
 	if (list_empty(&cache->dirty_list)) {
 		list_add_tail(&cache->dirty_list, &trans->transaction->dirty_bgs);
-		trans->delayed_ref_updates++;
+		bg_already_dirty = false;
 		btrfs_get_block_group(cache);
 	}
 	spin_unlock(&trans->transaction->dirty_bgs_lock);
@@ -3633,7 +3633,8 @@ int btrfs_update_block_group(struct btrfs_trans_handle *trans,
 	btrfs_put_block_group(cache);
 
 	/* Modified block groups are accounted for in the delayed_refs_rsv. */
-	btrfs_update_delayed_refs_rsv(trans);
+	if (!bg_already_dirty)
+		btrfs_inc_delayed_refs_rsv_bg_updates(info);
 
 	return 0;
 }

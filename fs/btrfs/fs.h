@@ -417,7 +417,17 @@ struct btrfs_fs_info {
 
 	struct btrfs_block_rsv empty_block_rsv;
 
+	/*
+	 * Updated while holding the lock 'trans_lock'. Due to the life cycle of
+	 * a transaction, it can be directly read while holding a transaction
+	 * handle, everywhere else must be read with btrfs_get_fs_generation().
+	 * Should always be updated using btrfs_set_fs_generation().
+	 */
 	u64 generation;
+	/*
+	 * Always use btrfs_get_last_trans_committed() and
+	 * btrfs_set_last_trans_committed() to read and update this field.
+	 */
 	u64 last_trans_committed;
 	/*
 	 * Generation of the last transaction used for block group relocation
@@ -817,6 +827,26 @@ struct btrfs_fs_info {
 	struct list_head allocated_ebs;
 #endif
 };
+
+static inline u64 btrfs_get_fs_generation(const struct btrfs_fs_info *fs_info)
+{
+	return READ_ONCE(fs_info->generation);
+}
+
+static inline void btrfs_set_fs_generation(struct btrfs_fs_info *fs_info, u64 gen)
+{
+	WRITE_ONCE(fs_info->generation, gen);
+}
+
+static inline u64 btrfs_get_last_trans_committed(const struct btrfs_fs_info *fs_info)
+{
+	return READ_ONCE(fs_info->last_trans_committed);
+}
+
+static inline void btrfs_set_last_trans_committed(struct btrfs_fs_info *fs_info, u64 gen)
+{
+	WRITE_ONCE(fs_info->last_trans_committed, gen);
+}
 
 static inline void btrfs_set_last_root_drop_gen(struct btrfs_fs_info *fs_info,
 						u64 gen)

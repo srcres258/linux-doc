@@ -566,6 +566,7 @@ static int ieee80211_add_key(struct wiphy *wiphy, struct net_device *dev,
 	/* KRACK protection, shouldn't happen but just silently accept key */
 	if (err == -EALREADY)
 		err = 0;
+
 	return err;
 }
 
