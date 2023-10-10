@@ -2165,7 +2165,8 @@ void ufshcd_send_command(struct ufs_hba *hba, unsigned int task_tag,
 	lrbp->compl_time_stamp = ktime_set(0, 0);
 	lrbp->compl_time_stamp_local_clock = 0;
 	ufshcd_add_command_trace(hba, task_tag, UFS_CMD_SEND);
-	ufshcd_clk_scaling_start_busy(hba);
+	if (lrbp->cmd)
+		ufshcd_clk_scaling_start_busy(hba);
 	if (unlikely(ufshcd_should_inform_monitor(hba, lrbp)))
 		ufshcd_start_monitor(hba, lrbp);
 
@@ -2715,27 +2716,23 @@ static int ufshcd_compose_devman_upiu(struct ufs_hba *hba,
  *			   for SCSI Purposes
  * @hba: per adapter instance
  * @lrbp: pointer to local reference block
- *
- * Return: 0 upon success; < 0 upon failure.
  */
-static int ufshcd_comp_scsi_upiu(struct ufs_hba *hba, struct ufshcd_lrb *lrbp)
+static void ufshcd_comp_scsi_upiu(struct ufs_hba *hba, struct ufshcd_lrb *lrbp)
 {
+	struct request *rq = scsi_cmd_to_rq(lrbp->cmd);
+	unsigned int ioprio_class = IOPRIO_PRIO_CLASS(req_get_ioprio(rq));
 	u8 upiu_flags;
-	int ret = 0;
 
 	if (hba->ufs_version <= ufshci_version(1, 1))
 		lrbp->command_type = UTP_CMD_TYPE_SCSI;
 	else
 		lrbp->command_type = UTP_CMD_TYPE_UFS_STORAGE;
 
-	if (likely(lrbp->cmd)) {
-		ufshcd_prepare_req_desc_hdr(lrbp, &upiu_flags, lrbp->cmd->sc_data_direction, 0);
-		ufshcd_prepare_utp_scsi_cmd_upiu(lrbp, upiu_flags);
-	} else {
-		ret = -EINVAL;
-	}
-
-	return ret;
+	ufshcd_prepare_req_desc_hdr(lrbp, &upiu_flags,
+				    lrbp->cmd->sc_data_direction, 0);
+	if (ioprio_class == IOPRIO_CLASS_RT)
+		upiu_flags |= UPIU_CMD_FLAGS_CP;
+	ufshcd_prepare_utp_scsi_cmd_upiu(lrbp, upiu_flags);
 }
 
 /**
@@ -2822,8 +2819,6 @@ static int ufshcd_queuecommand(struct Scsi_Host *host, struct scsi_cmnd *cmd)
 	struct ufshcd_lrb *lrbp;
 	int err = 0;
 	struct ufs_hw_queue *hwq = NULL;
-
-	WARN_ONCE(tag < 0 || tag >= hba->nutrs, "Invalid tag %d\n", tag);
 
 	switch (hba->ufshcd_state) {
 	case UFSHCD_STATE_OPERATIONAL:
@@ -5098,8 +5093,7 @@ static int ufshcd_slave_configure(struct scsi_device *sdev)
 	struct request_queue *q = sdev->request_queue;
 
 	blk_queue_update_dma_pad(q, PRDT_DATA_BYTE_COUNT_PAD - 1);
-	if (hba->quirks & UFSHCD_QUIRK_4KB_DMA_ALIGNMENT)
-		blk_queue_update_dma_alignment(q, SZ_4K - 1);
+
 	/*
 	 * Block runtime-pm until all consumers are added.
 	 * Refer ufshcd_setup_links().
@@ -5114,6 +5108,9 @@ static int ufshcd_slave_configure(struct scsi_device *sdev)
 	 * resume, causing more messages and so on.
 	 */
 	sdev->silence_suspend = 1;
+
+	if (hba->vops && hba->vops->config_scsi_dev)
+		hba->vops->config_scsi_dev(sdev);
 
 	ufshcd_crypto_register(hba, q);
 
@@ -5405,7 +5402,6 @@ void ufshcd_compl_one_cqe(struct ufs_hba *hba, int task_tag,
 				lrbp->utr_descriptor_ptr->header.ocs = ocs;
 			}
 			complete(hba->dev_cmd.complete);
-			ufshcd_clk_scaling_update_busy(hba);
 		}
 	}
 }
@@ -6924,8 +6920,6 @@ static int __ufshcd_issue_tm_cmd(struct ufs_hba *hba,
 	spin_lock_irqsave(host->host_lock, flags);
 
 	task_tag = req->tag;
-	WARN_ONCE(task_tag < 0 || task_tag >= hba->nutmrs, "Invalid tag %d\n",
-		  task_tag);
 	hba->tmf_rqs[req->tag] = req;
 	treq->upiu_req.req_header.task_tag = task_tag;
 
@@ -7499,8 +7493,6 @@ static int ufshcd_abort(struct scsi_cmnd *cmd)
 	bool outstanding;
 	u32 reg;
 
-	WARN_ONCE(tag < 0, "Invalid tag %d\n", tag);
-
 	ufshcd_hold(hba);
 
 	if (!is_mcq_enabled(hba)) {
@@ -7715,6 +7707,19 @@ static int ufshcd_eh_host_reset_handler(struct scsi_cmnd *cmd)
 	struct ufs_hba *hba;
 
 	hba = shost_priv(cmd->device->host);
+
+	/*
+	 * If runtime PM sent SSU and got a timeout, scsi_error_handler is
+	 * stuck in this function waiting for flush_work(&hba->eh_work). And
+	 * ufshcd_err_handler(eh_work) is stuck waiting for runtime PM. Do
+	 * ufshcd_link_recovery instead of eh_work to prevent deadlock.
+	 */
+	if (hba->pm_op_in_progress) {
+		if (ufshcd_link_recovery(hba))
+			err = FAILED;
+
+		return err;
+	}
 
 	spin_lock_irqsave(hba->host->host_lock, flags);
 	hba->force_reset = true;
