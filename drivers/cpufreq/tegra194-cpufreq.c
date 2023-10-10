@@ -135,7 +135,7 @@ static void tegra234_set_cpu_ndiv(struct cpufreq_policy *policy, u64 ndiv)
 	u32 cpu, cpuid, clusterid;
 	u64 mpidr_id;
 
-	for_each_cpu_and(cpu, policy->cpus, cpu_online_mask) {
+	for_each_cpu(cpu, policy->cpus) {
 		data->soc->ops->get_cpu_cluster_id(cpu, &cpuid, &clusterid);
 
 		/* use physical id to get address of per core frequency register */
@@ -449,6 +449,8 @@ static int tegra_cpufreq_init_cpufreq_table(struct cpufreq_policy *policy,
 		opp = dev_pm_opp_find_freq_exact(cpu_dev, pos->frequency * KHZ, false);
 		if (IS_ERR(opp))
 			continue;
+
+		dev_pm_opp_put(opp);
 
 		ret = dev_pm_opp_enable(cpu_dev, pos->frequency * KHZ);
 		if (ret < 0)
