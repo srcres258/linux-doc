@@ -2405,7 +2405,7 @@ static int shmem_mmap(struct file *file, struct vm_area_struct *vma)
 	struct shmem_inode_info *info = SHMEM_I(inode);
 	int ret;
 
-	ret = seal_check_future_write(info->seals, vma);
+	ret = seal_check_write(info->seals, vma);
 	if (ret)
 		return ret;
 
@@ -3738,7 +3738,7 @@ static const struct xattr_handler shmem_user_xattr_handler = {
 	.set = shmem_xattr_handler_set,
 };
 
-static const struct xattr_handler *shmem_xattr_handlers[] = {
+static const struct xattr_handler * const shmem_xattr_handlers[] = {
 	&shmem_security_xattr_handler,
 	&shmem_trusted_xattr_handler,
 	&shmem_user_xattr_handler,

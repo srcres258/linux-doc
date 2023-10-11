@@ -181,17 +181,6 @@ unsigned int hugepage_vma_check(struct vm_area_struct *vma,
 		if (!hugepage_flags_enabled())
 			return 0;
 
-		/* enabled=madvise without VM_HUGEPAGE. */
-		if (!(vm_flags & VM_HUGEPAGE) && !hugepage_flags_always()) {
-			if (vma_is_anonymous(vma)) {
-				orders &= READ_ONCE(huge_anon_always_mask);
-				if (!orders)
-					return 0;
-			} else
-				return 0;
-		}
-	}
-
 	if (!vma_is_anonymous(vma)) {
 		/*
 		 * Trust that ->huge_fault() handlers know what they are doing

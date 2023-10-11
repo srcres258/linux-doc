@@ -4479,19 +4479,18 @@ out_unlock:
 }
 #endif
 
-bool __kvm_mmu_honors_guest_mtrrs(struct kvm *kvm, bool vm_has_noncoherent_dma)
+bool __kvm_mmu_honors_guest_mtrrs(bool vm_has_noncoherent_dma)
 {
 	/*
-	 * If the TDP is enabled, the host MTRRs are ignored by TDP
-	 * (shadow_memtype_mask is non-zero), and the VM has non-coherent DMA
-	 * (DMA doesn't snoop CPU caches), KVM's ABI is to honor the memtype
-	 * from the guest's MTRRs so that guest accesses to memory that is
-	 * DMA'd aren't cached against the guest's wishes.
+	 * If host MTRRs are ignored (shadow_memtype_mask is non-zero), and the
+	 * VM has non-coherent DMA (DMA doesn't snoop CPU caches), KVM's ABI is
+	 * to honor the memtype from the guest's MTRRs so that guest accesses
+	 * to memory that is DMA'd aren't cached against the guest's wishes.
 	 *
 	 * Note, KVM may still ultimately ignore guest MTRRs for certain PFNs,
 	 * e.g. KVM will force UC memtype for host MMIO.
 	 */
-	return vm_has_noncoherent_dma && tdp_enabled && shadow_memtype_mask;
+	return vm_has_noncoherent_dma && shadow_memtype_mask;
 }
 
 int kvm_tdp_page_fault(struct kvm_vcpu *vcpu, struct kvm_page_fault *fault)

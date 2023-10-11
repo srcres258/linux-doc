@@ -170,6 +170,8 @@ static DEFINE_PER_CPU(void *, cur_csd_info);
 
 static ulong csd_lock_timeout = 5000;  /* CSD lock timeout in milliseconds. */
 module_param(csd_lock_timeout, ulong, 0444);
+static bool panic_on_ipistall;
+module_param(panic_on_ipistall, bool, 0444);
 
 static atomic_t csd_bug_count = ATOMIC_INIT(0);
 
@@ -254,7 +256,7 @@ static bool csd_lock_wait_toolong(call_single_data_t *csd, u64 ts0, u64 *ts1, in
 	 * to become unstuck. Use a signed comparison to avoid triggering
 	 * on underflows when the TSC is out of sync between sockets.
 	 */
-	BUG_ON((s64)ts_delta > 300000000000LL);
+	BUG_ON(panic_on_ipistall && (s64)ts_delta > 300000000000LL);
 	if (cpu_cur_csd && csd != cpu_cur_csd) {
 		pr_alert("\tcsd: CSD lock (#%d) handling prior %pS(%ps) request.\n",
 			 *bug_id, READ_ONCE(per_cpu(cur_csd_func, cpux)),

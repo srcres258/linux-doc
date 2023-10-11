@@ -35,7 +35,7 @@ static struct ctl_table ctl_isa_vars[] = {
 		.maxlen		= sizeof(isa_portshift),
 		.mode		= 0444,
 		.proc_handler	= proc_dointvec,
-	}
+	},
 };
 
 static struct ctl_table_header *isa_sysctl_header;

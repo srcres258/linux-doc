@@ -13,13 +13,11 @@
 #include <linux/interrupt.h>
 #include <linux/clk.h>
 #include <linux/of.h>
-#include <linux/of_device.h>
-#include <linux/of_address.h>
-#include <linux/of_irq.h>
 #include <linux/of_dma.h>
 #include <linux/dma-mapping.h>
 #include <linux/pm_runtime.h>
 #include <linux/pm_domain.h>
+#include <linux/property.h>
 
 #include "fsl-edma-common.h"
 
@@ -154,18 +152,20 @@ static struct dma_chan *fsl_edma3_xlate(struct of_phandle_args *dma_spec,
 		fsl_chan = to_fsl_edma_chan(chan);
 		i = fsl_chan - fsl_edma->chans;
 
-		chan = dma_get_slave_channel(chan);
-		chan->device->privatecnt++;
 		fsl_chan->priority = dma_spec->args[1];
 		fsl_chan->is_rxchan = dma_spec->args[2] & ARGS_RX;
 		fsl_chan->is_remote = dma_spec->args[2] & ARGS_REMOTE;
 		fsl_chan->is_multi_fifo = dma_spec->args[2] & ARGS_MULTI_FIFO;
 
 		if (!b_chmux && i == dma_spec->args[0]) {
+			chan = dma_get_slave_channel(chan);
+			chan->device->privatecnt++;
 			mutex_unlock(&fsl_edma->fsl_edma_mutex);
 			return chan;
 		} else if (b_chmux && !fsl_chan->srcid) {
 			/* if controller support channel mux, choose a free channel */
+			chan = dma_get_slave_channel(chan);
+			chan->device->privatecnt++;
 			fsl_chan->srcid = dma_spec->args[0];
 			mutex_unlock(&fsl_edma->fsl_edma_mutex);
 			return chan;
@@ -414,8 +414,6 @@ static int fsl_edma3_attach_pd(struct platform_device *pdev, struct fsl_edma_eng
 
 static int fsl_edma_probe(struct platform_device *pdev)
 {
-	const struct of_device_id *of_id =
-			of_match_device(fsl_edma_dt_ids, &pdev->dev);
 	struct device_node *np = pdev->dev.of_node;
 	struct fsl_edma_engine *fsl_edma;
 	const struct fsl_edma_drvdata *drvdata = NULL;
@@ -424,8 +422,7 @@ static int fsl_edma_probe(struct platform_device *pdev)
 	int chans;
 	int ret, i;
 
-	if (of_id)
-		drvdata = of_id->data;
+	drvdata = device_get_match_data(&pdev->dev);
 	if (!drvdata) {
 		dev_err(&pdev->dev, "unable to find driver data\n");
 		return -EINVAL;

@@ -199,7 +199,7 @@ static const struct dpu_intr_reg dpu_intr_set_7xxx[] = {
 
 #define DPU_IRQ_MASK(irq_idx)	(BIT(DPU_IRQ_BIT(irq_idx)))
 
-static inline bool dpu_core_irq_is_valid(int irq_idx)
+static inline bool dpu_core_irq_is_valid(unsigned int irq_idx)
 {
 	return irq_idx && irq_idx <= DPU_NUM_IRQS;
 }

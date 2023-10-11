@@ -336,8 +336,8 @@
 				interrupts = <GIC_SPI 19 IRQ_TYPE_LEVEL_HIGH>;
 				clocks = <&clk IMX93_CLK_LPUART1_GATE>;
 				clock-names = "ipg";
-				dmas = <&edma1 16 0 0>, <&edma1 17 0 1>;
-				dma-names = "tx", "rx";
+				dmas = <&edma1 17 0 1>, <&edma1 16 0 0>;
+				dma-names = "rx", "tx";
 				status = "disabled";
 			};
 
@@ -347,8 +347,8 @@
 				interrupts = <GIC_SPI 20 IRQ_TYPE_LEVEL_HIGH>;
 				clocks = <&clk IMX93_CLK_LPUART2_GATE>;
 				clock-names = "ipg";
-				dmas = <&edma1 18 0 0>, <&edma1 19 0 1>;
-				dma-names = "tx", "rx";
+				dmas = <&edma1 19 0 1>, <&edma1 18 0 0>;
+				dma-names = "rx", "tx";
 				status = "disabled";
 			};
 
@@ -669,8 +669,8 @@
 				interrupts = <GIC_SPI 68 IRQ_TYPE_LEVEL_HIGH>;
 				clocks = <&clk IMX93_CLK_LPUART3_GATE>;
 				clock-names = "ipg";
-				dmas = <&edma2 17 0 0>, <&edma2 18 0 1>;
-				dma-names = "tx", "rx";
+				dmas = <&edma2 18 0 1>, <&edma2 17 0 0>;
+				dma-names = "rx", "tx";
 				status = "disabled";
 			};
 
@@ -680,8 +680,8 @@
 				interrupts = <GIC_SPI 69 IRQ_TYPE_LEVEL_HIGH>;
 				clocks = <&clk IMX93_CLK_LPUART4_GATE>;
 				clock-names = "ipg";
-				dmas = <&edma2 19 0 0>, <&edma2 20 0 1>;
-				dma-names = "tx", "rx";
+				dmas = <&edma2 20 0 1>, <&edma2 19 0 0>;
+				dma-names = "rx", "tx";
 				status = "disabled";
 			};
 
@@ -691,8 +691,8 @@
 				interrupts = <GIC_SPI 70 IRQ_TYPE_LEVEL_HIGH>;
 				clocks = <&clk IMX93_CLK_LPUART5_GATE>;
 				clock-names = "ipg";
-				dmas = <&edma2 21 0 0>, <&edma2 22 0 1>;
-				dma-names = "tx", "rx";
+				dmas = <&edma2 22 0 1>, <&edma2 21 0 0>;
+				dma-names = "rx", "tx";
 				status = "disabled";
 			};
 
@@ -702,8 +702,8 @@
 				interrupts = <GIC_SPI 71 IRQ_TYPE_LEVEL_HIGH>;
 				clocks = <&clk IMX93_CLK_LPUART6_GATE>;
 				clock-names = "ipg";
-				dmas = <&edma2 23 0 0>, <&edma2 24 0 1>;
-				dma-names = "tx", "rx";
+				dmas = <&edma2 24 0 1>, <&edma2 23 0 0>;
+				dma-names = "rx", "tx";
 				status = "disabled";
 			};
 
@@ -742,8 +742,8 @@
 				interrupts = <GIC_SPI 210 IRQ_TYPE_LEVEL_HIGH>;
 				clocks = <&clk IMX93_CLK_LPUART7_GATE>;
 				clock-names = "ipg";
-				dmas = <&edma2 87 0 0>, <&edma2 88 0 1>;
-				dma-names = "tx", "rx";
+				dmas = <&edma2 88 0 1>, <&edma2 87 0 0>;
+				dma-names = "rx", "tx";
 				status = "disabled";
 			};
 
@@ -753,8 +753,8 @@
 				interrupts = <GIC_SPI 211 IRQ_TYPE_LEVEL_HIGH>;
 				clocks = <&clk IMX93_CLK_LPUART8_GATE>;
 				clock-names = "ipg";
-				dmas = <&edma2 89 0 0>, <&edma2 90 0 1>;
-				dma-names = "tx", "rx";
+				dmas =  <&edma2 90 0 1>, <&edma2 89 0 0>;
+				dma-names = "rx", "tx";
 				status = "disabled";
 			};
 
@@ -956,11 +956,12 @@
 		};
 
 		gpio2: gpio@43810080 {
-			compatible = "fsl,imx93-gpio", "fsl,imx7ulp-gpio";
-			reg = <0x43810080 0x1000>, <0x43810040 0x40>;
+			compatible = "fsl,imx93-gpio", "fsl,imx8ulp-gpio";
+			reg = <0x43810000 0x1000>;
 			gpio-controller;
 			#gpio-cells = <2>;
-			interrupts = <GIC_SPI 57 IRQ_TYPE_LEVEL_HIGH>;
+			interrupts = <GIC_SPI 57 IRQ_TYPE_LEVEL_HIGH>,
+				     <GIC_SPI 58 IRQ_TYPE_LEVEL_HIGH>;
 			interrupt-controller;
 			#interrupt-cells = <2>;
 			clocks = <&clk IMX93_CLK_GPIO2_GATE>,
@@ -970,11 +971,12 @@
 		};
 
 		gpio3: gpio@43820080 {
-			compatible = "fsl,imx93-gpio", "fsl,imx7ulp-gpio";
-			reg = <0x43820080 0x1000>, <0x43820040 0x40>;
+			compatible = "fsl,imx93-gpio", "fsl,imx8ulp-gpio";
+			reg = <0x43820000 0x1000>;
 			gpio-controller;
 			#gpio-cells = <2>;
-			interrupts = <GIC_SPI 59 IRQ_TYPE_LEVEL_HIGH>;
+			interrupts = <GIC_SPI 59 IRQ_TYPE_LEVEL_HIGH>,
+				     <GIC_SPI 60 IRQ_TYPE_LEVEL_HIGH>;
 			interrupt-controller;
 			#interrupt-cells = <2>;
 			clocks = <&clk IMX93_CLK_GPIO3_GATE>,
@@ -985,11 +987,12 @@
 		};
 
 		gpio4: gpio@43830080 {
-			compatible = "fsl,imx93-gpio", "fsl,imx7ulp-gpio";
-			reg = <0x43830080 0x1000>, <0x43830040 0x40>;
+			compatible = "fsl,imx93-gpio", "fsl,imx8ulp-gpio";
+			reg = <0x43830000 0x1000>;
 			gpio-controller;
 			#gpio-cells = <2>;
-			interrupts = <GIC_SPI 189 IRQ_TYPE_LEVEL_HIGH>;
+			interrupts = <GIC_SPI 189 IRQ_TYPE_LEVEL_HIGH>,
+				     <GIC_SPI 190 IRQ_TYPE_LEVEL_HIGH>;
 			interrupt-controller;
 			#interrupt-cells = <2>;
 			clocks = <&clk IMX93_CLK_GPIO4_GATE>,
@@ -999,11 +1002,12 @@
 		};
 
 		gpio1: gpio@47400080 {
-			compatible = "fsl,imx93-gpio", "fsl,imx7ulp-gpio";
-			reg = <0x47400080 0x1000>, <0x47400040 0x40>;
+			compatible = "fsl,imx93-gpio", "fsl,imx8ulp-gpio";
+			reg = <0x47400000 0x1000>;
 			gpio-controller;
 			#gpio-cells = <2>;
-			interrupts = <GIC_SPI 10 IRQ_TYPE_LEVEL_HIGH>;
+			interrupts = <GIC_SPI 10 IRQ_TYPE_LEVEL_HIGH>,
+				     <GIC_SPI 11 IRQ_TYPE_LEVEL_HIGH>;
 			interrupt-controller;
 			#interrupt-cells = <2>;
 			clocks = <&clk IMX93_CLK_GPIO1_GATE>,
