@@ -202,11 +202,10 @@ void symbols__fixup_duplicate(struct rb_root_cached *symbols)
 		curr = rb_entry(nd, struct symbol, rb_node);
 again:
 		nd = rb_next(&curr->rb_node);
-		next = rb_entry(nd, struct symbol, rb_node);
-
 		if (!nd)
 			break;
 
+		next = rb_entry(nd, struct symbol, rb_node);
 		if (curr->start != next->start)
 			continue;
 
@@ -1733,8 +1732,10 @@ int dso__load_bfd_symbols(struct dso *dso, const char *debugfile)
 			/* PE symbols can only have 4 bytes, so use .text high bits */
 			dso->text_offset = section->vma - (u32)section->vma;
 			dso->text_offset += (u32)bfd_asymbol_value(symbols[i]);
+			dso->text_end = (section->vma - dso->text_offset) + section->size;
 		} else {
 			dso->text_offset = section->vma - section->filepos;
+			dso->text_end = section->filepos + section->size;
 		}
 	}
 
