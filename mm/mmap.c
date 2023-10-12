@@ -2446,6 +2446,9 @@ static int split_vma(struct vma_iterator *vmi, struct vm_area_struct *vma,
  *
  * If no merge is possible and the range does not span the entirety of the VMA,
  * we then need to split the VMA to accommodate the change.
+ *
+ * The function returns either the merged VMA, the original VMA if a split was
+ * required instead, or an error if the split failed.
  */
 struct vm_area_struct *vma_modify(struct vma_iterator *vmi,
 				  struct vm_area_struct *prev,
@@ -2479,19 +2482,17 @@ struct vm_area_struct *vma_modify(struct vma_iterator *vmi,
 			return ERR_PTR(err);
 	}
 
-	return NULL;
+	return vma;
 }
 
 /*
  * Attempt to merge a newly mapped VMA with those adjacent to it. The caller
  * must ensure that [start, end) does not overlap any existing VMA.
  */
-static struct vm_area_struct *vma_merge_new_vma(struct vma_iterator *vmi,
-						struct vm_area_struct *prev,
-						struct vm_area_struct *vma,
-						unsigned long start,
-						unsigned long end,
-						pgoff_t pgoff)
+static struct vm_area_struct
+*vma_merge_new_vma(struct vma_iterator *vmi, struct vm_area_struct *prev,
+		   struct vm_area_struct *vma, unsigned long start,
+		   unsigned long end, pgoff_t pgoff)
 {
 	return vma_merge(vmi, vma->vm_mm, prev, start, end, vma->vm_flags,
 			 vma->anon_vma, vma->vm_file, pgoff, vma_policy(vma),
@@ -2880,7 +2881,7 @@ cannot_expand:
 		if (unlikely(vm_flags != vma->vm_flags && prev)) {
 			merge = vma_merge_new_vma(&vmi, prev, vma,
 						  vma->vm_start, vma->vm_end,
-						  pgoff);
+						  vma->vm_pgoff);
 			if (merge) {
 				/*
 				 * ->mmap() can change vma->vm_file and fput

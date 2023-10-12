@@ -79,6 +79,7 @@ static struct file_system_type bm_fs_type;
 
 /**
  * search_binfmt_handler - search for a binary handler for @bprm
+ * @misc: handle to binfmt_misc instance
  * @bprm: binary for which we are looking for a handler
  *
  * Search for a binary type handler for @bprm in the list of registered binary
@@ -128,6 +129,7 @@ static Node *search_binfmt_handler(struct binfmt_misc *misc,
 
 /**
  * get_binfmt_handler - try to find a binary type handler
+ * @misc: handle to binfmt_misc instance
  * @bprm: binary for which we are looking for a handler
  *
  * Try to find a binfmt handler for the binary type. If one is found take a
@@ -712,6 +714,7 @@ static void unlink_binfmt_dentry(struct dentry *dentry)
 
 /**
  * remove_binfmt_handler - remove a binary type handler
+ * @misc: handle to binfmt_misc instance
  * @e: binary type handler to remove
  *
  * Remove a binary type handler from the list of binary type handlers and

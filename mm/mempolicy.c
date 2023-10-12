@@ -788,7 +788,6 @@ static int mbind_range(struct vma_iterator *vmi, struct vm_area_struct *vma,
 		struct vm_area_struct **prev, unsigned long start,
 		unsigned long end, struct mempolicy *new_pol)
 {
-	struct vm_area_struct *merged;
 	unsigned long vmstart, vmend;
 
 	vmend = min(end, vma->vm_end);
@@ -804,14 +803,9 @@ static int mbind_range(struct vma_iterator *vmi, struct vm_area_struct *vma,
 		return 0;
 	}
 
-	merged =  vma_modify_policy(vmi, *prev, vma, vmstart, vmend, new_pol);
-	if (IS_ERR(merged))
-		return PTR_ERR(merged);
-
-	if (merged) {
-		*prev = merged;
-		return vma_replace_policy(merged, new_pol);
-	}
+	vma =  vma_modify_policy(vmi, *prev, vma, vmstart, vmend, new_pol);
+	if (IS_ERR(vma))
+		return PTR_ERR(vma);
 
 	*prev = vma;
 	return vma_replace_policy(vma, new_pol);

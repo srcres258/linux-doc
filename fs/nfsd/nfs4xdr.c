@@ -4873,44 +4873,6 @@ nfsd4_encode_channel_attrs4(struct xdr_stream *xdr,
 }
 
 static __be32
-nfsd4_encode_channel_attrs4(struct xdr_stream *xdr,
-			    const struct nfsd4_channel_attrs *attrs)
-{
-	__be32 status;
-
-	/* ca_headerpadsize */
-	status = nfsd4_encode_count4(xdr, 0);
-	if (status != nfs_ok)
-		return status;
-	/* ca_maxrequestsize */
-	status = nfsd4_encode_count4(xdr, attrs->maxreq_sz);
-	if (status != nfs_ok)
-		return status;
-	/* ca_maxresponsesize */
-	status = nfsd4_encode_count4(xdr, attrs->maxresp_sz);
-	if (status != nfs_ok)
-		return status;
-	/* ca_maxresponsesize_cached */
-	status = nfsd4_encode_count4(xdr, attrs->maxresp_cached);
-	if (status != nfs_ok)
-		return status;
-	/* ca_maxoperations */
-	status = nfsd4_encode_count4(xdr, attrs->maxops);
-	if (status != nfs_ok)
-		return status;
-	/* ca_maxrequests */
-	status = nfsd4_encode_count4(xdr, attrs->maxreqs);
-	if (status != nfs_ok)
-		return status;
-	/* ca_rdma_ird<1> */
-	if (xdr_stream_encode_u32(xdr, attrs->nr_rdma_attrs) != XDR_UNIT)
-		return nfserr_resource;
-	if (attrs->nr_rdma_attrs)
-		return nfsd4_encode_uint32_t(xdr, attrs->rdma_attrs);
-	return nfs_ok;
-}
-
-static __be32
 nfsd4_encode_create_session(struct nfsd4_compoundres *resp, __be32 nfserr,
 			    union nfsd4_op_u *u)
 {

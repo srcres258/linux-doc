@@ -581,7 +581,6 @@ mprotect_fixup(struct vma_iterator *vmi, struct mmu_gather *tlb,
 	long nrpages = (end - start) >> PAGE_SHIFT;
 	unsigned int mm_cp_flags = 0;
 	unsigned long charged = 0;
-	struct vm_area_struct *merged;
 	int error;
 
 	if (newflags == oldflags) {
@@ -631,17 +630,10 @@ mprotect_fixup(struct vma_iterator *vmi, struct mmu_gather *tlb,
 		newflags &= ~VM_ACCOUNT;
 	}
 
-	merged = vma_modify_flags(vmi, *pprev, vma, start, end, newflags);
-	if (IS_ERR(merged)) {
-		error = PTR_ERR(merged);
+	vma = vma_modify_flags(vmi, *pprev, vma, start, end, newflags);
+	if (IS_ERR(vma)) {
+		error = PTR_ERR(vma);
 		goto fail;
-	}
-
-	if (merged) {
-		vma = *pprev = merged;
-		VM_WARN_ON((vma->vm_flags ^ newflags) & ~VM_SOFTDIRTY);
-	} else {
-		*pprev = vma;
 	}
 
 	if ((oldflags & VM_ACCOUNT) && !(newflags & VM_ACCOUNT))
@@ -658,6 +650,9 @@ mprotect_fixup(struct vma_iterator *vmi, struct mmu_gather *tlb,
 	vma_set_page_prot(vma);
 
 	change_protection(tlb, vma, start, end, mm_cp_flags);
+
+	if ((oldflags & VM_ACCOUNT) && !(newflags & VM_ACCOUNT))
+		vm_unacct_memory(nrpages);
 
 	/*
 	 * Private VM_LOCKED VMA becoming writable: trigger COW to avoid major

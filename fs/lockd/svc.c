@@ -372,7 +372,9 @@ static void lockd_put(void)
 	unregister_inet6addr_notifier(&lockd_inet6addr_notifier);
 #endif
 
+	svc_get(nlmsvc_serv);
 	svc_set_num_threads(nlmsvc_serv, NULL, 0);
+	svc_put(nlmsvc_serv);
 	timer_delete_sync(&nlmsvc_retry);
 	svc_put(nlmsvc_serv);
 	nlmsvc_serv = NULL;

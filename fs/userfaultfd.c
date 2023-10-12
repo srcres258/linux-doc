@@ -49,7 +49,7 @@ static struct ctl_table vm_userfaultfd_table[] = {
 };
 #endif
 
-static struct kmem_cache *userfaultfd_ctx_cachep __read_mostly;
+static struct kmem_cache *userfaultfd_ctx_cachep __ro_after_init;
 
 /*
  * Start with fault_pending_wqh and fault_wqh so they're more likely
@@ -927,19 +927,15 @@ static int userfaultfd_release(struct inode *inode, struct file *file)
 			continue;
 		}
 		new_flags = vma->vm_flags & ~__VM_UFFD_FLAGS;
-		prev = vma_modify_flags_uffd(&vmi, prev, vma, vma->vm_start,
-					     vma->vm_end, new_flags,
-					     NULL_VM_UFFD_CTX);
-
-		if (prev) {
-			vma = prev;
-		} else {
-			prev = vma;
-		}
+		vma = vma_modify_flags_uffd(&vmi, prev, vma, vma->vm_start,
+					    vma->vm_end, new_flags,
+					    NULL_VM_UFFD_CTX);
 
 		vma_start_write(vma);
 		userfaultfd_set_vm_flags(vma, new_flags);
 		vma->vm_userfaultfd_ctx = NULL_VM_UFFD_CTX;
+
+		prev = vma;
 	}
 	mmap_write_unlock(mm);
 	mmput(mm);
@@ -1482,16 +1478,13 @@ static int userfaultfd_register(struct userfaultfd_ctx *ctx,
 		vma_end = min(end, vma->vm_end);
 
 		new_flags = (vma->vm_flags & ~__VM_UFFD_FLAGS) | vm_flags;
-		prev = vma_modify_flags_uffd(&vmi, prev, vma, start, vma_end,
-					     new_flags,
-					     (struct vm_userfaultfd_ctx){ctx});
-		if (IS_ERR(prev)) {
-			ret = PTR_ERR(prev);
+		vma = vma_modify_flags_uffd(&vmi, prev, vma, start, vma_end,
+					    new_flags,
+					    (struct vm_userfaultfd_ctx){ctx});
+		if (IS_ERR(vma)) {
+			ret = PTR_ERR(vma);
 			break;
 		}
-
-		if (prev)
-			vma = prev; /* vma_merge() invalidated the mas */
 
 		/*
 		 * In the vma_merge() successful mprotect-like case 8:
@@ -1657,15 +1650,13 @@ static int userfaultfd_unregister(struct userfaultfd_ctx *ctx,
 			uffd_wp_range(vma, start, vma_end - start, false);
 
 		new_flags = vma->vm_flags & ~__VM_UFFD_FLAGS;
-		prev = vma_modify_flags_uffd(&vmi, prev, vma, start, vma_end,
-					     new_flags, NULL_VM_UFFD_CTX);
-		if (IS_ERR(prev)) {
-			ret = PTR_ERR(prev);
+		vma = vma_modify_flags_uffd(&vmi, prev, vma, start, vma_end,
+					    new_flags, NULL_VM_UFFD_CTX);
+		if (IS_ERR(vma)) {
+			ret = PTR_ERR(vma);
 			break;
 		}
 
-		if (prev)
-			vma = prev;
 		/*
 		 * In the vma_merge() successful mprotect-like case 8:
 		 * the next vma was merged into the current one and

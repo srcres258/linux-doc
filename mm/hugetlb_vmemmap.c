@@ -495,7 +495,7 @@ EXPORT_SYMBOL(hugetlb_optimize_vmemmap_key);
 static bool vmemmap_optimize_enabled = IS_ENABLED(CONFIG_HUGETLB_PAGE_OPTIMIZE_VMEMMAP_DEFAULT_ON);
 core_param(hugetlb_free_vmemmap, vmemmap_optimize_enabled, bool, 0);
 
-static int __hugetlb_vmemmap_restore(const struct hstate *h, struct folio *folio, unsigned long flags)
+static int __hugetlb_vmemmap_restore_folio(const struct hstate *h, struct folio *folio, unsigned long flags)
 {
 	int ret;
 	struct page *head = &folio->page;
@@ -527,8 +527,8 @@ static int __hugetlb_vmemmap_restore(const struct hstate *h, struct folio *folio
 }
 
 /**
- * hugetlb_vmemmap_restore - restore previously optimized (by
- *				hugetlb_vmemmap_optimize()) vmemmap pages which
+ * hugetlb_vmemmap_restore_folio - restore previously optimized (by
+ *				hugetlb_vmemmap_optimize_folio()) vmemmap pages which
  *				will be reallocated and remapped.
  * @h:		struct hstate.
  * @folio:     the folio whose vmemmap pages will be restored.
@@ -536,9 +536,9 @@ static int __hugetlb_vmemmap_restore(const struct hstate *h, struct folio *folio
  * Return: %0 if @folio's vmemmap pages have been reallocated and remapped,
  * negative error code otherwise.
  */
-int hugetlb_vmemmap_restore(const struct hstate *h, struct folio *folio)
+int hugetlb_vmemmap_restore_folio(const struct hstate *h, struct folio *folio)
 {
-	return __hugetlb_vmemmap_restore(h, folio, 0);
+	return __hugetlb_vmemmap_restore_folio(h, folio, 0);
 }
 
 /**
@@ -564,7 +564,7 @@ long hugetlb_vmemmap_restore_folios(const struct hstate *h,
 
 	list_for_each_entry_safe(folio, t_folio, folio_list, lru) {
 		if (folio_test_hugetlb_vmemmap_optimized(folio)) {
-			ret = __hugetlb_vmemmap_restore(h, folio,
+			ret = __hugetlb_vmemmap_restore_folio(h, folio,
 						VMEMMAP_REMAP_NO_TLB_FLUSH);
 			if (ret)
 				break;
@@ -641,7 +641,7 @@ static bool vmemmap_should_optimize(const struct hstate *h, const struct page *h
 	return true;
 }
 
-static int __hugetlb_vmemmap_optimize(const struct hstate *h,
+static int __hugetlb_vmemmap_optimize_folio(const struct hstate *h,
 					struct folio *folio,
 					struct list_head *vmemmap_pages,
 					unsigned long flags)
@@ -689,7 +689,7 @@ static int __hugetlb_vmemmap_optimize(const struct hstate *h,
 }
 
 /**
- * hugetlb_vmemmap_optimize - optimize @folio's vmemmap pages.
+ * hugetlb_vmemmap_optimize_folio - optimize @folio's vmemmap pages.
  * @h:		struct hstate.
  * @folio:     the folio whose vmemmap pages will be optimized.
  *
@@ -698,11 +698,11 @@ static int __hugetlb_vmemmap_optimize(const struct hstate *h,
  * can use folio_test_hugetlb_vmemmap_optimized(@folio) to detect if @folio's
  * vmemmap pages have been optimized.
  */
-void hugetlb_vmemmap_optimize(const struct hstate *h, struct folio *folio)
+void hugetlb_vmemmap_optimize_folio(const struct hstate *h, struct folio *folio)
 {
 	LIST_HEAD(vmemmap_pages);
 
-	__hugetlb_vmemmap_optimize(h, folio, &vmemmap_pages, 0);
+	__hugetlb_vmemmap_optimize_folio(h, folio, &vmemmap_pages, 0);
 	free_vmemmap_page_list(&vmemmap_pages);
 }
 
@@ -746,7 +746,7 @@ void hugetlb_vmemmap_optimize_folios(struct hstate *h, struct list_head *folio_l
 	flush_tlb_all();
 
 	list_for_each_entry(folio, folio_list, lru) {
-		int ret = __hugetlb_vmemmap_optimize(h, folio,
+		int ret = __hugetlb_vmemmap_optimize_folio(h, folio,
 						&vmemmap_pages,
 						VMEMMAP_REMAP_NO_TLB_FLUSH);
 
@@ -755,14 +755,14 @@ void hugetlb_vmemmap_optimize_folios(struct hstate *h, struct list_head *folio_l
 		 * encounter an ENOMEM,  free what we have and try again.
 		 * This can occur in the case that both spliting fails
 		 * halfway and head page allocation also failed. In this
-		 * case __hugetlb_vmemmap_optimize() would free memory
+		 * case __hugetlb_vmemmap_optimize_folio() would free memory
 		 * allowing more vmemmap remaps to occur.
 		 */
 		if (ret == -ENOMEM && !list_empty(&vmemmap_pages)) {
 			flush_tlb_all();
 			free_vmemmap_page_list(&vmemmap_pages);
 			INIT_LIST_HEAD(&vmemmap_pages);
-			__hugetlb_vmemmap_optimize(h, folio,
+			__hugetlb_vmemmap_optimize_folio(h, folio,
 						&vmemmap_pages,
 						VMEMMAP_REMAP_NO_TLB_FLUSH);
 		}

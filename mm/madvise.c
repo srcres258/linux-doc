@@ -141,7 +141,6 @@ static int madvise_update_vma(struct vm_area_struct *vma,
 {
 	struct mm_struct *mm = vma->vm_mm;
 	int error;
-	struct vm_area_struct *merged;
 	VMA_ITERATOR(vmi, mm, start);
 
 	if (new_flags == vma->vm_flags && anon_vma_name_eq(anon_vma_name(vma), anon_name)) {
@@ -149,10 +148,10 @@ static int madvise_update_vma(struct vm_area_struct *vma,
 		return 0;
 	}
 
-	merged = vma_modify_flags_name(&vmi, *prev, vma, start, end, new_flags,
-				       anon_name);
-	if (IS_ERR(merged))
-		return PTR_ERR(merged);
+	vma = vma_modify_flags_name(&vmi, *prev, vma, start, end, new_flags,
+				    anon_name);
+	if (IS_ERR(vma))
+		return PTR_ERR(vma);
 
 	if (merged)
 		vma = *prev = merged;
