@@ -527,7 +527,7 @@ static int btrfs_free_stale_devices(dev_t devt, struct btrfs_device *skip_device
 				continue;
 			if (devt && devt != device->devt)
 				continue;
-			if (fs_devices->in_use) {
+			if (fs_devices->opened) {
 				if (devt)
 					ret = -EBUSY;
 				break;
@@ -599,7 +599,7 @@ static struct btrfs_fs_devices *find_fsid_by_device(
 	if (found_by_devt) {
 		/* Existing device. */
 		if (fsid_fs_devices == NULL) {
-			if (devt_fs_devices->in_use == 0) {
+			if (devt_fs_devices->opened == 0) {
 				/* Stale device. */
 				return NULL;
 			} else {
@@ -1297,7 +1297,7 @@ int btrfs_forget_devices(dev_t devt)
  * the device or return an error. Multi-device and seeding devices are registered
  * in both cases.
  */
-struct btrfs_device *btrfs_scan_one_device(const char *path,
+struct btrfs_device *btrfs_scan_one_device(const char *path, blk_mode_t flags,
 					   bool mount_arg_dev)
 {
 	struct btrfs_super_block *disk_super;
@@ -1326,9 +1326,9 @@ struct btrfs_device *btrfs_scan_one_device(const char *path,
 	 * values temporarily, as the device paths of the fsid are the only
 	 * required information for assembling the volume.
 	 */
-	bdev = blkdev_get_by_path(path, BLK_OPEN_READ, NULL, NULL);
-	if (IS_ERR(bdev))
-		return ERR_CAST(bdev);
+	bdev_handle = bdev_open_by_path(path, flags, NULL, NULL);
+	if (IS_ERR(bdev_handle))
+		return ERR_CAST(bdev_handle);
 
 	bytenr_orig = btrfs_sb_offset(0);
 	ret = btrfs_sb_log_location_bdev(bdev_handle->bdev, 0, READ, &bytenr);
@@ -5090,7 +5090,7 @@ static void init_alloc_chunk_ctl_policy_regular(
 	ASSERT(space_info);
 
 	ctl->max_chunk_size = READ_ONCE(space_info->chunk_size);
-	ctl->max_stripe_size = ctl->max_chunk_size;
+	ctl->max_stripe_size = min_t(u64, ctl->max_chunk_size, SZ_1G);
 
 	if (ctl->type & BTRFS_BLOCK_GROUP_SYSTEM)
 		ctl->devs_max = min_t(int, ctl->devs_max, BTRFS_MAX_DEVS_SYS_CHUNK);

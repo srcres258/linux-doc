@@ -506,7 +506,7 @@ static void simpledrm_device_detach_genpd(void *res)
 		return;
 
 	for (i = sdev->pwr_dom_count - 1; i >= 0; i--) {
-		if (!sdev->pwr_dom_links[i])
+		if (sdev->pwr_dom_links[i])
 			device_link_del(sdev->pwr_dom_links[i]);
 		if (!IS_ERR_OR_NULL(sdev->pwr_dom_devs[i]))
 			dev_pm_domain_detach(sdev->pwr_dom_devs[i], true);
@@ -850,7 +850,7 @@ static struct simpledrm_device *simpledrm_device_create(struct drm_driver *drv,
 
 		ret = devm_aperture_acquire_from_firmware(dev, res->start, resource_size(res));
 		if (ret) {
-			drm_err(dev, "could not acquire memory range %pr: %d\n", &res, ret);
+			drm_err(dev, "could not acquire memory range %pr: %d\n", res, ret);
 			return ERR_PTR(ret);
 		}
 

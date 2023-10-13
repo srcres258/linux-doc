@@ -497,7 +497,7 @@ size_t copy_page_from_iter_atomic(struct page *page, size_t offset,
 		}
 
 		p = kmap_atomic(page) + offset;
-		__copy_from_iter(p, n, i);
+		n = __copy_from_iter(p, n, i);
 		kunmap_atomic(p);
 		copied += n;
 		offset += n;

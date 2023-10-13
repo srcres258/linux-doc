@@ -856,6 +856,48 @@ void do_close_on_exec(struct files_struct *files)
 	spin_unlock(&files->file_lock);
 }
 
+static struct file *__get_file_rcu(struct file __rcu **f)
+{
+	struct file __rcu *file;
+	struct file __rcu *file_reloaded;
+	struct file __rcu *file_reloaded_cmp;
+
+	file = rcu_dereference_raw(*f);
+	if (!file)
+		return NULL;
+
+	if (unlikely(!atomic_long_inc_not_zero(&file->f_count)))
+		return ERR_PTR(-EAGAIN);
+
+	file_reloaded = rcu_dereference_raw(*f);
+
+	/*
+	 * Ensure that all accesses have a dependency on the load from
+	 * rcu_dereference_raw() above so we get correct ordering
+	 * between reuse/allocation and the pointer check below.
+	 */
+	file_reloaded_cmp = file_reloaded;
+	OPTIMIZER_HIDE_VAR(file_reloaded_cmp);
+
+	/*
+	 * atomic_long_inc_not_zero() above provided a full memory
+	 * barrier when we acquired a reference.
+	 *
+	 * This is paired with the write barrier from assigning to the
+	 * __rcu protected file pointer so that if that pointer still
+	 * matches the current file, we know we have successfully
+	 * acquired a reference to the right file.
+	 *
+	 * If the pointers don't match the file has been reallocated by
+	 * SLAB_TYPESAFE_BY_RCU.
+	 */
+	if (file == file_reloaded_cmp)
+		return file_reloaded;
+
+	fput(file);
+	return ERR_PTR(-EAGAIN);
+}
+
 /**
  * get_file_rcu - try go get a reference to a file under rcu
  * @f: the file to get a reference on
@@ -872,44 +914,15 @@ struct file *get_file_rcu(struct file __rcu **f)
 {
 	for (;;) {
 		struct file __rcu *file;
-		struct file __rcu *file_reloaded;
-		struct file __rcu *file_reloaded_cmp;
 
-		file = rcu_dereference_raw(*f);
-		if (!file)
+		file = __get_file_rcu(f);
+		if (unlikely(!file))
 			return NULL;
 
-		if (unlikely(!atomic_long_inc_not_zero(&file->f_count)))
+		if (unlikely(IS_ERR(file)))
 			continue;
 
-		file_reloaded = rcu_dereference_raw(*f);
-
-		/*
-		 * Ensure that all accesses have a dependency on the
-		 * load from rcu_dereference_raw() above so we get
-		 * correct ordering between reuse/allocation and the
-		 * pointer check below.
-		 */
-		file_reloaded_cmp = file_reloaded;
-		OPTIMIZER_HIDE_VAR(file_reloaded_cmp);
-
-		/*
-		 * atomic_long_inc_not_zero() above provided a full
-		 * memory barrier when we acquired a reference.
-		 *
-		 * This is paired with the write barrier from assigning
-		 * to the __rcu protected file pointer so that if that
-		 * pointer still matches the current file, we know we
-		 * have successfully acquired a reference to the right
-		 * file.
-		 *
-		 * If the pointers don't match the file has been
-		 * reallocated by SLAB_TYPESAFE_BY_RCU.
-		 */
-		if (file == file_reloaded_cmp)
-			return file_reloaded;
-
-		fput(file);
+		return file;
 	}
 }
 EXPORT_SYMBOL_GPL(get_file_rcu);
@@ -938,9 +951,12 @@ static inline struct file *__fget_files_rcu(struct files_struct *files,
 		 *      file hasn't been reused yet or the file count
 		 *      isn't zero but the file has already been reused.
 		 */
-		file = get_file_rcu(fdentry);
+		file = __get_file_rcu(fdentry);
 		if (unlikely(!file))
 			return NULL;
+
+		if (unlikely(IS_ERR(file)))
+			continue;
 
 		/*
 		 *  (b) the file table entry has changed under us.
@@ -1020,13 +1036,6 @@ struct file *lookup_fdget_rcu(unsigned int fd)
 }
 EXPORT_SYMBOL_GPL(lookup_fdget_rcu);
 
-static inline struct file *files_lookup_fdget_rcu(struct files_struct *files, unsigned int fd)
-{
-	RCU_LOCKDEP_WARN(!rcu_read_lock_held(),
-			 "suspicious rcu_dereference_check() usage");
-	return lookup_fdget_rcu(fd);
-}
-
 struct file *task_lookup_fdget_rcu(struct task_struct *task, unsigned int fd)
 {
 	/* Must be called with rcu_read_lock held */
@@ -1036,7 +1045,7 @@ struct file *task_lookup_fdget_rcu(struct task_struct *task, unsigned int fd)
 	task_lock(task);
 	files = task->files;
 	if (files)
-		file = files_lookup_fdget_rcu(files, fd);
+		file = __fget_files_rcu(files, fd, 0);
 	task_unlock(task);
 
 	return file;
@@ -1053,7 +1062,7 @@ struct file *task_lookup_next_fdget_rcu(struct task_struct *task, unsigned int *
 	files = task->files;
 	if (files) {
 		for (; fd < files_fdtable(files)->max_fds; fd++) {
-			file = files_lookup_fdget_rcu(files, fd);
+			file = __fget_files_rcu(files, fd, 0);
 			if (file)
 				break;
 		}
@@ -1355,7 +1364,7 @@ SYSCALL_DEFINE2(dup2, unsigned int, oldfd, unsigned int, newfd)
 		int retval = oldfd;
 
 		rcu_read_lock();
-		f = files_lookup_fdget_rcu(files, oldfd);
+		f = __fget_files_rcu(files, oldfd, 0);
 		if (!f)
 			retval = -EBADF;
 		rcu_read_unlock();
