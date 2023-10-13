@@ -32,7 +32,6 @@
 #include <linux/pci.h>
 #include "processor_thermal_device.h"
 
-#define SOC_WT_RES_INT_STATUS_OFFSET	0x5B18
 #define SOC_WT				GENMASK_ULL(47, 40)
 
 #define SOC_WT_PREDICTION_INT_ENABLE_BIT	23
@@ -216,8 +215,6 @@ void proc_thermal_wt_intr_callback(struct pci_dev *pdev, struct proc_thermal_dev
 	if (!(status & SOC_WT_PREDICTION_INT_ACTIVE))
 		return;
 
-	writeq(status & ~SOC_WT_PREDICTION_INT_ACTIVE,
-		       proc_priv->mmio_base + SOC_WT_RES_INT_STATUS_OFFSET);
 	sysfs_notify(&pdev->dev.kobj, "workload_hint", "workload_type_index");
 }
 EXPORT_SYMBOL_NS_GPL(proc_thermal_wt_intr_callback, INT340X_THERMAL);
