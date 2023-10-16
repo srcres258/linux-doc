@@ -4096,7 +4096,7 @@ F:	drivers/net/wireless/broadcom/brcm80211/
 
 BROADCOM BRCMSTB GPIO DRIVER
 M:	Doug Berger <opendmb@gmail.com>
-M:	Florian Fainelli <florian.fainelli@broadcom>
+M:	Florian Fainelli <florian.fainelli@broadcom.com>
 R:	Broadcom internal kernel review list <bcm-kernel-feedback-list@broadcom.com>
 S:	Supported
 F:	Documentation/devicetree/bindings/gpio/brcm,brcmstb-gpio.yaml
@@ -6661,6 +6661,7 @@ F:	drivers/gpu/drm/panel/panel-novatek-nt36672a.c
 DRM DRIVER FOR NVIDIA GEFORCE/QUADRO GPUS
 M:	Karol Herbst <kherbst@redhat.com>
 M:	Lyude Paul <lyude@redhat.com>
+M:	Danilo Krummrich <dakr@redhat.com>
 L:	dri-devel@lists.freedesktop.org
 L:	nouveau@lists.freedesktop.org
 S:	Supported
