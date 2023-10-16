@@ -128,6 +128,8 @@ static const char *const hwcap_str[] = {
 	[KERNEL_HWCAP_MOPS]		= "mops",
 	[KERNEL_HWCAP_HBC]		= "hbc",
 	[KERNEL_HWCAP_SVE_B16B16]	= "sveb16b16",
+	[KERNEL_HWCAP_LRCPC3]		= "lrcpc3",
+	[KERNEL_HWCAP_LSE128]		= "lse128",
 };
 
 #ifdef CONFIG_COMPAT

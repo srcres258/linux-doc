@@ -47,13 +47,13 @@
 
 #include <linux/bitfield.h>
 #include <linux/bits.h>
+#include <linux/cleanup.h>
 #include <linux/clk.h>
 #include <linux/delay.h>
 #include <linux/device.h>
 #include <linux/gpio/consumer.h>
 #include <linux/module.h>
 #include <linux/mutex.h>
-#include <linux/of.h>
 #include <linux/regmap.h>
 #include <linux/slab.h>
 #include <linux/spi/spi.h>
@@ -66,8 +66,6 @@
 #include <linux/iio/sysfs.h>
 #include <linux/iio/trigger_consumer.h>
 #include <linux/iio/triggered_buffer.h>
-
-#define DRV_NAME "ad2s1210"
 
 /* control register flags */
 #define AD2S1210_ADDRESS_DATA		BIT(7)
@@ -287,6 +285,26 @@ static int ad2s1210_regmap_reg_read(void *context, unsigned int reg,
 }
 
 /*
+ * Toggles the SAMPLE line on the AD2S1210 to latch in the current position,
+ * velocity, and faults.
+ *
+ * Must be called with lock held.
+ */
+static void ad2s1210_toggle_sample_line(struct ad2s1210_state *st)
+{
+	/*
+	 * Datasheet specifies minimum hold time t16 = 2 * tck + 20 ns. So the
+	 * longest time needed is when CLKIN is 6.144 MHz, in which case t16
+	 * ~= 350 ns. The same delay is also needed before re-asserting the
+	 * SAMPLE line.
+	 */
+	gpiod_set_value(st->sample_gpio, 1);
+	ndelay(350);
+	gpiod_set_value(st->sample_gpio, 0);
+	ndelay(350);
+}
+
+/*
  * Sets the excitation frequency and performs software reset.
  *
  * Must be called with lock held.
@@ -294,6 +312,9 @@ static int ad2s1210_regmap_reg_read(void *context, unsigned int reg,
 static int ad2s1210_reinit_excitation_frequency(struct ad2s1210_state *st,
 						u16 fexcit)
 {
+	/* Map resolution to settle time in milliseconds. */
+	static const int track_time_ms[] = { 10, 20, 25, 60 };
+	unsigned int ignored;
 	int ret;
 	u8 fcw;
 
@@ -309,7 +330,27 @@ static int ad2s1210_reinit_excitation_frequency(struct ad2s1210_state *st,
 	 * Software reset reinitializes the excitation frequency output.
 	 * It does not reset any of the configuration registers.
 	 */
-	return regmap_write(st->regmap, AD2S1210_REG_SOFT_RESET, 0);
+	ret = regmap_write(st->regmap, AD2S1210_REG_SOFT_RESET, 0);
+	if (ret < 0)
+		return ret;
+
+	/*
+	 * Soft reset always triggers some faults due the change in the output
+	 * signal so clear the faults too. We need to delay for some time
+	 * (what datasheet calls t[track]) to allow things to settle before
+	 * clearing the faults.
+	 */
+	msleep(track_time_ms[st->resolution] * 8192000 / st->clkin_hz);
+
+	/* Reading the fault register clears the faults. */
+	ret = regmap_read(st->regmap, AD2S1210_REG_FAULT, &ignored);
+	if (ret < 0)
+		return ret;
+
+	/* Have to toggle sample line to get fault output pins to reset. */
+	ad2s1210_toggle_sample_line(st);
+
+	return 0;
 }
 
 static void ad2s1210_push_events(struct iio_dev *indio_dev,
@@ -404,11 +445,10 @@ static int ad2s1210_single_conversion(struct iio_dev *indio_dev,
 	s64 timestamp;
 	int ret;
 
-	mutex_lock(&st->lock);
-	gpiod_set_value(st->sample_gpio, 1);
+	guard(mutex)(&st->lock);
+
+	ad2s1210_toggle_sample_line(st);
 	timestamp = iio_get_time_ns(indio_dev);
-	/* delay (6 * tck + 20) nano seconds */
-	udelay(1);
 
 	switch (chan->type) {
 	case IIO_ANGL:
@@ -418,14 +458,13 @@ static int ad2s1210_single_conversion(struct iio_dev *indio_dev,
 		ret = ad2s1210_set_mode(st, MOD_VEL);
 		break;
 	default:
-		ret = -EINVAL;
-		break;
+		return -EINVAL;
 	}
 	if (ret < 0)
-		goto error_ret;
+		return ret;
 	ret = spi_read(st->sdev, &st->sample, 3);
 	if (ret < 0)
-		goto error_ret;
+		return ret;
 
 	switch (chan->type) {
 	case IIO_ANGL:
@@ -437,17 +476,11 @@ static int ad2s1210_single_conversion(struct iio_dev *indio_dev,
 		ret = IIO_VAL_INT;
 		break;
 	default:
-		ret = -EINVAL;
-		break;
+		return -EINVAL;
 	}
 
 	ad2s1210_push_events(indio_dev, st->sample.fault, timestamp);
 
-error_ret:
-	gpiod_set_value(st->sample_gpio, 0);
-	/* delay (2 * tck + 20) nano seconds */
-	udelay(1);
-	mutex_unlock(&st->lock);
 	return ret;
 }
 
@@ -455,11 +488,9 @@ static int ad2s1210_get_hysteresis(struct ad2s1210_state *st, int *val)
 {
 	int ret;
 
-	mutex_lock(&st->lock);
+	guard(mutex)(&st->lock);
 	ret = regmap_test_bits(st->regmap, AD2S1210_REG_CONTROL,
 			       AD2S1210_ENABLE_HYSTERESIS);
-	mutex_unlock(&st->lock);
-
 	if (ret < 0)
 		return ret;
 
@@ -469,15 +500,10 @@ static int ad2s1210_get_hysteresis(struct ad2s1210_state *st, int *val)
 
 static int ad2s1210_set_hysteresis(struct ad2s1210_state *st, int val)
 {
-	int ret;
-
-	mutex_lock(&st->lock);
-	ret = regmap_update_bits(st->regmap, AD2S1210_REG_CONTROL,
-				 AD2S1210_ENABLE_HYSTERESIS,
-				 val ? AD2S1210_ENABLE_HYSTERESIS : 0);
-	mutex_unlock(&st->lock);
-
-	return ret;
+	guard(mutex)(&st->lock);
+	return regmap_update_bits(st->regmap, AD2S1210_REG_CONTROL,
+				  AD2S1210_ENABLE_HYSTERESIS,
+				  val ? AD2S1210_ENABLE_HYSTERESIS : 0);
 }
 
 static int ad2s1210_get_phase_lock_range(struct ad2s1210_state *st,
@@ -485,11 +511,9 @@ static int ad2s1210_get_phase_lock_range(struct ad2s1210_state *st,
 {
 	int ret;
 
-	mutex_lock(&st->lock);
+	guard(mutex)(&st->lock);
 	ret = regmap_test_bits(st->regmap, AD2S1210_REG_CONTROL,
 			       AD2S1210_PHASE_LOCK_RANGE_44);
-	mutex_unlock(&st->lock);
-
 	if (ret < 0)
 		return ret;
 
@@ -509,7 +533,7 @@ static int ad2s1210_get_phase_lock_range(struct ad2s1210_state *st,
 static int ad2s1210_set_phase_lock_range(struct ad2s1210_state *st,
 					 int val, int val2)
 {
-	int deg, ret;
+	int deg;
 
 	/* convert radians to degrees - only two allowable values */
 	if (val == PHASE_44_DEG_TO_RAD_INT && val2 == PHASE_44_DEG_TO_RAD_MICRO)
@@ -520,12 +544,10 @@ static int ad2s1210_set_phase_lock_range(struct ad2s1210_state *st,
 	else
 		return -EINVAL;
 
-	mutex_lock(&st->lock);
-	ret = regmap_update_bits(st->regmap, AD2S1210_REG_CONTROL,
-				 AD2S1210_PHASE_LOCK_RANGE_44,
-				 deg == 44 ? AD2S1210_PHASE_LOCK_RANGE_44 : 0);
-	mutex_unlock(&st->lock);
-	return ret;
+	guard(mutex)(&st->lock);
+	return regmap_update_bits(st->regmap, AD2S1210_REG_CONTROL,
+				  AD2S1210_PHASE_LOCK_RANGE_44,
+				  deg == 44 ? AD2S1210_PHASE_LOCK_RANGE_44 : 0);
 }
 
 /* map resolution to microradians/LSB for LOT registers */
@@ -542,10 +564,8 @@ static int ad2s1210_get_voltage_threshold(struct ad2s1210_state *st,
 	unsigned int reg_val;
 	int ret;
 
-	mutex_lock(&st->lock);
+	guard(mutex)(&st->lock);
 	ret = regmap_read(st->regmap, reg, &reg_val);
-	mutex_unlock(&st->lock);
-
 	if (ret < 0)
 		return ret;
 
@@ -557,15 +577,11 @@ static int ad2s1210_set_voltage_threshold(struct ad2s1210_state *st,
 					  unsigned int reg, int val)
 {
 	unsigned int reg_val;
-	int ret;
 
 	reg_val = val / THRESHOLD_MILLIVOLT_PER_LSB;
 
-	mutex_lock(&st->lock);
-	ret = regmap_write(st->regmap, reg, reg_val);
-	mutex_unlock(&st->lock);
-
-	return ret;
+	guard(mutex)(&st->lock);
+	return regmap_write(st->regmap, reg, reg_val);
 }
 
 static int ad2s1210_get_lot_high_threshold(struct ad2s1210_state *st,
@@ -574,10 +590,8 @@ static int ad2s1210_get_lot_high_threshold(struct ad2s1210_state *st,
 	unsigned int reg_val;
 	int ret;
 
-	mutex_lock(&st->lock);
+	guard(mutex)(&st->lock);
 	ret = regmap_read(st->regmap, AD2S1210_REG_LOT_HIGH_THRD, &reg_val);
-	mutex_unlock(&st->lock);
-
 	if (ret < 0)
 		return ret;
 
@@ -596,18 +610,18 @@ static int ad2s1210_set_lot_high_threshold(struct ad2s1210_state *st,
 	if (val != 0)
 		return -EINVAL;
 
-	mutex_lock(&st->lock);
+	guard(mutex)(&st->lock);
 	/*
 	 * We need to read both high and low registers first so we can preserve
 	 * the hysteresis.
 	 */
 	ret = regmap_read(st->regmap, AD2S1210_REG_LOT_HIGH_THRD, &high_reg_val);
 	if (ret < 0)
-		goto error_ret;
+		return ret;
 
 	ret = regmap_read(st->regmap, AD2S1210_REG_LOT_LOW_THRD, &low_reg_val);
 	if (ret < 0)
-		goto error_ret;
+		return ret;
 
 	hysteresis = high_reg_val - low_reg_val;
 	high_reg_val = val2 / ad2s1210_lot_threshold_urad_per_lsb[st->resolution];
@@ -615,14 +629,9 @@ static int ad2s1210_set_lot_high_threshold(struct ad2s1210_state *st,
 
 	ret = regmap_write(st->regmap, AD2S1210_REG_LOT_HIGH_THRD, high_reg_val);
 	if (ret < 0)
-		goto error_ret;
+		return ret;
 
-	ret = regmap_write(st->regmap, AD2S1210_REG_LOT_LOW_THRD, low_reg_val);
-
-error_ret:
-	mutex_unlock(&st->lock);
-
-	return ret;
+	return regmap_write(st->regmap, AD2S1210_REG_LOT_LOW_THRD, low_reg_val);
 }
 
 static int ad2s1210_get_lot_low_threshold(struct ad2s1210_state *st,
@@ -631,16 +640,13 @@ static int ad2s1210_get_lot_low_threshold(struct ad2s1210_state *st,
 	unsigned int high_reg_val, low_reg_val;
 	int ret;
 
-	mutex_lock(&st->lock);
+	guard(mutex)(&st->lock);
+
 	ret = regmap_read(st->regmap, AD2S1210_REG_LOT_HIGH_THRD, &high_reg_val);
 	if (ret < 0)
-		goto error_ret;
+		return ret;
 
 	ret = regmap_read(st->regmap, AD2S1210_REG_LOT_LOW_THRD, &low_reg_val);
-
-error_ret:
-	mutex_unlock(&st->lock);
-
 	if (ret < 0)
 		return ret;
 
@@ -663,18 +669,14 @@ static int ad2s1210_set_lot_low_threshold(struct ad2s1210_state *st,
 
 	hysteresis = val2 / ad2s1210_lot_threshold_urad_per_lsb[st->resolution];
 
-	mutex_lock(&st->lock);
+	guard(mutex)(&st->lock);
+
 	ret = regmap_read(st->regmap, AD2S1210_REG_LOT_HIGH_THRD, &reg_val);
 	if (ret < 0)
-		goto error_ret;
+		return ret;
 
-	ret = regmap_write(st->regmap, AD2S1210_REG_LOT_LOW_THRD,
+	return regmap_write(st->regmap, AD2S1210_REG_LOT_LOW_THRD,
 			   reg_val - hysteresis);
-
-error_ret:
-	mutex_unlock(&st->lock);
-
-	return ret;
 }
 
 static int ad2s1210_get_excitation_frequency(struct ad2s1210_state *st, int *val)
@@ -682,31 +684,23 @@ static int ad2s1210_get_excitation_frequency(struct ad2s1210_state *st, int *val
 	unsigned int reg_val;
 	int ret;
 
-	mutex_lock(&st->lock);
+	guard(mutex)(&st->lock);
+
 	ret = regmap_read(st->regmap, AD2S1210_REG_EXCIT_FREQ, &reg_val);
 	if (ret < 0)
-		goto error_ret;
+		return ret;
 
 	*val = reg_val * st->clkin_hz / (1 << 15);
-	ret = IIO_VAL_INT;
-
-error_ret:
-	mutex_unlock(&st->lock);
-	return ret;
+	return IIO_VAL_INT;
 }
 
 static int ad2s1210_set_excitation_frequency(struct ad2s1210_state *st, int val)
 {
-	int ret;
-
 	if (val < AD2S1210_MIN_EXCIT || val > AD2S1210_MAX_EXCIT)
 		return -EINVAL;
 
-	mutex_lock(&st->lock);
-	ret = ad2s1210_reinit_excitation_frequency(st, val);
-	mutex_unlock(&st->lock);
-
-	return ret;
+	guard(mutex)(&st->lock);
+	return ad2s1210_reinit_excitation_frequency(st, val);
 }
 
 static const int ad2s1210_velocity_scale[] = {
@@ -982,10 +976,8 @@ static ssize_t event_attr_voltage_reg_show(struct device *dev,
 	unsigned int value;
 	int ret;
 
-	mutex_lock(&st->lock);
+	guard(mutex)(&st->lock);
 	ret = regmap_read(st->regmap, iattr->address, &value);
-	mutex_unlock(&st->lock);
-
 	if (ret < 0)
 		return ret;
 
@@ -1005,11 +997,9 @@ static ssize_t event_attr_voltage_reg_store(struct device *dev,
 	if (ret)
 		return -EINVAL;
 
-	mutex_lock(&st->lock);
+	guard(mutex)(&st->lock);
 	ret = regmap_write(st->regmap, iattr->address,
 			   data / THRESHOLD_MILLIVOLT_PER_LSB);
-	mutex_unlock(&st->lock);
-
 	if (ret < 0)
 		return ret;
 
@@ -1083,7 +1073,7 @@ static int ad2s1210_initial(struct ad2s1210_state *st)
 	unsigned int data;
 	int ret;
 
-	mutex_lock(&st->lock);
+	guard(mutex)(&st->lock);
 
 	/* Use default config register value plus resolution from devicetree. */
 	data = FIELD_PREP(AD2S1210_PHASE_LOCK_RANGE_44, 1);
@@ -1093,13 +1083,9 @@ static int ad2s1210_initial(struct ad2s1210_state *st)
 
 	ret = regmap_write(st->regmap, AD2S1210_REG_CONTROL, data);
 	if (ret < 0)
-		goto error_ret;
+		return ret;
 
-	ret = ad2s1210_reinit_excitation_frequency(st, AD2S1210_DEF_EXCIT);
-
-error_ret:
-	mutex_unlock(&st->lock);
-	return ret;
+	return ad2s1210_reinit_excitation_frequency(st, AD2S1210_DEF_EXCIT);
 }
 
 static int ad2s1210_read_label(struct iio_dev *indio_dev,
@@ -1243,18 +1229,13 @@ static int ad2s1210_debugfs_reg_access(struct iio_dev *indio_dev,
 				       unsigned int *readval)
 {
 	struct ad2s1210_state *st = iio_priv(indio_dev);
-	int ret;
 
-	mutex_lock(&st->lock);
+	guard(mutex)(&st->lock);
 
 	if (readval)
-		ret = regmap_read(st->regmap, reg, readval);
-	else
-		ret = regmap_write(st->regmap, reg, writeval);
+		return regmap_read(st->regmap, reg, readval);
 
-	mutex_unlock(&st->lock);
-
-	return ret;
+	return regmap_write(st->regmap, reg, writeval);
 }
 
 static irqreturn_t ad2s1210_trigger_handler(int irq, void *p)
@@ -1265,10 +1246,10 @@ static irqreturn_t ad2s1210_trigger_handler(int irq, void *p)
 	size_t chan = 0;
 	int ret;
 
-	mutex_lock(&st->lock);
+	guard(mutex)(&st->lock);
 
 	memset(&st->scan, 0, sizeof(st->scan));
-	gpiod_set_value(st->sample_gpio, 1);
+	ad2s1210_toggle_sample_line(st);
 
 	if (test_bit(0, indio_dev->active_scan_mask)) {
 		ret = ad2s1210_set_mode(st, MOD_POS);
@@ -1298,8 +1279,6 @@ static irqreturn_t ad2s1210_trigger_handler(int irq, void *p)
 	iio_push_to_buffers_with_timestamp(indio_dev, &st->scan, pf->timestamp);
 
 error_ret:
-	gpiod_set_value(st->sample_gpio, 0);
-	mutex_unlock(&st->lock);
 	iio_trigger_notify_done(indio_dev->trig);
 
 	return IRQ_HANDLED;
@@ -1527,8 +1506,8 @@ MODULE_DEVICE_TABLE(spi, ad2s1210_id);
 
 static struct spi_driver ad2s1210_driver = {
 	.driver = {
-		.name = DRV_NAME,
-		.of_match_table = of_match_ptr(ad2s1210_of_match),
+		.name = "ad2s1210",
+		.of_match_table = ad2s1210_of_match,
 	},
 	.probe = ad2s1210_probe,
 	.id_table = ad2s1210_id,

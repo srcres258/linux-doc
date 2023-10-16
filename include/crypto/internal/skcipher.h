@@ -148,22 +148,16 @@ static inline void crypto_drop_lskcipher(struct crypto_lskcipher_spawn *spawn)
 	crypto_drop_spawn(&spawn->base);
 }
 
-static inline struct skcipher_alg *crypto_skcipher_spawn_alg(
-	struct crypto_skcipher_spawn *spawn)
-{
-	return container_of(spawn->base.alg, struct skcipher_alg, base);
-}
-
 static inline struct lskcipher_alg *crypto_lskcipher_spawn_alg(
 	struct crypto_lskcipher_spawn *spawn)
 {
 	return container_of(spawn->base.alg, struct lskcipher_alg, co.base);
 }
 
-static inline struct skcipher_alg *crypto_spawn_skcipher_alg(
+static inline struct skcipher_alg_common *crypto_spawn_skcipher_alg_common(
 	struct crypto_skcipher_spawn *spawn)
 {
-	return crypto_skcipher_spawn_alg(spawn);
+	return container_of(spawn->base.alg, struct skcipher_alg_common, base);
 }
 
 static inline struct lskcipher_alg *crypto_spawn_lskcipher_alg(
@@ -261,36 +255,6 @@ static inline void *skcipher_request_ctx_dma(struct skcipher_request *req)
 static inline u32 skcipher_request_flags(struct skcipher_request *req)
 {
 	return req->base.flags;
-}
-
-static inline unsigned int crypto_skcipher_alg_min_keysize(
-	struct skcipher_alg *alg)
-{
-	return alg->min_keysize;
-}
-
-static inline unsigned int crypto_skcipher_alg_max_keysize(
-	struct skcipher_alg *alg)
-{
-	return alg->max_keysize;
-}
-
-static inline unsigned int crypto_skcipher_alg_walksize(
-	struct skcipher_alg *alg)
-{
-	return alg->walksize;
-}
-
-static inline unsigned int crypto_lskcipher_alg_min_keysize(
-	struct lskcipher_alg *alg)
-{
-	return alg->co.min_keysize;
-}
-
-static inline unsigned int crypto_lskcipher_alg_max_keysize(
-	struct lskcipher_alg *alg)
-{
-	return alg->co.max_keysize;
 }
 
 /* Helpers for simple block cipher modes of operation */

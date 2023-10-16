@@ -772,7 +772,7 @@ void amd_uncore_l3_ctx_scan(struct amd_uncore *uncore, unsigned int cpu)
 	info.split.aux_data = 0;
 	info.split.num_pmcs = NUM_COUNTERS_L2;
 	info.split.gid = 0;
-	info.split.cid = get_llc_id(cpu);
+	info.split.cid = per_cpu_llc_id(cpu);
 
 	if (boot_cpu_data.x86 >= 0x17)
 		info.split.num_pmcs = NUM_COUNTERS_L3;
@@ -1009,7 +1009,8 @@ static struct amd_uncore uncores[UNCORE_TYPE_MAX] = {
 static int __init amd_uncore_init(void)
 {
 	struct amd_uncore *uncore;
-	int ret, i;
+	int ret = -ENODEV;
+	int i;
 
 	if (boot_cpu_data.x86_vendor != X86_VENDOR_AMD &&
 	    boot_cpu_data.x86_vendor != X86_VENDOR_HYGON)

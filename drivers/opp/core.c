@@ -1076,32 +1076,28 @@ static int _opp_set_required_opps_genpd(struct device *dev,
 {
 	struct device **genpd_virt_devs =
 		opp_table->genpd_virt_devs ? opp_table->genpd_virt_devs : &dev;
-	int i, ret = 0;
-
-	/*
-	 * Acquire genpd_virt_dev_lock to make sure we don't use a genpd_dev
-	 * after it is freed from another thread.
-	 */
-	mutex_lock(&opp_table->genpd_virt_dev_lock);
+	int index, target, delta, ret;
 
 	/* Scaling up? Set required OPPs in normal order, else reverse */
 	if (!scaling_down) {
-		for (i = 0; i < opp_table->required_opp_count; i++) {
-			ret = _set_performance_state(dev, genpd_virt_devs[i], opp, i);
-			if (ret)
-				break;
-		}
+		index = 0;
+		target = opp_table->required_opp_count;
+		delta = 1;
 	} else {
-		for (i = opp_table->required_opp_count - 1; i >= 0; i--) {
-			ret = _set_performance_state(dev, genpd_virt_devs[i], opp, i);
-			if (ret)
-				break;
-		}
+		index = opp_table->required_opp_count - 1;
+		target = -1;
+		delta = -1;
 	}
 
-	mutex_unlock(&opp_table->genpd_virt_dev_lock);
+	while (index != target) {
+		ret = _set_performance_state(dev, genpd_virt_devs[index], opp, index);
+		if (ret)
+			break;
 
-	return ret;
+		index += delta;
+	}
+
+	return 0;
 }
 
 /* This is only called for PM domain for now */
@@ -1470,7 +1466,6 @@ static struct opp_table *_allocate_opp_table(struct device *dev, int index)
 		return ERR_PTR(-ENOMEM);
 
 	mutex_init(&opp_table->lock);
-	mutex_init(&opp_table->genpd_virt_dev_lock);
 	INIT_LIST_HEAD(&opp_table->dev_list);
 	INIT_LIST_HEAD(&opp_table->lazy);
 
@@ -1506,7 +1501,6 @@ static struct opp_table *_allocate_opp_table(struct device *dev, int index)
 remove_opp_dev:
 	_of_clear_opp_table(opp_table);
 	_remove_opp_dev(opp_dev, opp_table);
-	mutex_destroy(&opp_table->genpd_virt_dev_lock);
 	mutex_destroy(&opp_table->lock);
 err:
 	kfree(opp_table);
@@ -1674,7 +1668,6 @@ static void _opp_table_kref_release(struct kref *kref)
 	list_for_each_entry_safe(opp_dev, temp, &opp_table->dev_list, node)
 		_remove_opp_dev(opp_dev, opp_table);
 
-	mutex_destroy(&opp_table->genpd_virt_dev_lock);
 	mutex_destroy(&opp_table->lock);
 	kfree(opp_table);
 }
@@ -2391,7 +2384,7 @@ static void _opp_put_config_regulators_helper(struct opp_table *opp_table)
 		opp_table->config_regulators = NULL;
 }
 
-static void _detach_genpd(struct opp_table *opp_table)
+static void _opp_detach_genpd(struct opp_table *opp_table)
 {
 	int index;
 
@@ -2437,21 +2430,11 @@ static int _opp_attach_genpd(struct opp_table *opp_table, struct device *dev,
 	if (opp_table->genpd_virt_devs)
 		return 0;
 
-	/*
-	 * If the genpd's OPP table isn't already initialized, parsing of the
-	 * required-opps fail for dev. We should retry this after genpd's OPP
-	 * table is added.
-	 */
-	if (!opp_table->required_opp_count)
-		return -EPROBE_DEFER;
-
-	mutex_lock(&opp_table->genpd_virt_dev_lock);
-
 	opp_table->genpd_virt_devs = kcalloc(opp_table->required_opp_count,
 					     sizeof(*opp_table->genpd_virt_devs),
 					     GFP_KERNEL);
 	if (!opp_table->genpd_virt_devs)
-		goto unlock;
+		return -ENOMEM;
 
 	while (*name) {
 		if (index >= opp_table->required_opp_count) {
@@ -2474,27 +2457,13 @@ static int _opp_attach_genpd(struct opp_table *opp_table, struct device *dev,
 
 	if (virt_devs)
 		*virt_devs = opp_table->genpd_virt_devs;
-	mutex_unlock(&opp_table->genpd_virt_dev_lock);
 
 	return 0;
 
 err:
-	_detach_genpd(opp_table);
-unlock:
-	mutex_unlock(&opp_table->genpd_virt_dev_lock);
+	_opp_detach_genpd(opp_table);
 	return ret;
 
-}
-
-static void _opp_detach_genpd(struct opp_table *opp_table)
-{
-	/*
-	 * Acquire genpd_virt_dev_lock to make sure virt_dev isn't getting
-	 * used in parallel.
-	 */
-	mutex_lock(&opp_table->genpd_virt_dev_lock);
-	_detach_genpd(opp_table);
-	mutex_unlock(&opp_table->genpd_virt_dev_lock);
 }
 
 static void _opp_clear_config(struct opp_config_data *data)

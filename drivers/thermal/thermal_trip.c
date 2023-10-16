@@ -13,10 +13,11 @@ int for_each_thermal_trip(struct thermal_zone_device *tz,
 			  int (*cb)(struct thermal_trip *, void *),
 			  void *data)
 {
-	int i, ret;
+	struct thermal_trip *trip;
+	int ret;
 
-	for (i = 0; i < tz->num_trips; i++) {
-		ret = cb(&tz->trips[i], data);
+	for_each_trip(tz, trip) {
+		ret = cb(trip, data);
 		if (ret)
 			return ret;
 	}
@@ -173,12 +174,9 @@ int thermal_zone_set_trip(struct thermal_zone_device *tz, int trip_id,
 int thermal_zone_trip_id(struct thermal_zone_device *tz,
 			 const struct thermal_trip *trip)
 {
-	int i;
-
-	for (i = 0; i < tz->num_trips; i++) {
-		if (&tz->trips[i] == trip)
-			return i;
-	}
-
-	return -ENODATA;
+	/*
+	 * Assume the trip to be located within the bounds of the thermal
+	 * zone's trips[] table.
+	 */
+	return trip - tz->trips;
 }

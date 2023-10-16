@@ -1842,17 +1842,21 @@ static noinline void __init check_forking(struct maple_tree *mt)
 	void *val;
 	MA_STATE(mas, mt, 0, 0);
 	MA_STATE(newmas, mt, 0, 0);
+	struct rw_semaphore newmt_lock;
+
+	init_rwsem(&newmt_lock);
 
 	for (i = 0; i <= nr_entries; i++)
 		mtree_store_range(mt, i*10, i*10 + 5,
 				  xa_mk_value(i), GFP_KERNEL);
 
 	mt_set_non_kernel(99999);
-	mt_init_flags(&newmt, MT_FLAGS_ALLOC_RANGE);
+	mt_init_flags(&newmt, MT_FLAGS_ALLOC_RANGE | MT_FLAGS_LOCK_EXTERN);
+	mt_set_external_lock(&newmt, &newmt_lock);
 	newmas.tree = &newmt;
 	mas_reset(&newmas);
 	mas_reset(&mas);
-	mas_lock(&newmas);
+	down_write(&newmt_lock);
 	mas.index = 0;
 	mas.last = 0;
 	if (mas_expected_entries(&newmas, nr_entries)) {
@@ -1867,10 +1871,10 @@ static noinline void __init check_forking(struct maple_tree *mt)
 	}
 	rcu_read_unlock();
 	mas_destroy(&newmas);
-	mas_unlock(&newmas);
 	mt_validate(&newmt);
 	mt_set_non_kernel(0);
-	mtree_destroy(&newmt);
+	__mt_destroy(&newmt);
+	up_write(&newmt_lock);
 }
 
 static noinline void __init check_iteration(struct maple_tree *mt)
@@ -1981,6 +1985,10 @@ static noinline void __init bench_forking(struct maple_tree *mt)
 	void *val;
 	MA_STATE(mas, mt, 0, 0);
 	MA_STATE(newmas, mt, 0, 0);
+	struct rw_semaphore newmt_lock;
+
+	init_rwsem(&newmt_lock);
+	mt_set_external_lock(&newmt, &newmt_lock);
 
 	for (i = 0; i <= nr_entries; i++)
 		mtree_store_range(mt, i*10, i*10 + 5,
@@ -1995,7 +2003,7 @@ static noinline void __init bench_forking(struct maple_tree *mt)
 		mas.index = 0;
 		mas.last = 0;
 		rcu_read_lock();
-		mas_lock(&newmas);
+		down_write(&newmt_lock);
 		if (mas_expected_entries(&newmas, nr_entries)) {
 			printk("OOM!");
 			BUG_ON(1);
@@ -2006,11 +2014,11 @@ static noinline void __init bench_forking(struct maple_tree *mt)
 			mas_store(&newmas, val);
 		}
 		mas_destroy(&newmas);
-		mas_unlock(&newmas);
 		rcu_read_unlock();
 		mt_validate(&newmt);
 		mt_set_non_kernel(0);
-		mtree_destroy(&newmt);
+		__mt_destroy(&newmt);
+		up_write(&newmt_lock);
 	}
 }
 #endif
