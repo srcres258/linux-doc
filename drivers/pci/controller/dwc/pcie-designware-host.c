@@ -502,6 +502,9 @@ int dw_pcie_host_init(struct dw_pcie_rp *pp)
 	if (ret)
 		goto err_stop_link;
 
+	if (pp->ops->host_post_init)
+		pp->ops->host_post_init(pp);
+
 	return 0;
 
 err_stop_link:
@@ -736,6 +739,15 @@ int dw_pcie_setup_rc(struct dw_pcie_rp *pp)
 	struct dw_pcie *pci = to_dw_pcie_from_pp(pp);
 	u32 val, ctrl, num_ctrls;
 	int ret;
+
+	/*
+	 * According to the section 3.5.7.2 "RC Mode" in DWC PCIe Dual Mode
+	 * Rev.5.20a and the section 3.5.6.1 "RC Mode" in DWC PCIe RC Rev.5.20a,
+	 * we should disable two BARs to avoid unnecessary memory assignment
+	 * during device enumeration.
+	 */
+	dw_pcie_writel_dbi2(pci, PCI_BASE_ADDRESS_0, 0x0);
+	dw_pcie_writel_dbi2(pci, PCI_BASE_ADDRESS_1, 0x0);
 
 	/*
 	 * Enable DBI read-only registers for writing/updating configuration.
