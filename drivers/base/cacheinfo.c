@@ -898,38 +898,45 @@ err:
 	return rc;
 }
 
-static void update_data_cache_size_cpu(unsigned int cpu)
+/*
+ * Calculate the size of the per-CPU data cache slice.  This can be
+ * used to estimate the size of the data cache slice that can be used
+ * by one CPU under ideal circumstances.  UNIFIED caches are counted
+ * in addition to DATA caches.  So, please consider code cache usage
+ * when use the result.
+ *
+ * Because the cache inclusive/non-inclusive information isn't
+ * available, we just use the size of the per-CPU slice of LLC to make
+ * the result more predictable across architectures.
+ */
+static void update_per_cpu_data_slice_size_cpu(unsigned int cpu)
 {
 	struct cpu_cacheinfo *ci;
-	struct cacheinfo *leaf;
-	unsigned int i, nr_shared;
-	unsigned int size_data = 0;
+	struct cacheinfo *llc;
+	unsigned int nr_shared;
 
-	if (!per_cpu_cacheinfo(cpu))
+	if (!last_level_cache_is_valid(cpu))
 		return;
 
 	ci = ci_cacheinfo(cpu);
-	for (i = 0; i < cache_leaves(cpu); i++) {
-		leaf = per_cpu_cacheinfo_idx(cpu, i);
-		if (leaf->type != CACHE_TYPE_DATA &&
-		    leaf->type != CACHE_TYPE_UNIFIED)
-			continue;
-		nr_shared = cpumask_weight(&leaf->shared_cpu_map);
-		if (!nr_shared)
-			continue;
-		size_data += leaf->size / nr_shared;
-	}
-	ci->size_data = size_data;
+	llc = per_cpu_cacheinfo_idx(cpu, cache_leaves(cpu) - 1);
+
+	if (llc->type != CACHE_TYPE_DATA && llc->type != CACHE_TYPE_UNIFIED)
+		return;
+
+	nr_shared = cpumask_weight(&llc->shared_cpu_map);
+	if (nr_shared)
+		ci->per_cpu_data_slice_size = llc->size / nr_shared;
 }
 
-static void update_data_cache_size(bool cpu_online, unsigned int cpu)
+static void update_per_cpu_data_slice_size(bool cpu_online, unsigned int cpu)
 {
 	unsigned int icpu;
 
 	for_each_online_cpu(icpu) {
 		if (!cpu_online && icpu == cpu)
 			continue;
-		update_data_cache_size_cpu(icpu);
+		update_per_cpu_data_slice_size_cpu(icpu);
 	}
 }
 
@@ -942,7 +949,7 @@ static int cacheinfo_cpu_online(unsigned int cpu)
 	rc = cache_add_dev(cpu);
 	if (rc)
 		goto err;
-	update_data_cache_size(true, cpu);
+	update_per_cpu_data_slice_size(true, cpu);
 	setup_pcp_cacheinfo();
 	return 0;
 err:
@@ -956,7 +963,7 @@ static int cacheinfo_cpu_pre_down(unsigned int cpu)
 		cpu_cache_sysfs_exit(cpu);
 
 	free_cache_attributes(cpu);
-	update_data_cache_size(false, cpu);
+	update_per_cpu_data_slice_size(false, cpu);
 	setup_pcp_cacheinfo();
 	return 0;
 }

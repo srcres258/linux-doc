@@ -43,6 +43,7 @@
 #include "smu_v13_0_5_ppt.h"
 #include "smu_v13_0_6_ppt.h"
 #include "smu_v13_0_7_ppt.h"
+#include "smu_v14_0_0_ppt.h"
 #include "amd_pcie.h"
 
 /*
@@ -278,6 +279,49 @@ static int smu_dpm_set_jpeg_enable(struct smu_context *smu,
 	return ret;
 }
 
+static int smu_dpm_set_vpe_enable(struct smu_context *smu,
+				   bool enable)
+{
+	struct smu_power_context *smu_power = &smu->smu_power;
+	struct smu_power_gate *power_gate = &smu_power->power_gate;
+	int ret = 0;
+
+	if (!smu->ppt_funcs->dpm_set_vpe_enable)
+		return 0;
+
+	if (atomic_read(&power_gate->vpe_gated) ^ enable)
+		return 0;
+
+	ret = smu->ppt_funcs->dpm_set_vpe_enable(smu, enable);
+	if (!ret)
+		atomic_set(&power_gate->vpe_gated, !enable);
+
+	return ret;
+}
+
+static int smu_dpm_set_umsch_mm_enable(struct smu_context *smu,
+				   bool enable)
+{
+	struct smu_power_context *smu_power = &smu->smu_power;
+	struct smu_power_gate *power_gate = &smu_power->power_gate;
+	int ret = 0;
+
+	if (!smu->adev->enable_umsch_mm)
+		return 0;
+
+	if (!smu->ppt_funcs->dpm_set_umsch_mm_enable)
+		return 0;
+
+	if (atomic_read(&power_gate->umsch_mm_gated) ^ enable)
+		return 0;
+
+	ret = smu->ppt_funcs->dpm_set_umsch_mm_enable(smu, enable);
+	if (!ret)
+		atomic_set(&power_gate->umsch_mm_gated, !enable);
+
+	return ret;
+}
+
 /**
  * smu_dpm_set_power_gate - power gate/ungate the specific IP block
  *
@@ -334,6 +378,12 @@ static int smu_dpm_set_power_gate(void *handle,
 		ret = smu_dpm_set_jpeg_enable(smu, !gate);
 		if (ret)
 			dev_err(smu->adev->dev, "Failed to power %s JPEG!\n",
+				gate ? "gate" : "ungate");
+		break;
+	case AMD_IP_BLOCK_TYPE_VPE:
+		ret = smu_dpm_set_vpe_enable(smu, !gate);
+		if (ret)
+			dev_err(smu->adev->dev, "Failed to power %s VPE!\n",
 				gate ? "gate" : "ungate");
 		break;
 	default:
@@ -659,6 +709,9 @@ static int smu_set_funcs(struct amdgpu_device *adev)
 		break;
 	case IP_VERSION(13, 0, 7):
 		smu_v13_0_7_set_ppt_funcs(smu);
+		break;
+	case IP_VERSION(14, 0, 0):
+		smu_v14_0_0_set_ppt_funcs(smu);
 		break;
 	default:
 		return -EINVAL;
@@ -1165,6 +1218,8 @@ static int smu_sw_init(void *handle)
 
 	atomic_set(&smu->smu_power.power_gate.vcn_gated, 1);
 	atomic_set(&smu->smu_power.power_gate.jpeg_gated, 1);
+	atomic_set(&smu->smu_power.power_gate.vpe_gated, 1);
+	atomic_set(&smu->smu_power.power_gate.umsch_mm_gated, 1);
 
 	smu->workload_mask = 1 << smu->workload_prority[PP_SMC_POWER_PROFILE_BOOTUP_DEFAULT];
 	smu->workload_prority[PP_SMC_POWER_PROFILE_BOOTUP_DEFAULT] = 0;
@@ -1517,6 +1572,8 @@ static int smu_hw_init(void *handle)
 			return ret;
 		smu_dpm_set_vcn_enable(smu, true);
 		smu_dpm_set_jpeg_enable(smu, true);
+		smu_dpm_set_vpe_enable(smu, true);
+		smu_dpm_set_umsch_mm_enable(smu, true);
 		smu_set_gfx_cgpg(smu, true);
 	}
 
@@ -1693,6 +1750,8 @@ static int smu_hw_fini(void *handle)
 
 	smu_dpm_set_vcn_enable(smu, false);
 	smu_dpm_set_jpeg_enable(smu, false);
+	smu_dpm_set_vpe_enable(smu, false);
+	smu_dpm_set_umsch_mm_enable(smu, false);
 
 	adev->vcn.cur_state = AMD_PG_STATE_GATE;
 	adev->jpeg.cur_state = AMD_PG_STATE_GATE;
@@ -2259,6 +2318,14 @@ const struct amdgpu_ip_block_version smu_v12_0_ip_block = {
 const struct amdgpu_ip_block_version smu_v13_0_ip_block = {
 	.type = AMD_IP_BLOCK_TYPE_SMC,
 	.major = 13,
+	.minor = 0,
+	.rev = 0,
+	.funcs = &smu_ip_funcs,
+};
+
+const struct amdgpu_ip_block_version smu_v14_0_ip_block = {
+	.type = AMD_IP_BLOCK_TYPE_SMC,
+	.major = 14,
 	.minor = 0,
 	.rev = 0,
 	.funcs = &smu_ip_funcs,

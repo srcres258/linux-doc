@@ -35,10 +35,12 @@
 #include "grph_object_ctrl_defs.h"
 #include <inc/hw/opp.h>
 
-#include "inc/hw_sequencer.h"
+#include "hwss/hw_sequencer.h"
 #include "inc/compressor.h"
 #include "inc/hw/dmcu.h"
 #include "dml/display_mode_lib.h"
+
+#include "dml2/dml2_wrapper.h"
 
 struct abm_save_restore;
 
@@ -47,7 +49,7 @@ struct aux_payload;
 struct set_config_cmd_payload;
 struct dmub_notification;
 
-#define DC_VER "3.2.254"
+#define DC_VER "3.2.255"
 
 #define MAX_SURFACES 3
 #define MAX_PLANES 6
@@ -830,6 +832,7 @@ struct dc_debug_options {
 	bool disable_hubp_power_gate;
 	bool disable_dsc_power_gate;
 	bool disable_optc_power_gate;
+	bool disable_hpo_power_gate;
 	int dsc_min_slice_height_override;
 	int dsc_bpp_increment_div;
 	bool disable_pplib_wm_range;
@@ -942,6 +945,7 @@ struct dc_debug_options {
 	bool dml_disallow_alternate_prefetch_modes;
 	bool use_legacy_soc_bb_mechanism;
 	bool exit_idle_opt_for_cursor_updates;
+	bool using_dml2;
 	bool enable_single_display_2to1_odm_policy;
 	bool enable_double_buffered_dsc_pg_support;
 	bool enable_dp_dig_pixel_rate_div_policy;
@@ -1049,6 +1053,8 @@ struct dc {
 			struct _vcs_dpi_voltage_scaling_st clock_limits[DC__VOLTAGE_STATES];
 		} update_bw_bounding_box;
 	} scratch;
+
+	struct dml2_configuration_options dml2_options;
 };
 
 enum frame_buffer_mode {
@@ -2288,7 +2294,7 @@ void dc_notify_vsync_int_state(struct dc *dc, struct dc_stream_state *stream, bo
 
 /* Power Interfaces */
 
-bool dc_set_power_state(
+void dc_set_power_state(
 		struct dc *dc,
 		enum dc_acpi_cm_power_state power_state);
 void dc_resume(struct dc *dc);
@@ -2311,7 +2317,6 @@ bool dc_is_plane_eligible_for_idle_optimizations(struct dc *dc, struct dc_plane_
 				struct dc_cursor_attributes *cursor_attr);
 
 void dc_allow_idle_optimizations(struct dc *dc, bool allow);
-bool dc_is_idle_power_optimized(struct dc *dc);
 
 /* set min and max memory clock to lowest and highest DPM level, respectively */
 void dc_unlock_memory_clock_frequency(struct dc *dc);

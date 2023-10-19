@@ -431,6 +431,10 @@ static int jpeg_v4_0_start_sriov(struct amdgpu_device *adev)
 	end.cmd_header.command_type =
 		MMSCH_COMMAND__END;
 
+	size = sizeof(struct mmsch_v4_0_init_header);
+	table_loc = (uint32_t *)table->cpu_addr;
+	memcpy(&header, (void *)table_loc, size);
+
 	header.version = MMSCH_VERSION;
 	header.total_size = RREG32_SOC15(VCN, 0, regMMSCH_VF_CTX_SIZE);
 
@@ -518,8 +522,11 @@ static int jpeg_v4_0_start_sriov(struct amdgpu_device *adev)
 			return -EBUSY;
 		}
 	}
-	if (resp != expected && resp != MMSCH_VF_MAILBOX_RESP__INCOMPLETE && init_status != MMSCH_VF_ENGINE_STATUS__PASS)
+	if (resp != expected && resp != MMSCH_VF_MAILBOX_RESP__INCOMPLETE
+			&& init_status != MMSCH_VF_ENGINE_STATUS__PASS) {
 		DRM_ERROR("MMSCH init status is incorrect! readback=0x%08x, header init status for jpeg: %x\n", resp, init_status);
+		return -EINVAL;
+	}
 
 	return 0;
 

@@ -2196,20 +2196,19 @@ static int rmqueue_bulk(struct zone *zone, unsigned int order,
  */
 int decay_pcp_high(struct zone *zone, struct per_cpu_pages *pcp)
 {
-	int high_min, decrease, to_drain, batch;
+	int high_min, to_drain, batch;
 	int todo = 0;
 
 	high_min = READ_ONCE(pcp->high_min);
 	batch = READ_ONCE(pcp->batch);
 	/*
-	 * Decrease pcp->high periodically to free idle PCP pages counted
-	 * via pcp->count_min.  And, avoid to free too many pages to
+	 * Decrease pcp->high periodically to try to free possible
+	 * idle PCP pages.  And, avoid to free too many pages to
 	 * control latency.  This caps pcp->high decrement too.
 	 */
 	if (pcp->high > high_min) {
-		decrease = min(pcp->count_min, pcp->high / 5);
-		pcp->high = max3(pcp->count - (batch << PCP_BATCH_SCALE_MAX),
-				 pcp->high - decrease, high_min);
+		pcp->high = max3(pcp->count - (batch << CONFIG_PCP_BATCH_SCALE_MAX),
+				 pcp->high - (pcp->high >> 3), high_min);
 		if (pcp->high > high_min)
 			todo++;
 	}
@@ -2221,8 +2220,6 @@ int decay_pcp_high(struct zone *zone, struct per_cpu_pages *pcp)
 		spin_unlock(&pcp->lock);
 		todo++;
 	}
-
-	pcp->count_min = pcp->count;
 
 	return todo;
 }
@@ -2394,7 +2391,7 @@ static int nr_pcp_free(struct per_cpu_pages *pcp, int batch, int high, bool free
 
 	/* Free as much as possible if batch freeing high-order pages. */
 	if (unlikely(free_high))
-		return min(pcp->count, batch << PCP_BATCH_SCALE_MAX);
+		return min(pcp->count, batch << CONFIG_PCP_BATCH_SCALE_MAX);
 
 	/* Check for PCP disabled or boot pageset */
 	if (unlikely(high < batch))
@@ -2426,7 +2423,8 @@ static int nr_pcp_high(struct per_cpu_pages *pcp, struct zone *zone,
 		return 0;
 
 	if (unlikely(free_high)) {
-		pcp->high = max(high - (batch << PCP_BATCH_SCALE_MAX), high_min);
+		pcp->high = max(high - (batch << CONFIG_PCP_BATCH_SCALE_MAX),
+				high_min);
 		return 0;
 	}
 
@@ -2435,7 +2433,9 @@ static int nr_pcp_high(struct per_cpu_pages *pcp, struct zone *zone,
 	 * stored on pcp lists
 	 */
 	if (test_bit(ZONE_RECLAIM_ACTIVE, &zone->flags)) {
-		pcp->high = max(high - pcp->free_count, high_min);
+		int free_count = max_t(int, pcp->free_count, batch);
+
+		pcp->high = max(high - free_count, high_min);
 		return min(batch << 2, pcp->high);
 	}
 
@@ -2443,7 +2443,9 @@ static int nr_pcp_high(struct per_cpu_pages *pcp, struct zone *zone,
 		return high;
 
 	if (test_bit(ZONE_BELOW_HIGH, &zone->flags)) {
-		pcp->high = max(high - pcp->free_count, high_min);
+		int free_count = max_t(int, pcp->free_count, batch);
+
+		pcp->high = max(high - free_count, high_min);
 		high = max(pcp->count, high_min);
 	} else if (pcp->count >= high) {
 		int need_high = pcp->free_count + batch;
@@ -2491,7 +2493,7 @@ static void free_unref_page_commit(struct zone *zone, struct per_cpu_pages *pcp,
 	} else if (pcp->flags & PCPF_PREV_FREE_HIGH_ORDER) {
 		pcp->flags &= ~PCPF_PREV_FREE_HIGH_ORDER;
 	}
-	if (pcp->free_count < (batch << PCP_BATCH_SCALE_MAX))
+	if (pcp->free_count < (batch << CONFIG_PCP_BATCH_SCALE_MAX))
 		pcp->free_count += (1 << order);
 	high = nr_pcp_high(pcp, zone, batch, free_high);
 	if (pcp->count >= high) {
@@ -2814,9 +2816,10 @@ static int nr_pcp_alloc(struct per_cpu_pages *pcp, struct zone *zone, int order)
 		max_nr_alloc = max(high - pcp->count - base_batch, base_batch);
 		/*
 		 * Double the number of pages allocated each time there is
-		 * subsequent refiling of order-0 pages without drain.
+		 * subsequent allocation of order-0 pages without any freeing.
 		 */
-		if (batch <= max_nr_alloc && pcp->alloc_factor < PCP_BATCH_SCALE_MAX)
+		if (batch <= max_nr_alloc &&
+		    pcp->alloc_factor < CONFIG_PCP_BATCH_SCALE_MAX)
 			pcp->alloc_factor++;
 		batch = min(batch, max_nr_alloc);
 	}
@@ -3270,14 +3273,25 @@ retry:
 			}
 		}
 
+		/*
+		 * Detect whether the number of free pages is below high
+		 * watermark.  If so, we will decrease pcp->high and free
+		 * PCP pages in free path to reduce the possibility of
+		 * premature page reclaiming.  Detection is done here to
+		 * avoid to do that in hotter free path.
+		 */
+		if (test_bit(ZONE_BELOW_HIGH, &zone->flags))
+			goto check_alloc_wmark;
+
 		mark = high_wmark_pages(zone);
 		if (zone_watermark_fast(zone, order, mark,
 					ac->highest_zoneidx, alloc_flags,
 					gfp_mask))
 			goto try_this_zone;
-		else if (!test_bit(ZONE_BELOW_HIGH, &zone->flags))
+		else
 			set_bit(ZONE_BELOW_HIGH, &zone->flags);
 
+check_alloc_wmark:
 		mark = wmark_pages(zone, alloc_flags & ALLOC_WMARK_MASK);
 		if (!zone_watermark_fast(zone, order, mark,
 				       ac->highest_zoneidx, alloc_flags,
@@ -5601,13 +5615,14 @@ static void zone_pcp_update_cacheinfo(struct zone *zone)
 		pcp = per_cpu_ptr(zone->per_cpu_pageset, cpu);
 		cci = get_cpu_cacheinfo(cpu);
 		/*
-		 * If per-CPU data cache is large enough, up to
-		 * "batch" high-order pages can be cached in PCP for
-		 * consecutive freeing.  This can reduce zone lock
-		 * contention without hurting cache-hot pages sharing.
+		 * If data cache slice of CPU is large enough, "pcp->batch"
+		 * pages can be preserved in PCP before draining PCP for
+		 * consecutive high-order pages freeing without allocation.
+		 * This can reduce zone lock contention without hurting
+		 * cache-hot pages sharing.
 		 */
 		spin_lock(&pcp->lock);
-		if ((cci->size_data >> PAGE_SHIFT) > 4 * pcp->batch)
+		if ((cci->per_cpu_data_slice_size >> PAGE_SHIFT) > 3 * pcp->batch)
 			pcp->flags |= PCPF_FREE_HIGH_BATCH;
 		else
 			pcp->flags &= ~PCPF_FREE_HIGH_BATCH;

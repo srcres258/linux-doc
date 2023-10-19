@@ -32,7 +32,6 @@
 #include <drm/drm_crtc.h>
 #include <drm/drm_plane.h>
 #include "link_service_types.h"
-#include <drm/drm_writeback.h>
 
 /*
  * This file contains the definition for amdgpu_display_manager
@@ -715,13 +714,6 @@ static inline void amdgpu_dm_set_mst_status(uint8_t *status,
 
 #define to_amdgpu_dm_connector(x) container_of(x, struct amdgpu_dm_connector, base)
 
-struct amdgpu_dm_wb_connector {
-	struct drm_writeback_connector base;
-	struct dc_link *link;
-};
-
-#define to_amdgpu_dm_wb_connector(x) container_of(x, struct amdgpu_dm_wb_connector, base)
-
 extern const struct amdgpu_ip_block_version dm_ip_block;
 
 struct dm_plane_state {
@@ -834,7 +826,7 @@ int amdgpu_dm_process_dmub_set_config_sync(struct dc_context *ctx, unsigned int 
 					struct set_config_cmd_payload *payload, enum set_config_status *operation_result);
 
 struct dc_stream_state *
-	create_validate_stream_for_sink(struct drm_connector *connector,
+	create_validate_stream_for_sink(struct amdgpu_dm_connector *aconnector,
 					const struct drm_display_mode *drm_mode,
 					const struct dm_connector_state *dm_state,
 					const struct dc_stream_state *old_stream);
@@ -842,7 +834,7 @@ struct dc_stream_state *
 int dm_atomic_get_state(struct drm_atomic_state *state,
 			struct dm_atomic_state **dm_state);
 
-struct drm_connector *
+struct amdgpu_dm_connector *
 amdgpu_dm_find_first_crtc_matching_connector(struct drm_atomic_state *state,
 					     struct drm_crtc *crtc);
 

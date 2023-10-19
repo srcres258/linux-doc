@@ -92,10 +92,11 @@ struct perf_pmu {
 	 */
 	int max_precise;
 	/**
-	 * @default_config: Optional default perf_event_attr determined in
-	 * architecture specific code.
+	 * @perf_event_attr_init_default: Optional function to default
+	 * initialize PMU specific parts of the perf_event_attr.
 	 */
-	struct perf_event_attr *default_config;
+	void (*perf_event_attr_init_default)(const struct perf_pmu *pmu,
+					     struct perf_event_attr *attr);
 	/**
 	 * @cpus: Empty or the contents of either of:
 	 * <sysfs>/bus/event_source/devices/<name>/cpumask.
@@ -193,7 +194,7 @@ void pmu_add_sys_aliases(struct perf_pmu *pmu);
 int perf_pmu__config(struct perf_pmu *pmu, struct perf_event_attr *attr,
 		     struct parse_events_terms *head_terms,
 		     struct parse_events_error *error);
-int perf_pmu__config_terms(struct perf_pmu *pmu,
+int perf_pmu__config_terms(const struct perf_pmu *pmu,
 			   struct perf_event_attr *attr,
 			   struct parse_events_terms *terms,
 			   bool zero, struct parse_events_error *error);
@@ -222,18 +223,19 @@ bool pmu__name_match(const struct perf_pmu *pmu, const char *pmu_name);
  */
 bool perf_pmu__is_software(const struct perf_pmu *pmu);
 
-FILE *perf_pmu__open_file(struct perf_pmu *pmu, const char *name);
-FILE *perf_pmu__open_file_at(struct perf_pmu *pmu, int dirfd, const char *name);
+FILE *perf_pmu__open_file(const struct perf_pmu *pmu, const char *name);
+FILE *perf_pmu__open_file_at(const struct perf_pmu *pmu, int dirfd, const char *name);
 
-int perf_pmu__scan_file(struct perf_pmu *pmu, const char *name, const char *fmt, ...) __scanf(3, 4);
-int perf_pmu__scan_file_at(struct perf_pmu *pmu, int dirfd, const char *name,
+int perf_pmu__scan_file(const struct perf_pmu *pmu, const char *name, const char *fmt, ...)
+	__scanf(3, 4);
+int perf_pmu__scan_file_at(const struct perf_pmu *pmu, int dirfd, const char *name,
 			   const char *fmt, ...) __scanf(4, 5);
 
-bool perf_pmu__file_exists(struct perf_pmu *pmu, const char *name);
+bool perf_pmu__file_exists(const struct perf_pmu *pmu, const char *name);
 
 int perf_pmu__test(void);
 
-struct perf_event_attr *perf_pmu__get_default_config(struct perf_pmu *pmu);
+void perf_pmu__arch_init(struct perf_pmu *pmu);
 void pmu_add_cpu_aliases_table(struct perf_pmu *pmu,
 			       const struct pmu_events_table *table);
 

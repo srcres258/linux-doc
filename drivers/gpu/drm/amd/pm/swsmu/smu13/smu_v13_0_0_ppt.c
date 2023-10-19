@@ -296,7 +296,6 @@ smu_v13_0_0_get_allowed_feature_mask(struct smu_context *smu,
 				  uint32_t *feature_mask, uint32_t num)
 {
 	struct amdgpu_device *adev = smu->adev;
-	u32 smu_version;
 
 	if (num > 2)
 		return -EINVAL;
@@ -316,8 +315,7 @@ smu_v13_0_0_get_allowed_feature_mask(struct smu_context *smu,
 		*(uint64_t *)feature_mask &= ~FEATURE_MASK(FEATURE_DPM_SOCCLK_BIT);
 
 	/* PMFW 78.58 contains a critical fix for gfxoff feature */
-	smu_cmn_get_smc_version(smu, NULL, &smu_version);
-	if ((smu_version < 0x004e3a00) ||
+	if ((smu->smc_fw_version < 0x004e3a00) ||
 	     !(adev->pm.pp_feature & PP_GFXOFF_MASK))
 		*(uint64_t *)feature_mask &= ~FEATURE_MASK(FEATURE_GFXOFF_BIT);
 
@@ -1533,6 +1531,30 @@ static int smu_v13_0_0_od_restore_table_single(struct smu_context *smu, long inp
 		od_table->OverDriveTable.FanMode = FAN_MODE_AUTO;
 		od_table->OverDriveTable.FeatureCtrlMask |= BIT(PP_OD_FEATURE_FAN_CURVE_BIT);
 		break;
+	case PP_OD_EDIT_ACOUSTIC_LIMIT:
+		od_table->OverDriveTable.AcousticLimitRpmThreshold =
+					boot_overdrive_table->OverDriveTable.AcousticLimitRpmThreshold;
+		od_table->OverDriveTable.FanMode = FAN_MODE_AUTO;
+		od_table->OverDriveTable.FeatureCtrlMask |= BIT(PP_OD_FEATURE_FAN_CURVE_BIT);
+		break;
+	case PP_OD_EDIT_ACOUSTIC_TARGET:
+		od_table->OverDriveTable.AcousticTargetRpmThreshold =
+					boot_overdrive_table->OverDriveTable.AcousticTargetRpmThreshold;
+		od_table->OverDriveTable.FanMode = FAN_MODE_AUTO;
+		od_table->OverDriveTable.FeatureCtrlMask |= BIT(PP_OD_FEATURE_FAN_CURVE_BIT);
+		break;
+	case PP_OD_EDIT_FAN_TARGET_TEMPERATURE:
+		od_table->OverDriveTable.FanTargetTemperature =
+					boot_overdrive_table->OverDriveTable.FanTargetTemperature;
+		od_table->OverDriveTable.FanMode = FAN_MODE_AUTO;
+		od_table->OverDriveTable.FeatureCtrlMask |= BIT(PP_OD_FEATURE_FAN_CURVE_BIT);
+		break;
+	case PP_OD_EDIT_FAN_MINIMUM_PWM:
+		od_table->OverDriveTable.FanMinimumPwm =
+					boot_overdrive_table->OverDriveTable.FanMinimumPwm;
+		od_table->OverDriveTable.FanMode = FAN_MODE_AUTO;
+		od_table->OverDriveTable.FeatureCtrlMask |= BIT(PP_OD_FEATURE_FAN_CURVE_BIT);
+		break;
 	default:
 		dev_info(adev->dev, "Invalid table index: %ld\n", input);
 		return -EINVAL;
@@ -2264,8 +2286,6 @@ static void smu_v13_0_0_get_unique_id(struct smu_context *smu)
 
 out:
 	adev->unique_id = ((uint64_t)upper32 << 32) | lower32;
-	if (adev->serial[0] == '\0')
-		sprintf(adev->serial, "%016llx", adev->unique_id);
 }
 
 static int smu_v13_0_0_get_fan_speed_pwm(struct smu_context *smu,
@@ -2446,6 +2466,7 @@ static int smu_v13_0_0_set_power_profile_mode(struct smu_context *smu,
 	DpmActivityMonitorCoeffInt_t *activity_monitor =
 		&(activity_monitor_external.DpmActivityMonitorCoeffInt);
 	int workload_type, ret = 0;
+	u32 workload_mask;
 
 	smu->power_profile_mode = input[size];
 
@@ -2535,9 +2556,23 @@ static int smu_v13_0_0_set_power_profile_mode(struct smu_context *smu,
 	if (workload_type < 0)
 		return -EINVAL;
 
+	workload_mask = 1 << workload_type;
+
+	/* Add optimizations for SMU13.0.0.  Reuse the power saving profile */
+	if (smu->power_profile_mode == PP_SMC_POWER_PROFILE_COMPUTE &&
+	    (amdgpu_ip_version(smu->adev, MP1_HWIP, 0) == IP_VERSION(13, 0, 0)) &&
+	    ((smu->adev->pm.fw_version == 0x004e6601) ||
+	     (smu->adev->pm.fw_version >= 0x004e7300))) {
+		workload_type = smu_cmn_to_asic_specific_index(smu,
+							       CMN2ASIC_MAPPING_WORKLOAD,
+							       PP_SMC_POWER_PROFILE_POWERSAVING);
+		if (workload_type >= 0)
+			workload_mask |= 1 << workload_type;
+	}
+
 	return smu_cmn_send_smc_msg_with_param(smu,
 					       SMU_MSG_SetWorkloadMask,
-					       1 << workload_type,
+					       workload_mask,
 					       NULL);
 }
 
@@ -2570,15 +2605,13 @@ static int smu_v13_0_0_baco_exit(struct smu_context *smu)
 static bool smu_v13_0_0_is_mode1_reset_supported(struct smu_context *smu)
 {
 	struct amdgpu_device *adev = smu->adev;
-	u32 smu_version;
 
 	/* SRIOV does not support SMU mode1 reset */
 	if (amdgpu_sriov_vf(adev))
 		return false;
 
 	/* PMFW support is available since 78.41 */
-	smu_cmn_get_smc_version(smu, NULL, &smu_version);
-	if (smu_version < 0x004e2900)
+	if (smu->smc_fw_version < 0x004e2900)
 		return false;
 
 	return true;
@@ -2768,13 +2801,10 @@ static void smu_v13_0_0_set_mode1_reset_param(struct smu_context *smu,
 						uint32_t supported_version,
 						uint32_t *param)
 {
-	uint32_t smu_version;
 	struct amdgpu_device *adev = smu->adev;
 	struct amdgpu_ras *ras = amdgpu_ras_get_context(adev);
 
-	smu_cmn_get_smc_version(smu, NULL, &smu_version);
-
-	if ((smu_version >= supported_version) &&
+	if ((smu->smc_fw_version >= supported_version) &&
 			ras && atomic_read(&ras->in_recovery))
 		/* Set RAS fatal error reset flag */
 		*param = 1 << 16;
@@ -2890,15 +2920,10 @@ static int smu_v13_0_0_send_bad_mem_channel_flag(struct smu_context *smu,
 static int smu_v13_0_0_check_ecc_table_support(struct smu_context *smu)
 {
 	struct amdgpu_device *adev = smu->adev;
-	uint32_t if_version = 0xff, smu_version = 0xff;
 	int ret = 0;
 
-	ret = smu_cmn_get_smc_version(smu, &if_version, &smu_version);
-	if (ret)
-		return -EOPNOTSUPP;
-
 	if ((amdgpu_ip_version(adev, MP1_HWIP, 0) == IP_VERSION(13, 0, 10)) &&
-		(smu_version >= SUPPORT_ECCTABLE_SMU_13_0_10_VERSION))
+		(smu->smc_fw_version >= SUPPORT_ECCTABLE_SMU_13_0_10_VERSION))
 		return ret;
 	else
 		return -EOPNOTSUPP;

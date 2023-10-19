@@ -6653,7 +6653,7 @@ static void mem_cgroup_kmem_attach(struct cgroup_taskset *tset)
 
 	cgroup_taskset_for_each(task, css, tset) {
 		/* atomically set the update bit */
-		set_bit(0, (unsigned long *)&current->objcg);
+		set_bit(0, (unsigned long *)&task->objcg);
 	}
 }
 #else

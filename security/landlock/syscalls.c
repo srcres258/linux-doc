@@ -76,7 +76,7 @@ static void build_check_abi(void)
 	struct landlock_ruleset_attr ruleset_attr;
 	struct landlock_path_beneath_attr path_beneath_attr;
 	struct landlock_net_port_attr net_port_attr;
-	size_t ruleset_size, path_beneath_size, net_service_size;
+	size_t ruleset_size, path_beneath_size, net_port_size;
 
 	/*
 	 * For each user space ABI structures, first checks that there is no
@@ -93,9 +93,9 @@ static void build_check_abi(void)
 	BUILD_BUG_ON(sizeof(path_beneath_attr) != path_beneath_size);
 	BUILD_BUG_ON(sizeof(path_beneath_attr) != 12);
 
-	net_service_size = sizeof(net_port_attr.allowed_access);
-	net_service_size += sizeof(net_port_attr.port);
-	BUILD_BUG_ON(sizeof(net_port_attr) != net_service_size);
+	net_port_size = sizeof(net_port_attr.allowed_access);
+	net_port_size += sizeof(net_port_attr.port);
+	BUILD_BUG_ON(sizeof(net_port_attr) != net_port_size);
 	BUILD_BUG_ON(sizeof(net_port_attr) != 16);
 }
 
@@ -329,6 +329,42 @@ static int add_rule_path_beneath(struct landlock_ruleset *const ruleset,
 	return err;
 }
 
+static int add_rule_net_port(struct landlock_ruleset *ruleset,
+			     const void __user *const rule_attr)
+{
+	struct landlock_net_port_attr net_port_attr;
+	int res;
+	access_mask_t mask;
+
+	/* Copies raw user space buffer. */
+	res = copy_from_user(&net_port_attr, rule_attr, sizeof(net_port_attr));
+	if (res)
+		return -EFAULT;
+
+	/*
+	 * Informs about useless rule: empty allowed_access (i.e. deny rules)
+	 * are ignored by network actions.
+	 */
+	if (!net_port_attr.allowed_access)
+		return -ENOMSG;
+
+	/*
+	 * Checks that allowed_access matches the @ruleset constraints
+	 * (ruleset->access_masks[0] is automatically upgraded to 64-bits).
+	 */
+	mask = landlock_get_net_access_mask(ruleset, 0);
+	if ((net_port_attr.allowed_access | mask) != mask)
+		return -EINVAL;
+
+	/* Denies inserting a rule with port higher than 65535. */
+	if (net_port_attr.port > U16_MAX)
+		return -EINVAL;
+
+	/* Imports the new rule. */
+	return landlock_append_net_rule(ruleset, net_port_attr.port,
+					net_port_attr.allowed_access);
+}
+
 /**
  * sys_landlock_add_rule - Add a new rule to a ruleset
  *
@@ -383,7 +419,7 @@ SYSCALL_DEFINE4(landlock_add_rule, const int, ruleset_fd,
 		err = add_rule_path_beneath(ruleset, rule_attr);
 		break;
 	case LANDLOCK_RULE_NET_PORT:
-		err = landlock_add_rule_net_service(ruleset, rule_attr);
+		err = add_rule_net_port(ruleset, rule_attr);
 		break;
 	default:
 		err = -EINVAL;

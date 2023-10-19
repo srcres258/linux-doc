@@ -2861,15 +2861,6 @@ cannot_expand:
 		}
 
 		/*
-		 * call_mmap() may have changed VMA flags, so retry this check
-		 * if it failed before.
-		 */
-		if (writable_error && vma_is_shared_maywrite(vma)) {
-			error = writable_error;
-			goto close_and_free_vma;
-		}
-
-		/*
 		 * Expansion is handled above, merging is handled below.
 		 * Drivers should not alter the address of the VMA.
 		 */
@@ -2932,7 +2923,7 @@ cannot_expand:
 	mm->map_count++;
 	if (vma->vm_file) {
 		i_mmap_lock_write(vma->vm_file->f_mapping);
-		if (vma_is_shared_maywrite(vma)) {
+		if (vma_is_shared_maywrite(vma))
 			mapping_allow_writable(vma->vm_file->f_mapping);
 			writable_file_mapping = true;
 		}

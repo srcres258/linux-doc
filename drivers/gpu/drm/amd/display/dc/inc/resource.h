@@ -103,6 +103,10 @@ enum dc_status resource_map_pool_resources(
 		struct dc_state *context,
 		struct dc_stream_state *stream);
 
+void resource_build_test_pattern_params(
+		struct resource_context *res_ctx,
+		struct pipe_ctx *pipe_ctx);
+
 bool resource_build_scaling_params(struct pipe_ctx *pipe_ctx);
 
 enum dc_status resource_build_scaling_params_for_context(
@@ -604,4 +608,7 @@ bool dc_resource_acquire_secondary_pipe_for_mpc_odm_legacy(
 enum dc_status update_dp_encoder_resources_for_test_harness(const struct dc *dc,
 		struct dc_state *context,
 		struct pipe_ctx *pipe_ctx);
+
+bool check_subvp_sw_cursor_fallback_req(const struct dc *dc, struct dc_stream_state *stream);
+
 #endif /* DRIVERS_GPU_DRM_AMD_DC_DEV_DC_INC_RESOURCE_H_ */

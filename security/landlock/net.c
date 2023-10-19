@@ -39,49 +39,6 @@ int landlock_append_net_rule(struct landlock_ruleset *const ruleset,
 	return err;
 }
 
-int landlock_add_rule_net_service(struct landlock_ruleset *ruleset,
-				  const void __user *const rule_attr)
-{
-	struct landlock_net_port_attr net_port_attr;
-	int res;
-	access_mask_t mask, bind_access_mask;
-
-	/* Copies raw user space buffer. */
-	res = copy_from_user(&net_port_attr, rule_attr, sizeof(net_port_attr));
-	if (res)
-		return -EFAULT;
-
-	/*
-	 * Informs about useless rule: empty allowed_access (i.e. deny rules)
-	 * are ignored by network actions.
-	 */
-	if (!net_port_attr.allowed_access)
-		return -ENOMSG;
-
-	/*
-	 * Checks that allowed_access matches the @ruleset constraints
-	 * (ruleset->access_masks[0] is automatically upgraded to 64-bits).
-	 */
-	mask = landlock_get_net_access_mask(ruleset, 0);
-	if ((net_port_attr.allowed_access | mask) != mask)
-		return -EINVAL;
-
-	/*
-	 * Denies inserting a rule with port 0 (for bind action) or
-	 * higher than 65535.
-	 */
-	bind_access_mask = net_port_attr.allowed_access &
-			   LANDLOCK_ACCESS_NET_BIND_TCP;
-	if (((net_port_attr.port == 0) &&
-	     (bind_access_mask == LANDLOCK_ACCESS_NET_BIND_TCP)) ||
-	    (net_port_attr.port > U16_MAX))
-		return -EINVAL;
-
-	/* Imports the new rule. */
-	return landlock_append_net_rule(ruleset, net_port_attr.port,
-					net_port_attr.allowed_access);
-}
-
 static access_mask_t
 get_raw_handled_net_accesses(const struct landlock_ruleset *const domain)
 {

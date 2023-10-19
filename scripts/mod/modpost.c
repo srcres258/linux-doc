@@ -1410,32 +1410,20 @@ static void get_rel_type_and_sym(struct elf_info *elf, uint64_t r_info,
 		return;
 	}
 
-	if (is_64bit) {
-		Elf64_Xword r_info64 = r_info;
-
-		r_info = TO_NATIVE(r_info64);
-	} else {
-		Elf32_Word r_info32 = r_info;
-
-		r_info = TO_NATIVE(r_info32);
-	}
+	if (is_64bit)
+		r_info = TO_NATIVE((Elf64_Xword)r_info);
+	else
+		r_info = TO_NATIVE((Elf32_Word)r_info);
 
 	*r_type = ELF_R_TYPE(r_info);
 	*r_sym = ELF_R_SYM(r_info);
 }
 
 static void section_rela(struct module *mod, struct elf_info *elf,
-			 Elf_Shdr *sechdr)
+			 unsigned int fsecndx, const char *fromsec,
+			 const Elf_Rela *start, const Elf_Rela *stop)
 {
-	Elf_Rela *rela;
-	unsigned int fsecndx = sechdr->sh_info;
-	const char *fromsec = sec_name(elf, fsecndx);
-	Elf_Rela *start = (void *)elf->hdr + sechdr->sh_offset;
-	Elf_Rela *stop  = (void *)start + sechdr->sh_size;
-
-	/* if from section (name) is know good then skip it */
-	if (match(fromsec, section_white_list))
-		return;
+	const Elf_Rela *rela;
 
 	for (rela = start; rela < stop; rela++) {
 		Elf_Addr taddr, r_offset;
@@ -1465,17 +1453,10 @@ static void section_rela(struct module *mod, struct elf_info *elf,
 }
 
 static void section_rel(struct module *mod, struct elf_info *elf,
-			Elf_Shdr *sechdr)
+			unsigned int fsecndx, const char *fromsec,
+			const Elf_Rel *start, const Elf_Rel *stop)
 {
-	Elf_Rel *rel;
-	unsigned int fsecndx = sechdr->sh_info;
-	const char *fromsec = sec_name(elf, fsecndx);
-	Elf_Rel *start = (void *)elf->hdr + sechdr->sh_offset;
-	Elf_Rel *stop  = (void *)start + sechdr->sh_size;
-
-	/* if from section (name) is know good then skip it */
-	if (match(fromsec, section_white_list))
-		return;
+	const Elf_Rel *rel;
 
 	for (rel = start; rel < stop; rel++) {
 		Elf_Sym *tsym;
@@ -1523,16 +1504,33 @@ static void section_rel(struct module *mod, struct elf_info *elf,
 static void check_sec_ref(struct module *mod, struct elf_info *elf)
 {
 	int i;
-	Elf_Shdr *sechdrs = elf->sechdrs;
 
 	/* Walk through all sections */
 	for (i = 0; i < elf->num_sections; i++) {
-		check_section(mod->name, elf, &elf->sechdrs[i]);
+		Elf_Shdr *sechdr = &elf->sechdrs[i];
+
+		check_section(mod->name, elf, sechdr);
 		/* We want to process only relocation sections and not .init */
-		if (sechdrs[i].sh_type == SHT_RELA)
-			section_rela(mod, elf, &elf->sechdrs[i]);
-		else if (sechdrs[i].sh_type == SHT_REL)
-			section_rel(mod, elf, &elf->sechdrs[i]);
+		if (sechdr->sh_type == SHT_REL || sechdr->sh_type == SHT_RELA) {
+			/* section to which the relocation applies */
+			unsigned int secndx = sechdr->sh_info;
+			const char *secname = sec_name(elf, secndx);
+			const void *start, *stop;
+
+			/* If the section is known good, skip it */
+			if (match(secname, section_white_list))
+				continue;
+
+			start = sym_get_data_by_offset(elf, i, 0);
+			stop = start + sechdr->sh_size;
+
+			if (sechdr->sh_type == SHT_RELA)
+				section_rela(mod, elf, secndx, secname,
+					     start, stop);
+			else
+				section_rel(mod, elf, secndx, secname,
+					    start, stop);
+		}
 	}
 }
 

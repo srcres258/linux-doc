@@ -285,7 +285,7 @@ static struct spi_driver altera_ps_driver = {
 	.driver = {
 		.name = "altera-ps-spi",
 		.owner = THIS_MODULE,
-		.of_match_table = of_match_ptr(of_ef_match),
+		.of_match_table = of_ef_match,
 	},
 	.id_table = altera_ps_spi_ids,
 	.probe = altera_ps_probe,

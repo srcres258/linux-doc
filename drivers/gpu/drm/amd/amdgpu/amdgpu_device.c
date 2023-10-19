@@ -1760,6 +1760,7 @@ static void amdgpu_switcheroo_set_state(struct pci_dev *pdev,
 	} else {
 		pr_info("switched off\n");
 		dev->switch_power_state = DRM_SWITCH_POWER_CHANGING;
+		amdgpu_device_prepare(dev);
 		amdgpu_device_suspend(dev, true);
 		amdgpu_device_cache_pci_state(pdev);
 		/* Shut down the device */
@@ -4274,6 +4275,9 @@ void amdgpu_device_fini_sw(struct amdgpu_device *adev)
 	kfree(adev->bios);
 	adev->bios = NULL;
 
+	kfree(adev->fru_info);
+	adev->fru_info = NULL;
+
 	px = amdgpu_device_supports_px(adev_to_drm(adev));
 
 	if (px || (!pci_is_thunderbolt_attached(adev->pdev) &&
@@ -4333,6 +4337,41 @@ static int amdgpu_device_evict_resources(struct amdgpu_device *adev)
  * Suspend & resume.
  */
 /**
+ * amdgpu_device_prepare - prepare for device suspend
+ *
+ * @dev: drm dev pointer
+ *
+ * Prepare to put the hw in the suspend state (all asics).
+ * Returns 0 for success or an error on failure.
+ * Called at driver suspend.
+ */
+int amdgpu_device_prepare(struct drm_device *dev)
+{
+	struct amdgpu_device *adev = drm_to_adev(dev);
+	int i, r;
+
+	if (dev->switch_power_state == DRM_SWITCH_POWER_OFF)
+		return 0;
+
+	/* Evict the majority of BOs before starting suspend sequence */
+	r = amdgpu_device_evict_resources(adev);
+	if (r)
+		return r;
+
+	for (i = 0; i < adev->num_ip_blocks; i++) {
+		if (!adev->ip_blocks[i].status.valid)
+			continue;
+		if (!adev->ip_blocks[i].version->funcs->prepare_suspend)
+			continue;
+		r = adev->ip_blocks[i].version->funcs->prepare_suspend((void *)adev);
+		if (r)
+			return r;
+	}
+
+	return 0;
+}
+
+/**
  * amdgpu_device_suspend - initiate device suspend
  *
  * @dev: drm dev pointer
@@ -4351,11 +4390,6 @@ int amdgpu_device_suspend(struct drm_device *dev, bool fbcon)
 		return 0;
 
 	adev->in_suspend = true;
-
-	/* Evict the majority of BOs before grabbing the full access */
-	r = amdgpu_device_evict_resources(adev);
-	if (r)
-		return r;
 
 	if (amdgpu_sriov_vf(adev)) {
 		amdgpu_virt_fini_data_exchange(adev);
@@ -5435,7 +5469,8 @@ int amdgpu_device_gpu_recover(struct amdgpu_device *adev,
 	 * Flush RAM to disk so that after reboot
 	 * the user can read log and see why the system rebooted.
 	 */
-	if (need_emergency_restart && amdgpu_ras_get_context(adev)->reboot) {
+	if (need_emergency_restart && amdgpu_ras_get_context(adev) &&
+		amdgpu_ras_get_context(adev)->reboot) {
 		DRM_WARN("Emergency reboot.");
 
 		ksys_sync_helper();

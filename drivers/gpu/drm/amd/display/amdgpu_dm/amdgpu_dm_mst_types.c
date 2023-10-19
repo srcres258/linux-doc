@@ -1500,22 +1500,22 @@ int pre_validate_dsc(struct drm_atomic_state *state,
 		int ind = find_crtc_index_in_state_by_stream(state, stream);
 
 		if (ind >= 0) {
-			struct drm_connector *connector;
+			struct amdgpu_dm_connector *aconnector;
 			struct drm_connector_state *drm_new_conn_state;
 			struct dm_connector_state *dm_new_conn_state;
 			struct dm_crtc_state *dm_old_crtc_state;
 
-			connector =
+			aconnector =
 				amdgpu_dm_find_first_crtc_matching_connector(state,
 									     state->crtcs[ind].ptr);
 			drm_new_conn_state =
 				drm_atomic_get_new_connector_state(state,
-								   connector);
+								   &aconnector->base);
 			dm_new_conn_state = to_dm_connector_state(drm_new_conn_state);
 			dm_old_crtc_state = to_dm_crtc_state(state->crtcs[ind].old_state);
 
 			local_dc_state->streams[i] =
-				create_validate_stream_for_sink(connector,
+				create_validate_stream_for_sink(aconnector,
 								&state->crtcs[ind].new_state->mode,
 								dm_new_conn_state,
 								dm_old_crtc_state->stream);

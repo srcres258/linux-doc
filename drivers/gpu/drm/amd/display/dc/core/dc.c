@@ -77,6 +77,8 @@
 
 #include "hw_sequencer_private.h"
 
+#include "dml2/dml2_internal_types.h"
+
 #include "dce/dmub_outbox.h"
 
 #define CTX \
@@ -1213,6 +1215,67 @@ static void disable_dangling_plane(struct dc *dc, struct dc_state *context)
 	dc_release_state(current_ctx);
 }
 
+static void disable_vbios_mode_if_required(
+		struct dc *dc,
+		struct dc_state *context)
+{
+	unsigned int i, j;
+
+	/* check if timing_changed, disable stream*/
+	for (i = 0; i < dc->res_pool->pipe_count; i++) {
+		struct dc_stream_state *stream = NULL;
+		struct dc_link *link = NULL;
+		struct pipe_ctx *pipe = NULL;
+
+		pipe = &context->res_ctx.pipe_ctx[i];
+		stream = pipe->stream;
+		if (stream == NULL)
+			continue;
+
+		if (stream->apply_seamless_boot_optimization)
+			continue;
+
+		// only looking for first odm pipe
+		if (pipe->prev_odm_pipe)
+			continue;
+
+		if (stream->link->local_sink &&
+			stream->link->local_sink->sink_signal == SIGNAL_TYPE_EDP) {
+			link = stream->link;
+		}
+
+		if (link != NULL && link->link_enc->funcs->is_dig_enabled(link->link_enc)) {
+			unsigned int enc_inst, tg_inst = 0;
+			unsigned int pix_clk_100hz;
+
+			enc_inst = link->link_enc->funcs->get_dig_frontend(link->link_enc);
+			if (enc_inst != ENGINE_ID_UNKNOWN) {
+				for (j = 0; j < dc->res_pool->stream_enc_count; j++) {
+					if (dc->res_pool->stream_enc[j]->id == enc_inst) {
+						tg_inst = dc->res_pool->stream_enc[j]->funcs->dig_source_otg(
+							dc->res_pool->stream_enc[j]);
+						break;
+					}
+				}
+
+				dc->res_pool->dp_clock_source->funcs->get_pixel_clk_frequency_100hz(
+					dc->res_pool->dp_clock_source,
+					tg_inst, &pix_clk_100hz);
+
+				if (link->link_status.link_active) {
+					uint32_t requested_pix_clk_100hz =
+						pipe->stream_res.pix_clk_params.requested_pix_clk_100hz;
+
+					if (pix_clk_100hz != requested_pix_clk_100hz) {
+						dc->link_srv->set_dpms_off(pipe);
+						pipe->stream->dpms_off = false;
+					}
+				}
+			}
+		}
+	}
+}
+
 static void wait_for_no_pipes_pending(struct dc *dc, struct dc_state *context)
 {
 	int i;
@@ -1782,6 +1845,7 @@ static enum dc_status dc_commit_state_no_check(struct dc *dc, struct dc_state *c
 		dc_streams[i] =  context->streams[i];
 
 	if (!dcb->funcs->is_accelerated_mode(dcb)) {
+		disable_vbios_mode_if_required(dc, context);
 		dc->hwss.enable_accelerated_mode(dc, context);
 	}
 
@@ -2176,6 +2240,11 @@ struct dc_state *dc_create_state(struct dc *dc)
 
 	init_state(dc, context);
 
+#ifdef CONFIG_DRM_AMD_DC_FP
+	if (dc->debug.using_dml2) {
+		dml2_create(dc, &dc->dml2_options, &context->bw_ctx.dml2);
+	}
+#endif
 	kref_init(&context->refcount);
 
 	return context;
@@ -2185,10 +2254,24 @@ struct dc_state *dc_copy_state(struct dc_state *src_ctx)
 {
 	int i, j;
 	struct dc_state *new_ctx = kvmalloc(sizeof(struct dc_state), GFP_KERNEL);
+#ifdef CONFIG_DRM_AMD_DC_FP
+	struct dml2_context *dml2 =  NULL;
+#endif
 
 	if (!new_ctx)
 		return NULL;
 	memcpy(new_ctx, src_ctx, sizeof(struct dc_state));
+
+#ifdef CONFIG_DRM_AMD_DC_FP
+	if (new_ctx->bw_ctx.dml2) {
+		dml2 = kzalloc(sizeof(struct dml2_context), GFP_KERNEL);
+		if (!dml2)
+			return NULL;
+
+		memcpy(dml2, src_ctx->bw_ctx.dml2, sizeof(struct dml2_context));
+		new_ctx->bw_ctx.dml2 = dml2;
+	}
+#endif
 
 	for (i = 0; i < MAX_PIPES; i++) {
 			struct pipe_ctx *cur_pipe = &new_ctx->res_ctx.pipe_ctx[i];
@@ -2228,6 +2311,12 @@ static void dc_state_free(struct kref *kref)
 {
 	struct dc_state *context = container_of(kref, struct dc_state, refcount);
 	dc_resource_state_destruct(context);
+
+#ifdef CONFIG_DRM_AMD_DC_FP
+	dml2_destroy(context->bw_ctx.dml2);
+	context->bw_ctx.dml2 = 0;
+#endif
+
 	kvfree(context);
 }
 
@@ -3080,6 +3169,14 @@ static bool update_planes_and_stream_state(struct dc *dc,
 			BREAK_TO_DEBUGGER();
 			goto fail;
 		}
+
+		for (i = 0; i < context->stream_count; i++) {
+			struct pipe_ctx *otg_master = resource_get_otg_master_for_stream(&context->res_ctx,
+					context->streams[i]);
+
+			if (otg_master->stream->test_pattern.type != DP_TEST_PATTERN_VIDEO_MODE)
+				resource_build_test_pattern_params(&context->res_ctx, otg_master);
+		}
 	}
 
 	*new_context = context;
@@ -3499,6 +3596,7 @@ static void commit_planes_for_stream(struct dc *dc,
 	bool should_lock_all_pipes = (update_type != UPDATE_TYPE_FAST);
 	bool subvp_prev_use = false;
 	bool subvp_curr_use = false;
+	uint8_t current_stream_mask = 0;
 
 	// Once we apply the new subvp context to hardware it won't be in the
 	// dc->current_state anymore, so we have to cache it before we apply
@@ -3847,6 +3945,12 @@ static void commit_planes_for_stream(struct dc *dc,
 
 		if (pipe_ctx->stream_res.tg->funcs->program_manual_trigger)
 			pipe_ctx->stream_res.tg->funcs->program_manual_trigger(pipe_ctx->stream_res.tg);
+	}
+
+	current_stream_mask = get_stream_mask(dc, context);
+	if (current_stream_mask != context->stream_mask) {
+		context->stream_mask = current_stream_mask;
+		dc_dmub_srv_notify_stream_mask(dc->ctx->dmub_srv, current_stream_mask);
 	}
 }
 
@@ -4673,15 +4777,12 @@ void dc_power_down_on_boot(struct dc *dc)
 		dc->hwss.power_down_on_boot(dc);
 }
 
-bool dc_set_power_state(
+void dc_set_power_state(
 	struct dc *dc,
 	enum dc_acpi_cm_power_state power_state)
 {
-	struct kref refcount;
-	struct display_mode_lib *dml;
-
 	if (!dc->current_state)
-		return true;
+		return;
 
 	switch (power_state) {
 	case DC_ACPI_CM_POWER_STATE_D0:
@@ -4699,35 +4800,11 @@ bool dc_set_power_state(
 		break;
 	default:
 		ASSERT(dc->current_state->stream_count == 0);
-		/* Zero out the current context so that on resume we start with
-		 * clean state, and dc hw programming optimizations will not
-		 * cause any trouble.
-		 */
-		dml = kzalloc(sizeof(struct display_mode_lib),
-				GFP_KERNEL);
-
-		ASSERT(dml);
-		if (!dml)
-			return false;
-
-		/* Preserve refcount */
-		refcount = dc->current_state->refcount;
-		/* Preserve display mode lib */
-		memcpy(dml, &dc->current_state->bw_ctx.dml, sizeof(struct display_mode_lib));
 
 		dc_resource_state_destruct(dc->current_state);
-		memset(dc->current_state, 0,
-				sizeof(*dc->current_state));
-
-		dc->current_state->refcount = refcount;
-		dc->current_state->bw_ctx.dml = *dml;
-
-		kfree(dml);
 
 		break;
 	}
-
-	return true;
 }
 
 void dc_resume(struct dc *dc)
@@ -4803,8 +4880,7 @@ bool dc_set_psr_allow_active(struct dc *dc, bool enable)
 
 void dc_allow_idle_optimizations(struct dc *dc, bool allow)
 {
-	if (dc->debug.disable_idle_power_optimizations ||
-		(dc->caps.ips_support && dc->config.disable_ips))
+	if (dc->debug.disable_idle_power_optimizations)
 		return;
 
 	if (dc->clk_mgr != NULL && dc->clk_mgr->funcs->is_smu_present)
@@ -4816,23 +4892,6 @@ void dc_allow_idle_optimizations(struct dc *dc, bool allow)
 
 	if (dc->hwss.apply_idle_power_optimizations && dc->hwss.apply_idle_power_optimizations(dc, allow))
 		dc->idle_optimizations_allowed = allow;
-}
-
-bool dc_is_idle_power_optimized(struct dc *dc)
-{
-	uint32_t idle_state = 0;
-
-	if (dc->debug.disable_idle_power_optimizations)
-		return false;
-
-	if (dc->hwss.get_idle_state)
-		idle_state = dc->hwss.get_idle_state(dc);
-
-	if ((idle_state & DMUB_IPS1_ALLOW_MASK) ||
-		(idle_state & DMUB_IPS2_ALLOW_MASK))
-		return true;
-
-	return false;
 }
 
 /* set min and max memory clock to lowest and highest DPM level, respectively */
@@ -5367,15 +5426,15 @@ bool dc_abm_save_restore(
 void dc_query_current_properties(struct dc *dc, struct dc_current_properties *properties)
 {
 	unsigned int i;
-	bool subvp_in_use = false;
+	bool subvp_sw_cursor_req = false;
 
 	for (i = 0; i < dc->current_state->stream_count; i++) {
-		if (dc->current_state->streams[i]->mall_stream_config.type != SUBVP_NONE) {
-			subvp_in_use = true;
+		if (check_subvp_sw_cursor_fallback_req(dc, dc->current_state->streams[i])) {
+			subvp_sw_cursor_req = true;
 			break;
 		}
 	}
-	properties->cursor_size_limit = subvp_in_use ? 64 : dc->caps.max_cursor_size;
+	properties->cursor_size_limit = subvp_sw_cursor_req ? 64 : dc->caps.max_cursor_size;
 }
 
 /**

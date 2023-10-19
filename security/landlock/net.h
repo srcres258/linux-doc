@@ -17,17 +17,14 @@ __init void landlock_add_net_hooks(void);
 
 int landlock_append_net_rule(struct landlock_ruleset *const ruleset,
 			     const u16 port, access_mask_t access_rights);
-
-int landlock_add_rule_net_service(struct landlock_ruleset *ruleset,
-				  const void __user *const rule_attr);
 #else /* IS_ENABLED(CONFIG_INET) */
 static inline void landlock_add_net_hooks(void)
 {
 }
 
 static inline int
-landlock_add_rule_net_service(struct landlock_ruleset *ruleset,
-			      const void __user *const rule_attr)
+landlock_append_net_rule(struct landlock_ruleset *const ruleset, const u16 port,
+			 access_mask_t access_rights)
 {
 	return -EAFNOSUPPORT;
 }

@@ -680,7 +680,7 @@ static int create_ruleset(struct __test_metadata *const _metadata,
 	return ruleset_fd;
 }
 
-TEST_F_FORK(layout1, proc_nsfs)
+TEST_F_FORK(layout0, proc_nsfs)
 {
 	const struct rule rules[] = {
 		{

@@ -91,7 +91,7 @@ enum landlock_key_type {
 	 * @LANDLOCK_KEY_NET_PORT: Type of &landlock_ruleset.root_net_port's
 	 * node keys.
 	 */
-	LANDLOCK_KEY_NET_PORT = 2,
+	LANDLOCK_KEY_NET_PORT,
 };
 
 /**

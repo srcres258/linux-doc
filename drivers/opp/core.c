@@ -1092,7 +1092,7 @@ static int _opp_set_required_opps_genpd(struct device *dev,
 	while (index != target) {
 		ret = _set_performance_state(dev, genpd_virt_devs[index], opp, index);
 		if (ret)
-			break;
+			return ret;
 
 		index += delta;
 	}
