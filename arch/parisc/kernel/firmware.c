@@ -532,16 +532,17 @@ int pdc_model_info(struct pdc_model *model)
  */
 int pdc_model_sysmodel(unsigned int os_id, char *name)
 {
-        int retval;
+	int retval, strlen;
 	unsigned long flags;
 
         spin_lock_irqsave(&pdc_lock, flags);
         retval = mem_pdc_call(PDC_MODEL, PDC_MODEL_SYSMODEL, __pa(pdc_result),
                               os_id, __pa(name));
+        strlen = pdc_result[0];
         convert_to_wide(pdc_result);
 
         if (retval == PDC_OK) {
-                name[pdc_result[0]] = '\0'; /* add trailing '\0' */
+                name[strlen] = '\0'; /* add trailing '\0' */
         } else {
                 name[0] = 0;
         }
