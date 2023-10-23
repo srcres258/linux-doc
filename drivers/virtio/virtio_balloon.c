@@ -395,7 +395,11 @@ static inline s64 towards_target(struct virtio_balloon *vb)
 	virtio_cread_le(vb->vdev, struct virtio_balloon_config, num_pages,
 			&num_pages);
 
-	target = num_pages;
+	/*
+	 * Aligned up to guest page size to avoid inflating and deflating
+	 * balloon endlessly.
+	 */
+	target = ALIGN(num_pages, VIRTIO_BALLOON_PAGES_PER_PAGE);
 	return target - vb->num_pages;
 }
 
@@ -741,7 +745,7 @@ static void report_free_page_func(struct work_struct *work)
  *  2) update the host about the old page removed from vb->pages list;
  *
  * This function preforms the balloon page migration task.
- * Called through balloon_mapping->a_ops->migratepage
+ * Called through movable_operations->migrate_page
  */
 static int virtballoon_migratepage(struct balloon_dev_info *vb_dev_info,
 		struct page *newpage, struct page *page, enum migrate_mode mode)
