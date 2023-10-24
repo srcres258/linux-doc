@@ -78,12 +78,20 @@ static const struct iommu_domain_ops intel_nested_domain_ops = {
 	.free			= intel_nested_domain_free,
 };
 
-struct iommu_domain *intel_nested_domain_alloc(struct iommu_domain *s2_domain,
+struct iommu_domain *intel_nested_domain_alloc(struct iommu_domain *parent,
 					       const struct iommu_user_data *user_data)
 {
+	struct dmar_domain *s2_domain = to_dmar_domain(parent);
 	struct iommu_hwpt_vtd_s1 vtd;
 	struct dmar_domain *domain;
 	int ret;
+
+	/* Must be nested domain */
+	if (user_data->type != IOMMU_HWPT_DATA_VTD_S1)
+		return ERR_PTR(-EOPNOTSUPP);
+	if (parent->ops != intel_iommu_ops.default_domain_ops ||
+	    !s2_domain->nested_parent)
+		return ERR_PTR(-EINVAL);
 
 	ret = iommu_copy_struct_from_user(&vtd, user_data,
 					  IOMMU_HWPT_DATA_VTD_S1, __reserved);
@@ -95,7 +103,7 @@ struct iommu_domain *intel_nested_domain_alloc(struct iommu_domain *s2_domain,
 		return ERR_PTR(-ENOMEM);
 
 	domain->use_first_level = true;
-	domain->s2_domain = to_dmar_domain(s2_domain);
+	domain->s2_domain = s2_domain;
 	domain->s1_pgtbl = vtd.pgtbl_addr;
 	domain->s1_cfg = vtd;
 	domain->domain.ops = &intel_nested_domain_ops;
