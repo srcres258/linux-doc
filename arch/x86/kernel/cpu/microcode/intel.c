@@ -375,8 +375,6 @@ static __init struct microcode_intel *get_microcode_blob(struct ucode_cpu_info *
 	return scan_microcode(cp.data, cp.size, uci);
 }
 
-static struct microcode_intel *ucode_early_pa __initdata;
-
 /*
  * Invoked from an early init call to save the microcode blob which was
  * selected during early boot when mm was not usable. The microcode must be
@@ -386,13 +384,14 @@ static struct microcode_intel *ucode_early_pa __initdata;
  */
 static int __init save_builtin_microcode(void)
 {
-	struct microcode_intel *mc;
+	struct ucode_cpu_info uci;
 
-	if (!ucode_early_pa)
+	if (dis_ucode_ldr || boot_cpu_data.x86_vendor != X86_VENDOR_INTEL)
 		return 0;
 
-	mc = __va((void *)ucode_early_pa);
-	save_microcode_patch(mc);
+	uci.mc = get_microcode_blob(&uci);
+	if (uci.mc)
+		save_microcode_patch(uci.mc);
 	return 0;
 }
 early_initcall(save_builtin_microcode);
@@ -403,14 +402,8 @@ void __init load_ucode_intel_bsp(void)
 	struct ucode_cpu_info uci;
 
 	uci.mc = get_microcode_blob(&uci);
-	if (!uci.mc)
-		return;
-
-	if (apply_microcode_early(&uci) != UCODE_UPDATED)
-		return;
-
-	/* Store the physical address as KASLR happens after this. */
-	ucode_early_pa = (struct microcode_intel *)__pa_nodebug(uci.mc);
+	if (uci.mc)
+		apply_microcode_early(&uci);
 }
 
 void load_ucode_intel_ap(void)

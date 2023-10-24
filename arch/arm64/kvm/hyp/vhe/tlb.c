@@ -26,7 +26,7 @@ static void __tlb_switch_to_guest(struct kvm_s2_mmu *mmu,
 	local_irq_save(cxt->flags);
 
 	if (vcpu && mmu != vcpu->arch.hw_mmu)
-		cxt->mmu = mmu;
+		cxt->mmu = vcpu->arch.hw_mmu;
 	else
 		cxt->mmu = NULL;
 

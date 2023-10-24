@@ -710,10 +710,6 @@ skip:
 					&page_allocated);
 	if (unlikely(page_allocated))
 		swap_readpage(page, false, NULL);
-#ifdef CONFIG_ZSWAP
-	if (page)
-		inc_nr_protected(page);
-#endif
 	return page;
 }
 
@@ -889,10 +885,6 @@ skip:
 					&page_allocated);
 	if (unlikely(page_allocated))
 		swap_readpage(page, false, NULL);
-#ifdef CONFIG_ZSWAP
-	if (page)
-		inc_nr_protected(page);
-#endif
 	return page;
 }
 

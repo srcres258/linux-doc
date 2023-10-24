@@ -249,7 +249,8 @@ struct mem_cgroup *vmpressure_to_memcg(struct vmpressure *vmpr)
 	return container_of(vmpr, struct mem_cgroup, vmpressure);
 }
 
-#define CURRENT_OBJCG_UPDATE_FLAG 0x1UL
+#define CURRENT_OBJCG_UPDATE_BIT 0
+#define CURRENT_OBJCG_UPDATE_FLAG (1UL << CURRENT_OBJCG_UPDATE_BIT)
 
 #ifdef CONFIG_MEMCG_KMEM
 static DEFINE_SPINLOCK(objcg_lock);
@@ -3128,21 +3129,29 @@ static struct obj_cgroup *current_objcg_update(void)
 			old = NULL;
 		}
 
-		/* Obtain the new objcg pointer. */
-		rcu_read_lock();
-		memcg = mem_cgroup_from_task(current);
+		/* If new objcg is NULL, no reason for the second atomic update. */
+		if (!current->mm || (current->flags & PF_KTHREAD))
+			return NULL;
+
 		/*
-		 * The current task can be asynchronously moved to another
-		 * memcg and the previous memcg can be offlined. So let's
-		 * get the memcg pointer and try get a reference to objcg
-		 * under a rcu read lock.
+		 * Release the objcg pointer from the previous iteration,
+		 * if try_cmpxcg() below fails.
 		 */
-		for (; memcg != root_mem_cgroup; memcg = parent_mem_cgroup(memcg)) {
-			objcg = rcu_dereference(memcg->objcg);
-			if (likely(objcg && obj_cgroup_tryget(objcg)))
-				break;
+		if (unlikely(objcg)) {
+			obj_cgroup_put(objcg);
 			objcg = NULL;
 		}
+
+		/*
+		 * Obtain the new objcg pointer. The current task can be
+		 * asynchronously moved to another memcg and the previous
+		 * memcg can be offlined. So let's get the memcg pointer
+		 * and try get a reference to objcg under a rcu read lock.
+		 */
+
+		rcu_read_lock();
+		memcg = mem_cgroup_from_task(current);
+		objcg = __get_obj_cgroup_from_memcg(memcg);
 		rcu_read_unlock();
 
 		/*
@@ -3155,7 +3164,7 @@ static struct obj_cgroup *current_objcg_update(void)
 	return objcg;
 }
 
-__always_inline struct obj_cgroup *get_obj_cgroup_from_current(void)
+__always_inline struct obj_cgroup *current_obj_cgroup(void)
 {
 	struct mem_cgroup *memcg;
 	struct obj_cgroup *objcg;
@@ -3168,22 +3177,33 @@ __always_inline struct obj_cgroup *get_obj_cgroup_from_current(void)
 		objcg = READ_ONCE(current->objcg);
 		if (unlikely((unsigned long)objcg & CURRENT_OBJCG_UPDATE_FLAG))
 			objcg = current_objcg_update();
-
-		if (objcg) {
-			obj_cgroup_get(objcg);
-			return objcg;
-		}
-	} else {
-		memcg = this_cpu_read(int_active_memcg);
-		if (unlikely(memcg))
-			goto from_memcg;
+		/*
+		 * Objcg reference is kept by the task, so it's safe
+		 * to use the objcg by the current task.
+		 */
+		return objcg;
 	}
+
+	memcg = this_cpu_read(int_active_memcg);
+	if (unlikely(memcg))
+		goto from_memcg;
+
 	return NULL;
 
 from_memcg:
-	rcu_read_lock();
-	objcg = __get_obj_cgroup_from_memcg(memcg);
-	rcu_read_unlock();
+	for (; !mem_cgroup_is_root(memcg); memcg = parent_mem_cgroup(memcg)) {
+		/*
+		 * Memcg pointer is protected by scope (see set_active_memcg())
+		 * and is pinning the corresponding objcg, so objcg can't go
+		 * away and can be used within the scope without any additional
+		 * protection.
+		 */
+		objcg = rcu_dereference_check(memcg->objcg, 1);
+		if (likely(objcg))
+			break;
+		objcg = NULL;
+	}
+
 	return objcg;
 }
 
@@ -5836,6 +5856,7 @@ static void mem_cgroup_css_rstat_flush(struct cgroup_subsys_state *css, int cpu)
 			}
 		}
 	}
+	statc->stats_updates = 0;
 	/* We are in a per-cpu loop here, only do the atomic write once */
 	if (atomic64_read(&memcg->vmstats->stats_updates))
 		atomic64_set(&memcg->vmstats->stats_updates, 0);
@@ -6653,7 +6674,7 @@ static void mem_cgroup_kmem_attach(struct cgroup_taskset *tset)
 
 	cgroup_taskset_for_each(task, css, tset) {
 		/* atomically set the update bit */
-		set_bit(0, (unsigned long *)&task->objcg);
+		set_bit(CURRENT_OBJCG_UPDATE_BIT, (unsigned long *)&task->objcg);
 	}
 }
 #else

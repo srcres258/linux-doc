@@ -362,7 +362,7 @@ struct bch_csum bch2_checksum_merge(unsigned type, struct bch_csum a,
 
 	state.type = type;
 	bch2_checksum_init(&state);
-	state.seed = (u64 __force) a.lo;
+	state.seed = le64_to_cpu(a.lo);
 
 	BUG_ON(!bch2_checksum_mergeable(type));
 
@@ -373,7 +373,7 @@ struct bch_csum bch2_checksum_merge(unsigned type, struct bch_csum a,
 				page_address(ZERO_PAGE(0)), page_len);
 		b_len -= page_len;
 	}
-	a.lo = (__le64 __force) bch2_checksum_final(&state);
+	a.lo = cpu_to_le64(bch2_checksum_final(&state));
 	a.lo ^= b.lo;
 	a.hi ^= b.hi;
 	return a;
@@ -535,15 +535,30 @@ static int __bch2_request_key(char *key_description, struct bch_key *key)
 	key_serial_t key_id;
 
 	key_id = request_key("user", key_description, NULL,
+			     KEY_SPEC_SESSION_KEYRING);
+	if (key_id >= 0)
+		goto got_key;
+
+	key_id = request_key("user", key_description, NULL,
 			     KEY_SPEC_USER_KEYRING);
-	if (key_id < 0)
-		return -errno;
+	if (key_id >= 0)
+		goto got_key;
+
+	key_id = request_key("user", key_description, NULL,
+			     KEY_SPEC_USER_SESSION_KEYRING);
+	if (key_id >= 0)
+		goto got_key;
+
+	return -errno;
+got_key:
 
 	if (keyctl_read(key_id, (void *) key, sizeof(*key)) != sizeof(*key))
 		return -1;
 
 	return 0;
 }
+
+#include "../crypto.h"
 #endif
 
 int bch2_request_key(struct bch_sb *sb, struct bch_key *key)
@@ -556,8 +571,42 @@ int bch2_request_key(struct bch_sb *sb, struct bch_key *key)
 
 	ret = __bch2_request_key(key_description.buf, key);
 	printbuf_exit(&key_description);
+
+#ifndef __KERNEL__
+	if (ret) {
+		char *passphrase = read_passphrase("Enter passphrase: ");
+		struct bch_encrypted_key sb_key;
+
+		bch2_passphrase_check(sb, passphrase,
+				      key, &sb_key);
+		ret = 0;
+	}
+#endif
+
+	/* stash with memfd, pass memfd fd to mount */
+
 	return ret;
 }
+
+#ifndef __KERNEL__
+int bch2_revoke_key(struct bch_sb *sb)
+{
+	key_serial_t key_id;
+	struct printbuf key_description = PRINTBUF;
+
+	prt_printf(&key_description, "bcachefs:");
+	pr_uuid(&key_description, sb->user_uuid.b);
+
+	key_id = request_key("user", key_description.buf, NULL, KEY_SPEC_USER_KEYRING);
+	printbuf_exit(&key_description);
+	if (key_id < 0)
+		return errno;
+
+	keyctl_revoke(key_id);
+
+	return 0;
+}
+#endif
 
 int bch2_decrypt_sb_key(struct bch_fs *c,
 			struct bch_sb_field_crypt *crypt,
@@ -629,7 +678,7 @@ int bch2_disable_encryption(struct bch_fs *c)
 
 	mutex_lock(&c->sb_lock);
 
-	crypt = bch2_sb_get_crypt(c->disk_sb.sb);
+	crypt = bch2_sb_field_get(c->disk_sb.sb, crypt);
 	if (!crypt)
 		goto out;
 
@@ -663,7 +712,7 @@ int bch2_enable_encryption(struct bch_fs *c, bool keyed)
 	mutex_lock(&c->sb_lock);
 
 	/* Do we already have an encryption key? */
-	if (bch2_sb_get_crypt(c->disk_sb.sb))
+	if (bch2_sb_field_get(c->disk_sb.sb, crypt))
 		goto err;
 
 	ret = bch2_alloc_ciphers(c);
@@ -691,7 +740,8 @@ int bch2_enable_encryption(struct bch_fs *c, bool keyed)
 	if (ret)
 		goto err;
 
-	crypt = bch2_sb_resize_crypt(&c->disk_sb, sizeof(*crypt) / sizeof(u64));
+	crypt = bch2_sb_field_resize(&c->disk_sb, crypt,
+				     sizeof(*crypt) / sizeof(u64));
 	if (!crypt) {
 		ret = -BCH_ERR_ENOSPC_sb_crypt;
 		goto err;
@@ -732,7 +782,7 @@ int bch2_fs_encryption_init(struct bch_fs *c)
 		goto out;
 	}
 
-	crypt = bch2_sb_get_crypt(c->disk_sb.sb);
+	crypt = bch2_sb_field_get(c->disk_sb.sb, crypt);
 	if (!crypt)
 		goto out;
 

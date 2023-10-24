@@ -13,8 +13,8 @@
 #include "util.h"
 
 bool gfs2_release_folio(struct folio *folio, gfp_t gfp_mask);
-int gfs2_internal_read(struct gfs2_inode *ip,
-		       char *buf, loff_t *pos, unsigned size);
+ssize_t gfs2_internal_read(struct gfs2_inode *ip,
+			   char *buf, loff_t *pos, size_t size);
 void gfs2_set_aops(struct inode *inode);
 
 static inline int gfs2_is_stuffed(const struct gfs2_inode *ip)
@@ -44,19 +44,17 @@ static inline int gfs2_is_dir(const struct gfs2_inode *ip)
 
 static inline void gfs2_set_inode_blocks(struct inode *inode, u64 blocks)
 {
-	inode->i_blocks = blocks <<
-		(GFS2_SB(inode)->sd_sb.sb_bsize_shift - GFS2_BASIC_BLOCK_SHIFT);
+	inode->i_blocks = blocks << (inode->i_blkbits - 9);
 }
 
 static inline u64 gfs2_get_inode_blocks(const struct inode *inode)
 {
-	return inode->i_blocks >>
-		(GFS2_SB(inode)->sd_sb.sb_bsize_shift - GFS2_BASIC_BLOCK_SHIFT);
+	return inode->i_blocks >> (inode->i_blkbits - 9);
 }
 
 static inline void gfs2_add_inode_blocks(struct inode *inode, s64 change)
 {
-	change <<= inode->i_blkbits - GFS2_BASIC_BLOCK_SHIFT;
+	change <<= inode->i_blkbits - 9;
 	gfs2_assert(GFS2_SB(inode), (change >= 0 || inode->i_blocks >= -change));
 	inode->i_blocks += change;
 }
@@ -101,7 +99,7 @@ struct inode *gfs2_lookupi(struct inode *dir, const struct qstr *name,
 			   int is_root);
 int gfs2_permission(struct mnt_idmap *idmap,
 		    struct inode *inode, int mask);
-struct inode *gfs2_lookup_simple(struct inode *dip, const char *name);
+struct inode *gfs2_lookup_meta(struct inode *dip, const char *name);
 void gfs2_dinode_out(const struct gfs2_inode *ip, void *buf);
 int gfs2_open_common(struct inode *inode, struct file *file);
 loff_t gfs2_seek_data(struct file *file, loff_t offset);

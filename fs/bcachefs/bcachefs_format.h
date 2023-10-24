@@ -1222,7 +1222,7 @@ struct bch_sb_field {
 
 #define BCH_SB_FIELDS()				\
 	x(journal,	0)			\
-	x(members,	1)			\
+	x(members_v1,	1)			\
 	x(crypt,	2)			\
 	x(replicas_v0,	3)			\
 	x(quota,	4)			\
@@ -1231,7 +1231,8 @@ struct bch_sb_field {
 	x(replicas,	7)			\
 	x(journal_seq_blacklist, 8)		\
 	x(journal_v2,	9)			\
-	x(counters,	10)
+	x(counters,	10)			\
+	x(members_v2,	11)
 
 enum bch_sb_field_type {
 #define x(f, nr)	BCH_SB_FIELD_##f = nr,
@@ -1264,9 +1265,22 @@ struct bch_sb_field_journal_v2 {
 	}			d[];
 };
 
-/* BCH_SB_FIELD_members: */
+/* BCH_SB_FIELD_members_v1: */
 
 #define BCH_MIN_NR_NBUCKETS	(1 << 6)
+
+#define BCH_IOPS_MEASUREMENTS()			\
+	x(seqread,	0)			\
+	x(seqwrite,	1)			\
+	x(randread,	2)			\
+	x(randwrite,	3)
+
+enum bch_iops_measurement {
+#define x(t, n) BCH_IOPS_##t = n,
+	BCH_IOPS_MEASUREMENTS()
+#undef x
+	BCH_IOPS_NR
+};
 
 struct bch_member {
 	__uuid_t		uuid;
@@ -1276,17 +1290,20 @@ struct bch_member {
 	__le32			pad;
 	__le64			last_mount;	/* time_t */
 
-	__le64			flags[2];
+	__le64			flags;
+	__le32			iops[4];
 };
 
-LE64_BITMASK(BCH_MEMBER_STATE,		struct bch_member, flags[0],  0,  4)
+#define BCH_MEMBER_V1_BYTES	56
+
+LE64_BITMASK(BCH_MEMBER_STATE,		struct bch_member, flags,  0,  4)
 /* 4-14 unused, was TIER, HAS_(META)DATA, REPLACEMENT */
-LE64_BITMASK(BCH_MEMBER_DISCARD,	struct bch_member, flags[0], 14, 15)
-LE64_BITMASK(BCH_MEMBER_DATA_ALLOWED,	struct bch_member, flags[0], 15, 20)
-LE64_BITMASK(BCH_MEMBER_GROUP,		struct bch_member, flags[0], 20, 28)
-LE64_BITMASK(BCH_MEMBER_DURABILITY,	struct bch_member, flags[0], 28, 30)
+LE64_BITMASK(BCH_MEMBER_DISCARD,	struct bch_member, flags, 14, 15)
+LE64_BITMASK(BCH_MEMBER_DATA_ALLOWED,	struct bch_member, flags, 15, 20)
+LE64_BITMASK(BCH_MEMBER_GROUP,		struct bch_member, flags, 20, 28)
+LE64_BITMASK(BCH_MEMBER_DURABILITY,	struct bch_member, flags, 28, 30)
 LE64_BITMASK(BCH_MEMBER_FREESPACE_INITIALIZED,
-					struct bch_member, flags[0], 30, 31)
+					struct bch_member, flags, 30, 31)
 
 #if 0
 LE64_BITMASK(BCH_MEMBER_NR_READ_ERRORS,	struct bch_member, flags[1], 0,  20);
@@ -1306,9 +1323,16 @@ enum bch_member_state {
 	BCH_MEMBER_STATE_NR
 };
 
-struct bch_sb_field_members {
+struct bch_sb_field_members_v1 {
 	struct bch_sb_field	field;
-	struct bch_member	members[];
+	struct bch_member	_members[]; //Members are now variable size
+};
+
+struct bch_sb_field_members_v2 {
+	struct bch_sb_field	field;
+	__le16			member_bytes; //size of single member entry
+	u8			pad[6];
+	struct bch_member	_members[];
 };
 
 /* BCH_SB_FIELD_crypt: */

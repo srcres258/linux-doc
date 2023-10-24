@@ -343,7 +343,7 @@ int bch2_snapshot_lookup(struct btree_trans *trans, u32 id,
 				       BTREE_ITER_WITH_UPDATES, snapshot, s);
 }
 
-int bch2_snapshot_live(struct btree_trans *trans, u32 id)
+static int bch2_snapshot_live(struct btree_trans *trans, u32 id)
 {
 	struct bch_snapshot v;
 	int ret;
@@ -370,7 +370,7 @@ int bch2_snapshot_live(struct btree_trans *trans, u32 id)
  * it's part of such a linear chain: this correctly sets equivalence classes on
  * startup if we run leaf to root (i.e. in natural key order).
  */
-int bch2_snapshot_set_equiv(struct btree_trans *trans, struct bkey_s_c k)
+static int bch2_snapshot_set_equiv(struct btree_trans *trans, struct bkey_s_c k)
 {
 	struct bch_fs *c = trans->c;
 	unsigned i, nr_live = 0, live_idx = 0;
@@ -1071,6 +1071,10 @@ static int create_snapids(struct btree_trans *trans, u32 parent, u32 tree,
 			goto err;
 
 		new_snapids[i]	= iter.pos.offset;
+
+		mutex_lock(&c->snapshot_table_lock);
+		snapshot_t_mut(c, new_snapids[i])->equiv = new_snapids[i];
+		mutex_unlock(&c->snapshot_table_lock);
 	}
 err:
 	bch2_trans_iter_exit(trans, &iter);
@@ -1284,6 +1288,9 @@ static inline u32 bch2_snapshot_nth_parent_skip(struct bch_fs *c, u32 id, u32 n,
 						snapshot_id_list *skip)
 {
 	rcu_read_lock();
+	while (snapshot_list_has_id(skip, id))
+		id = __bch2_snapshot_parent(c, id);
+
 	while (n--) {
 		do {
 			id = __bch2_snapshot_parent(c, id);
@@ -1440,6 +1447,8 @@ int bch2_delete_dead_snapshots(struct bch_fs *c)
 		}
 	}
 
+	down_write(&c->snapshot_create_lock);
+
 	for_each_btree_key(trans, iter, BTREE_ID_snapshots,
 			   POS_MIN, 0, k, ret) {
 		u32 snapshot = k.k->p.offset;
@@ -1449,6 +1458,9 @@ int bch2_delete_dead_snapshots(struct bch_fs *c)
 			snapshot_list_add(c, &deleted_interior, snapshot);
 	}
 	bch2_trans_iter_exit(trans, &iter);
+
+	if (ret)
+		goto err_create_lock;
 
 	/*
 	 * Fixing children of deleted snapshots can't be done completely
@@ -1460,14 +1472,14 @@ int bch2_delete_dead_snapshots(struct bch_fs *c)
 				  NULL, NULL, BTREE_INSERT_NOFAIL,
 		bch2_fix_child_of_deleted_snapshot(trans, &iter, k, &deleted_interior));
 	if (ret)
-		goto err;
+		goto err_create_lock;
 
 	darray_for_each(deleted, i) {
 		ret = commit_do(trans, NULL, NULL, 0,
 			bch2_snapshot_node_delete(trans, *i));
 		if (ret) {
 			bch_err_msg(c, ret, "deleting snapshot %u", *i);
-			goto err;
+			goto err_create_lock;
 		}
 	}
 
@@ -1476,11 +1488,13 @@ int bch2_delete_dead_snapshots(struct bch_fs *c)
 			bch2_snapshot_node_delete(trans, *i));
 		if (ret) {
 			bch_err_msg(c, ret, "deleting snapshot %u", *i);
-			goto err;
+			goto err_create_lock;
 		}
 	}
 
 	clear_bit(BCH_FS_HAVE_DELETED_SNAPSHOTS, &c->flags);
+err_create_lock:
+	up_write(&c->snapshot_create_lock);
 err:
 	darray_exit(&deleted_interior);
 	darray_exit(&deleted);
@@ -1632,9 +1646,15 @@ int bch2_propagate_key_to_snapshot_leaves(struct btree_trans *trans,
 		if (!bch2_snapshot_is_ancestor(c, id, k.k->p.snapshot) ||
 		    !bch2_snapshot_is_leaf(c, id))
 			continue;
+again:
+		ret =   btree_trans_too_many_iters(trans) ?:
+			bch2_propagate_key_to_snapshot_leaf(trans, btree, k, id, new_min_pos) ?:
+			bch2_trans_commit(trans, NULL, NULL, 0);
+		if (ret && bch2_err_matches(ret, BCH_ERR_transaction_restart)) {
+			bch2_trans_begin(trans);
+			goto again;
+		}
 
-		ret = commit_do(trans, NULL, NULL, 0,
-				bch2_propagate_key_to_snapshot_leaf(trans, btree, k, id, new_min_pos));
 		if (ret)
 			break;
 	}

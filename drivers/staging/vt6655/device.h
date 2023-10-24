@@ -239,21 +239,21 @@ struct vnt_private {
 	bool bIsBeaconBufReadySet;
 	unsigned int	cbBeaconBufReadySetCnt;
 	bool bFixRate;
-	u16 byCurrentCh;
+	u16 current_ch;
 
 	bool bAES;
 
 	unsigned char byAutoFBCtrl;
 
 	/* For Update BaseBand VGA Gain Offset */
-	bool bUpdateBBVGA;
+	bool update_bbvga;
 	unsigned int	uBBVGADiffCount;
 	unsigned char bbvga_new;
 	unsigned char bbvga_current;
 	unsigned char bbvga[BB_VGA_LEVEL];
 	long                    dbm_threshold[BB_VGA_LEVEL];
 
-	unsigned char byBBPreEDRSSI;
+	unsigned char bb_pre_edrssi;
 	unsigned char byBBPreEDIndex;
 
 	unsigned long dwDiagRefCount;
@@ -264,7 +264,7 @@ struct vnt_private {
 	/* For RF Power table */
 	unsigned char byCCKPwr;
 	unsigned char byOFDMPwrG;
-	unsigned char byCurPwr;
+	unsigned char cur_pwr;
 	char	 byCurPwrdBm;
 	unsigned char abyCCKPwrTbl[CB_MAX_CHANNEL_24G + 1];
 	unsigned char abyOFDMPwrTbl[CB_MAX_CHANNEL + 1];

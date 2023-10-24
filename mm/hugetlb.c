@@ -2308,18 +2308,19 @@ static struct folio *alloc_fresh_hugetlb_folio(struct hstate *h,
 static void prep_and_add_allocated_folios(struct hstate *h,
 					struct list_head *folio_list)
 {
+	unsigned long flags;
 	struct folio *folio, *tmp_f;
 
 	/* Send list for bulk vmemmap optimization processing */
 	hugetlb_vmemmap_optimize_folios(h, folio_list);
 
 	/* Add all new pool pages to free lists in one lock cycle */
-	spin_lock_irq(&hugetlb_lock);
+	spin_lock_irqsave(&hugetlb_lock, flags);
 	list_for_each_entry_safe(folio, tmp_f, folio_list, lru) {
 		__prep_account_new_huge_page(h, folio_nid(folio));
 		enqueue_hugetlb_folio(h, folio);
 	}
-	spin_unlock_irq(&hugetlb_lock);
+	spin_unlock_irqrestore(&hugetlb_lock, flags);
 }
 
 /*
@@ -3360,13 +3361,14 @@ static void __init hugetlb_folio_init_vmemmap(struct folio *folio,
 static void __init prep_and_add_bootmem_folios(struct hstate *h,
 					struct list_head *folio_list)
 {
+	unsigned long flags;
 	struct folio *folio, *tmp_f;
 
 	/* Send list for bulk vmemmap optimization processing */
 	hugetlb_vmemmap_optimize_folios(h, folio_list);
 
 	/* Add all new pool pages to free lists in one lock cycle */
-	spin_lock_irq(&hugetlb_lock);
+	spin_lock_irqsave(&hugetlb_lock, flags);
 	list_for_each_entry_safe(folio, tmp_f, folio_list, lru) {
 		if (!folio_test_hugetlb_vmemmap_optimized(folio)) {
 			/*
@@ -3382,7 +3384,7 @@ static void __init prep_and_add_bootmem_folios(struct hstate *h,
 		__prep_account_new_huge_page(h, folio_nid(folio));
 		enqueue_hugetlb_folio(h, folio);
 	}
-	spin_unlock_irq(&hugetlb_lock);
+	spin_unlock_irqrestore(&hugetlb_lock, flags);
 }
 
 /*
@@ -3393,7 +3395,7 @@ static void __init gather_bootmem_prealloc(void)
 {
 	LIST_HEAD(folio_list);
 	struct huge_bootmem_page *m;
-	struct hstate *h, *prev_h = NULL;
+	struct hstate *h = NULL, *prev_h = NULL;
 
 	list_for_each_entry(m, &huge_boot_pages, list) {
 		struct page *page = virt_to_page(m);
@@ -3533,8 +3535,7 @@ static void __init hugetlb_hstate_alloc_pages(struct hstate *h)
 	}
 
 	/* list will be empty if hstate_is_gigantic */
-	if (!hstate_is_gigantic(h))
-		prep_and_add_allocated_folios(h, &folio_list);
+	prep_and_add_allocated_folios(h, &folio_list);
 
 	if (i < h->max_huge_pages) {
 		char buf[32];

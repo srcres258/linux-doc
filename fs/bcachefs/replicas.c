@@ -700,9 +700,9 @@ int bch2_sb_replicas_to_cpu_replicas(struct bch_fs *c)
 	struct bch_replicas_cpu new_r = { 0, 0, NULL };
 	int ret = 0;
 
-	if ((sb_v1 = bch2_sb_get_replicas(c->disk_sb.sb)))
+	if ((sb_v1 = bch2_sb_field_get(c->disk_sb.sb, replicas)))
 		ret = __bch2_sb_replicas_to_cpu_replicas(sb_v1, &new_r);
-	else if ((sb_v0 = bch2_sb_get_replicas_v0(c->disk_sb.sb)))
+	else if ((sb_v0 = bch2_sb_field_get(c->disk_sb.sb, replicas_v0)))
 		ret = __bch2_sb_replicas_v0_to_cpu_replicas(sb_v0, &new_r);
 	if (ret)
 		return ret;
@@ -732,13 +732,13 @@ static int bch2_cpu_replicas_to_sb_replicas_v0(struct bch_fs *c,
 	for_each_cpu_replicas_entry(r, src)
 		bytes += replicas_entry_bytes(src) - 1;
 
-	sb_r = bch2_sb_resize_replicas_v0(&c->disk_sb,
+	sb_r = bch2_sb_field_resize(&c->disk_sb, replicas_v0,
 			DIV_ROUND_UP(bytes, sizeof(u64)));
 	if (!sb_r)
 		return -BCH_ERR_ENOSPC_sb_replicas;
 
 	bch2_sb_field_delete(&c->disk_sb, BCH_SB_FIELD_replicas);
-	sb_r = bch2_sb_get_replicas_v0(c->disk_sb.sb);
+	sb_r = bch2_sb_field_get(c->disk_sb.sb, replicas_v0);
 
 	memset(&sb_r->entries, 0,
 	       vstruct_end(&sb_r->field) -
@@ -777,13 +777,13 @@ static int bch2_cpu_replicas_to_sb_replicas(struct bch_fs *c,
 	if (!need_v1)
 		return bch2_cpu_replicas_to_sb_replicas_v0(c, r);
 
-	sb_r = bch2_sb_resize_replicas(&c->disk_sb,
+	sb_r = bch2_sb_field_resize(&c->disk_sb, replicas,
 			DIV_ROUND_UP(bytes, sizeof(u64)));
 	if (!sb_r)
 		return -BCH_ERR_ENOSPC_sb_replicas;
 
 	bch2_sb_field_delete(&c->disk_sb, BCH_SB_FIELD_replicas_v0);
-	sb_r = bch2_sb_get_replicas(c->disk_sb.sb);
+	sb_r = bch2_sb_field_get(c->disk_sb.sb, replicas);
 
 	memset(&sb_r->entries, 0,
 	       vstruct_end(&sb_r->field) -
@@ -805,7 +805,6 @@ static int bch2_cpu_replicas_validate(struct bch_replicas_cpu *cpu_r,
 				      struct bch_sb *sb,
 				      struct printbuf *err)
 {
-	struct bch_sb_field_members *mi = bch2_sb_get_members(sb);
 	unsigned i, j;
 
 	sort_cmp_size(cpu_r->entries,
@@ -837,7 +836,7 @@ static int bch2_cpu_replicas_validate(struct bch_replicas_cpu *cpu_r,
 		}
 
 		for (j = 0; j < e->nr_devs; j++)
-			if (!bch2_dev_exists(sb, mi, e->devs[j])) {
+			if (!bch2_dev_exists(sb, e->devs[j])) {
 				prt_printf(err, "invalid device %u in entry ", e->devs[j]);
 				bch2_replicas_entry_to_text(err, e);
 				return -BCH_ERR_invalid_sb_replicas;
@@ -999,8 +998,8 @@ unsigned bch2_sb_dev_has_data(struct bch_sb *sb, unsigned dev)
 	struct bch_sb_field_replicas_v0 *replicas_v0;
 	unsigned i, data_has = 0;
 
-	replicas = bch2_sb_get_replicas(sb);
-	replicas_v0 = bch2_sb_get_replicas_v0(sb);
+	replicas = bch2_sb_field_get(sb, replicas);
+	replicas_v0 = bch2_sb_field_get(sb, replicas_v0);
 
 	if (replicas) {
 		struct bch_replicas_entry *r;

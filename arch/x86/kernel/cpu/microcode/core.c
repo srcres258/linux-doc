@@ -44,7 +44,7 @@
 #define DRIVER_VERSION	"2.2"
 
 static struct microcode_ops	*microcode_ops;
-static bool dis_ucode_ldr = true;
+bool dis_ucode_ldr = true;
 
 bool force_minrev = IS_ENABLED(CONFIG_MICROCODE_LATE_FORCE_MINREV);
 module_param(force_minrev, bool, S_IRUSR | S_IWUSR);
@@ -191,12 +191,9 @@ struct cpio_data __init find_microcode_in_initrd(const char *path)
 
 #ifdef CONFIG_X86_32
 	size = boot_params.hdr.ramdisk_size;
-	/*
-	 * Set start only if we have an initrd image. We cannot use initrd_start
-	 * because it is not set that early yet.
-	 */
+	/* Early load on BSP has a temporary mapping. */
 	if (size)
-		start = boot_params.hdr.ramdisk_image;
+		start = initrd_start_early;
 
 #else /* CONFIG_X86_64 */
 	size  = (unsigned long)boot_params.ext_ramdisk_size << 32;

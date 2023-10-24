@@ -542,6 +542,7 @@ static int __collapse_huge_page_isolate(struct vm_area_struct *vma,
 					struct collapse_control *cc,
 					struct list_head *compound_pagelist)
 {
+	struct page *page = NULL;
 	struct folio *folio = NULL;
 	pte_t *_pte;
 	int none_or_zero = 0, shared = 0, result = SCAN_FAIL, referenced = 0;
@@ -577,6 +578,7 @@ static int __collapse_huge_page_isolate(struct vm_area_struct *vma,
 			goto out;
 		}
 
+		folio = page_folio(page);
 		VM_BUG_ON_FOLIO(!folio_test_anon(folio), folio);
 
 		if (folio_estimated_sharers(folio) > 1) {
@@ -1063,8 +1065,10 @@ static int alloc_charge_hpage(struct page **hpage, struct mm_struct *mm,
 	int node = hpage_collapse_find_target_node(cc);
 	struct folio *folio;
 
-	if (!hpage_collapse_alloc_folio(&folio, gfp, node, &cc->alloc_nmask))
+	if (!hpage_collapse_alloc_folio(&folio, gfp, node, &cc->alloc_nmask)) {
+		*hpage = NULL;
 		return SCAN_ALLOC_HUGE_PAGE_FAIL;
+	}
 
 	if (unlikely(mem_cgroup_charge(folio, mm, gfp))) {
 		folio_put(folio);
@@ -1072,9 +1076,9 @@ static int alloc_charge_hpage(struct page **hpage, struct mm_struct *mm,
 		return SCAN_CGROUP_CHARGE_FAIL;
 	}
 
-	*hpage = folio_page(folio, 0);
-	count_memcg_page_event(*hpage, THP_COLLAPSE_ALLOC);
+	count_memcg_folio_events(folio, THP_COLLAPSE_ALLOC, 1);
 
+	*hpage = folio_page(folio, 0);
 	return SCAN_SUCCEED;
 }
 
@@ -1247,6 +1251,7 @@ static int hpage_collapse_scan_pmd(struct mm_struct *mm,
 	pte_t *pte, *_pte;
 	int result = SCAN_FAIL, referenced = 0;
 	int none_or_zero = 0, shared = 0;
+	struct page *page = NULL;
 	struct folio *folio = NULL;
 	unsigned long _address;
 	spinlock_t *ptl;
@@ -1334,6 +1339,7 @@ static int hpage_collapse_scan_pmd(struct mm_struct *mm,
 			}
 		}
 
+		folio = page_folio(page);
 		/*
 		 * Record which node the original page is from and save this
 		 * information to cc->node_load[].
@@ -1508,7 +1514,7 @@ int collapse_pte_mapped_thp(struct mm_struct *mm, unsigned long addr,
 
 	folio = filemap_lock_folio(vma->vm_file->f_mapping,
 			       linear_page_index(vma, haddr));
-	if (!folio)
+	if (IS_ERR(folio))
 		return SCAN_PAGE_NULL;
 
 	if (folio_order(folio) != HPAGE_PMD_ORDER) {

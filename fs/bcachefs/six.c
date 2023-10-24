@@ -319,7 +319,7 @@ bool six_relock_ip(struct six_lock *lock, enum six_lock_type type,
 }
 EXPORT_SYMBOL_GPL(six_relock_ip);
 
-#ifdef CONFIG_LOCK_SPIN_ON_OWNER
+#ifdef CONFIG_SIX_LOCK_SPIN_ON_OWNER
 
 static inline bool six_can_spin_on_owner(struct six_lock *lock)
 {
@@ -439,7 +439,7 @@ fail:
 	return false;
 }
 
-#else /* CONFIG_LOCK_SPIN_ON_OWNER */
+#else /* CONFIG_SIX_LOCK_SPIN_ON_OWNER */
 
 static inline bool six_optimistic_spin(struct six_lock *lock, enum six_lock_type type)
 {

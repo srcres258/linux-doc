@@ -35,13 +35,27 @@
 
 #define QSTR(n) { { { .len = strlen(n) } }, .name = n }
 
+static bool btree_id_is_alloc(enum btree_id id)
+{
+	switch (id) {
+	case BTREE_ID_alloc:
+	case BTREE_ID_backpointers:
+	case BTREE_ID_need_discard:
+	case BTREE_ID_freespace:
+	case BTREE_ID_bucket_gens:
+		return true;
+	default:
+		return false;
+	}
+}
+
 /* for -o reconstruct_alloc: */
 static void drop_alloc_keys(struct journal_keys *keys)
 {
 	size_t src, dst;
 
 	for (src = 0, dst = 0; src < keys->nr; src++)
-		if (keys->d[src].btree_id != BTREE_ID_alloc)
+		if (!btree_id_is_alloc(keys->d[src].btree_id))
 			keys->d[dst++] = keys->d[src];
 
 	keys->nr = dst;
@@ -332,20 +346,6 @@ static int journal_replay_early(struct bch_fs *c,
 
 /* sb clean section: */
 
-static bool btree_id_is_alloc(enum btree_id id)
-{
-	switch (id) {
-	case BTREE_ID_alloc:
-	case BTREE_ID_backpointers:
-	case BTREE_ID_need_discard:
-	case BTREE_ID_freespace:
-	case BTREE_ID_bucket_gens:
-		return true;
-	default:
-		return false;
-	}
-}
-
 static int read_btree_roots(struct bch_fs *c)
 {
 	unsigned i;
@@ -374,13 +374,12 @@ static int read_btree_roots(struct bch_fs *c)
 
 		ret = bch2_btree_root_read(c, i, &r->key, r->level);
 		if (ret) {
-			__fsck_err(c,
-				   btree_id_is_alloc(i)
-				   ? FSCK_CAN_IGNORE : 0,
-				   "error reading btree root %s",
-				   bch2_btree_ids[i]);
+			fsck_err(c,
+				 "error reading btree root %s",
+				 bch2_btree_ids[i]);
 			if (btree_id_is_alloc(i))
 				c->sb.compat &= ~(1ULL << BCH_COMPAT_alloc_info);
+			ret = 0;
 		}
 	}
 
@@ -645,7 +644,7 @@ int bch2_fs_recovery(struct bch_fs *c)
 {
 	struct bch_sb_field_clean *clean = NULL;
 	struct jset *last_journal_entry = NULL;
-	u64 last_seq, blacklist_seq, journal_seq;
+	u64 last_seq = 0, blacklist_seq, journal_seq;
 	bool write_sb = false;
 	int ret = 0;
 

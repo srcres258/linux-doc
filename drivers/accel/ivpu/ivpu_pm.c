@@ -246,6 +246,19 @@ int ivpu_rpm_get(struct ivpu_device *vdev)
 	return ret;
 }
 
+int ivpu_rpm_get_if_active(struct ivpu_device *vdev)
+{
+	int ret;
+
+	ivpu_dbg(vdev, RPM, "rpm_get_if_active count %d\n",
+		 atomic_read(&vdev->drm.dev->power.usage_count));
+
+	ret = pm_runtime_get_if_active(vdev->drm.dev, false);
+	drm_WARN_ON(&vdev->drm, ret < 0);
+
+	return ret;
+}
+
 void ivpu_rpm_put(struct ivpu_device *vdev)
 {
 	pm_runtime_mark_last_busy(vdev->drm.dev);
@@ -261,7 +274,8 @@ void ivpu_pm_reset_prepare_cb(struct pci_dev *pdev)
 	ivpu_dbg(vdev, PM, "Pre-reset..\n");
 	atomic_inc(&vdev->pm->reset_counter);
 	atomic_set(&vdev->pm->in_reset, 1);
-	ivpu_shutdown(vdev);
+	ivpu_prepare_for_reset(vdev);
+	ivpu_hw_reset(vdev);
 	ivpu_pm_prepare_cold_boot(vdev);
 	ivpu_jobs_abort_all(vdev);
 	ivpu_dbg(vdev, PM, "Pre-reset done.\n");

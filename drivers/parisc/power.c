@@ -210,7 +210,7 @@ static int __init power_init(void)
 	}
 
 	power_task = NULL;
-	if (running_on_qemu)
+	if (running_on_qemu && soft_power_reg)
 		register_sys_off_handler(SYS_OFF_MODE_POWER_OFF, SYS_OFF_PRIO_DEFAULT,
 					qemu_power_off, (void *)soft_power_reg);
 	else

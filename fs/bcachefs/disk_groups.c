@@ -25,19 +25,18 @@ static int bch2_sb_disk_groups_validate(struct bch_sb *sb,
 	struct bch_sb_field_disk_groups *groups =
 		field_to_type(f, disk_groups);
 	struct bch_disk_group *g, *sorted = NULL;
-	struct bch_sb_field_members *mi = bch2_sb_get_members(sb);
 	unsigned nr_groups = disk_groups_nr(groups);
 	unsigned i, len;
 	int ret = 0;
 
 	for (i = 0; i < sb->nr_devices; i++) {
-		struct bch_member *m = mi->members + i;
+		struct bch_member m = bch2_sb_member_get(sb, i);
 		unsigned group_id;
 
-		if (!BCH_MEMBER_GROUP(m))
+		if (!BCH_MEMBER_GROUP(&m))
 			continue;
 
-		group_id = BCH_MEMBER_GROUP(m) - 1;
+		group_id = BCH_MEMBER_GROUP(&m) - 1;
 
 		if (group_id >= nr_groups) {
 			prt_printf(err, "disk %u has invalid label %u (have %u)",
@@ -152,22 +151,19 @@ const struct bch_sb_field_ops bch_sb_field_ops_disk_groups = {
 
 int bch2_sb_disk_groups_to_cpu(struct bch_fs *c)
 {
-	struct bch_sb_field_members *mi;
 	struct bch_sb_field_disk_groups *groups;
 	struct bch_disk_groups_cpu *cpu_g, *old_g;
 	unsigned i, g, nr_groups;
 
 	lockdep_assert_held(&c->sb_lock);
 
-	mi		= bch2_sb_get_members(c->disk_sb.sb);
-	groups		= bch2_sb_get_disk_groups(c->disk_sb.sb);
+	groups		= bch2_sb_field_get(c->disk_sb.sb, disk_groups);
 	nr_groups	= disk_groups_nr(groups);
 
 	if (!groups)
 		return 0;
 
-	cpu_g = kzalloc(sizeof(*cpu_g) +
-			sizeof(cpu_g->entries[0]) * nr_groups, GFP_KERNEL);
+	cpu_g = kzalloc(struct_size(cpu_g, entries, nr_groups), GFP_KERNEL);
 	if (!cpu_g)
 		return -BCH_ERR_ENOMEM_disk_groups_to_cpu;
 
@@ -182,13 +178,13 @@ int bch2_sb_disk_groups_to_cpu(struct bch_fs *c)
 	}
 
 	for (i = 0; i < c->disk_sb.sb->nr_devices; i++) {
-		struct bch_member *m = mi->members + i;
+		struct bch_member m = bch2_sb_member_get(c->disk_sb.sb, i);
 		struct bch_disk_group_cpu *dst;
 
-		if (!bch2_member_exists(m))
+		if (!bch2_member_exists(&m))
 			continue;
 
-		g = BCH_MEMBER_GROUP(m);
+		g = BCH_MEMBER_GROUP(&m);
 		while (g) {
 			dst = &cpu_g->entries[g - 1];
 			__set_bit(i, dst->devs.d);
@@ -299,7 +295,7 @@ static int __bch2_disk_group_add(struct bch_sb_handle *sb, unsigned parent,
 				 const char *name, unsigned namelen)
 {
 	struct bch_sb_field_disk_groups *groups =
-		bch2_sb_get_disk_groups(sb->sb);
+		bch2_sb_field_get(sb->sb, disk_groups);
 	unsigned i, nr_groups = disk_groups_nr(groups);
 	struct bch_disk_group *g;
 
@@ -317,7 +313,7 @@ static int __bch2_disk_group_add(struct bch_sb_handle *sb, unsigned parent,
 			 sizeof(struct bch_disk_group) * (nr_groups + 1)) /
 			sizeof(u64);
 
-		groups = bch2_sb_resize_disk_groups(sb, u64s);
+		groups = bch2_sb_field_resize(sb, disk_groups, u64s);
 		if (!groups)
 			return -BCH_ERR_ENOSPC_disk_label_add;
 
@@ -341,7 +337,7 @@ static int __bch2_disk_group_add(struct bch_sb_handle *sb, unsigned parent,
 int bch2_disk_path_find(struct bch_sb_handle *sb, const char *name)
 {
 	struct bch_sb_field_disk_groups *groups =
-		bch2_sb_get_disk_groups(sb->sb);
+		bch2_sb_field_get(sb->sb, disk_groups);
 	int v = -1;
 
 	do {
@@ -371,7 +367,7 @@ int bch2_disk_path_find_or_create(struct bch_sb_handle *sb, const char *name)
 		if (*next == '.')
 			next++;
 
-		groups = bch2_sb_get_disk_groups(sb->sb);
+		groups = bch2_sb_field_get(sb->sb, disk_groups);
 
 		v = __bch2_disk_group_find(groups, parent, name, len);
 		if (v < 0)
@@ -389,7 +385,7 @@ int bch2_disk_path_find_or_create(struct bch_sb_handle *sb, const char *name)
 void bch2_disk_path_to_text(struct printbuf *out, struct bch_sb *sb, unsigned v)
 {
 	struct bch_sb_field_disk_groups *groups =
-		bch2_sb_get_disk_groups(sb);
+		bch2_sb_field_get(sb, disk_groups);
 	struct bch_disk_group *g;
 	unsigned nr = 0;
 	u16 path[32];
@@ -443,7 +439,7 @@ int __bch2_dev_group_set(struct bch_fs *c, struct bch_dev *ca, const char *name)
 	if (ret)
 		return ret;
 
-	mi = &bch2_sb_get_members(c->disk_sb.sb)->members[ca->dev_idx];
+	mi = bch2_members_v2_get_mut(c->disk_sb.sb, ca->dev_idx);
 	SET_BCH_MEMBER_GROUP(mi, v + 1);
 	return 0;
 }
@@ -528,12 +524,11 @@ void bch2_opt_target_to_text(struct printbuf *out,
 
 			rcu_read_unlock();
 		} else {
-			struct bch_sb_field_members *mi = bch2_sb_get_members(sb);
-			struct bch_member *m = mi->members + t.dev;
+			struct bch_member m = bch2_sb_member_get(sb, t.dev);
 
-			if (bch2_dev_exists(sb, mi, t.dev)) {
+			if (bch2_dev_exists(sb, t.dev)) {
 				prt_printf(out, "Device ");
-				pr_uuid(out, m->uuid.b);
+				pr_uuid(out, m.uuid.b);
 				prt_printf(out, " (%u)", t.dev);
 			} else {
 				prt_printf(out, "Bad device %u", t.dev);

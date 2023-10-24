@@ -12,6 +12,7 @@
 #include <linux/hugetlb.h>
 #include <linux/slab.h>
 #include <linux/sort.h>
+#include <asm/page-states.h>
 #include <asm/cacheflush.h>
 #include <asm/nospec-branch.h>
 #include <asm/ctlreg.h>
@@ -46,8 +47,11 @@ void *vmem_crst_alloc(unsigned long val)
 	unsigned long *table;
 
 	table = vmem_alloc_pages(CRST_ALLOC_ORDER);
-	if (table)
-		crst_table_init(table, val);
+	if (!table)
+		return NULL;
+	crst_table_init(table, val);
+	if (slab_is_available())
+		arch_set_page_dat(virt_to_page(table), CRST_ALLOC_ORDER);
 	return table;
 }
 
@@ -499,6 +503,8 @@ int __meminit vmemmap_populate(unsigned long start, unsigned long end, int node,
 	return ret;
 }
 
+#ifdef CONFIG_MEMORY_HOTPLUG
+
 void vmemmap_free(unsigned long start, unsigned long end,
 		  struct vmem_altmap *altmap)
 {
@@ -506,6 +512,8 @@ void vmemmap_free(unsigned long start, unsigned long end,
 	remove_pagetable(start, end, false);
 	mutex_unlock(&vmem_mutex);
 }
+
+#endif
 
 void vmem_remove_mapping(unsigned long start, unsigned long size)
 {

@@ -131,6 +131,22 @@ static int ivpu_get_capabilities(struct ivpu_device *vdev, struct drm_ivpu_param
 	return 0;
 }
 
+static int ivpu_get_core_clock_rate(struct ivpu_device *vdev, u64 *clk_rate)
+{
+	int ret;
+
+	ret = ivpu_rpm_get_if_active(vdev);
+	if (ret < 0)
+		return ret;
+
+	*clk_rate = ret ? ivpu_hw_reg_pll_freq_get(vdev) : 0;
+
+	if (ret)
+		ivpu_rpm_put(vdev);
+
+	return 0;
+}
+
 static int ivpu_get_param_ioctl(struct drm_device *dev, void *data, struct drm_file *file)
 {
 	struct ivpu_file_priv *file_priv = file->driver_priv;
@@ -154,7 +170,7 @@ static int ivpu_get_param_ioctl(struct drm_device *dev, void *data, struct drm_f
 		args->value = vdev->platform;
 		break;
 	case DRM_IVPU_PARAM_CORE_CLOCK_RATE:
-		args->value = ivpu_hw_reg_pll_freq_get(vdev);
+		ret = ivpu_get_core_clock_rate(vdev, &args->value);
 		break;
 	case DRM_IVPU_PARAM_NUM_CONTEXTS:
 		args->value = ivpu_get_context_count(vdev);
@@ -367,14 +383,19 @@ int ivpu_boot(struct ivpu_device *vdev)
 	return 0;
 }
 
-int ivpu_shutdown(struct ivpu_device *vdev)
+void ivpu_prepare_for_reset(struct ivpu_device *vdev)
 {
-	int ret;
-
 	ivpu_hw_irq_disable(vdev);
 	disable_irq(vdev->irq);
 	ivpu_ipc_disable(vdev);
 	ivpu_mmu_disable(vdev);
+}
+
+int ivpu_shutdown(struct ivpu_device *vdev)
+{
+	int ret;
+
+	ivpu_prepare_for_reset(vdev);
 
 	ret = ivpu_hw_power_down(vdev);
 	if (ret)

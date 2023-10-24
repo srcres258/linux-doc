@@ -90,6 +90,9 @@ static inline unsigned int x86_cpuid_family(void)
 	return x86_family(eax);
 }
 
+extern bool dis_ucode_ldr;
+extern bool force_minrev;
+
 #ifdef CONFIG_CPU_SUP_AMD
 void load_ucode_amd_bsp(unsigned int family);
 void load_ucode_amd_ap(unsigned int family);

@@ -12,6 +12,11 @@
 
 #define x(t, n, ...) [n] = #t,
 
+const char * const bch2_iops_measurements[] = {
+	BCH_IOPS_MEASUREMENTS()
+	NULL
+};
+
 const char * const bch2_error_actions[] = {
 	BCH_ERROR_ACTIONS()
 	NULL
@@ -471,8 +476,9 @@ int bch2_parse_mount_opts(struct bch_fs *c, struct bch_opts *opts,
 			val = "0";
 		}
 
+		/* Unknown options are ignored: */
 		if (id < 0)
-			goto bad_opt;
+			continue;
 
 		if (!(bch2_opt_table[id].flags & OPT_MOUNT))
 			goto bad_opt;

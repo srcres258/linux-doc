@@ -1012,20 +1012,20 @@ void bdev_mark_dead(struct block_device *bdev, bool surprise)
 	mutex_lock(&bdev->bd_holder_lock);
 	if (bdev->bd_holder_ops && bdev->bd_holder_ops->mark_dead)
 		bdev->bd_holder_ops->mark_dead(bdev, surprise);
-	else
+	else {
+		mutex_unlock(&bdev->bd_holder_lock);
 		sync_blockdev(bdev);
-	mutex_unlock(&bdev->bd_holder_lock);
+	}
 
 	invalidate_bdev(bdev);
 }
-#ifdef CONFIG_DASD_MODULE
 /*
- * Drivers should not use this directly, but the DASD driver has historically
- * had a shutdown to offline mode that doesn't actually remove the gendisk
- * that otherwise looks a lot like a safe device removal.
+ * New drivers should not use this directly.  There are some drivers however
+ * that needs this for historical reasons. For example, the DASD driver has
+ * historically had a shutdown to offline mode that doesn't actually remove the
+ * gendisk that otherwise looks a lot like a safe device removal.
  */
 EXPORT_SYMBOL_GPL(bdev_mark_dead);
-#endif
 
 void sync_bdevs(bool wait)
 {

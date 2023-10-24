@@ -2,6 +2,11 @@
 #ifndef _BCACHEFS_SB_MEMBERS_H
 #define _BCACHEFS_SB_MEMBERS_H
 
+int bch2_members_v2_init(struct bch_fs *c);
+int bch_members_cpy_v2_v1(struct bch_sb_handle *disk_sb);
+struct bch_member *bch2_members_v2_get_mut(struct bch_sb *sb, int i);
+struct bch_member bch2_sb_member_get(struct bch_sb *sb, int i);
+
 static inline bool bch2_dev_is_online(struct bch_dev *ca)
 {
 	return !percpu_ref_is_zero(&ca->io_ref);
@@ -171,6 +176,7 @@ static inline struct bch_devs_mask bch2_online_devs(struct bch_fs *c)
 	return devs;
 }
 
-extern const struct bch_sb_field_ops bch_sb_field_ops_members;
+extern const struct bch_sb_field_ops bch_sb_field_ops_members_v1;
+extern const struct bch_sb_field_ops bch_sb_field_ops_members_v2;
 
 #endif /* _BCACHEFS_SB_MEMBERS_H */

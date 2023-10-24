@@ -96,7 +96,7 @@ const char * const bch2_sb_fields[] = {
 static int bch2_sb_field_validate(struct bch_sb *, struct bch_sb_field *,
 				  struct printbuf *);
 
-struct bch_sb_field *bch2_sb_field_get(struct bch_sb *sb,
+struct bch_sb_field *bch2_sb_field_get_id(struct bch_sb *sb,
 				      enum bch_sb_field_type type)
 {
 	struct bch_sb_field *f;
@@ -151,7 +151,7 @@ static struct bch_sb_field *__bch2_sb_field_resize(struct bch_sb_handle *sb,
 void bch2_sb_field_delete(struct bch_sb_handle *sb,
 			  enum bch_sb_field_type type)
 {
-	struct bch_sb_field *f = bch2_sb_field_get(sb->sb, type);
+	struct bch_sb_field *f = bch2_sb_field_get_id(sb->sb, type);
 
 	if (f)
 		__bch2_sb_field_resize(sb, f, 0);
@@ -225,11 +225,11 @@ int bch2_sb_realloc(struct bch_sb_handle *sb, unsigned u64s)
 	return 0;
 }
 
-struct bch_sb_field *bch2_sb_field_resize(struct bch_sb_handle *sb,
+struct bch_sb_field *bch2_sb_field_resize_id(struct bch_sb_handle *sb,
 					  enum bch_sb_field_type type,
 					  unsigned u64s)
 {
-	struct bch_sb_field *f = bch2_sb_field_get(sb->sb, type);
+	struct bch_sb_field *f = bch2_sb_field_get_id(sb->sb, type);
 	ssize_t old_u64s = f ? le32_to_cpu(f->u64s) : 0;
 	ssize_t d = -old_u64s + u64s;
 
@@ -255,7 +255,7 @@ struct bch_sb_field *bch2_sb_field_resize(struct bch_sb_handle *sb,
 		}
 	}
 
-	f = bch2_sb_field_get(sb->sb, type);
+	f = bch2_sb_field_get_id(sb->sb, type);
 	f = __bch2_sb_field_resize(sb, f, u64s);
 	if (f)
 		f->type = cpu_to_le32(type);
@@ -355,7 +355,7 @@ static int bch2_sb_validate(struct bch_sb_handle *disk_sb, struct printbuf *out,
 {
 	struct bch_sb *sb = disk_sb->sb;
 	struct bch_sb_field *f;
-	struct bch_sb_field_members *mi;
+	struct bch_sb_field_members_v1 *mi;
 	enum bch_opt_id opt_id;
 	u16 block_size;
 	int ret;
@@ -458,7 +458,7 @@ static int bch2_sb_validate(struct bch_sb_handle *disk_sb, struct printbuf *out,
 	}
 
 	/* members must be validated first: */
-	mi = bch2_sb_get_members(sb);
+	mi = bch2_sb_field_get(sb, members_v1);
 	if (!mi) {
 		prt_printf(out, "Invalid superblock: member info area missing");
 		return -BCH_ERR_invalid_sb_members_missing;
@@ -469,7 +469,7 @@ static int bch2_sb_validate(struct bch_sb_handle *disk_sb, struct printbuf *out,
 		return ret;
 
 	vstruct_for_each(sb, f) {
-		if (le32_to_cpu(f->type) == BCH_SB_FIELD_members)
+		if (le32_to_cpu(f->type) == BCH_SB_FIELD_members_v1)
 			continue;
 
 		ret = bch2_sb_field_validate(sb, f, out);
@@ -485,7 +485,6 @@ static int bch2_sb_validate(struct bch_sb_handle *disk_sb, struct printbuf *out,
 static void bch2_sb_update(struct bch_fs *c)
 {
 	struct bch_sb *src = c->disk_sb.sb;
-	struct bch_sb_field_members *mi = bch2_sb_get_members(src);
 	struct bch_dev *ca;
 	unsigned i;
 
@@ -511,8 +510,10 @@ static void bch2_sb_update(struct bch_fs *c)
 	c->sb.features		= le64_to_cpu(src->features[0]);
 	c->sb.compat		= le64_to_cpu(src->compat[0]);
 
-	for_each_member_device(ca, c, i)
-		ca->mi = bch2_mi_to_cpu(mi->members + i);
+	for_each_member_device(ca, c, i) {
+		struct bch_member m = bch2_sb_member_get(src, i);
+		ca->mi = bch2_mi_to_cpu(&m);
+	}
 }
 
 static int __copy_super(struct bch_sb_handle *dst_handle, struct bch_sb *src)
@@ -545,8 +546,8 @@ static int __copy_super(struct bch_sb_handle *dst_handle, struct bch_sb *src)
 		if ((1U << i) & BCH_SINGLE_DEVICE_SB_FIELDS)
 			continue;
 
-		src_f = bch2_sb_field_get(src, i);
-		dst_f = bch2_sb_field_get(dst, i);
+		src_f = bch2_sb_field_get_id(src, i);
+		dst_f = bch2_sb_field_get_id(dst, i);
 
 		d = (src_f ? le32_to_cpu(src_f->u64s) : 0) -
 		    (dst_f ? le32_to_cpu(dst_f->u64s) : 0);
@@ -558,7 +559,7 @@ static int __copy_super(struct bch_sb_handle *dst_handle, struct bch_sb *src)
 				return ret;
 
 			dst = dst_handle->sb;
-			dst_f = bch2_sb_field_get(dst, i);
+			dst_f = bch2_sb_field_get_id(dst, i);
 		}
 
 		dst_f = __bch2_sb_field_resize(dst_handle, dst_f,
@@ -675,7 +676,7 @@ retry:
 
 #ifndef __KERNEL__
 	if (opt_get(*opts, direct_io) == false)
-		sb->mode |= FMODE_BUFFERED;
+		sb->mode |= BLK_OPEN_BUFFERED;
 #endif
 
 	if (!opt_get(*opts, noexcl))
@@ -891,6 +892,7 @@ int bch2_write_super(struct bch_fs *c)
 	SET_BCH_SB_BIG_ENDIAN(c->disk_sb.sb, CPU_BIG_ENDIAN);
 
 	bch2_sb_counters_from_cpu(c);
+	bch_members_cpy_v2_v1(&c->disk_sb);
 
 	for_each_online_member(ca, c, i)
 		bch2_sb_from_fs(c, ca);
@@ -1125,7 +1127,6 @@ void bch2_sb_layout_to_text(struct printbuf *out, struct bch_sb_layout *l)
 void bch2_sb_to_text(struct printbuf *out, struct bch_sb *sb,
 		     bool print_layout, unsigned fields)
 {
-	struct bch_sb_field_members *mi;
 	struct bch_sb_field *f;
 	u64 fields_have = 0;
 	unsigned nr_devices = 0;
@@ -1133,15 +1134,8 @@ void bch2_sb_to_text(struct printbuf *out, struct bch_sb *sb,
 	if (!out->nr_tabstops)
 		printbuf_tabstop_push(out, 44);
 
-	mi = bch2_sb_get_members(sb);
-	if (mi) {
-		struct bch_member *m;
-
-		for (m = mi->members;
-		     m < mi->members + sb->nr_devices;
-		     m++)
-			nr_devices += bch2_member_exists(m);
-	}
+	for (int i = 0; i < sb->nr_devices; i++)
+		nr_devices += bch2_dev_exists(sb, i);
 
 	prt_printf(out, "External UUID:");
 	prt_tab(out);

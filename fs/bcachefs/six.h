@@ -124,9 +124,12 @@
  */
 
 #include <linux/lockdep.h>
-#include <linux/osq_lock.h>
 #include <linux/sched.h>
 #include <linux/types.h>
+
+#ifdef CONFIG_SIX_LOCK_SPIN_ON_OWNER
+#include <linux/osq_lock.h>
+#endif
 
 enum six_lock_type {
 	SIX_LOCK_read,
@@ -140,7 +143,9 @@ struct six_lock {
 	unsigned		intent_lock_recurse;
 	struct task_struct	*owner;
 	unsigned __percpu	*readers;
+#ifdef CONFIG_SIX_LOCK_SPIN_ON_OWNER
 	struct optimistic_spin_queue osq;
+#endif
 	raw_spinlock_t		wait_lock;
 	struct list_head	wait_list;
 #ifdef CONFIG_DEBUG_LOCK_ALLOC

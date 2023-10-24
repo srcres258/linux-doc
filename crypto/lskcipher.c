@@ -194,14 +194,6 @@ int crypto_lskcipher_decrypt(struct crypto_lskcipher *tfm, const u8 *src,
 }
 EXPORT_SYMBOL_GPL(crypto_lskcipher_decrypt);
 
-int crypto_lskcipher_setkey_sg(struct crypto_skcipher *tfm, const u8 *key,
-			       unsigned int keylen)
-{
-	struct crypto_lskcipher **ctx = crypto_skcipher_ctx(tfm);
-
-	return crypto_lskcipher_setkey(*ctx, key, keylen);
-}
-
 static int crypto_lskcipher_crypt_sg(struct skcipher_request *req,
 				     int (*crypt)(struct crypto_lskcipher *tfm,
 						  const u8 *src, u8 *dst,
@@ -583,6 +575,7 @@ struct lskcipher_instance *lskcipher_alloc_instance_simple(
 	if (ecb_name[0]) {
 		int len;
 
+		err = -EINVAL;
 		len = strscpy(ecb_name, &cipher_alg->co.base.cra_name[4],
 			      sizeof(ecb_name));
 		if (len < 2)

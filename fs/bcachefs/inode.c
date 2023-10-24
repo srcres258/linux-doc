@@ -357,9 +357,7 @@ int bch2_inode_peek(struct btree_trans *trans,
 		    subvol_inum inum, unsigned flags)
 {
 	int ret = bch2_inode_peek_nowarn(trans, iter, inode, inum, flags);
-
-	if (ret && !bch2_err_matches(ret, BCH_ERR_transaction_restart))
-		bch_err_msg(trans->c, ret, "looking up inum %u:%llu:", inum.subvol, inum.inum);
+	bch_err_msg(trans->c, ret, "looking up inum %u:%llu:", inum.subvol, inum.inum);
 	return ret;
 }
 
@@ -782,6 +780,7 @@ static int bch2_inode_delete_keys(struct btree_trans *trans,
 	struct btree_iter iter;
 	struct bkey_s_c k;
 	struct bkey_i delete;
+	struct bpos end = POS(inum.inum, U64_MAX);
 	u32 snapshot;
 	int ret = 0;
 
@@ -790,7 +789,7 @@ static int bch2_inode_delete_keys(struct btree_trans *trans,
 	 * extent iterator:
 	 */
 	bch2_trans_iter_init(trans, &iter, id, POS(inum.inum, 0),
-			     BTREE_ITER_INTENT|BTREE_ITER_NOT_EXTENTS);
+			     BTREE_ITER_INTENT);
 
 	while (1) {
 		bch2_trans_begin(trans);
@@ -801,7 +800,7 @@ static int bch2_inode_delete_keys(struct btree_trans *trans,
 
 		bch2_btree_iter_set_snapshot(&iter, snapshot);
 
-		k = bch2_btree_iter_peek_upto(&iter, POS(inum.inum, U64_MAX));
+		k = bch2_btree_iter_peek_upto(&iter, end);
 		ret = bkey_err(k);
 		if (ret)
 			goto err;
@@ -811,6 +810,11 @@ static int bch2_inode_delete_keys(struct btree_trans *trans,
 
 		bkey_init(&delete.k);
 		delete.k.p = iter.pos;
+
+		if (iter.flags & BTREE_ITER_IS_EXTENTS)
+			bch2_key_resize(&delete.k,
+					bpos_min(end, k.k->p).offset -
+					iter.pos.offset);
 
 		ret = bch2_trans_update(trans, &iter, &delete, 0) ?:
 		      bch2_trans_commit(trans, NULL, NULL,

@@ -530,7 +530,7 @@ static int __init save_microcode_in_initrd(void)
 	enum ucode_state ret;
 	struct cpio_data cp;
 
-	if (c->x86_vendor != X86_VENDOR_AMD || c->x86 < 0x10)
+	if (dis_ucode_ldr || c->x86_vendor != X86_VENDOR_AMD || c->x86 < 0x10)
 		return 0;
 
 	find_blobs_in_containers(cpuid_1_eax, &cp);

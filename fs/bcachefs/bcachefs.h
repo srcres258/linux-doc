@@ -293,9 +293,17 @@ do {									\
 	printk_ratelimited(KERN_ERR bch2_fmt_inum_offset(c, _inum, _offset, fmt), ##__VA_ARGS__)
 
 #define bch_err_fn(_c, _ret)						\
-	 bch_err(_c, "%s(): error %s", __func__, bch2_err_str(_ret))
+do {									\
+	if (_ret && !bch2_err_matches(_ret, BCH_ERR_transaction_restart))\
+		bch_err(_c, "%s(): error %s", __func__, bch2_err_str(_ret));\
+} while (0)
+
 #define bch_err_msg(_c, _ret, _msg, ...)				\
-	 bch_err(_c, "%s(): error " _msg " %s", __func__, ##__VA_ARGS__, bch2_err_str(_ret))
+do {									\
+	if (_ret && !bch2_err_matches(_ret, BCH_ERR_transaction_restart))\
+		bch_err(_c, "%s(): error " _msg " %s", __func__,	\
+			##__VA_ARGS__, bch2_err_str(_ret));		\
+} while (0)
 
 #define bch_verbose(c, fmt, ...)					\
 do {									\
@@ -371,7 +379,7 @@ BCH_DEBUG_PARAMS()
 #undef BCH_DEBUG_PARAM
 
 #ifndef CONFIG_BCACHEFS_DEBUG
-#define BCH_DEBUG_PARAM(name, description) static const bool bch2_##name;
+#define BCH_DEBUG_PARAM(name, description) static const __maybe_unused bool bch2_##name;
 BCH_DEBUG_PARAMS_DEBUG()
 #undef BCH_DEBUG_PARAM
 #endif
@@ -738,6 +746,7 @@ struct bch_fs {
 	struct snapshot_table __rcu *snapshots;
 	size_t			snapshot_table_size;
 	struct mutex		snapshot_table_lock;
+	struct rw_semaphore	snapshot_create_lock;
 
 	struct work_struct	snapshot_delete_work;
 	struct work_struct	snapshot_wait_for_pagecache_and_delete_work;
