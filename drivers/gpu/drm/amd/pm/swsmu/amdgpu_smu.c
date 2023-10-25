@@ -849,7 +849,8 @@ static int smu_late_init(void *handle)
 	ret = smu_get_asic_power_limits(smu,
 					&smu->current_power_limit,
 					&smu->default_power_limit,
-					&smu->max_power_limit);
+					&smu->max_power_limit,
+					&smu->min_power_limit);
 	if (ret) {
 		dev_err(adev->dev, "Failed to get asic power limits!\n");
 		return ret;
@@ -1677,13 +1678,14 @@ static int smu_disable_dpms(struct smu_context *smu)
 	}
 
 	/*
-	 * For SMU 13.0.4/11, PMFW will handle the features disablement properly
+	 * For SMU 13.0.4/11 and 14.0.0, PMFW will handle the features disablement properly
 	 * for gpu reset and S0i3 cases. Driver involvement is unnecessary.
 	 */
 	if (amdgpu_in_reset(adev) || adev->in_s0ix) {
 		switch (amdgpu_ip_version(adev, MP1_HWIP, 0)) {
 		case IP_VERSION(13, 0, 4):
 		case IP_VERSION(13, 0, 11):
+		case IP_VERSION(14, 0, 0):
 			return 0;
 		default:
 			break;
@@ -2433,7 +2435,6 @@ int smu_get_power_limit(void *handle,
 		break;
 	default:
 		return -EOPNOTSUPP;
-		break;
 	}
 
 	switch (pp_limit_level) {
@@ -2447,9 +2448,10 @@ int smu_get_power_limit(void *handle,
 		limit_level = SMU_PPT_LIMIT_MAX;
 		break;
 	case PP_PWR_LIMIT_MIN:
+		limit_level = SMU_PPT_LIMIT_MIN;
+		break;
 	default:
 		return -EOPNOTSUPP;
-		break;
 	}
 
 	if (limit_type != SMU_DEFAULT_PPT_LIMIT) {
@@ -2466,8 +2468,7 @@ int smu_get_power_limit(void *handle,
 			case IP_VERSION(11, 0, 13):
 				ret = smu_get_asic_power_limits(smu,
 								&smu->current_power_limit,
-								NULL,
-								NULL);
+								NULL, NULL, NULL);
 				break;
 			default:
 				break;
@@ -2480,8 +2481,11 @@ int smu_get_power_limit(void *handle,
 		case SMU_PPT_LIMIT_MAX:
 			*limit = smu->max_power_limit;
 			break;
-		default:
+		case SMU_PPT_LIMIT_MIN:
+			*limit = smu->min_power_limit;
 			break;
+		default:
+			return -EINVAL;
 		}
 	}
 
@@ -2502,10 +2506,10 @@ static int smu_set_power_limit(void *handle, uint32_t limit)
 		if (smu->ppt_funcs->set_power_limit)
 			return smu->ppt_funcs->set_power_limit(smu, limit_type, limit);
 
-	if (limit > smu->max_power_limit) {
+	if ((limit > smu->max_power_limit) || (limit < smu->min_power_limit)) {
 		dev_err(smu->adev->dev,
-			"New power limit (%d) is over the max allowed %d\n",
-			limit, smu->max_power_limit);
+			"New power limit (%d) is out of range [%d,%d]\n",
+			limit, smu->min_power_limit, smu->max_power_limit);
 		return -EINVAL;
 	}
 

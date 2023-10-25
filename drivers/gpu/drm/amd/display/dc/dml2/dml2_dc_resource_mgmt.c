@@ -20,6 +20,8 @@
  * ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
  * OTHER DEALINGS IN THE SOFTWARE.
  *
+ * Authors: AMD
+ *
  */
 
 #include "dml2_mall_phantom.h"
@@ -461,7 +463,7 @@ static void sort_pipes_for_splitting(struct dc_plane_pipe_pool *pipes)
 				swapped = false;
 			}
 
-		};
+		}
 	}
 }
 
