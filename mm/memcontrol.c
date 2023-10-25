@@ -593,6 +593,7 @@ static const unsigned int memcg_vm_event_stat[] = {
 #if defined(CONFIG_MEMCG_KMEM) && defined(CONFIG_ZSWAP)
 	ZSWPIN,
 	ZSWPOUT,
+	ZSWPOUT_FAIL,
 #endif
 #ifdef CONFIG_TRANSPARENT_HUGEPAGE
 	THP_FAULT_ALLOC,
@@ -843,7 +844,7 @@ void __mod_memcg_lruvec_state(struct lruvec *lruvec, enum node_stat_item idx,
 	memcg = pn->memcg;
 
 	/*
-	 * The caller from rmap relay on disabled preemption becase they never
+	 * The caller from rmap relies on disabled preemption because they never
 	 * update their counter from in-interrupt context. For these two
 	 * counters we check that the update is never performed from an
 	 * interrupt context while other caller need to have disabled interrupt.
@@ -3160,49 +3161,6 @@ static struct obj_cgroup *current_objcg_update(void)
 		 * the whole procedure should be repeated.
 		 */
 	} while (!try_cmpxchg(&current->objcg, &old, objcg));
-
-	return objcg;
-}
-
-__always_inline struct obj_cgroup *current_obj_cgroup(void)
-{
-	struct mem_cgroup *memcg;
-	struct obj_cgroup *objcg;
-
-	if (in_task()) {
-		memcg = current->active_memcg;
-		if (unlikely(memcg))
-			goto from_memcg;
-
-		objcg = READ_ONCE(current->objcg);
-		if (unlikely((unsigned long)objcg & CURRENT_OBJCG_UPDATE_FLAG))
-			objcg = current_objcg_update();
-		/*
-		 * Objcg reference is kept by the task, so it's safe
-		 * to use the objcg by the current task.
-		 */
-		return objcg;
-	}
-
-	memcg = this_cpu_read(int_active_memcg);
-	if (unlikely(memcg))
-		goto from_memcg;
-
-	return NULL;
-
-from_memcg:
-	for (; !mem_cgroup_is_root(memcg); memcg = parent_mem_cgroup(memcg)) {
-		/*
-		 * Memcg pointer is protected by scope (see set_active_memcg())
-		 * and is pinning the corresponding objcg, so objcg can't go
-		 * away and can be used within the scope without any additional
-		 * protection.
-		 */
-		objcg = rcu_dereference_check(memcg->objcg, 1);
-		if (likely(objcg))
-			break;
-		objcg = NULL;
-	}
 
 	return objcg;
 }
@@ -8133,7 +8091,7 @@ static struct cftype memsw_files[] = {
  *
  * This doesn't check for specific headroom, and it is not atomic
  * either. But with zswap, the size of the allocation is only known
- * once compression has occured, and this optimistic pre-check avoids
+ * once compression has occurred, and this optimistic pre-check avoids
  * spending cycles on compression when there is already no room left
  * or zswap is disabled altogether somewhere in the hierarchy.
  */

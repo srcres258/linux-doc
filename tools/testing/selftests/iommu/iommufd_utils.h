@@ -18,6 +18,25 @@
 /* Hack to make assertions more readable */
 #define _IOMMU_TEST_CMD(x) IOMMU_TEST_CMD
 
+/* Imported from include/asm-generic/bitops/generic-non-atomic.h */
+#define BITS_PER_BYTE 8
+#define BITS_PER_LONG __BITS_PER_LONG
+#define BIT_MASK(nr) (1UL << ((nr) % __BITS_PER_LONG))
+#define BIT_WORD(nr) ((nr) / __BITS_PER_LONG)
+
+static inline void set_bit(unsigned int nr, unsigned long *addr)
+{
+	unsigned long mask = BIT_MASK(nr);
+	unsigned long *p = ((unsigned long *)addr) + BIT_WORD(nr);
+
+	*p |= mask;
+}
+
+static inline bool test_bit(unsigned int nr, unsigned long *addr)
+{
+	return 1UL & (addr[BIT_WORD(nr)] >> (nr & (BITS_PER_LONG - 1)));
+}
+
 static void *buffer;
 static unsigned long BUFFER_SIZE;
 
@@ -137,13 +156,17 @@ static int _test_cmd_mock_domain_replace(int fd, __u32 stdev_id, __u32 pt_id,
 							   pt_id, NULL))
 
 static int _test_cmd_hwpt_alloc(int fd, __u32 device_id, __u32 pt_id,
-				__u32 flags, __u32 *hwpt_id)
+				__u32 flags, __u32 *hwpt_id, __u32 data_type,
+				void *data, size_t data_len)
 {
 	struct iommu_hwpt_alloc cmd = {
 		.size = sizeof(cmd),
 		.flags = flags,
 		.dev_id = device_id,
 		.pt_id = pt_id,
+		.data_type = data_type,
+		.data_len = data_len,
+		.data_uptr = (uint64_t)data,
 	};
 	int ret;
 
@@ -155,12 +178,24 @@ static int _test_cmd_hwpt_alloc(int fd, __u32 device_id, __u32 pt_id,
 	return 0;
 }
 
-#define test_cmd_hwpt_alloc(device_id, pt_id, flags, hwpt_id) \
-	ASSERT_EQ(0, _test_cmd_hwpt_alloc(self->fd, device_id, \
-					  pt_id, flags, hwpt_id))
-#define test_err_hwpt_alloc(_errno, device_id, pt_id, flags, hwpt_id) \
-	EXPECT_ERRNO(_errno, _test_cmd_hwpt_alloc(self->fd, device_id, \
-						  pt_id, flags, hwpt_id))
+#define test_cmd_hwpt_alloc(device_id, pt_id, flags, hwpt_id)                  \
+	ASSERT_EQ(0, _test_cmd_hwpt_alloc(self->fd, device_id, pt_id, flags,   \
+					  hwpt_id, IOMMU_HWPT_DATA_NONE, NULL, \
+					  0))
+#define test_err_hwpt_alloc(_errno, device_id, pt_id, flags, hwpt_id)   \
+	EXPECT_ERRNO(_errno, _test_cmd_hwpt_alloc(                      \
+				     self->fd, device_id, pt_id, flags, \
+				     hwpt_id, IOMMU_HWPT_DATA_NONE, NULL, 0))
+
+#define test_cmd_hwpt_alloc_nested(device_id, pt_id, flags, hwpt_id,         \
+				   data_type, data, data_len)                \
+	ASSERT_EQ(0, _test_cmd_hwpt_alloc(self->fd, device_id, pt_id, flags, \
+					  hwpt_id, data_type, data, data_len))
+#define test_err_hwpt_alloc_nested(_errno, device_id, pt_id, flags, hwpt_id, \
+				   data_type, data, data_len)                \
+	EXPECT_ERRNO(_errno,                                                 \
+		     _test_cmd_hwpt_alloc(self->fd, device_id, pt_id, flags, \
+					  hwpt_id, data_type, data, data_len))
 
 static int _test_cmd_access_replace_ioas(int fd, __u32 access_id,
 					 unsigned int ioas_id)
@@ -209,7 +244,7 @@ static int _test_cmd_get_dirty_bitmap(int fd, __u32 hwpt_id, size_t length,
 		.iova = iova,
 		.length = length,
 		.page_size = page_size,
-		.data = bitmap,
+		.data = (uintptr_t)bitmap,
 	};
 	int ret;
 
@@ -236,7 +271,7 @@ static int _test_cmd_mock_domain_set_dirty(int fd, __u32 hwpt_id, size_t length,
 			.iova = iova,
 			.length = length,
 			.page_size = page_size,
-			.uptr = (uintptr_t) bitmap,
+			.uptr = (uintptr_t)bitmap,
 		}
 	};
 	int ret;
@@ -267,7 +302,7 @@ static int _test_mock_dirty_bitmaps(int fd, __u32 hwpt_id, size_t length,
 	/* Mark all even bits as dirty in the mock domain */
 	for (count = 0, i = 0; i < nbits; count += !(i % 2), i++)
 		if (!(i % 2))
-			__set_bit(i, (unsigned long *)bitmap);
+			set_bit(i, (unsigned long *)bitmap);
 	ASSERT_EQ(nr, count);
 
 	test_cmd_mock_domain_set_dirty(fd, hwpt_id, length, iova, page_size,

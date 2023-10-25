@@ -26,7 +26,7 @@ static int vchiq_bus_uevent(const struct device *dev, struct kobj_uevent_env *en
 {
 	const struct vchiq_device *device = container_of_const(dev, struct vchiq_device, dev);
 
-	return add_uevent_var(env, "MODALIAS=%s", dev_name(&device->dev));
+	return add_uevent_var(env, "MODALIAS=vchiq:%s", dev_name(&device->dev));
 }
 
 static int vchiq_bus_probe(struct device *dev)
@@ -73,7 +73,6 @@ vchiq_device_register(struct device *parent, const char *name)
 	if (ret) {
 		dev_err(parent, "Cannot register %s: %d\n", name, ret);
 		put_device(&device->dev);
-		kfree(device);
 		return NULL;
 	}
 

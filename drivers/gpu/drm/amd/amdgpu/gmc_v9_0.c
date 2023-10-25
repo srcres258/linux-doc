@@ -1587,13 +1587,8 @@ static int gmc_v9_0_late_init(void *handle)
 	}
 
 	if (!amdgpu_persistent_edc_harvesting_supported(adev)) {
-		if (adev->mmhub.ras && adev->mmhub.ras->ras_block.hw_ops &&
-		    adev->mmhub.ras->ras_block.hw_ops->reset_ras_error_count)
-			adev->mmhub.ras->ras_block.hw_ops->reset_ras_error_count(adev);
-
-		if (adev->hdp.ras && adev->hdp.ras->ras_block.hw_ops &&
-		    adev->hdp.ras->ras_block.hw_ops->reset_ras_error_count)
-			adev->hdp.ras->ras_block.hw_ops->reset_ras_error_count(adev);
+		amdgpu_ras_reset_error_count(adev, AMDGPU_RAS_BLOCK__MMHUB);
+		amdgpu_ras_reset_error_count(adev, AMDGPU_RAS_BLOCK__HDP);
 	}
 
 	r = amdgpu_gmc_ras_late_init(adev);
@@ -2023,11 +2018,8 @@ static int gmc_v9_0_sw_init(void *handle)
 		 * vm size is 256TB (48bit), maximum size of Vega10,
 		 * block size 512 (9bit)
 		 */
-		/* sriov restrict max_pfn below AMDGPU_GMC_HOLE */
-		if (amdgpu_sriov_vf(adev))
-			amdgpu_vm_adjust_size(adev, 256 * 1024, 9, 3, 47);
-		else
-			amdgpu_vm_adjust_size(adev, 256 * 1024, 9, 3, 48);
+
+		amdgpu_vm_adjust_size(adev, 256 * 1024, 9, 3, 48);
 		if (amdgpu_ip_version(adev, GC_HWIP, 0) == IP_VERSION(9, 4, 2))
 			adev->gmc.translate_further = adev->vm_manager.num_level > 1;
 		break;

@@ -465,7 +465,8 @@ iommu_read_and_clear_dirty(struct iommu_domain *domain,
 		return -EOPNOTSUPP;
 
 	iter = iova_bitmap_alloc(bitmap->iova, bitmap->length,
-				 bitmap->page_size, bitmap->data);
+				 bitmap->page_size,
+				 u64_to_user_ptr(bitmap->data));
 	if (IS_ERR(iter))
 		return -ENOMEM;
 
@@ -485,20 +486,42 @@ iommu_read_and_clear_dirty(struct iommu_domain *domain,
 	return ret;
 }
 
+int iommufd_check_iova_range(struct io_pagetable *iopt,
+			     struct iommu_hwpt_get_dirty_bitmap *bitmap)
+{
+	size_t iommu_pgsize = iopt->iova_alignment;
+	u64 last_iova;
+
+	if (check_add_overflow(bitmap->iova, bitmap->length - 1, &last_iova))
+		return -EOVERFLOW;
+
+	if (bitmap->iova > ULONG_MAX || last_iova > ULONG_MAX)
+		return -EOVERFLOW;
+
+	if ((bitmap->iova & (iommu_pgsize - 1)) ||
+	    ((last_iova + 1) & (iommu_pgsize - 1)))
+		return -EINVAL;
+
+	if (!bitmap->page_size)
+		return -EINVAL;
+
+	if ((bitmap->iova & (bitmap->page_size - 1)) ||
+	    ((last_iova + 1) & (bitmap->page_size - 1)))
+		return -EINVAL;
+
+	return 0;
+}
+
 int iopt_read_and_clear_dirty_data(struct io_pagetable *iopt,
 				   struct iommu_domain *domain,
 				   unsigned long flags,
 				   struct iommu_hwpt_get_dirty_bitmap *bitmap)
 {
-	unsigned long last_iova, iova = bitmap->iova;
-	unsigned long length = bitmap->length;
-	int ret = -EINVAL;
+	int ret;
 
-	if ((iova & (iopt->iova_alignment - 1)))
-		return -EINVAL;
-
-	if (check_add_overflow(iova, length - 1, &last_iova))
-		return -EOVERFLOW;
+	ret = iommufd_check_iova_range(iopt, bitmap);
+	if (ret)
+		return ret;
 
 	down_read(&iopt->iova_rwsem);
 	ret = iommu_read_and_clear_dirty(domain, iopt, flags, bitmap);

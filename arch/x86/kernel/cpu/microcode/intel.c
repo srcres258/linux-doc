@@ -31,6 +31,8 @@
 
 static const char ucode_path[] = "kernel/x86/microcode/GenuineIntel.bin";
 
+#define UCODE_BSP_LOADED	((struct microcode_intel *)0x1UL)
+
 /* Current microcode patch used in early patching on the APs. */
 static struct microcode_intel *ucode_patch_va __read_mostly;
 static struct microcode_intel *ucode_patch_late __read_mostly;
@@ -257,7 +259,8 @@ static void save_microcode_patch(struct microcode_intel *patch)
 
 /* Scan blob for microcode matching the boot CPUs family, model, stepping */
 static __init struct microcode_intel *scan_microcode(void *data, size_t size,
-						     struct ucode_cpu_info *uci)
+						     struct ucode_cpu_info *uci,
+						     bool save)
 {
 	struct microcode_header_intel *mc_header;
 	struct microcode_intel *patch = NULL;
@@ -275,9 +278,19 @@ static __init struct microcode_intel *scan_microcode(void *data, size_t size,
 		if (!intel_find_matching_signature(data, &uci->cpu_sig))
 			continue;
 
-		/* Check whether there is newer microcode */
-		if (cur_rev >= mc_header->rev)
+		/*
+		 * For saving the early microcode, find the matching revision which
+		 * was loaded on the BSP.
+		 *
+		 * On the BSP during early boot, find a newer revision than
+		 * actually loaded in the CPU.
+		 */
+		if (save) {
+			if (cur_rev != mc_header->rev)
+				continue;
+		} else if (cur_rev >= mc_header->rev) {
 			continue;
+		}
 
 		patch = data;
 		cur_rev = mc_header->rev;
@@ -360,7 +373,7 @@ static __init bool load_builtin_intel_microcode(struct cpio_data *cp)
 	return false;
 }
 
-static __init struct microcode_intel *get_microcode_blob(struct ucode_cpu_info *uci)
+static __init struct microcode_intel *get_microcode_blob(struct ucode_cpu_info *uci, bool save)
 {
 	struct cpio_data cp;
 
@@ -372,7 +385,7 @@ static __init struct microcode_intel *get_microcode_blob(struct ucode_cpu_info *
 
 	intel_collect_cpu_info(&uci->cpu_sig);
 
-	return scan_microcode(cp.data, cp.size, uci);
+	return scan_microcode(cp.data, cp.size, uci, save);
 }
 
 /*
@@ -386,10 +399,13 @@ static int __init save_builtin_microcode(void)
 {
 	struct ucode_cpu_info uci;
 
+	if (xchg(&ucode_patch_va, NULL) != UCODE_BSP_LOADED)
+		return 0;
+
 	if (dis_ucode_ldr || boot_cpu_data.x86_vendor != X86_VENDOR_INTEL)
 		return 0;
 
-	uci.mc = get_microcode_blob(&uci);
+	uci.mc = get_microcode_blob(&uci, true);
 	if (uci.mc)
 		save_microcode_patch(uci.mc);
 	return 0;
@@ -401,9 +417,9 @@ void __init load_ucode_intel_bsp(void)
 {
 	struct ucode_cpu_info uci;
 
-	uci.mc = get_microcode_blob(&uci);
-	if (uci.mc)
-		apply_microcode_early(&uci);
+	uci.mc = get_microcode_blob(&uci, false);
+	if (uci.mc && apply_microcode_early(&uci) == UCODE_UPDATED)
+		ucode_patch_va = UCODE_BSP_LOADED;
 }
 
 void load_ucode_intel_ap(void)

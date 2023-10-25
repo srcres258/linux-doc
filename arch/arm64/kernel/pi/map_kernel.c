@@ -20,17 +20,17 @@ extern const u8 __eh_frame_start[], __eh_frame_end[];
 
 extern void idmap_cpu_replace_ttbr1(void *pgdir);
 
-static void map_segment(pgd_t *pg_dir, u64 *pgd, u64 va_offset,
-			void *start, void *end, pgprot_t prot,
-			bool may_use_cont, int root_level)
+static void __init map_segment(pgd_t *pg_dir, u64 *pgd, u64 va_offset,
+			       void *start, void *end, pgprot_t prot,
+			       bool may_use_cont, int root_level)
 {
 	map_range(pgd, ((u64)start + va_offset) & ~PAGE_OFFSET,
 		  ((u64)end + va_offset) & ~PAGE_OFFSET, (u64)start,
 		  prot, root_level, (pte_t *)pg_dir, may_use_cont, 0);
 }
 
-static void unmap_segment(pgd_t *pg_dir, u64 va_offset, void *start,
-			  void *end, int root_level)
+static void __init unmap_segment(pgd_t *pg_dir, u64 va_offset, void *start,
+				 void *end, int root_level)
 {
 	map_segment(pg_dir, NULL, va_offset, start, end, __pgprot(0),
 		    false, root_level);
@@ -205,7 +205,7 @@ static void __init remap_idmap_for_lpa2(void)
 	memset(init_pg_dir, 0, (u64)init_pg_end - (u64)init_pg_dir);
 }
 
-static void map_fdt(u64 fdt)
+static void __init map_fdt(u64 fdt)
 {
 	static u8 ptes[INIT_IDMAP_FDT_SIZE] __initdata __aligned(PAGE_SIZE);
 	u64 efdt = fdt + MAX_FDT_SIZE;

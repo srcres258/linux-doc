@@ -49,8 +49,8 @@
 #define EARLY_ENTRIES(vstart, vend, shift, add) \
 	(SPAN_NR_ENTRIES(vstart, vend, shift) + (add))
 
-#define EARLY_LEVEL(l, lvls, vstart, vend, add)	\
-	(lvls > l ? EARLY_ENTRIES(vstart, vend, SWAPPER_BLOCK_SHIFT + l * (PAGE_SHIFT - 3), add) : 0)
+#define EARLY_LEVEL(lvl, lvls, vstart, vend, add)	\
+	(lvls > lvl ? EARLY_ENTRIES(vstart, vend, SWAPPER_BLOCK_SHIFT + lvl * (PAGE_SHIFT - 3), add) : 0)
 
 #define EARLY_PAGES(lvls, vstart, vend, add) (1 	/* PGDIR page */				\
 	+ EARLY_LEVEL(3, (lvls), (vstart), (vend), add) /* each entry needs a next level page table */	\
