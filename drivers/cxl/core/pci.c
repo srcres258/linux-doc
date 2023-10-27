@@ -729,8 +729,6 @@ static bool cxl_handle_endpoint_ras(struct cxl_dev_state *cxlds)
 	return __cxl_handle_ras(cxlds, cxlds->regs.ras);
 }
 
-#ifdef CONFIG_PCIEAER_CXL
-
 static void cxl_dport_map_rch_aer(struct cxl_dport *dport)
 {
 	struct cxl_rcrb_info *ri = &dport->rcrb;
@@ -796,6 +794,9 @@ void cxl_setup_parent_dport(struct device *host, struct cxl_dport *dport)
 {
 	struct device *dport_dev = dport->dport_dev;
 	struct pci_host_bridge *host_bridge;
+
+	if (!IS_ENABLED(CONFIG_PCIEAER_CXL))
+		return;
 
 	host_bridge = to_pci_host_bridge(dport_dev);
 	if (host_bridge->native_cxl_error)
@@ -896,10 +897,6 @@ static void cxl_handle_rdport_errors(struct cxl_dev_state *cxlds)
 	else
 		cxl_handle_rdport_ras(cxlds, dport);
 }
-
-#else
-static void cxl_handle_rdport_errors(struct cxl_dev_state *cxlds) { }
-#endif
 
 void cxl_cor_error_detected(struct pci_dev *pdev)
 {

@@ -934,8 +934,6 @@ static bool find_source_device(struct pci_dev *parent,
 	return true;
 }
 
-#ifdef CONFIG_PCIEAER_CXL
-
 /**
  * pci_aer_unmask_internal_errors - unmask internal errors
  * @dev: pointer to the pcie_dev data structure
@@ -1000,7 +998,8 @@ static int cxl_rch_handle_error_iter(struct pci_dev *dev, void *data)
 	struct aer_err_info *info = (struct aer_err_info *)data;
 	const struct pci_error_handlers *err_handler;
 
-	if (!is_cxl_mem_dev(dev) || !cxl_error_is_native(dev))
+	if (!is_cxl_mem_dev(dev) || !cxl_error_is_native(dev) ||
+	    !IS_ENABLED(CONFIG_PCIEAER_CXL))
 		return 0;
 
 	/* protect dev->driver */
@@ -1041,7 +1040,9 @@ static int handles_cxl_error_iter(struct pci_dev *dev, void *data)
 	bool *handles_cxl = data;
 
 	if (!*handles_cxl)
-		*handles_cxl = is_cxl_mem_dev(dev) && cxl_error_is_native(dev);
+		*handles_cxl = is_cxl_mem_dev(dev) &&
+			       cxl_error_is_native(dev) &&
+			       IS_ENABLED(CONFIG_PCIEAER_CXL);
 
 	/* Non-zero terminates iteration */
 	return *handles_cxl;
@@ -1066,12 +1067,6 @@ static void cxl_rch_enable_rcec(struct pci_dev *rcec)
 	pci_aer_unmask_internal_errors(rcec);
 	pci_info(rcec, "CXL: Internal errors unmasked");
 }
-
-#else
-static inline void cxl_rch_enable_rcec(struct pci_dev *dev) { }
-static inline void cxl_rch_handle_error(struct pci_dev *dev,
-					struct aer_err_info *info) { }
-#endif
 
 /**
  * pci_aer_handle_error - handle logging error into an event log
