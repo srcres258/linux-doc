@@ -269,7 +269,7 @@ static int paicrypt_event_init(struct perf_event *event)
 	    a->config > PAI_CRYPTO_BASE + paicrypt_cnt)
 		return -EINVAL;
 	/* Allow only CPU wide operation, no process context for now. */
-	if (event->hw.target || event->cpu == -1)
+	if ((event->attach_state & PERF_ATTACH_TASK) || event->cpu == -1)
 		return -ENOENT;
 	/* Allow only CRYPTO_ALL for sampling. */
 	if (a->sample_period && a->config != PAI_CRYPTO_BASE)
@@ -285,7 +285,6 @@ static int paicrypt_event_init(struct perf_event *event)
 	 * are active at the same time.
 	 */
 	event->hw.last_tag = 0;
-	cpump->event = event;
 	event->destroy = paicrypt_event_destroy;
 
 	if (a->sample_period) {
@@ -322,7 +321,6 @@ static void paicrypt_start(struct perf_event *event, int flags)
 	if (!event->hw.last_tag) {
 		event->hw.last_tag = 1;
 		sum = paicrypt_getall(event);		/* Get current value */
-		local64_set(&event->count, 0);
 		local64_set(&event->hw.prev_count, sum);
 	}
 }

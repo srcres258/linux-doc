@@ -1451,7 +1451,6 @@ static void ffa_notifications_setup(void)
 cleanup:
 	pr_info("Notification setup failed %d, not enabled\n", ret);
 	ffa_notifications_cleanup();
-	return;
 }
 
 static int __init ffa_init(void)

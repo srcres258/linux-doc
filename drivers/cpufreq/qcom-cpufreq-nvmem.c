@@ -32,11 +32,6 @@
 
 #include <dt-bindings/arm/qcom,ids.h>
 
-enum ipq8074_versions {
-	IPQ8074_HAWKEYE_VERSION = 0,
-	IPQ8074_ACORN_VERSION,
-};
-
 enum ipq806x_versions {
 	IPQ8062_VERSION = 0,
 	IPQ8064_VERSION,
@@ -44,6 +39,11 @@ enum ipq806x_versions {
 };
 
 #define IPQ6000_VERSION	BIT(2)
+
+enum ipq8074_versions {
+	IPQ8074_HAWKEYE_VERSION = 0,
+	IPQ8074_ACORN_VERSION,
+};
 
 struct qcom_cpufreq_drv;
 
@@ -54,6 +54,10 @@ struct qcom_cpufreq_match_data {
 			   struct qcom_cpufreq_drv *drv);
 	const char **genpd_names;
 	const char * const *regulator_names;
+};
+
+struct qcom_cpufreq_drv_cpu {
+	int opp_token;
 };
 
 struct qcom_cpufreq_drv_cpu {
@@ -295,44 +299,6 @@ exit:
 	return ret;
 }
 
-static int qcom_cpufreq_ipq8074_name_version(struct device *cpu_dev,
-					     struct nvmem_cell *speedbin_nvmem,
-					     char **pvs_name,
-					     struct qcom_cpufreq_drv *drv)
-{
-	u32 msm_id;
-	int ret;
-	*pvs_name = NULL;
-
-	ret = qcom_smem_get_soc_id(&msm_id);
-	if (ret)
-		return ret;
-
-	switch (msm_id) {
-	case QCOM_ID_IPQ8070A:
-	case QCOM_ID_IPQ8071A:
-	case QCOM_ID_IPQ8172:
-	case QCOM_ID_IPQ8173:
-	case QCOM_ID_IPQ8174:
-		drv->versions = BIT(IPQ8074_ACORN_VERSION);
-		break;
-	case QCOM_ID_IPQ8072A:
-	case QCOM_ID_IPQ8074A:
-	case QCOM_ID_IPQ8076A:
-	case QCOM_ID_IPQ8078A:
-		drv->versions = BIT(IPQ8074_HAWKEYE_VERSION);
-		break;
-	default:
-		dev_err(cpu_dev,
-			"SoC ID %u is not part of IPQ8074 family, limiting to 1.4GHz!\n",
-			msm_id);
-		drv->versions = BIT(IPQ8074_ACORN_VERSION);
-		break;
-	}
-
-	return 0;
-}
-
 static int qcom_cpufreq_ipq6018_name_version(struct device *cpu_dev,
 					     struct nvmem_cell *speedbin_nvmem,
 					     char **pvs_name,
@@ -381,6 +347,44 @@ static int qcom_cpufreq_ipq6018_name_version(struct device *cpu_dev,
 	}
 
 	kfree(speedbin);
+	return 0;
+}
+
+static int qcom_cpufreq_ipq8074_name_version(struct device *cpu_dev,
+					     struct nvmem_cell *speedbin_nvmem,
+					     char **pvs_name,
+					     struct qcom_cpufreq_drv *drv)
+{
+	u32 msm_id;
+	int ret;
+	*pvs_name = NULL;
+
+	ret = qcom_smem_get_soc_id(&msm_id);
+	if (ret)
+		return ret;
+
+	switch (msm_id) {
+	case QCOM_ID_IPQ8070A:
+	case QCOM_ID_IPQ8071A:
+	case QCOM_ID_IPQ8172:
+	case QCOM_ID_IPQ8173:
+	case QCOM_ID_IPQ8174:
+		drv->versions = BIT(IPQ8074_ACORN_VERSION);
+		break;
+	case QCOM_ID_IPQ8072A:
+	case QCOM_ID_IPQ8074A:
+	case QCOM_ID_IPQ8076A:
+	case QCOM_ID_IPQ8078A:
+		drv->versions = BIT(IPQ8074_HAWKEYE_VERSION);
+		break;
+	default:
+		dev_err(cpu_dev,
+			"SoC ID %u is not part of IPQ8074 family, limiting to 1.4GHz!\n",
+			msm_id);
+		drv->versions = BIT(IPQ8074_ACORN_VERSION);
+		break;
+	}
+
 	return 0;
 }
 

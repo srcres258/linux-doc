@@ -8,10 +8,12 @@
 
 #include <linux/init.h>
 #include <linux/lsm_hooks.h>
+#include <uapi/linux/lsm.h>
 
 #include "common.h"
 #include "cred.h"
 #include "fs.h"
+#include "net.h"
 #include "ptrace.h"
 #include "setup.h"
 #include "net.h"
@@ -23,6 +25,11 @@ struct lsm_blob_sizes landlock_blob_sizes __ro_after_init = {
 	.lbs_file = sizeof(struct landlock_file_security),
 	.lbs_inode = sizeof(struct landlock_inode_security),
 	.lbs_superblock = sizeof(struct landlock_superblock_security),
+};
+
+const struct lsm_id landlock_lsmid = {
+	.name = LANDLOCK_NAME,
+	.id = LSM_ID_LANDLOCK,
 };
 
 static int __init landlock_init(void)

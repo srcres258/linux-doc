@@ -264,8 +264,9 @@ create_file_dentry(struct eventfs_inode *ei, struct dentry **e_dentry,
 		 * Note, with the mutex held, the e_dentry cannot have content
 		 * and the ei->is_freed be true at the same time.
 		 */
-		WARN_ON_ONCE(ei->is_freed);
 		dentry = *e_dentry;
+		if (WARN_ON_ONCE(dentry && ei->is_freed))
+			dentry = NULL;
 		/* The lookup does not need to up the dentry refcount */
 		if (dentry && !lookup)
 			dget(dentry);
@@ -731,11 +732,11 @@ struct eventfs_inode *eventfs_create_events_dir(const char *name, struct dentry 
 		return NULL;
 
 	if (IS_ERR(dentry))
-		return (struct eventfs_inode *)dentry;
+		return ERR_CAST(dentry);
 
 	ei = kzalloc(sizeof(*ei), GFP_KERNEL);
 	if (!ei)
-		goto fail;
+		goto fail_ei;
 
 	inode = tracefs_get_inode(dentry->d_sb);
 	if (unlikely(!inode))
@@ -781,6 +782,7 @@ struct eventfs_inode *eventfs_create_events_dir(const char *name, struct dentry 
  fail:
 	kfree(ei->d_children);
 	kfree(ei);
+ fail_ei:
 	tracefs_failed_creating(dentry);
 	return ERR_PTR(-ENOMEM);
 }
@@ -855,7 +857,7 @@ static void unhook_dentry(struct dentry **dentry, struct dentry **list)
 	}
 }
 /**
- * eventfs_remove - remove eventfs dir or file from list
+ * eventfs_remove_dir - remove eventfs dir or file from list
  * @ei: eventfs_inode to be removed.
  *
  * This function acquire the eventfs_mutex lock and call eventfs_remove_rec()

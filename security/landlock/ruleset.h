@@ -166,6 +166,8 @@ struct landlock_ruleset {
 	 * reaches zero.
 	 */
 	struct rb_root root_inode;
+
+#if IS_ENABLED(CONFIG_INET)
 	/**
 	 * @root_net_port: Root of a red-black tree containing &struct
 	 * landlock_rule nodes with network port. Once a ruleset is tied to a
@@ -173,6 +175,8 @@ struct landlock_ruleset {
 	 * reaches zero.
 	 */
 	struct rb_root root_net_port;
+#endif /* IS_ENABLED(CONFIG_INET) */
+
 	/**
 	 * @hierarchy: Enables hierarchy identification even when a parent
 	 * domain vanishes.  This is needed for the ptrace protection.

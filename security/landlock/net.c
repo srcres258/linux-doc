@@ -61,10 +61,10 @@ static const struct landlock_ruleset *get_current_net_domain(void)
 	return dom;
 }
 
-static int check_socket_access(struct socket *const sock,
-			       struct sockaddr *const address,
-			       const int addrlen,
-			       const access_mask_t access_request)
+static int current_check_access_socket(struct socket *const sock,
+				       struct sockaddr *const address,
+				       const int addrlen,
+				       const access_mask_t access_request)
 {
 	__be16 port;
 	layer_mask_t layer_masks[LANDLOCK_NUM_ACCESS_NET] = {};
@@ -73,11 +73,11 @@ static int check_socket_access(struct socket *const sock,
 	struct landlock_id id = {
 		.type = LANDLOCK_KEY_NET_PORT,
 	};
-	const struct landlock_ruleset *const domain = get_current_net_domain();
+	const struct landlock_ruleset *const dom = get_current_net_domain();
 
-	if (!domain)
+	if (!dom)
 		return 0;
-	if (WARN_ON_ONCE(domain->num_layers < 1))
+	if (WARN_ON_ONCE(dom->num_layers < 1))
 		return -EACCES;
 
 	/* Checks if it's a (potential) TCP socket. */
@@ -95,13 +95,15 @@ static int check_socket_access(struct socket *const sock,
 			return -EINVAL;
 		port = ((struct sockaddr_in *)address)->sin_port;
 		break;
+
 #if IS_ENABLED(CONFIG_IPV6)
 	case AF_INET6:
 		if (addrlen < SIN6_LEN_RFC2133)
 			return -EINVAL;
 		port = ((struct sockaddr_in6 *)address)->sin6_port;
 		break;
-#endif
+#endif /* IS_ENABLED(CONFIG_IPV6) */
+
 	default:
 		return 0;
 	}
@@ -161,9 +163,9 @@ static int check_socket_access(struct socket *const sock,
 	id.key.data = (__force uintptr_t)port;
 	BUILD_BUG_ON(sizeof(port) > sizeof(id.key.data));
 
-	rule = landlock_find_rule(domain, id);
+	rule = landlock_find_rule(dom, id);
 	handled_access = landlock_init_layer_masks(
-		domain, access_request, &layer_masks, LANDLOCK_KEY_NET_PORT);
+		dom, access_request, &layer_masks, LANDLOCK_KEY_NET_PORT);
 	if (landlock_unmask_layers(rule, handled_access, &layer_masks,
 				   ARRAY_SIZE(layer_masks)))
 		return 0;
@@ -174,16 +176,16 @@ static int check_socket_access(struct socket *const sock,
 static int hook_socket_bind(struct socket *const sock,
 			    struct sockaddr *const address, const int addrlen)
 {
-	return check_socket_access(sock, address, addrlen,
-				   LANDLOCK_ACCESS_NET_BIND_TCP);
+	return current_check_access_socket(sock, address, addrlen,
+					   LANDLOCK_ACCESS_NET_BIND_TCP);
 }
 
 static int hook_socket_connect(struct socket *const sock,
 			       struct sockaddr *const address,
 			       const int addrlen)
 {
-	return check_socket_access(sock, address, addrlen,
-				   LANDLOCK_ACCESS_NET_CONNECT_TCP);
+	return current_check_access_socket(sock, address, addrlen,
+					   LANDLOCK_ACCESS_NET_CONNECT_TCP);
 }
 
 static struct security_hook_list landlock_hooks[] __ro_after_init = {
@@ -194,5 +196,5 @@ static struct security_hook_list landlock_hooks[] __ro_after_init = {
 __init void landlock_add_net_hooks(void)
 {
 	security_add_hooks(landlock_hooks, ARRAY_SIZE(landlock_hooks),
-			   LANDLOCK_NAME);
+			   &landlock_lsmid);
 }

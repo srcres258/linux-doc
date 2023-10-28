@@ -248,7 +248,7 @@ static int paiext_event_init(struct perf_event *event)
 	if (rc)
 		return rc;
 	/* Allow only CPU wide operation, no process context for now. */
-	if (event->hw.target || event->cpu == -1)
+	if ((event->attach_state & PERF_ATTACH_TASK) || event->cpu == -1)
 		return -ENOENT;
 	/* Allow only event NNPA_ALL for sampling. */
 	if (a->sample_period && a->config != PAI_NNPA_BASE)
@@ -326,7 +326,6 @@ static void paiext_start(struct perf_event *event, int flags)
 	event->hw.last_tag = 1;
 	sum = paiext_getall(event);		/* Get current value */
 	local64_set(&event->hw.prev_count, sum);
-	local64_set(&event->count, 0);
 }
 
 static int paiext_add(struct perf_event *event, int flags)

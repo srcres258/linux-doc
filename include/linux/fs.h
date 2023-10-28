@@ -1050,6 +1050,7 @@ static inline struct file *get_file(struct file *f)
 }
 
 struct file *get_file_rcu(struct file __rcu **f);
+struct file *get_file_active(struct file **f);
 
 #define file_count(x)	atomic_long_read(&(x)->f_count)
 

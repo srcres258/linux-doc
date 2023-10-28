@@ -309,10 +309,7 @@ static int add_rule_path_beneath(struct landlock_ruleset *const ruleset,
 	if (!path_beneath_attr.allowed_access)
 		return -ENOMSG;
 
-	/*
-	 * Checks that allowed_access matches the @ruleset constraints
-	 * (ruleset->access_masks[0] is automatically upgraded to 64-bits).
-	 */
+	/* Checks that allowed_access matches the @ruleset constraints. */
 	mask = landlock_get_raw_fs_access_mask(ruleset, 0);
 	if ((path_beneath_attr.allowed_access | mask) != mask)
 		return -EINVAL;
@@ -348,15 +345,12 @@ static int add_rule_net_port(struct landlock_ruleset *ruleset,
 	if (!net_port_attr.allowed_access)
 		return -ENOMSG;
 
-	/*
-	 * Checks that allowed_access matches the @ruleset constraints
-	 * (ruleset->access_masks[0] is automatically upgraded to 64-bits).
-	 */
+	/* Checks that allowed_access matches the @ruleset constraints. */
 	mask = landlock_get_net_access_mask(ruleset, 0);
 	if ((net_port_attr.allowed_access | mask) != mask)
 		return -EINVAL;
 
-	/* Denies inserting a rule with port higher than 65535. */
+	/* Denies inserting a rule with port greater than 65535. */
 	if (net_port_attr.port > U16_MAX)
 		return -EINVAL;
 
@@ -382,11 +376,13 @@ static int add_rule_net_port(struct landlock_ruleset *ruleset,
  * Possible returned errors are:
  *
  * - %EOPNOTSUPP: Landlock is supported by the kernel but disabled at boot time;
- * - %EAFNOSUPPORT: @rule_type is LANDLOCK_RULE_NET_PORT but TCP/IP is not
+ * - %EAFNOSUPPORT: @rule_type is %LANDLOCK_RULE_NET_PORT but TCP/IP is not
  *   supported by the running kernel;
  * - %EINVAL: @flags is not 0, or inconsistent access in the rule (i.e.
- *   &landlock_path_beneath_attr.allowed_access is not a subset of the
- *   ruleset handled accesses);
+ *   &landlock_path_beneath_attr.allowed_access or
+ *   &landlock_net_port_attr.allowed_access is not a subset of the
+ *   ruleset handled accesses), or &landlock_net_port_attr.port is
+ *   greater than 65535;
  * - %ENOMSG: Empty accesses (e.g. &landlock_path_beneath_attr.allowed_access);
  * - %EBADF: @ruleset_fd is not a file descriptor for the current thread, or a
  *   member of @rule_attr is not a file descriptor as expected;

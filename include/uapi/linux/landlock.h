@@ -64,7 +64,7 @@ enum landlock_rule_type {
 	 * @LANDLOCK_RULE_NET_PORT: Type of a &struct
 	 * landlock_net_port_attr .
 	 */
-	LANDLOCK_RULE_NET_PORT = 2,
+	LANDLOCK_RULE_NET_PORT,
 };
 
 /**
@@ -102,16 +102,15 @@ struct landlock_net_port_attr {
 	 */
 	__u64 allowed_access;
 	/**
-	 * @port: Network port. Landlock does not forbid rules with port 0,
-	 * since some network services use it. Port 0 is a reserved one in
-	 * TCP/IP networking, meaning that it should not be used in TCP or
-	 * UDP messages. To allocate its source port number, services call
-	 * TCP/IP network functions like bind() to request one. With port 0
-	 * it triggers the operating system to automatically search for
-	 * and return a suitable available port in the TCP/IP dynamic
-	 * port number range. This port range can be controlled by a
-	 * sysadmin with /proc/sys/net/ipv4/ip_local_port_range sysctl,
-	 * which is also used by IPv6.
+	 * @port: Network port in host endianness.
+	 *
+	 * It should be noted that port 0 passed to :manpage:`bind(2)` will
+	 * bind to an available port from a specific port range. This can be
+	 * configured thanks to the ``/proc/sys/net/ipv4/ip_local_port_range``
+	 * sysctl (also used for IPv6). A Landlock rule with port 0 and the
+	 * ``LANDLOCK_ACCESS_NET_BIND_TCP`` right means that requesting to bind
+	 * on port 0 is allowed and it will automatically translate to binding
+	 * on the related port range.
 	 */
 	__u64 port;
 };
@@ -233,7 +232,7 @@ struct landlock_net_port_attr {
  * ~~~~~~~~~~~~~~~~
  *
  * These flags enable to restrict a sandboxed process to a set of network
- * actions.
+ * actions. This is supported since the Landlock ABI version 4.
  *
  * TCP sockets with allowed actions:
  *

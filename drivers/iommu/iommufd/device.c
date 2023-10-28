@@ -448,7 +448,7 @@ iommufd_group_do_replace_paging(struct iommufd_group *igroup,
 
 	lockdep_assert_held(&igroup->lock);
 
-	if (hwpt_is_paging(old_hwpt) &&
+	if (!hwpt_is_paging(old_hwpt) ||
 	    hwpt_paging->ioas != to_hwpt_paging(old_hwpt)->ioas) {
 		list_for_each_entry(cur, &igroup->device_list, group_item) {
 			rc = iopt_table_enforce_dev_resv_regions(

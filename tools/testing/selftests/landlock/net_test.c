@@ -159,16 +159,16 @@ static socklen_t get_addrlen(const struct service_fixture *const srv,
 	}
 }
 
-static void set_port(struct service_fixture *const srv, in_port_t port)
+static void set_port(struct service_fixture *const srv, uint16_t port)
 {
 	switch (srv->protocol.domain) {
 	case AF_UNSPEC:
 	case AF_INET:
-		srv->ipv4_addr.sin_port = port;
+		srv->ipv4_addr.sin_port = htons(port);
 		return;
 
 	case AF_INET6:
-		srv->ipv6_addr.sin6_port = port;
+		srv->ipv6_addr.sin6_port = htons(port);
 		return;
 
 	default:
@@ -176,8 +176,8 @@ static void set_port(struct service_fixture *const srv, in_port_t port)
 	}
 }
 
-static in_port_t get_binded_port(int socket_fd,
-				 const struct protocol_variant *const prot)
+static uint16_t get_binded_port(int socket_fd,
+				const struct protocol_variant *const prot)
 {
 	struct sockaddr_in ipv4_addr;
 	struct sockaddr_in6 ipv6_addr;
@@ -905,7 +905,6 @@ FIXTURE_TEARDOWN(ipv4)
 {
 }
 
-// Kernel FIXME: tcp_sandbox_with_tcp and tcp_sandbox_with_udp
 TEST_F(ipv4, from_unix_to_inet)
 {
 	int unix_stream_fd, unix_dgram_fd;
@@ -1237,7 +1236,7 @@ TEST_F(mini, network_access_rights)
 	const struct landlock_ruleset_attr ruleset_attr = {
 		.handled_access_net = ACCESS_ALL,
 	};
-	struct landlock_net_port_attr net_service = {
+	struct landlock_net_port_attr net_port = {
 		.port = sock_port_start,
 	};
 	int ruleset_fd;
@@ -1248,10 +1247,10 @@ TEST_F(mini, network_access_rights)
 	ASSERT_LE(0, ruleset_fd);
 
 	for (access = 1; access <= ACCESS_LAST; access <<= 1) {
-		net_service.allowed_access = access;
+		net_port.allowed_access = access;
 		EXPECT_EQ(0,
 			  landlock_add_rule(ruleset_fd, LANDLOCK_RULE_NET_PORT,
-					    &net_service, 0))
+					    &net_port, 0))
 		{
 			TH_LOG("Failed to add rule with access 0x%llx: %s",
 			       access, strerror(errno));
@@ -1461,6 +1460,61 @@ TEST_F(ipv4_tcp, port_endianness)
 	test_bind_and_connect(_metadata, &self->srv1, false, false);
 }
 
+TEST_F(ipv4_tcp, with_fs)
+{
+	const struct landlock_ruleset_attr ruleset_attr_fs_net = {
+		.handled_access_fs = LANDLOCK_ACCESS_FS_READ_DIR,
+		.handled_access_net = LANDLOCK_ACCESS_NET_BIND_TCP,
+	};
+	struct landlock_path_beneath_attr path_beneath = {
+		.allowed_access = LANDLOCK_ACCESS_FS_READ_DIR,
+		.parent_fd = -1,
+	};
+	struct landlock_net_port_attr tcp_bind = {
+		.allowed_access = LANDLOCK_ACCESS_NET_BIND_TCP,
+		.port = self->srv0.port,
+	};
+	int ruleset_fd, bind_fd, dir_fd;
+
+	/* Creates ruleset both for filesystem and network access. */
+	ruleset_fd = landlock_create_ruleset(&ruleset_attr_fs_net,
+					     sizeof(ruleset_attr_fs_net), 0);
+	ASSERT_LE(0, ruleset_fd);
+
+	/* Adds a filesystem rule. */
+	path_beneath.parent_fd = open("/dev", O_PATH | O_DIRECTORY | O_CLOEXEC);
+	ASSERT_LE(0, path_beneath.parent_fd);
+	ASSERT_EQ(0, landlock_add_rule(ruleset_fd, LANDLOCK_RULE_PATH_BENEATH,
+				       &path_beneath, 0));
+	EXPECT_EQ(0, close(path_beneath.parent_fd));
+
+	/* Adds a network rule. */
+	ASSERT_EQ(0, landlock_add_rule(ruleset_fd, LANDLOCK_RULE_NET_PORT,
+				       &tcp_bind, 0));
+
+	enforce_ruleset(_metadata, ruleset_fd);
+	EXPECT_EQ(0, close(ruleset_fd));
+
+	/* Tests file access. */
+	dir_fd = open("/dev", O_RDONLY);
+	EXPECT_LE(0, dir_fd);
+	EXPECT_EQ(0, close(dir_fd));
+
+	dir_fd = open("/", O_RDONLY);
+	EXPECT_EQ(-1, dir_fd);
+	EXPECT_EQ(EACCES, errno);
+
+	/* Tests port binding. */
+	bind_fd = socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0);
+	ASSERT_LE(0, bind_fd);
+	EXPECT_EQ(0, bind_variant(bind_fd, &self->srv0));
+	EXPECT_EQ(0, close(bind_fd));
+
+	bind_fd = socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0);
+	ASSERT_LE(0, bind_fd);
+	EXPECT_EQ(-EACCES, bind_variant(bind_fd, &self->srv1));
+}
+
 FIXTURE(port_specific)
 {
 	struct service_fixture srv0;
@@ -1525,11 +1579,12 @@ FIXTURE_TEARDOWN(port_specific)
 {
 }
 
-TEST_F(port_specific, bind_connect)
+TEST_F(port_specific, bind_connect_zero)
 {
-	int socket_fd, ret;
+	int bind_fd, connect_fd, ret;
+	uint16_t port;
 
-	/* Adds the first rule layer with bind and connect actions. */
+	/* Adds a rule layer with bind and connect actions. */
 	if (variant->sandbox == TCP_SANDBOX) {
 		const struct landlock_ruleset_attr ruleset_attr = {
 			.handled_access_net = LANDLOCK_ACCESS_NET_BIND_TCP |
@@ -1538,9 +1593,8 @@ TEST_F(port_specific, bind_connect)
 		const struct landlock_net_port_attr tcp_bind_connect_zero = {
 			.allowed_access = LANDLOCK_ACCESS_NET_BIND_TCP |
 					  LANDLOCK_ACCESS_NET_CONNECT_TCP,
-			.port = htons(0),
+			.port = 0,
 		};
-
 		int ruleset_fd;
 
 		ruleset_fd = landlock_create_ruleset(&ruleset_attr,
@@ -1556,46 +1610,33 @@ TEST_F(port_specific, bind_connect)
 		EXPECT_EQ(0, close(ruleset_fd));
 	}
 
-	socket_fd = socket_variant(&self->srv0);
-	ASSERT_LE(0, socket_fd);
+	bind_fd = socket_variant(&self->srv0);
+	ASSERT_LE(0, bind_fd);
+
+	connect_fd = socket_variant(&self->srv0);
+	ASSERT_LE(0, connect_fd);
 
 	/* Sets address port to 0 for both protocol families. */
-	set_port(&self->srv0, htons(0));
+	set_port(&self->srv0, 0);
+	/*
+	 * Binds on port 0, which selects a random port within
+	 * ip_local_port_range.
+	 */
+	ret = bind_variant(bind_fd, &self->srv0);
+	EXPECT_EQ(0, ret);
 
-	/* Binds on port 0. */
-	ret = bind_variant(socket_fd, &self->srv0);
-	if (is_restricted(&variant->prot, variant->sandbox)) {
-		/* Binds to a random port within ip_local_port_range. */
-		EXPECT_EQ(0, ret);
-	} else {
-		/* Binds to a random port within ip_local_port_range. */
-		EXPECT_EQ(0, ret);
-	}
+	EXPECT_EQ(0, listen(bind_fd, backlog));
 
 	/* Connects on port 0. */
-	ret = connect_variant(socket_fd, &self->srv0);
-	if (is_restricted(&variant->prot, variant->sandbox)) {
-		EXPECT_EQ(-ECONNREFUSED, ret);
-	} else {
-		EXPECT_EQ(-ECONNREFUSED, ret);
-	}
-
-	/* Binds on port 0. */
-	ret = bind_variant(socket_fd, &self->srv0);
-	if (is_restricted(&variant->prot, variant->sandbox)) {
-		/* Binds to a random port within ip_local_port_range. */
-		EXPECT_EQ(0, ret);
-	} else {
-		/* Binds to a random port within ip_local_port_range. */
-		EXPECT_EQ(0, ret);
-	}
+	ret = connect_variant(connect_fd, &self->srv0);
+	EXPECT_EQ(-ECONNREFUSED, ret);
 
 	/* Sets binded port for both protocol families. */
-	set_port(&self->srv0,
-		 htons(get_binded_port(socket_fd, &variant->prot)));
-
+	port = get_binded_port(bind_fd, &variant->prot);
+	EXPECT_NE(0, port);
+	set_port(&self->srv0, port);
 	/* Connects on the binded port. */
-	ret = connect_variant(socket_fd, &self->srv0);
+	ret = connect_variant(connect_fd, &self->srv0);
 	if (is_restricted(&variant->prot, variant->sandbox)) {
 		/* Denied by Landlock. */
 		EXPECT_EQ(-EACCES, ret);
@@ -1603,26 +1644,32 @@ TEST_F(port_specific, bind_connect)
 		EXPECT_EQ(0, ret);
 	}
 
-	EXPECT_EQ(0, close(socket_fd));
+	EXPECT_EQ(0, close(connect_fd));
+	EXPECT_EQ(0, close(bind_fd));
+}
 
-	/* Adds the second rule layer with just bind action. */
+TEST_F(port_specific, bind_connect_1023)
+{
+	int bind_fd, connect_fd, ret;
+
+	/* Adds a rule layer with bind and connect actions. */
 	if (variant->sandbox == TCP_SANDBOX) {
 		const struct landlock_ruleset_attr ruleset_attr = {
 			.handled_access_net = LANDLOCK_ACCESS_NET_BIND_TCP |
 					      LANDLOCK_ACCESS_NET_CONNECT_TCP
 		};
-
-		const struct landlock_net_port_attr tcp_bind_zero = {
-			.allowed_access = LANDLOCK_ACCESS_NET_BIND_TCP,
-			.port = htons(0),
-		};
-
 		/* A rule with port value less than 1024. */
-		const struct landlock_net_port_attr tcp_bind_lower_range = {
-			.allowed_access = LANDLOCK_ACCESS_NET_BIND_TCP,
-			.port = htons(1023),
+		const struct landlock_net_port_attr tcp_bind_connect_low_range = {
+			.allowed_access = LANDLOCK_ACCESS_NET_BIND_TCP |
+					  LANDLOCK_ACCESS_NET_CONNECT_TCP,
+			.port = 1023,
 		};
-
+		/* A rule with 1024 port. */
+		const struct landlock_net_port_attr tcp_bind_connect = {
+			.allowed_access = LANDLOCK_ACCESS_NET_BIND_TCP |
+					  LANDLOCK_ACCESS_NET_CONNECT_TCP,
+			.port = 1024,
+		};
 		int ruleset_fd;
 
 		ruleset_fd = landlock_create_ruleset(&ruleset_attr,
@@ -1631,58 +1678,61 @@ TEST_F(port_specific, bind_connect)
 
 		ASSERT_EQ(0,
 			  landlock_add_rule(ruleset_fd, LANDLOCK_RULE_NET_PORT,
-					    &tcp_bind_lower_range, 0));
+					    &tcp_bind_connect_low_range, 0));
 		ASSERT_EQ(0,
 			  landlock_add_rule(ruleset_fd, LANDLOCK_RULE_NET_PORT,
-					    &tcp_bind_zero, 0));
+					    &tcp_bind_connect, 0));
 
 		enforce_ruleset(_metadata, ruleset_fd);
 		EXPECT_EQ(0, close(ruleset_fd));
 	}
 
-	socket_fd = socket_variant(&self->srv0);
-	ASSERT_LE(0, socket_fd);
+	bind_fd = socket_variant(&self->srv0);
+	ASSERT_LE(0, bind_fd);
+
+	connect_fd = socket_variant(&self->srv0);
+	ASSERT_LE(0, connect_fd);
 
 	/* Sets address port to 1023 for both protocol families. */
-	set_port(&self->srv0, htons(1023));
+	set_port(&self->srv0, 1023);
+	/* Binds on port 1023. */
+	ret = bind_variant(bind_fd, &self->srv0);
+	/* Denied by the system. */
+	EXPECT_EQ(-EACCES, ret);
 
 	/* Binds on port 1023. */
-	ret = bind_variant(socket_fd, &self->srv0);
-	if (is_restricted(&variant->prot, variant->sandbox)) {
-		/* Denied by the system. */
-		EXPECT_EQ(-EACCES, ret);
-	} else {
-		/* Denied by the system. */
-		EXPECT_EQ(-EACCES, ret);
-	}
+	set_cap(_metadata, CAP_NET_BIND_SERVICE);
+	ret = bind_variant(bind_fd, &self->srv0);
+	clear_cap(_metadata, CAP_NET_BIND_SERVICE);
+	EXPECT_EQ(0, ret);
+	EXPECT_EQ(0, listen(bind_fd, backlog));
 
-	/* Sets address port to 0 for both protocol families. */
-	set_port(&self->srv0, htons(0));
+	/* Connects on the binded port 1023. */
+	ret = connect_variant(connect_fd, &self->srv0);
+	EXPECT_EQ(0, ret);
 
-	/* Binds on port 0. */
-	ret = bind_variant(socket_fd, &self->srv0);
-	if (is_restricted(&variant->prot, variant->sandbox)) {
-		/* Binds to a random port within ip_local_port_range. */
-		EXPECT_EQ(0, ret);
-	} else {
-		/* Binds to a random port within ip_local_port_range. */
-		EXPECT_EQ(0, ret);
-	}
+	EXPECT_EQ(0, close(connect_fd));
+	EXPECT_EQ(0, close(bind_fd));
 
-	/* Sets binded port for both protocol families. */
-	set_port(&self->srv0,
-		 htons(get_binded_port(socket_fd, &variant->prot)));
+	bind_fd = socket_variant(&self->srv0);
+	ASSERT_LE(0, bind_fd);
 
-	/* Connects on the binded port. */
-	ret = connect_variant(socket_fd, &self->srv0);
-	if (is_restricted(&variant->prot, variant->sandbox)) {
-		/* Denied by Landlock. */
-		EXPECT_EQ(-EACCES, ret);
-	} else {
-		EXPECT_EQ(0, ret);
-	}
+	connect_fd = socket_variant(&self->srv0);
+	ASSERT_LE(0, connect_fd);
 
-	EXPECT_EQ(0, close(socket_fd));
+	/* Sets address port to 1024 for both protocol families. */
+	set_port(&self->srv0, 1024);
+	/* Binds on port 1024. */
+	ret = bind_variant(bind_fd, &self->srv0);
+	EXPECT_EQ(0, ret);
+	EXPECT_EQ(0, listen(bind_fd, backlog));
+
+	/* Connects on the binded port 1024. */
+	ret = connect_variant(connect_fd, &self->srv0);
+	EXPECT_EQ(0, ret);
+
+	EXPECT_EQ(0, close(connect_fd));
+	EXPECT_EQ(0, close(bind_fd));
 }
 
 TEST_HARNESS_MAIN

@@ -678,8 +678,8 @@ get_access_mask_t(const struct landlock_ruleset *const ruleset,
  *
  * @domain: The domain that defines the current restrictions.
  * @access_request: The requested access rights to check.
- * @layer_masks: It must contain LANDLOCK_NUM_ACCESS_FS or LANDLOCK_NUM_ACCESS_NET
- * elements according to @key_type.
+ * @layer_masks: It must contain %LANDLOCK_NUM_ACCESS_FS or
+ * %LANDLOCK_NUM_ACCESS_NET elements according to @key_type.
  * @key_type: The key type to switch between access masks of different types.
  *
  * Returns: An access mask where each access right bit is set which is handled

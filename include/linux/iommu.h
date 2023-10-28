@@ -68,7 +68,7 @@ struct iommu_domain_geometry {
 #define __IOMMU_DOMAIN_SVA	(1U << 4)  /* Shared process address space */
 #define __IOMMU_DOMAIN_PLATFORM	(1U << 5)
 
-#define __IOMMU_DOMAIN_NESTED	(1U << 5)  /* User-managed address space nested
+#define __IOMMU_DOMAIN_NESTED	(1U << 6)  /* User-managed address space nested
 					      on a stage-2 translation        */
 
 #define IOMMU_DOMAIN_ALLOC_FLAGS ~__IOMMU_DOMAIN_DMA_FQ
@@ -370,6 +370,8 @@ static inline int __iommu_copy_struct_from_user(
  * @owner: Driver module providing these ops
  * @identity_domain: An always available, always attachable identity
  *                   translation.
+ * @blocked_domain: An always available, always attachable blocking
+ *                  translation.
  * @default_domain: If not NULL this will always be set as the default domain.
  *                  This should be an IDENTITY/BLOCKED/PLATFORM domain.
  *                  Do not use in new drivers.
@@ -411,6 +413,7 @@ struct iommu_ops {
 	unsigned long pgsize_bitmap;
 	struct module *owner;
 	struct iommu_domain *identity_domain;
+	struct iommu_domain *blocked_domain;
 	struct iommu_domain *default_domain;
 };
 

@@ -8,7 +8,7 @@ Landlock: unprivileged access control
 =====================================
 
 :Author: Mickaël Salaün
-:Date: October 2022
+:Date: October 2023
 
 The goal of Landlock is to enable to restrict ambient rights (e.g. global
 filesystem or network access) for a set of processes.  Because Landlock
@@ -40,7 +40,7 @@ Filesystem rules
     `filesystem access rights`.
 
 Network rules (since ABI v4)
-    For these rules, the object is currently a TCP port,
+    For these rules, the object is a TCP port,
     and the related actions are defined with `network access rights`.
 
 Defining and enforcing a security policy
@@ -52,7 +52,7 @@ For this example, the ruleset will contain rules that only allow filesystem
 read actions and establish a specific TCP connection. Filesystem write
 actions and other TCP actions will be denied.
 
-The ruleset then needs to handle both of these kind of actions.  This is
+The ruleset then needs to handle both these kinds of actions.  This is
 required for backward and forward compatibility (i.e. the kernel and user
 space may not know each other's supported restrictions), hence the need
 to be explicit about the denied-by-default access rights.
@@ -107,6 +107,7 @@ remove access rights which are only supported in higher versions of the ABI.
     case 2:
         /* Removes LANDLOCK_ACCESS_FS_TRUNCATE for ABI < 3 */
         ruleset_attr.handled_access_fs &= ~LANDLOCK_ACCESS_FS_TRUNCATE;
+        __attribute__((fallthrough));
     case 3:
         /* Removes network support for ABI < 4 */
         ruleset_attr.handled_access_net &=
@@ -177,9 +178,9 @@ number for a specific action: HTTPS connections.
                             &net_port, 0);
 
 The next step is to restrict the current thread from gaining more privileges
-(e.g. through a SUID binary). We now have a ruleset with the first rule allowing
-read access to ``/usr`` while denying all other handled accesses for the filesystem,
-and a second rule allowing HTTPS connections.
+(e.g. through a SUID binary).  We now have a ruleset with the first rule
+allowing read access to ``/usr`` while denying all other handled accesses for
+the filesystem, and a second rule allowing HTTPS connections.
 
 .. code-block:: c
 
@@ -407,7 +408,7 @@ Extending a ruleset
 
 .. kernel-doc:: include/uapi/linux/landlock.h
     :identifiers: landlock_rule_type landlock_path_beneath_attr
-                  landlock_net_service_attr
+                  landlock_net_port_attr
 
 Enforcing a ruleset
 -------------------
@@ -489,7 +490,9 @@ Network support (ABI < 4)
 -------------------------
 
 Starting with the Landlock ABI version 4, it is now possible to restrict TCP
-bind and connect actions to only a set of allowed ports.
+bind and connect actions to only a set of allowed ports thanks to the new
+``LANDLOCK_ACCESS_NET_BIND_TCP`` and ``LANDLOCK_ACCESS_NET_CONNECT_TCP``
+access rights.
 
 .. _kernel_support:
 
@@ -510,9 +513,10 @@ Documentation/admin-guide/kernel-parameters.rst thanks to the bootloader
 configuration.
 
 To be able to explicitly allow TCP operations (e.g., adding a network rule with
-``LANDLOCK_ACCESS_NET_TCP_BIND``), the kernel must support TCP (``CONFIG_INET=y``).
-Otherwise, sys_landlock_add_rule() returns an ``EAFNOSUPPORT`` error, which can
-safely be ignored because this kind of TCP operation is already not possible.
+``LANDLOCK_ACCESS_NET_BIND_TCP``), the kernel must support TCP
+(``CONFIG_INET=y``).  Otherwise, sys_landlock_add_rule() returns an
+``EAFNOSUPPORT`` error, which can safely be ignored because this kind of TCP
+operation is already not possible.
 
 Questions and answers
 =====================

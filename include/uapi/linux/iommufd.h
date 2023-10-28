@@ -445,9 +445,9 @@ struct iommu_hwpt_alloc {
 
 /**
  * enum iommu_hw_info_vtd_flags - Flags for VT-d hw_info
- * @IOMMU_HW_INFO_VTD_ERRATA_772415_SPR17: If set, disallow nesting on domains
- *                                   with read-only mapping.
- *                                   https://www.intel.com/content/www/us/en/content-details/772415/content-details.html
+ * @IOMMU_HW_INFO_VTD_ERRATA_772415_SPR17: If set, disallow read-only mappings
+ *                                         on a nested_parent domain.
+ *                                         https://www.intel.com/content/www/us/en/content-details/772415/content-details.html
  */
 enum iommu_hw_info_vtd_flags {
 	IOMMU_HW_INFO_VTD_ERRATA_772415_SPR17 = 1 << 0,
