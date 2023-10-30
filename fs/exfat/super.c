@@ -360,7 +360,7 @@ static int exfat_read_root(struct inode *inode)
 	inode->i_gid = sbi->options.fs_gid;
 	inode_inc_iversion(inode);
 	inode->i_generation = 0;
-	inode->i_mode = exfat_make_mode(sbi, ATTR_SUBDIR, 0777);
+	inode->i_mode = exfat_make_mode(sbi, EXFAT_ATTR_SUBDIR, 0777);
 	inode->i_op = &exfat_dir_inode_operations;
 	inode->i_fop = &exfat_dir_operations;
 
@@ -369,7 +369,7 @@ static int exfat_read_root(struct inode *inode)
 	ei->i_size_aligned = i_size_read(inode);
 	ei->i_size_ondisk = i_size_read(inode);
 
-	exfat_save_attr(inode, ATTR_SUBDIR);
+	exfat_save_attr(inode, EXFAT_ATTR_SUBDIR);
 	inode->i_mtime = inode->i_atime = ei->i_crtime = inode_set_ctime_current(inode);
 	exfat_truncate_atime(&inode->i_atime);
 	return 0;
