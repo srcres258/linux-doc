@@ -342,44 +342,30 @@ out:
 	return error;
 }
 
+#define FILEID_INO64_GEN_LEN 3
+
 /**
- * generic_encode_ino32_fh - generic export_operations->encode_fh function
+ * exportfs_encode_ino64_fid - encode non-decodeable 64bit ino file id
  * @inode:   the object to encode
- * @fh:      where to store the file handle fragment
+ * @fid:     where to store the file handle fragment
  * @max_len: maximum length to store there (in 4 byte units)
- * @parent:  parent directory inode, if wanted
  *
- * This generic encode_fh function assumes that the 32 inode number
- * is suitable for locating an inode, and that the generation number
- * can be used to check that it is still valid.  It places them in the
- * filehandle fragment where export_decode_fh expects to find them.
+ * This generic function is used to encode a non-decodeable file id for
+ * fanotify for filesystems that do not support NFS export.
  */
-int generic_encode_ino32_fh(struct inode *inode, __u32 *fh, int *max_len,
-			    struct inode *parent)
+static int exportfs_encode_ino64_fid(struct inode *inode, struct fid *fid,
+				     int *max_len)
 {
-	struct fid *fid = (void *)fh;
-	int len = *max_len;
-	int type = FILEID_INO32_GEN;
-
-	if (parent && (len < 4)) {
-		*max_len = 4;
-		return FILEID_INVALID;
-	} else if (len < 2) {
-		*max_len = 2;
+	if (*max_len < FILEID_INO64_GEN_LEN) {
+		*max_len = FILEID_INO64_GEN_LEN;
 		return FILEID_INVALID;
 	}
 
-	len = 2;
-	fid->i32.ino = inode->i_ino;
-	fid->i32.gen = inode->i_generation;
-	if (parent) {
-		fid->i32.parent_ino = parent->i_ino;
-		fid->i32.parent_gen = parent->i_generation;
-		len = 4;
-		type = FILEID_INO32_GEN_PARENT;
-	}
-	*max_len = len;
-	return type;
+	fid->i64.ino = inode->i_ino;
+	fid->i64.gen = inode->i_generation;
+	*max_len = FILEID_INO64_GEN_LEN;
+
+	return FILEID_INO64_GEN;
 }
 EXPORT_SYMBOL_GPL(generic_encode_ino32_fh);
 

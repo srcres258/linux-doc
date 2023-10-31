@@ -1117,7 +1117,7 @@ struct smb2_server_client_notification {
 #define FILE_NON_DIRECTORY_FILE_LE	cpu_to_le32(0x00000040)
 #define FILE_COMPLETE_IF_OPLOCKED_LE	cpu_to_le32(0x00000100)
 #define FILE_NO_EA_KNOWLEDGE_LE		cpu_to_le32(0x00000200)
-/* FILE_OPEN_REMOTE_INSTANcE		cpu_to_le32(0x00000400) should be zero, ignored */
+/* FILE_OPEN_REMOTE_INSTANCE		cpu_to_le32(0x00000400) should be zero, ignored */
 #define FILE_RANDOM_ACCESS_LE		cpu_to_le32(0x00000800)
 #define FILE_DELETE_ON_CLOSE_LE		cpu_to_le32(0x00001000) /* MBZ */
 #define FILE_OPEN_BY_FILE_ID_LE		cpu_to_le32(0x00002000)

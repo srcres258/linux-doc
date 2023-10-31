@@ -611,9 +611,9 @@ struct pdc_system_map_addr_info { /* PDC_SYSTEM_MAP/FIND_ADDRESS */
 };
 
 struct pdc_relocate_info_block {   /* PDC_RELOCATE_INFO */
-        unsigned long pdc_size;
-        unsigned long pdc_alignment;
-        unsigned long pdc_address;
+	unsigned long pdc_size;
+	unsigned long pdc_alignment;
+	unsigned long pdc_address;
 };
 
 struct pdc_initiator { /* PDC_INITIATOR */
@@ -726,20 +726,20 @@ struct pdc_toc_pim_20 {
 
 /* for SpeedyBoot/firm_ctl funtionality */
 struct pdc_firm_test_get_rtn_block {   /* PDC_MODEL/PDC_FIRM_TEST_GET */
-        unsigned long current_tests;   /* u_R_addr Raddr_ints[0]  */
-        unsigned long tests_supported; /* u_R_addr Raddr_ints[1]  */
-        unsigned long default_tests;   /* u_R_addr Raddr_ints[2]  */
+	unsigned long current_tests;   /* u_R_addr Raddr_ints[0]  */
+	unsigned long tests_supported; /* u_R_addr Raddr_ints[1]  */
+	unsigned long default_tests;   /* u_R_addr Raddr_ints[2]  */
 };
 
-#define TORNADO_CPU_ID 		 0xB
-#define PCXL_CPU_ID              0xD
-#define PCXU_CPU_ID              0xE	/* U and U+ for all but C-class with bug */
-#define VR_CPU_ID                0xF
-#define PCXU_PLUS_CPU_ID        0x10	/* U+ only on C-class with bug */
-#define PCXW_CPU_ID             0x11
-#define PCXW_PLUS_CPU_ID        0x12
-#define PIRANHA_CPU_ID          0x13
-#define MAKO_CPU_ID             0x14
+#define TORNADO_CPU_ID		0xB
+#define PCXL_CPU_ID		0xD
+#define PCXU_CPU_ID		0xE	/* U and U+ for all but C-class with bug */
+#define VR_CPU_ID		0xF
+#define PCXU_PLUS_CPU_ID	0x10	/* U+ only on C-class with bug */
+#define PCXW_CPU_ID		0x11
+#define PCXW_PLUS_CPU_ID	0x12
+#define PIRANHA_CPU_ID		0x13
+#define MAKO_CPU_ID		0x14
 
 #endif /* !defined(__ASSEMBLY__) */
 
