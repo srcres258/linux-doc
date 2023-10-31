@@ -270,7 +270,7 @@ static int smu_v13_0_6_init_microcode(struct smu_context *smu)
 	struct amdgpu_device *adev = smu->adev;
 	uint32_t p2s_table_id = P2S_TABLE_ID_A;
 	int ret = 0, i, p2stable_count;
-	char ucode_prefix[30];
+	char ucode_prefix[15];
 	char fw_name[30];
 
 	/* No need to load P2S tables in IOV mode */
@@ -1478,6 +1478,7 @@ static int smu_v13_0_6_mca_set_debug_mode(struct smu_context *smu, bool enable)
 	if (smu->smc_fw_version < 0x554800)
 		return 0;
 
+	amdgpu_ras_set_mca_debug_mode(smu->adev, enable);
 	return smu_cmn_send_smc_msg_with_param(smu, SMU_MSG_ClearMcaOnRead,
 					       enable ? 0 : ClearMcaOnRead_UE_FLAG_MASK | ClearMcaOnRead_CE_POLL_MASK,
 					       NULL);
