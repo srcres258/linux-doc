@@ -207,27 +207,6 @@ static void HTIOTPeerDetermine(struct rtllib_device *ieee)
 	netdev_dbg(ieee->dev, "IOTPEER: %x\n", ht_info->IOTPeer);
 }
 
-static u8 HTIOTActIsDisableMCS14(struct rtllib_device *ieee, u8 *PeerMacAddr)
-{
-	return 0;
-}
-
-static bool HTIOTActIsDisableMCS15(struct rtllib_device *ieee)
-{
-	return false;
-}
-
-static bool HTIOTActIsDisableMCSTwoSpatialStream(struct rtllib_device *ieee)
-{
-	return false;
-}
-
-static u8 HTIOTActIsDisableEDCATurbo(struct rtllib_device *ieee,
-				     u8 *PeerMacAddr)
-{
-	return false;
-}
-
 static u8 HTIOTActIsMgntUseCCK6M(struct rtllib_device *ieee,
 				 struct rtllib_network *network)
 {
@@ -696,22 +675,6 @@ void HTResetSelfAndSavePeerSetting(struct rtllib_device *ieee,
 		HTIOTPeerDetermine(ieee);
 
 		ht_info->iot_action = 0;
-		bIOTAction = HTIOTActIsDisableMCS14(ieee, pNetwork->bssid);
-		if (bIOTAction)
-			ht_info->iot_action |= HT_IOT_ACT_DISABLE_MCS14;
-
-		bIOTAction = HTIOTActIsDisableMCS15(ieee);
-		if (bIOTAction)
-			ht_info->iot_action |= HT_IOT_ACT_DISABLE_MCS15;
-
-		bIOTAction = HTIOTActIsDisableMCSTwoSpatialStream(ieee);
-		if (bIOTAction)
-			ht_info->iot_action |= HT_IOT_ACT_DISABLE_ALL_2SS;
-
-		bIOTAction = HTIOTActIsDisableEDCATurbo(ieee, pNetwork->bssid);
-		if (bIOTAction)
-			ht_info->iot_action |= HT_IOT_ACT_DISABLE_EDCA_TURBO;
-
 		bIOTAction = HTIOTActIsMgntUseCCK6M(ieee, pNetwork);
 		if (bIOTAction)
 			ht_info->iot_action |= HT_IOT_ACT_MGNT_USE_CCK_6M;

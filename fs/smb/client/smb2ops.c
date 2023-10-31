@@ -5137,7 +5137,7 @@ smb2_make_node(unsigned int xid, struct inode *inode,
 		pdev->minor = cpu_to_le64(MINOR(dev));
 		rc = tcon->ses->server->ops->sync_write(xid, &fid, &io_parms,
 							&bytes_written, iov, 1);
-	} else if (S_ISBLK(mode)) {
+	} else if (S_ISFIFO(mode)) {
 		memcpy(pdev->type, "LnxFIFO", 8);
 		pdev->major = 0;
 		pdev->minor = 0;

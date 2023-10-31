@@ -23,6 +23,9 @@
  *	/proc/${pid}/smaps
  *	/proc/${pid}/smaps_rollup
  */
+#undef _GNU_SOURCE
+#define _GNU_SOURCE
+
 #undef NDEBUG
 #include <assert.h>
 #include <errno.h>
@@ -34,6 +37,7 @@
 #include <sys/mman.h>
 #include <sys/ptrace.h>
 #include <sys/resource.h>
+#include <sys/syscall.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -42,6 +46,43 @@
 #ifdef __amd64__
 #define TEST_VSYSCALL
 #endif
+
+#if defined __amd64__
+	#ifndef SYS_pkey_alloc
+		#define SYS_pkey_alloc 330
+	#endif
+	#ifndef SYS_pkey_free
+		#define SYS_pkey_free 331
+	#endif
+#elif defined __i386__
+	#ifndef SYS_pkey_alloc
+		#define SYS_pkey_alloc 381
+	#endif
+	#ifndef SYS_pkey_free
+		#define SYS_pkey_free 382
+	#endif
+#else
+	#error "SYS_pkey_alloc"
+#endif
+
+static int g_protection_key_support;
+
+static int protection_key_support(void)
+{
+	long rv = syscall(SYS_pkey_alloc, 0, 0);
+	if (rv > 0) {
+		syscall(SYS_pkey_free, (int)rv);
+		return 1;
+	} else if (rv == -1 && errno == ENOSYS) {
+		return 0;
+	} else if (rv == -1 && errno == EINVAL) {
+		// ospke=n
+		return 0;
+	} else {
+		fprintf(stderr, "%s: error: rv %ld, errno %d\n", __func__, rv, errno);
+		exit(EXIT_FAILURE);
+	}
+}
 
 /*
  * 0: vsyscall VMA doesn't exist	vsyscall=none
@@ -61,33 +102,6 @@ static const char proc_pid_maps_vsyscall_2[] =
 static const char proc_pid_smaps_vsyscall_0[] = "";
 
 static const char proc_pid_smaps_vsyscall_1[] =
-"ffffffffff600000-ffffffffff601000 r-xp 00000000 00:00 0                  [vsyscall]\n"
-"Size:                  4 kB\n"
-"KernelPageSize:        4 kB\n"
-"MMUPageSize:           4 kB\n"
-"Rss:                   0 kB\n"
-"Pss:                   0 kB\n"
-"Pss_Dirty:             0 kB\n"
-"Shared_Clean:          0 kB\n"
-"Shared_Dirty:          0 kB\n"
-"Private_Clean:         0 kB\n"
-"Private_Dirty:         0 kB\n"
-"Referenced:            0 kB\n"
-"Anonymous:             0 kB\n"
-"LazyFree:              0 kB\n"
-"AnonHugePages:         0 kB\n"
-"ShmemPmdMapped:        0 kB\n"
-"FilePmdMapped:         0 kB\n"
-"Shared_Hugetlb:        0 kB\n"
-"Private_Hugetlb:       0 kB\n"
-"Swap:                  0 kB\n"
-"SwapPss:               0 kB\n"
-"Locked:                0 kB\n"
-"THPeligible:           0\n"
-"ProtectionKey:         0\n"
-;
-
-static const char proc_pid_smaps_vsyscall_2[] =
 "ffffffffff600000-ffffffffff601000 --xp 00000000 00:00 0                  [vsyscall]\n"
 "Size:                  4 kB\n"
 "KernelPageSize:        4 kB\n"
@@ -101,6 +115,7 @@ static const char proc_pid_smaps_vsyscall_2[] =
 "Private_Dirty:         0 kB\n"
 "Referenced:            0 kB\n"
 "Anonymous:             0 kB\n"
+"KSM:                   0 kB\n"
 "LazyFree:              0 kB\n"
 "AnonHugePages:         0 kB\n"
 "ShmemPmdMapped:        0 kB\n"
@@ -111,7 +126,33 @@ static const char proc_pid_smaps_vsyscall_2[] =
 "SwapPss:               0 kB\n"
 "Locked:                0 kB\n"
 "THPeligible:           0\n"
-"ProtectionKey:         0\n"
+;
+
+static const char proc_pid_smaps_vsyscall_2[] =
+"ffffffffff600000-ffffffffff601000 r-xp 00000000 00:00 0                  [vsyscall]\n"
+"Size:                  4 kB\n"
+"KernelPageSize:        4 kB\n"
+"MMUPageSize:           4 kB\n"
+"Rss:                   0 kB\n"
+"Pss:                   0 kB\n"
+"Pss_Dirty:             0 kB\n"
+"Shared_Clean:          0 kB\n"
+"Shared_Dirty:          0 kB\n"
+"Private_Clean:         0 kB\n"
+"Private_Dirty:         0 kB\n"
+"Referenced:            0 kB\n"
+"Anonymous:             0 kB\n"
+"KSM:                   0 kB\n"
+"LazyFree:              0 kB\n"
+"AnonHugePages:         0 kB\n"
+"ShmemPmdMapped:        0 kB\n"
+"FilePmdMapped:         0 kB\n"
+"Shared_Hugetlb:        0 kB\n"
+"Private_Hugetlb:       0 kB\n"
+"Swap:                  0 kB\n"
+"SwapPss:               0 kB\n"
+"Locked:                0 kB\n"
+"THPeligible:           0\n"
 ;
 
 static void sigaction_SIGSEGV(int _, siginfo_t *__, void *___)
@@ -233,32 +274,27 @@ static int test_proc_pid_smaps(pid_t pid)
 		}
 		perror("open /proc/${pid}/smaps");
 		return EXIT_FAILURE;
-	} else {
-		ssize_t rv = read(fd, buf, sizeof(buf));
-		close(fd);
-		assert(rv >= 0);
-		assert(rv <= sizeof(buf));
-		if (g_vsyscall != 0) {
-			int pkey = pkey_alloc(0, 0);
-
-			if (pkey < 0) {
-				size_t len = strlen(g_proc_pid_maps_vsyscall);
-
-				assert(rv > len);
-				assert(memcmp(buf, g_proc_pid_maps_vsyscall, len) == 0);
-			} else {
-				pkey_free(pkey);
-				static const char * const S[] = {
-					"ProtectionKey:         0\n"
-				};
-				int i;
-
-				for (i = 0; i < ARRAY_SIZE(S); i++)
-					assert(memmem(buf, rv, S[i], strlen(S[i])));
-			}
-		}
-		return EXIT_SUCCESS;
 	}
+	ssize_t rv = read(fd, buf, sizeof(buf));
+	close(fd);
+
+	assert(0 <= rv);
+	assert(rv <= sizeof(buf));
+
+	if (g_vsyscall == 0) {
+		assert(rv == 0);
+	} else {
+		size_t len = strlen(g_proc_pid_smaps_vsyscall);
+		assert(rv > len);
+		assert(memcmp(buf, g_proc_pid_smaps_vsyscall, len) == 0);
+
+		if (g_protection_key_support) {
+#define PROTECTION_KEY "ProtectionKey:         0\n"
+			assert(memmem(buf, rv, PROTECTION_KEY, strlen(PROTECTION_KEY)));
+		}
+	}
+
+	return EXIT_SUCCESS;
 }
 
 static const char g_smaps_rollup[] =
@@ -424,6 +460,8 @@ int main(void)
 	default:
 		abort();
 	}
+
+	g_protection_key_support = protection_key_support();
 
 	pid_t pid = fork();
 	if (pid == -1) {

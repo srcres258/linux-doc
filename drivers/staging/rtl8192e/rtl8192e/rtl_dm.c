@@ -292,25 +292,25 @@ static void _rtl92e_dm_check_rate_adaptive(struct net_device *dev)
 				     ht_info->bCurShortGI20MHz);
 
 		pra->upper_rssi_threshold_ratr =
-				(pra->upper_rssi_threshold_ratr & (~BIT31)) |
-				((bshort_gi_enabled) ? BIT31 : 0);
+				(pra->upper_rssi_threshold_ratr & (~BIT(31))) |
+				((bshort_gi_enabled) ? BIT(31) : 0);
 
 		pra->middle_rssi_threshold_ratr =
-				(pra->middle_rssi_threshold_ratr & (~BIT31)) |
-				((bshort_gi_enabled) ? BIT31 : 0);
+				(pra->middle_rssi_threshold_ratr & (~BIT(31))) |
+				((bshort_gi_enabled) ? BIT(31) : 0);
 
 		if (priv->current_chnl_bw != HT_CHANNEL_WIDTH_20) {
 			pra->low_rssi_threshold_ratr =
-				(pra->low_rssi_threshold_ratr_40M & (~BIT31)) |
-				((bshort_gi_enabled) ? BIT31 : 0);
+				(pra->low_rssi_threshold_ratr_40M & (~BIT(31))) |
+				((bshort_gi_enabled) ? BIT(31) : 0);
 		} else {
 			pra->low_rssi_threshold_ratr =
-				(pra->low_rssi_threshold_ratr_20M & (~BIT31)) |
-				((bshort_gi_enabled) ? BIT31 : 0);
+				(pra->low_rssi_threshold_ratr_20M & (~BIT(31))) |
+				((bshort_gi_enabled) ? BIT(31) : 0);
 		}
 		pra->ping_rssi_ratr =
-				(pra->ping_rssi_ratr & (~BIT31)) |
-				((bshort_gi_enabled) ? BIT31 : 0);
+				(pra->ping_rssi_ratr & (~BIT(31))) |
+				((bshort_gi_enabled) ? BIT(31) : 0);
 
 		if (pra->ratr_state == DM_RATR_STA_HIGH) {
 			high_rssi_thresh_for_ra = pra->high2low_rssi_thresh_for_ra;
@@ -1247,7 +1247,7 @@ static void _rtl92e_dm_check_rf_ctrl_gpio(void *data)
 
 	tmp1byte = rtl92e_readb(dev, GPI);
 
-	rf_power_state_to_set = (tmp1byte & BIT1) ?  rf_on : rf_off;
+	rf_power_state_to_set = (tmp1byte & BIT(1)) ?  rf_on : rf_off;
 
 	if (priv->hw_radio_off && (rf_power_state_to_set == rf_on)) {
 		netdev_info(dev, "gpiochangeRF  - HW Radio ON\n");

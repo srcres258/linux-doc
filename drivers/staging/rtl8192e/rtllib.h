@@ -91,7 +91,7 @@ static inline void *netdev_priv_rsl(struct net_device *dev)
 #define IE_CISCO_FLAG_POSITION		0x08
 #define SUPPORT_CKIP_MIC			0x08
 #define SUPPORT_CKIP_PK			0x10
-#define	RT_RF_OFF_LEVL_HALT_NIC		BIT3
+#define	RT_RF_OFF_LEVL_HALT_NIC		BIT(3)
 #define	RT_IN_PS_LEVEL(psc, _PS_FLAG)		\
 	((psc->CurPsLevel & _PS_FLAG) ? true : false)
 #define	RT_CLEAR_PS_LEVEL(psc, _PS_FLAG)	\
@@ -341,7 +341,7 @@ enum rt_op_mode {
 /* QOS control */
 #define RTLLIB_QCTL_TID	      0x000F
 
-#define	FC_QOS_BIT					BIT7
+#define	FC_QOS_BIT					BIT(7)
 #define IsDataFrame(pdu)	(((pdu[0] & 0x0C) == 0x08) ? true : false)
 #define	IsLegacyDataFrame(pdu)	(IsDataFrame(pdu) && (!(pdu[0]&FC_QOS_BIT)))
 #define IsQoSDataFrame(pframe)			\
@@ -911,7 +911,6 @@ enum {WMM_all_frame, WMM_two_frame, WMM_four_frame, WMM_six_frame};
 	((up) < 6) ? WME_AC_VI : \
 	WME_AC_VO)
 
-#define	ETHER_ADDR_LEN		6	/* length of an Ethernet address */
 #define ETHERNET_HEADER_SIZE    14      /* length of two Ethernet address
 					 * plus ether type
 					 */
@@ -1085,10 +1084,10 @@ struct rt_pwr_save_ctrl {
 
 #define RT_RF_CHANGE_SOURCE u32
 
-#define RF_CHANGE_BY_SW BIT31
-#define RF_CHANGE_BY_HW BIT30
-#define RF_CHANGE_BY_PS BIT29
-#define RF_CHANGE_BY_IPS BIT28
+#define RF_CHANGE_BY_SW BIT(31)
+#define RF_CHANGE_BY_HW BIT(30)
+#define RF_CHANGE_BY_PS BIT(29)
+#define RF_CHANGE_BY_IPS BIT(28)
 #define RF_CHANGE_BY_INIT	0
 
 enum country_code_type {

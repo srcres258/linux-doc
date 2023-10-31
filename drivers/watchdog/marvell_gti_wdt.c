@@ -8,8 +8,8 @@
 #include <linux/interrupt.h>
 #include <linux/io.h>
 #include <linux/module.h>
-#include <linux/of_platform.h>
 #include <linux/platform_device.h>
+#include <linux/of.h>
 #include <linux/watchdog.h>
 
 /*
@@ -190,6 +190,13 @@ static int gti_wdt_set_pretimeout(struct watchdog_device *wdev,
 	struct gti_wdt_priv *priv = watchdog_get_drvdata(wdev);
 	struct watchdog_device *wdog_dev = &priv->wdev;
 
+	if (!timeout) {
+		/* Disable Interrupt */
+		writeq(GTI_CWD_INT_ENA_CLR_VAL(priv->wdt_timer_idx),
+		       priv->base + GTI_CWD_INT_ENA_CLR);
+		return 0;
+	}
+
 	/* pretimeout should 1/3 of max_timeout */
 	if (timeout * 3 <= wdog_dev->max_timeout)
 		return gti_wdt_settimeout(wdev, timeout * 3);
@@ -271,7 +278,7 @@ static int gti_wdt_probe(struct platform_device *pdev)
 				   &wdt_idx);
 	if (!err) {
 		if (wdt_idx >= priv->data->gti_num_timers)
-			return dev_err_probe(&pdev->dev, err,
+			return dev_err_probe(&pdev->dev, -EINVAL,
 				"GTI wdog timer index not valid");
 
 		priv->wdt_timer_idx = wdt_idx;
@@ -292,6 +299,7 @@ static int gti_wdt_probe(struct platform_device *pdev)
 
 	/* Maximum timeout is 3 times the pretimeout */
 	wdog_dev->max_timeout = max_pretimeout * 3;
+	wdog_dev->max_hw_heartbeat_ms = max_pretimeout * 1000;
 	/* Minimum first timeout (pretimeout) is 1, so min_timeout as 3 */
 	wdog_dev->min_timeout = 3;
 	wdog_dev->timeout = wdog_dev->pretimeout;

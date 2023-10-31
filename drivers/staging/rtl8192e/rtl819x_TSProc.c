@@ -94,10 +94,7 @@ static void TsAddBaProcess(struct timer_list *t)
 static void ResetTsCommonInfo(struct ts_common_info *pTsCommonInfo)
 {
 	eth_zero_addr(pTsCommonInfo->addr);
-	memset(&pTsCommonInfo->TSpec, 0, sizeof(union tspec_body));
-	memset(&pTsCommonInfo->TClass, 0, sizeof(union qos_tclas) * TCLAS_NUM);
-	pTsCommonInfo->TClasProc = 0;
-	pTsCommonInfo->TClasNum = 0;
+	memset(&pTsCommonInfo->TSpec, 0, sizeof(struct qos_tsinfo));
 }
 
 static void ResetTxTsEntry(struct tx_ts_record *ts)
@@ -201,8 +198,8 @@ static struct ts_common_info *SearchAdmitTRStream(struct rtllib_device *ieee,
 			continue;
 		list_for_each_entry(pRet, psearch_list, List) {
 			if (memcmp(pRet->addr, addr, 6) == 0 &&
-			    pRet->TSpec.f.ts_info.field.ucTSID == TID &&
-			    pRet->TSpec.f.ts_info.field.ucDirection == dir)
+			    pRet->TSpec.ucTSID == TID &&
+			    pRet->TSpec.ucDirection == dir)
 				break;
 		}
 		if (&pRet->List  != psearch_list)
@@ -215,11 +212,8 @@ static struct ts_common_info *SearchAdmitTRStream(struct rtllib_device *ieee,
 }
 
 static void MakeTSEntry(struct ts_common_info *pTsCommonInfo, u8 *addr,
-			union tspec_body *pTSPEC, union qos_tclas *pTCLAS,
-			u8 TCLAS_Num, u8 TCLAS_Proc)
+			struct qos_tsinfo *pTSPEC)
 {
-	u8	count;
-
 	if (!pTsCommonInfo)
 		return;
 
@@ -227,22 +221,15 @@ static void MakeTSEntry(struct ts_common_info *pTsCommonInfo, u8 *addr,
 
 	if (pTSPEC)
 		memcpy((u8 *)(&(pTsCommonInfo->TSpec)), (u8 *)pTSPEC,
-			sizeof(union tspec_body));
-
-	for (count = 0; count < TCLAS_Num; count++)
-		memcpy((u8 *)(&(pTsCommonInfo->TClass[count])),
-		       (u8 *)pTCLAS, sizeof(union qos_tclas));
-
-	pTsCommonInfo->TClasProc = TCLAS_Proc;
-	pTsCommonInfo->TClasNum = TCLAS_Num;
+			sizeof(struct qos_tsinfo));
 }
 
 bool rtllib_get_ts(struct rtllib_device *ieee, struct ts_common_info **ppTS,
 	   u8 *addr, u8 TID, enum tr_select TxRxSelect, bool bAddNewTs)
 {
 	u8	UP = 0;
-	union tspec_body TSpec;
-	union qos_tsinfo *ts_info = &TSpec.f.ts_info;
+	struct qos_tsinfo TSpec;
+	struct qos_tsinfo *ts_info = &TSpec;
 	struct list_head *pUnusedList;
 	struct list_head *pAddmitList;
 	enum direction_value Dir;
@@ -318,17 +305,10 @@ bool rtllib_get_ts(struct rtllib_device *ieee, struct ts_common_info **ppTS,
 		netdev_dbg(ieee->dev,
 			   "to init current TS, UP:%d, Dir:%d, addr: %pM ppTs=%p\n",
 			   UP, Dir, addr, *ppTS);
-		ts_info->field.ucTrafficType = 0;
-		ts_info->field.ucTSID = UP;
-		ts_info->field.ucDirection = Dir;
-		ts_info->field.ucAccessPolicy = 1;
-		ts_info->field.ucAggregation = 0;
-		ts_info->field.ucPSB = 0;
-		ts_info->field.ucUP = UP;
-		ts_info->field.ucTSInfoAckPolicy = 0;
-		ts_info->field.ucSchedule = 0;
+		ts_info->ucTSID = UP;
+		ts_info->ucDirection = Dir;
 
-		MakeTSEntry(*ppTS, addr, &TSpec, NULL, 0, 0);
+		MakeTSEntry(*ppTS, addr, &TSpec);
 		list_add_tail(&((*ppTS)->List), pAddmitList);
 
 		return true;
