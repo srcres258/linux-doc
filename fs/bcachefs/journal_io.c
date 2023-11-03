@@ -1876,9 +1876,11 @@ void bch2_journal_write(struct closure *cl)
 	if (ret)
 		goto err;
 
+	mutex_lock(&j->buf_lock);
 	journal_buf_realloc(j, w);
 
 	ret = bch2_journal_write_prep(j, w);
+	mutex_unlock(&j->buf_lock);
 	if (ret)
 		goto err;
 
