@@ -5585,6 +5585,7 @@ static struct inode *new_simple_dir(struct inode *dir,
 				    struct btrfs_key *key,
 				    struct btrfs_root *root)
 {
+	struct timespec64 ts;
 	struct inode *inode = new_inode(dir->i_sb);
 	struct timespec64 mtime;
 
@@ -5604,11 +5605,13 @@ static struct inode *new_simple_dir(struct inode *dir,
 	inode->i_opflags &= ~IOP_XATTR;
 	inode->i_fop = &simple_dir_operations;
 	inode->i_mode = S_IFDIR | S_IRUGO | S_IWUSR | S_IXUGO;
-	inode_set_mtime_to_ts(inode, inode_set_ctime_current(inode));
+
+	ts = inode_set_ctime_current(inode);
+	inode_set_mtime_to_ts(inode, ts);
 	inode_set_atime_to_ts(inode, inode_get_atime(dir));
-	mtime = inode_get_mtime(inode);
-	BTRFS_I(inode)->i_otime_sec = mtime.tv_sec;
-	BTRFS_I(inode)->i_otime_nsec = mtime.tv_nsec;
+	BTRFS_I(inode)->i_otime_sec = ts.tv_sec;
+	BTRFS_I(inode)->i_otime_nsec = ts.tv_nsec;
+
 	inode->i_uid = dir->i_uid;
 	inode->i_gid = dir->i_gid;
 
@@ -6166,6 +6169,7 @@ static void btrfs_inherit_iflags(struct btrfs_inode *inode, struct btrfs_inode *
 int btrfs_create_new_inode(struct btrfs_trans_handle *trans,
 			   struct btrfs_new_inode_args *args)
 {
+	struct timespec64 ts;
 	struct inode *dir = args->dir;
 	struct inode *inode = args->inode;
 	const struct fscrypt_str *name = args->orphan ? NULL : &args->fname.disk_name;
@@ -6284,10 +6288,9 @@ int btrfs_create_new_inode(struct btrfs_trans_handle *trans,
 		goto discard;
 	}
 
-	simple_inode_init_ts(inode);
-	otime = inode_get_mtime(inode);
-	BTRFS_I(inode)->i_otime_sec = otime.tv_sec;
-	BTRFS_I(inode)->i_otime_nsec = otime.tv_nsec;
+	ts = simple_inode_init_ts(inode);
+	BTRFS_I(inode)->i_otime_sec = ts.tv_sec;
+	BTRFS_I(inode)->i_otime_nsec = ts.tv_nsec;
 
 	/*
 	 * We're going to fill the inode item now, so at this point the inode

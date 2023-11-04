@@ -816,15 +816,12 @@ __SYSCALL(__NR_process_mrelease, sys_process_mrelease)
 __SYSCALL(__NR_futex_waitv, sys_futex_waitv)
 #define __NR_set_mempolicy_home_node 450
 __SYSCALL(__NR_set_mempolicy_home_node, sys_set_mempolicy_home_node)
-
 #define __NR_cachestat 451
 __SYSCALL(__NR_cachestat, sys_cachestat)
-
 #define __NR_fchmodat2 452
 __SYSCALL(__NR_fchmodat2, sys_fchmodat2)
 #define __NR_map_shadow_stack 453
 __SYSCALL(__NR_map_shadow_stack, sys_map_shadow_stack)
-
 #define __NR_futex_wake 454
 __SYSCALL(__NR_futex_wake, sys_futex_wake)
 #define __NR_futex_wait 455
