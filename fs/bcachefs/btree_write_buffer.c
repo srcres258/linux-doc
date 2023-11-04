@@ -10,21 +10,82 @@
 #include "journal_io.h"
 #include "journal_reclaim.h"
 
-#include <linux/sort.h>
-
 static int bch2_btree_write_buffer_journal_flush(struct journal *,
 				struct journal_entry_pin *, u64);
 
 static int bch2_journal_keys_to_write_buffer(struct bch_fs *, struct journal_buf *);
 
-static inline int wb_key_cmp(const void *_l, const void *_r)
+static inline bool wb_key_cmp(const void *_l, const void *_r)
 {
+#if 0
+	int cmp;
+
+	asm(".intel_syntax noprefix;"
+	    "mov rax, [%[l]];"
+	    "sub rax, [%[r]];"
+	    "mov rax, [%[l] + 8];"
+	    "sbb rax, [%[r] + 8];"
+	    "mov rax, [%[l] + 16];"
+	    "sbb rax, [%[r] + 16];"
+	    ".att_syntax prefix;"
+	    : "=@ccae" (cmp)
+	    : [l] "r" (_l), [r] "r" (_r)
+	    : "rax", "cc");
+
+	return cmp;
+#else
 	const struct wb_key_ref *l = _l;
 	const struct wb_key_ref *r = _r;
 
-	return  cmp_int(l->hi, r->hi) ?:
+	return (cmp_int(l->hi, r->hi) ?:
 		cmp_int(l->mi, r->mi) ?:
-		cmp_int(l->lo, r->lo);
+		cmp_int(l->lo, r->lo)) >= 0;
+#endif
+}
+
+static noinline void wb_sort(struct wb_key_ref *base, size_t num)
+{
+	size_t n = num, a = num / 2;
+
+	if (!a)		/* num < 2 || size == 0 */
+		return;
+
+	for (;;) {
+		size_t b, c, d;
+
+		if (a)			/* Building heap: sift down --a */
+			--a;
+		else if (--n)		/* Sorting: Extract root to --n */
+			swap(base[0], base[n]);
+		else			/* Sort complete */
+			break;
+
+		/*
+		 * Sift element at "a" down into heap.  This is the
+		 * "bottom-up" variant, which significantly reduces
+		 * calls to cmp_func(): we find the sift-down path all
+		 * the way to the leaves (one compare per level), then
+		 * backtrack to find where to insert the target element.
+		 *
+		 * Because elements tend to sift down close to the leaves,
+		 * this uses fewer compares than doing two per level
+		 * on the way down.  (A bit more than half as many on
+		 * average, 3/4 worst-case.)
+		 */
+		for (b = a; c = 2*b + 1, (d = c + 1) < n;)
+			b = wb_key_cmp(base + c, base + d) ? c : d;
+		if (d == n)		/* Special case last leaf with no sibling */
+			b = c;
+
+		/* Now backtrack from "b" to the correct location for "a" */
+		while (b != a && wb_key_cmp(base + a, base + b))
+			b = (b - 1) / 2;
+		c = b;			/* Where "a" belongs */
+		while (b != a) {	/* Shift it into place */
+			b = (b - 1) / 2;
+			swap(base[b], base[c]);
+		}
+	}
 }
 
 static noinline int wb_flush_one_slowpath(struct btree_trans *trans,
@@ -205,9 +266,7 @@ static int bch2_btree_write_buffer_flush_locked(struct btree_trans *trans)
 	 * If that happens, simply skip the key so we can optimistically insert
 	 * as many keys as possible in the fast path.
 	 */
-	sort(wb->sorted.data, wb->sorted.nr,
-	     sizeof(wb->sorted.data[0]),
-	     wb_key_cmp, NULL);
+	wb_sort(wb->sorted.data, wb->sorted.nr);
 
 	darray_for_each(wb->sorted, i) {
 		struct btree_write_buffered_key *k = &wb->flushing.keys.data[i->idx];
