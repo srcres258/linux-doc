@@ -303,7 +303,7 @@ static inline void push_whiteout(struct bch_fs *c, struct btree *b,
 	k.needs_whiteout = true;
 
 	b->whiteout_u64s += k.u64s;
-	bkey_copy(unwritten_whiteouts_start(c, b), &k);
+	bkey_p_copy(unwritten_whiteouts_start(c, b), &k);
 }
 
 /*
@@ -325,7 +325,7 @@ bool bch2_btree_interior_updates_flush(struct bch_fs *);
 
 void bch2_journal_entry_to_btree_root(struct bch_fs *, struct jset_entry *);
 struct jset_entry *bch2_btree_roots_to_journal_entries(struct bch_fs *,
-					struct jset_entry *, struct jset_entry *);
+					struct jset_entry *, unsigned long);
 
 void bch2_do_pending_node_rewrites(struct bch_fs *);
 void bch2_free_pending_node_rewrites(struct bch_fs *);

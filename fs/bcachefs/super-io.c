@@ -721,7 +721,7 @@ retry:
 	if (opt_defined(*opts, sb))
 		goto err;
 
-	printk(KERN_ERR "bcachefs (%s): error reading default superblock: %s",
+	printk(KERN_ERR "bcachefs (%s): error reading default superblock: %s\n",
 	       path, err.buf);
 	printbuf_reset(&err);
 
@@ -783,7 +783,7 @@ got_super:
 
 	ret = bch2_sb_validate(sb, &err, READ);
 	if (ret) {
-		printk(KERN_ERR "bcachefs (%s): error validating superblock: %s",
+		printk(KERN_ERR "bcachefs (%s): error validating superblock: %s\n",
 		       path, err.buf);
 		goto err_no_print;
 	}
@@ -791,7 +791,7 @@ out:
 	printbuf_exit(&err);
 	return ret;
 err:
-	printk(KERN_ERR "bcachefs (%s): error reading superblock: %s",
+	printk(KERN_ERR "bcachefs (%s): error reading superblock: %s\n",
 	       path, err.buf);
 err_no_print:
 	bch2_free_super(sb);
@@ -1183,7 +1183,7 @@ void bch2_sb_to_text(struct printbuf *out, struct bch_sb *sb,
 	prt_printf(out, "Created:");
 	prt_tab(out);
 	if (sb->time_base_lo)
-		pr_time(out, div_u64(le64_to_cpu(sb->time_base_lo), NSEC_PER_SEC));
+		bch2_prt_datetime(out, div_u64(le64_to_cpu(sb->time_base_lo), NSEC_PER_SEC));
 	else
 		prt_printf(out, "(not set)");
 	prt_newline(out);

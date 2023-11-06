@@ -150,6 +150,7 @@ void bch2_stripe_to_text(struct printbuf *out, struct bch_fs *c,
 		prt_printf(out, " %u:%llu:%u", ptr->dev, b, offset);
 		if (i < nr_data)
 			prt_printf(out, "#%u", stripe_blockcount_get(s, i));
+		prt_printf(out, " gen %u", ptr->gen);
 		if (ptr_stale(ca, ptr))
 			prt_printf(out, " stale");
 	}
@@ -303,16 +304,21 @@ static void ec_validate_checksums(struct bch_fs *c, struct ec_stripe_buf *buf)
 			struct bch_csum got = ec_block_checksum(buf, i, offset);
 
 			if (bch2_crc_cmp(want, got)) {
-				struct printbuf buf2 = PRINTBUF;
+				struct printbuf err = PRINTBUF;
+				struct bch_dev *ca = bch_dev_bkey_exists(c, v->ptrs[i].dev);
 
-				bch2_bkey_val_to_text(&buf2, c, bkey_i_to_s_c(&buf->key));
+				prt_printf(&err, "stripe checksum error: expected %0llx:%0llx got %0llx:%0llx (type %s)\n",
+					   want.hi, want.lo,
+					   got.hi, got.lo,
+					   bch2_csum_types[v->csum_type]);
+				prt_printf(&err, "  for %ps at %u of\n  ", (void *) _RET_IP_, i);
+				bch2_bkey_val_to_text(&err, c, bkey_i_to_s_c(&buf->key));
+				bch_err_ratelimited(ca, "%s", err.buf);
+				printbuf_exit(&err);
 
-				bch_err_ratelimited(c,
-					"stripe checksum error for %ps at %u:%u: csum type %u, expected %llx got %llx\n%s",
-					(void *) _RET_IP_, i, j, v->csum_type,
-					want.lo, got.lo, buf2.buf);
-				printbuf_exit(&buf2);
 				clear_bit(i, buf->valid);
+
+				bch2_io_error(ca, BCH_MEMBER_ERROR_checksum);
 				break;
 			}
 
@@ -475,14 +481,10 @@ err:
 	return ret;
 }
 
-static int get_stripe_key(struct bch_fs *c, u64 idx, struct ec_stripe_buf *stripe)
-{
-	return bch2_trans_run(c, get_stripe_key_trans(trans, idx, stripe));
-}
-
 /* recovery read path: */
-int bch2_ec_read_extent(struct bch_fs *c, struct bch_read_bio *rbio)
+int bch2_ec_read_extent(struct btree_trans *trans, struct bch_read_bio *rbio)
 {
+	struct bch_fs *c = trans->c;
 	struct ec_stripe_buf *buf;
 	struct closure cl;
 	struct bch_stripe *v;
@@ -497,7 +499,7 @@ int bch2_ec_read_extent(struct bch_fs *c, struct bch_read_bio *rbio)
 	if (!buf)
 		return -BCH_ERR_ENOMEM_ec_read_extent;
 
-	ret = get_stripe_key(c, rbio->pick.ec.idx, buf);
+	ret = lockrestart_do(trans, get_stripe_key_trans(trans, rbio->pick.ec.idx, buf));
 	if (ret) {
 		bch_err_ratelimited(c,
 			"error doing reconstruct read: error %i looking up stripe", ret);

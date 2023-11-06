@@ -1678,9 +1678,15 @@ static void do_journal_write(struct closure *cl)
 	continue_at(cl, journal_write_done, c->io_complete_wq);
 }
 
-static void bch2_journal_entries_postprocess(struct bch_fs *c, struct jset *jset)
+static int bch2_journal_write_prep(struct journal *j, struct journal_buf *w)
 {
-	struct jset_entry *i, *next, *prev = NULL;
+	struct bch_fs *c = container_of(j, struct bch_fs, journal);
+	struct jset_entry *start, *end, *i, *next, *prev = NULL;
+	struct jset *jset = w->data;
+	unsigned sectors, bytes, u64s;
+	bool validate_before_checksum = false;
+	unsigned long btree_roots_have = 0;
+	int ret;
 
 	/*
 	 * Simple compaction, dropping empty jset_entries (from journal
@@ -1697,8 +1703,20 @@ static void bch2_journal_entries_postprocess(struct bch_fs *c, struct jset *jset
 		if (!u64s)
 			continue;
 
-		if (i->type == BCH_JSET_ENTRY_btree_root)
+		/*
+		 * New btree roots are set by journalling them; when the journal
+		 * entry gets written we have to propagate them to
+		 * c->btree_roots
+		 *
+		 * But, every journal entry we write has to contain all the
+		 * btree roots (at least for now); so after we copy btree roots
+		 * to c->btree_roots we have to get any missing btree roots and
+		 * add them to this journal entry:
+		 */
+		if (i->type == BCH_JSET_ENTRY_btree_root) {
 			bch2_journal_entry_to_btree_root(c, i);
+			__set_bit(i->btree_id, &btree_roots_have);
+		}
 
 		/* Can we merge with previous entry? */
 		if (prev &&
@@ -1722,85 +1740,10 @@ static void bch2_journal_entries_postprocess(struct bch_fs *c, struct jset *jset
 
 	prev = prev ? vstruct_next(prev) : jset->start;
 	jset->u64s = cpu_to_le32((u64 *) prev - jset->_data);
-}
-
-void bch2_journal_write(struct closure *cl)
-{
-	struct journal *j = container_of(cl, struct journal, io);
-	struct bch_fs *c = container_of(j, struct bch_fs, journal);
-	struct bch_dev *ca;
-	struct journal_buf *w = journal_last_unwritten_buf(j);
-	struct bch_replicas_padded replicas;
-	struct jset_entry *start, *end;
-	struct jset *jset;
-	struct bio *bio;
-	struct printbuf journal_debug_buf = PRINTBUF;
-	bool validate_before_checksum = false;
-	unsigned i, sectors, bytes, u64s, nr_rw_members = 0;
-	int ret;
-
-	BUG_ON(BCH_SB_CLEAN(c->disk_sb.sb));
-
-	journal_buf_realloc(j, w);
-	jset = w->data;
-
-	j->write_start_time = local_clock();
-
-	spin_lock(&j->lock);
-
-	/*
-	 * If the journal is in an error state - we did an emergency shutdown -
-	 * we prefer to continue doing journal writes. We just mark them as
-	 * noflush so they'll never be used, but they'll still be visible by the
-	 * list_journal tool - this helps in debugging.
-	 *
-	 * There's a caveat: the first journal write after marking the
-	 * superblock dirty must always be a flush write, because on startup
-	 * from a clean shutdown we didn't necessarily read the journal and the
-	 * new journal write might overwrite whatever was in the journal
-	 * previously - we can't leave the journal without any flush writes in
-	 * it.
-	 *
-	 * So if we're in an error state, and we're still starting up, we don't
-	 * write anything at all.
-	 */
-	if (!test_bit(JOURNAL_NEED_FLUSH_WRITE, &j->flags) &&
-	    (bch2_journal_error(j) ||
-	     w->noflush ||
-	     (!w->must_flush &&
-	      (jiffies - j->last_flush_write) < msecs_to_jiffies(c->opts.journal_flush_delay) &&
-	      test_bit(JOURNAL_MAY_SKIP_FLUSH, &j->flags)))) {
-		w->noflush = true;
-		SET_JSET_NO_FLUSH(jset, true);
-		jset->last_seq	= 0;
-		w->last_seq	= 0;
-
-		j->nr_noflush_writes++;
-	} else if (!bch2_journal_error(j)) {
-		j->last_flush_write = jiffies;
-		j->nr_flush_writes++;
-		clear_bit(JOURNAL_NEED_FLUSH_WRITE, &j->flags);
-	} else {
-		spin_unlock(&j->lock);
-		goto err;
-	}
-	spin_unlock(&j->lock);
-
-	/*
-	 * New btree roots are set by journalling them; when the journal entry
-	 * gets written we have to propagate them to c->btree_roots
-	 *
-	 * But, every journal entry we write has to contain all the btree roots
-	 * (at least for now); so after we copy btree roots to c->btree_roots we
-	 * have to get any missing btree roots and add them to this journal
-	 * entry:
-	 */
-
-	bch2_journal_entries_postprocess(c, jset);
 
 	start = end = vstruct_last(jset);
 
-	end	= bch2_btree_roots_to_journal_entries(c, jset->start, end);
+	end	= bch2_btree_roots_to_journal_entries(c, end, btree_roots_have);
 
 	bch2_journal_super_entries_add_common(c, &end,
 				le64_to_cpu(jset->seq));
@@ -1816,7 +1759,7 @@ void bch2_journal_write(struct closure *cl)
 		bch2_fs_fatal_error(c, "aieeee! journal write overran available space, %zu > %u (extra %u reserved %u/%u)",
 				    vstruct_bytes(jset), w->sectors << 9,
 				    u64s, w->u64s_reserved, j->entry_u64s_reserved);
-		goto err;
+		return -EINVAL;
 	}
 
 	jset->magic		= cpu_to_le64(jset_magic(c));
@@ -1835,37 +1778,117 @@ void bch2_journal_write(struct closure *cl)
 		validate_before_checksum = true;
 
 	if (validate_before_checksum &&
-	    jset_validate(c, NULL, jset, 0, WRITE))
-		goto err;
+	    (ret = jset_validate(c, NULL, jset, 0, WRITE)))
+		return ret;
 
 	ret = bch2_encrypt(c, JSET_CSUM_TYPE(jset), journal_nonce(jset),
 		    jset->encrypted_start,
 		    vstruct_end(jset) - (void *) jset->encrypted_start);
 	if (bch2_fs_fatal_err_on(ret, c,
 			"error decrypting journal entry: %i", ret))
-		goto err;
+		return ret;
 
 	jset->csum = csum_vstruct(c, JSET_CSUM_TYPE(jset),
 				  journal_nonce(jset), jset);
 
 	if (!validate_before_checksum &&
-	    jset_validate(c, NULL, jset, 0, WRITE))
-		goto err;
+	    (ret = jset_validate(c, NULL, jset, 0, WRITE)))
+		return ret;
 
 	memset((void *) jset + bytes, 0, (sectors << 9) - bytes);
+	return 0;
+}
 
-retry_alloc:
-	spin_lock(&j->lock);
-	ret = journal_write_alloc(j, w);
+static int bch2_journal_write_pick_flush(struct journal *j, struct journal_buf *w)
+{
+	struct bch_fs *c = container_of(j, struct bch_fs, journal);
+	int error = bch2_journal_error(j);
 
-	if (ret && j->can_discard) {
-		spin_unlock(&j->lock);
-		bch2_journal_do_discards(j);
-		goto retry_alloc;
+	/*
+	 * If the journal is in an error state - we did an emergency shutdown -
+	 * we prefer to continue doing journal writes. We just mark them as
+	 * noflush so they'll never be used, but they'll still be visible by the
+	 * list_journal tool - this helps in debugging.
+	 *
+	 * There's a caveat: the first journal write after marking the
+	 * superblock dirty must always be a flush write, because on startup
+	 * from a clean shutdown we didn't necessarily read the journal and the
+	 * new journal write might overwrite whatever was in the journal
+	 * previously - we can't leave the journal without any flush writes in
+	 * it.
+	 *
+	 * So if we're in an error state, and we're still starting up, we don't
+	 * write anything at all.
+	 */
+	if (error && test_bit(JOURNAL_NEED_FLUSH_WRITE, &j->flags))
+		return -EIO;
+
+	if (error ||
+	    w->noflush ||
+	    (!w->must_flush &&
+	     (jiffies - j->last_flush_write) < msecs_to_jiffies(c->opts.journal_flush_delay) &&
+	     test_bit(JOURNAL_MAY_SKIP_FLUSH, &j->flags))) {
+		     w->noflush = true;
+		SET_JSET_NO_FLUSH(w->data, true);
+		w->data->last_seq	= 0;
+		w->last_seq		= 0;
+
+		j->nr_noflush_writes++;
+	} else {
+		j->last_flush_write = jiffies;
+		j->nr_flush_writes++;
+		clear_bit(JOURNAL_NEED_FLUSH_WRITE, &j->flags);
 	}
 
+	return 0;
+}
+
+void bch2_journal_write(struct closure *cl)
+{
+	struct journal *j = container_of(cl, struct journal, io);
+	struct bch_fs *c = container_of(j, struct bch_fs, journal);
+	struct bch_dev *ca;
+	struct journal_buf *w = journal_last_unwritten_buf(j);
+	struct bch_replicas_padded replicas;
+	struct bio *bio;
+	struct printbuf journal_debug_buf = PRINTBUF;
+	unsigned i, nr_rw_members = 0;
+	int ret;
+
+	BUG_ON(BCH_SB_CLEAN(c->disk_sb.sb));
+
+	j->write_start_time = local_clock();
+
+	spin_lock(&j->lock);
+	ret = bch2_journal_write_pick_flush(j, w);
+	spin_unlock(&j->lock);
 	if (ret)
+		goto err;
+
+	journal_buf_realloc(j, w);
+
+	ret = bch2_journal_write_prep(j, w);
+	if (ret)
+		goto err;
+
+	while (1) {
+		spin_lock(&j->lock);
+		ret = journal_write_alloc(j, w);
+		if (!ret || !j->can_discard)
+			break;
+
+		spin_unlock(&j->lock);
+		bch2_journal_do_discards(j);
+	}
+
+	if (ret) {
 		__bch2_journal_debug_to_text(&journal_debug_buf, j);
+		spin_unlock(&j->lock);
+		bch_err(c, "Unable to allocate journal write:\n%s",
+			journal_debug_buf.buf);
+		printbuf_exit(&journal_debug_buf);
+		goto err;
+	}
 
 	/*
 	 * write is allocated, no longer need to account for it in
@@ -1879,13 +1902,6 @@ retry_alloc:
 	 */
 	bch2_journal_space_available(j);
 	spin_unlock(&j->lock);
-
-	if (ret) {
-		bch_err(c, "Unable to allocate journal write:\n%s",
-			journal_debug_buf.buf);
-		printbuf_exit(&journal_debug_buf);
-		goto err;
-	}
 
 	w->devs_written = bch2_bkey_devs(bkey_i_to_s_c(&w->key));
 
@@ -1908,7 +1924,7 @@ retry_alloc:
 	if (ret)
 		goto err;
 
-	if (!JSET_NO_FLUSH(jset) && w->separate_flush) {
+	if (!JSET_NO_FLUSH(w->data) && w->separate_flush) {
 		for_each_rw_member(ca, c, i) {
 			percpu_ref_get(&ca->io_ref);
 

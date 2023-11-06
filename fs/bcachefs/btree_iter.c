@@ -257,7 +257,7 @@ static void bch2_btree_iter_verify(struct btree_iter *iter)
 
 	BUG_ON(!(iter->flags & __BTREE_ITER_ALL_SNAPSHOTS) &&
 	       (iter->flags & BTREE_ITER_ALL_SNAPSHOTS) &&
-	       !btree_type_has_snapshots(iter->btree_id));
+	       !btree_type_has_snapshot_field(iter->btree_id));
 
 	if (iter->update_path)
 		bch2_btree_path_verify(trans, iter->update_path);
@@ -2835,8 +2835,9 @@ void *__bch2_trans_kmalloc(struct btree_trans *trans, size_t size)
 
 static inline void check_srcu_held_too_long(struct btree_trans *trans)
 {
-	WARN(time_after(jiffies, trans->srcu_lock_time + HZ * 10),
-	     "btree trans held srcu lock (delaying memory reclaim) by more than 10 seconds");
+	WARN(trans->srcu_held && time_after(jiffies, trans->srcu_lock_time + HZ * 10),
+	     "btree trans held srcu lock (delaying memory reclaim) for %lu seconds",
+	     (jiffies - trans->srcu_lock_time) / HZ);
 }
 
 void bch2_trans_srcu_unlock(struct btree_trans *trans)

@@ -202,6 +202,17 @@ static inline int bch2_extent_update_i_size_sectors(struct btree_trans *trans,
 	struct btree_iter iter;
 	struct bkey_i *k;
 	struct bkey_i_inode_v3 *inode;
+	/*
+	 * Crazy performance optimization:
+	 * Every extent update needs to also update the inode: the inode trigger
+	 * will set bi->journal_seq to the journal sequence number of this
+	 * transaction - for fsync.
+	 *
+	 * But if that's the only reason we're updating the inode (we're not
+	 * updating bi_size or bi_sectors), then we don't need the inode update
+	 * to be journalled - if we crash, the bi_journal_seq update will be
+	 * lost, but that's fine.
+	 */
 	unsigned inode_update_flags = BTREE_UPDATE_NOJOURNAL;
 	int ret;
 
@@ -223,7 +234,7 @@ static inline int bch2_extent_update_i_size_sectors(struct btree_trans *trans,
 
 	inode = bkey_i_to_inode_v3(k);
 
-	if (!(le64_to_cpu(inode->v.bi_flags) & BCH_INODE_I_SIZE_DIRTY) &&
+	if (!(le64_to_cpu(inode->v.bi_flags) & BCH_INODE_i_size_dirty) &&
 	    new_i_size > le64_to_cpu(inode->v.bi_size)) {
 		inode->v.bi_size = cpu_to_le64(new_i_size);
 		inode_update_flags = 0;
