@@ -93,10 +93,10 @@ static bool riscv_isa_extension_check(int id)
 		return true;
 	case RISCV_ISA_EXT_ZICBOZ:
 		if (!riscv_cboz_block_size) {
-			pr_err("Zicboz detected in ISA string, but no cboz-block-size found\n");
+			pr_err("Zicboz detected in ISA string, disabling as no cboz-block-size found\n");
 			return false;
 		} else if (!is_power_of_2(riscv_cboz_block_size)) {
-			pr_err("cboz-block-size present, but is not a power-of-2\n");
+			pr_err("Zicboz disabled as cboz-block-size present, but is not a power-of-2\n");
 			return false;
 		}
 		return true;
@@ -206,10 +206,11 @@ static void __init riscv_parse_isa_string(unsigned long *this_hwcap, struct risc
 		switch (*ext) {
 		case 's':
 			/*
-			 * Workaround for invalid single-letter 's' & 'u'(QEMU).
+			 * Workaround for invalid single-letter 's' & 'u' (QEMU).
 			 * No need to set the bit in riscv_isa as 's' & 'u' are
-			 * not valid ISA extensions. It works until multi-letter
-			 * extension starting with "Su" appears.
+			 * not valid ISA extensions. It works unless the first
+			 * multi-letter extension in the ISA string begins with
+			 * "Su" and is not prefixed with an underscore.
 			 */
 			if (ext[-1] != '_' && ext[1] == 'u') {
 				++isa;
@@ -570,6 +571,13 @@ void check_unaligned_access(int cpu)
 	void *src;
 	long speed = RISCV_HWPROBE_MISALIGNED_SLOW;
 
+	if (check_unaligned_access_emulated(cpu))
+		return;
+
+	/* We are already set since the last check */
+	if (per_cpu(misaligned_access_speed, cpu) != RISCV_HWPROBE_MISALIGNED_UNKNOWN)
+		return;
+
 	page = alloc_pages(GFP_NOWAIT, get_order(MISALIGNED_BUFFER_SIZE));
 	if (!page) {
 		pr_warn("Can't alloc pages to measure memcpy performance");
@@ -647,13 +655,20 @@ out:
 	__free_pages(page, get_order(MISALIGNED_BUFFER_SIZE));
 }
 
-static int check_unaligned_access_boot_cpu(void)
+static int __init check_unaligned_access_boot_cpu(void)
 {
 	check_unaligned_access(0);
+	unaligned_emulation_finish();
 	return 0;
 }
 
 arch_initcall(check_unaligned_access_boot_cpu);
+
+void riscv_user_isa_enable(void)
+{
+	if (riscv_cpu_has_extension_unlikely(smp_processor_id(), RISCV_ISA_EXT_ZICBOZ))
+		csr_set(CSR_SENVCFG, ENVCFG_CBZE);
+}
 
 #ifdef CONFIG_RISCV_ALTERNATIVE
 /*
