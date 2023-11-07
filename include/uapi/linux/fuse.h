@@ -450,6 +450,9 @@ struct fuse_file_lock {
 #define FUSE_HAS_EXPIRE_ONLY	(1ULL << 35)
 #define FUSE_DIRECT_IO_ALLOW_MMAP (1ULL << 36)
 
+/* Obsolete alias for FUSE_DIRECT_IO_ALLOW_MMAP */
+#define FUSE_DIRECT_IO_RELAX	FUSE_DIRECT_IO_ALLOW_MMAP
+
 /**
  * CUSE INIT request/reply flags
  *

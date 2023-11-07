@@ -650,6 +650,7 @@ struct TCP_Server_Info {
 	bool noautotune;		/* do not autotune send buf sizes */
 	bool nosharesock;
 	bool tcp_nodelay;
+	bool terminate;
 	unsigned int credits;  /* send no more requests at once */
 	unsigned int max_credits; /* can override large 32000 default at mnt */
 	unsigned int in_flight;  /* number of requests on the wire to server */
@@ -969,6 +970,8 @@ struct cifs_server_iface {
 	struct list_head iface_head;
 	struct kref refcount;
 	size_t speed;
+	size_t weight_fulfilled;
+	unsigned int num_channels;
 	unsigned int rdma_capable : 1;
 	unsigned int rss_capable : 1;
 	unsigned int is_active : 1; /* unset if non existent */
@@ -1050,6 +1053,7 @@ struct cifs_ses {
 	spinlock_t chan_lock;
 	/* ========= begin: protected by chan_lock ======== */
 #define CIFS_MAX_CHANNELS 16
+#define CIFS_INVAL_CHAN_INDEX (-1)
 #define CIFS_ALL_CHANNELS_SET(ses)	\
 	((1UL << (ses)->chan_count) - 1)
 #define CIFS_ALL_CHANS_GOOD(ses)		\
