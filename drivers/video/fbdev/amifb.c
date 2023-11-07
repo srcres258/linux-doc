@@ -3530,7 +3530,7 @@ static inline void chipfree(void)
 	 * Initialisation
 	 */
 
-static int __init amifb_probe(struct platform_device *pdev)
+static int amifb_probe(struct platform_device *pdev)
 {
 	struct fb_info *info;
 	int tag, i, err = 0;
@@ -3752,7 +3752,7 @@ release:
 }
 
 
-static int __exit amifb_remove(struct platform_device *pdev)
+static void amifb_remove(struct platform_device *pdev)
 {
 	struct fb_info *info = platform_get_drvdata(pdev);
 
@@ -3765,17 +3765,16 @@ static int __exit amifb_remove(struct platform_device *pdev)
 	chipfree();
 	framebuffer_release(info);
 	amifb_video_off();
-	return 0;
 }
 
 static struct platform_driver amifb_driver = {
-	.remove = __exit_p(amifb_remove),
-	.driver   = {
+	.probe = amifb_probe,
+	.remove_new = amifb_remove,
+	.driver = {
 		.name	= "amiga-video",
 	},
 };
-
-module_platform_driver_probe(amifb_driver, amifb_probe);
+module_platform_driver(amifb_driver);
 
 MODULE_LICENSE("GPL");
 MODULE_ALIAS("platform:amiga-video");
