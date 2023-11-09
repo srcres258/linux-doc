@@ -134,6 +134,9 @@ static void smb2_query_server_interfaces(struct work_struct *work)
 	if (rc) {
 		cifs_dbg(FYI, "%s: failed to query server interfaces: %d\n",
 				__func__, rc);
+
+		if (rc == -EOPNOTSUPP)
+			return;
 	}
 
 	queue_delayed_work(cifsiod_wq, &tcon->query_interfaces,
@@ -173,8 +176,12 @@ cifs_signal_cifsd_for_reconnect(struct TCP_Server_Info *server,
 	list_for_each_entry(ses, &pserver->smb_ses_list, smb_ses_list) {
 		spin_lock(&ses->chan_lock);
 		for (i = 0; i < ses->chan_count; i++) {
+			if (!ses->chans[i].server)
+				continue;
+
 			spin_lock(&ses->chans[i].server->srv_lock);
-			ses->chans[i].server->tcpStatus = CifsNeedReconnect;
+			if (ses->chans[i].server->tcpStatus != CifsExiting)
+				ses->chans[i].server->tcpStatus = CifsNeedReconnect;
 			spin_unlock(&ses->chans[i].server->srv_lock);
 		}
 		spin_unlock(&ses->chan_lock);
@@ -385,7 +392,13 @@ static int __cifs_reconnect(struct TCP_Server_Info *server,
 			spin_unlock(&server->srv_lock);
 			cifs_swn_reset_server_dstaddr(server);
 			cifs_server_unlock(server);
-			mod_delayed_work(cifsiod_wq, &server->reconnect, 0);
+
+			/* increase ref count which reconnect work will drop */
+			spin_lock(&cifs_tcp_ses_lock);
+			server->srv_count++;
+			spin_unlock(&cifs_tcp_ses_lock);
+			if (mod_delayed_work(cifsiod_wq, &server->reconnect, 0))
+				cifs_put_tcp_session(server, false);
 		}
 	} while (server->tcpStatus == CifsNeedReconnect);
 
@@ -515,7 +528,13 @@ static int reconnect_dfs_server(struct TCP_Server_Info *server)
 		spin_unlock(&server->srv_lock);
 		cifs_swn_reset_server_dstaddr(server);
 		cifs_server_unlock(server);
-		mod_delayed_work(cifsiod_wq, &server->reconnect, 0);
+
+		/* increase ref count which reconnect work will drop */
+		spin_lock(&cifs_tcp_ses_lock);
+		server->srv_count++;
+		spin_unlock(&cifs_tcp_ses_lock);
+		if (mod_delayed_work(cifsiod_wq, &server->reconnect, 0))
+			cifs_put_tcp_session(server, false);
 	} while (server->tcpStatus == CifsNeedReconnect);
 
 	mutex_lock(&server->refpath_lock);
@@ -1597,16 +1616,19 @@ cifs_put_tcp_session(struct TCP_Server_Info *server, int from_reconnect)
 
 	cancel_delayed_work_sync(&server->echo);
 
-	if (from_reconnect)
+	if (from_reconnect) {
 		/*
 		 * Avoid deadlock here: reconnect work calls
 		 * cifs_put_tcp_session() at its end. Need to be sure
 		 * that reconnect work does nothing with server pointer after
 		 * that step.
 		 */
-		cancel_delayed_work(&server->reconnect);
-	else
-		cancel_delayed_work_sync(&server->reconnect);
+		if (cancel_delayed_work(&server->reconnect))
+			cifs_put_tcp_session(server, from_reconnect);
+	} else {
+		if (cancel_delayed_work_sync(&server->reconnect))
+			cifs_put_tcp_session(server, from_reconnect);
+	}
 
 	spin_lock(&server->srv_lock);
 	server->tcpStatus = CifsExiting;
@@ -3560,7 +3582,7 @@ int cifs_mount(struct cifs_sb_info *cifs_sb, struct smb3_fs_context *ctx)
 	ctx->prepath = NULL;
 
 out:
-	cifs_try_adding_channels(cifs_sb, mnt_ctx.ses);
+	cifs_try_adding_channels(mnt_ctx.ses);
 	rc = mount_setup_tlink(cifs_sb, mnt_ctx.ses, mnt_ctx.tcon);
 	if (rc)
 		goto error;
