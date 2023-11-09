@@ -554,6 +554,7 @@ static int __init numa_register_memblks(struct numa_meminfo *mi)
 			return -EINVAL;
 		}
 	}
+
 	if (!memblock_validate_numa_coverage(SZ_1M))
 		return -EINVAL;
 

@@ -1412,27 +1412,27 @@ xfs_rtunmount_inodes(
  * of rtextents and the fraction.
  * The fraction sequence is 0, 1/2, 1/4, 3/4, 1/8, ..., 7/8, 1/16, ...
  */
-int					/* error */
+int						/* error */
 xfs_rtpick_extent(
 	xfs_mount_t		*mp,		/* file system mount point */
 	xfs_trans_t		*tp,		/* transaction pointer */
 	xfs_rtxlen_t		len,		/* allocation length (rtextents) */
 	xfs_rtxnum_t		*pick)		/* result rt extent */
-	{
+{
 	xfs_rtxnum_t		b;		/* result rtext */
 	int			log2;		/* log of sequence number */
 	uint64_t		resid;		/* residual after log removed */
 	uint64_t		seq;		/* sequence number of file creation */
-	struct timespec64	ts;		/* temporary timespec64 storage */
+	struct timespec64	ts;		/* timespec in inode */
 
 	ASSERT(xfs_isilocked(mp->m_rbmip, XFS_ILOCK_EXCL));
 
+	ts = inode_get_atime(VFS_I(mp->m_rbmip));
 	if (!(mp->m_rbmip->i_diflags & XFS_DIFLAG_NEWRTBM)) {
 		mp->m_rbmip->i_diflags |= XFS_DIFLAG_NEWRTBM;
 		seq = 0;
 	} else {
-		ts = inode_get_atime(VFS_I(mp->m_rbmip));
-		seq = (uint64_t)ts.tv_sec;
+		seq = ts.tv_sec;
 	}
 	if ((log2 = xfs_highbit64(seq)) == -1)
 		b = 0;
@@ -1445,7 +1445,7 @@ xfs_rtpick_extent(
 		if (b + len > mp->m_sb.sb_rextents)
 			b = mp->m_sb.sb_rextents - len;
 	}
-	ts.tv_sec = (time64_t)seq + 1;
+	ts.tv_sec = seq + 1;
 	inode_set_atime_to_ts(VFS_I(mp->m_rbmip), ts);
 	xfs_trans_log_inode(tp, mp->m_rbmip, XFS_ILOG_CORE);
 	*pick = b;

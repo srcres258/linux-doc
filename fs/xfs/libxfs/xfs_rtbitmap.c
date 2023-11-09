@@ -973,7 +973,7 @@ xfs_rtfree_extent(
 			mp->m_rbmip->i_diflags |= XFS_DIFLAG_NEWRTBM;
 
 		atime = inode_get_atime(VFS_I(mp->m_rbmip));
-		*((uint64_t *)&atime) = 0;
+		atime.tv_sec = 0;
 		inode_set_atime_to_ts(VFS_I(mp->m_rbmip), atime);
 		xfs_trans_log_inode(tp, mp->m_rbmip, XFS_ILOG_CORE);
 	}

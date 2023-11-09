@@ -1138,21 +1138,21 @@ pass:
 		pntsd->gsidoffset = parent_pntsd->gsidoffset;
 		pntsd->dacloffset = parent_pntsd->dacloffset;
 
-		if ((u64)pntsd->osidoffset + powner_sid_size >
+		if ((u64)le32_to_cpu(pntsd->osidoffset) + powner_sid_size >
 		    pntsd_alloc_size) {
 			rc = -EINVAL;
 			kfree(pntsd);
 			goto free_aces_base;
 		}
 
-		if ((u64)pntsd->gsidoffset + pgroup_sid_size >
+		if ((u64)le32_to_cpu(pntsd->gsidoffset) + pgroup_sid_size >
 		    pntsd_alloc_size) {
 			rc = -EINVAL;
 			kfree(pntsd);
 			goto free_aces_base;
 		}
 
-		if ((u64)pntsd->dacloffset + sizeof(struct smb_acl) + nt_size >
+		if ((u64)le32_to_cpu(pntsd->dacloffset) + sizeof(struct smb_acl) + nt_size >
 		    pntsd_alloc_size) {
 			rc = -EINVAL;
 			kfree(pntsd);
