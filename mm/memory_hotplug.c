@@ -2285,43 +2285,6 @@ static int __ref try_remove_memory(u64 start, u64 size)
 		try_offline_node(nid);
 
 	mem_hotplug_done();
-}
-
-static int __ref try_remove_memory(u64 start, u64 size)
-{
-	int rc, nid = NUMA_NO_NODE;
-
-	BUG_ON(check_hotplug_memory_range(start, size));
-
-	/*
-	 * All memory blocks must be offlined before removing memory.  Check
-	 * whether all memory blocks in question are offline and return error
-	 * if this is not the case.
-	 *
-	 * While at it, determine the nid. Note that if we'd have mixed nodes,
-	 * we'd only try to offline the last determined one -- which is good
-	 * enough for the cases we care about.
-	 */
-	rc = walk_memory_blocks(start, size, &nid, check_memblock_offlined_cb);
-	if (rc)
-		return rc;
-
-	/*
-	 * For memmap_on_memory, the altmaps could have been added on
-	 * a per-memblock basis. Loop through the entire range if so,
-	 * and remove each memblock and its altmap.
-	 */
-	if (mhp_memmap_on_memory()) {
-		unsigned long memblock_size = memory_block_size_bytes();
-		u64 cur_start;
-
-		for (cur_start = start; cur_start < start + size;
-		     cur_start += memblock_size)
-			__try_remove_memory(nid, cur_start, memblock_size);
-	} else {
-		__try_remove_memory(nid, start, size);
-	}
-
 	return 0;
 }
 

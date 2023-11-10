@@ -2499,12 +2499,10 @@ static int rcu_torture_stall(void *args)
 		cur_ops->readunlock(idx);
 	}
 	pr_alert("%s end.\n", __func__);
-	if (!ret) {
-		if (rcu_cpu_stall_notifiers) {
-			ret = rcu_stall_chain_notifier_unregister(&rcu_torture_stall_block);
-			if (ret)
-				pr_info("%s: rcu_stall_chain_notifier_unregister() returned %d.\n", __func__, ret);
-		}
+	if (rcu_cpu_stall_notifiers && !ret) {
+		ret = rcu_stall_chain_notifier_unregister(&rcu_torture_stall_block);
+		if (ret)
+			pr_info("%s: rcu_stall_chain_notifier_unregister() returned %d.\n", __func__, ret);
 	}
 	torture_shutdown_absorb("rcu_torture_stall");
 	while (!kthread_should_stop())
