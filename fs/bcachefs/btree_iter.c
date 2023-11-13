@@ -1214,8 +1214,6 @@ __bch2_btree_path_set_pos(struct btree_trans *trans,
 		   struct btree_path *path, struct bpos new_pos,
 		   bool intent, unsigned long ip, int cmp)
 {
-	unsigned level = path->level;
-
 	bch2_trans_verify_not_in_restart(trans);
 	EBUG_ON(!path->ref);
 
@@ -1231,7 +1229,7 @@ __bch2_btree_path_set_pos(struct btree_trans *trans,
 		goto out;
 	}
 
-	level = btree_path_up_until_good_node(trans, path, cmp);
+	unsigned level = btree_path_up_until_good_node(trans, path, cmp);
 
 	if (btree_path_node(path, level)) {
 		struct btree_path_level *l = &path->l[level];
@@ -3086,8 +3084,6 @@ void bch2_trans_put(struct btree_trans *trans)
 		check_srcu_held_too_long(trans);
 		srcu_read_unlock(&c->btree_trans_barrier, trans->srcu_idx);
 	}
-
-	bch2_journal_preres_put(&c->journal, &trans->journal_preres);
 
 	kfree(trans->extra_journal_entries.data);
 

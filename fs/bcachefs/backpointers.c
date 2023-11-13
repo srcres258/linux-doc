@@ -313,17 +313,17 @@ struct btree *bch2_backpointer_get_node(struct btree_trans *trans,
 				  bp.level - 1,
 				  0);
 	b = bch2_btree_iter_peek_node(iter);
-	if (IS_ERR(b))
+	if (IS_ERR_OR_NULL(b))
 		goto err;
 
 	BUG_ON(b->c.level != bp.level - 1);
 
-	if (b && extent_matches_bp(c, bp.btree_id, bp.level,
-				   bkey_i_to_s_c(&b->key),
-				   bucket, bp))
+	if (extent_matches_bp(c, bp.btree_id, bp.level,
+			      bkey_i_to_s_c(&b->key),
+			      bucket, bp))
 		return b;
 
-	if (b && btree_node_will_make_reachable(b)) {
+	if (btree_node_will_make_reachable(b)) {
 		b = ERR_PTR(-BCH_ERR_backpointer_to_overwritten_btree_node);
 	} else {
 		backpointer_not_found(trans, bp_pos, bp, bkey_i_to_s_c(&b->key));
@@ -382,7 +382,7 @@ int bch2_check_btree_backpointers(struct bch_fs *c)
 	ret = bch2_trans_run(c,
 		for_each_btree_key_commit(trans, iter,
 			BTREE_ID_backpointers, POS_MIN, 0, k,
-			NULL, NULL, BTREE_INSERT_LAZY_RW|BTREE_INSERT_NOFAIL,
+			NULL, NULL, BCH_TRANS_COMMIT_lazy_rw|BCH_TRANS_COMMIT_no_enospc,
 		  bch2_check_btree_backpointer(trans, &iter, k)));
 	if (ret)
 		bch_err_fn(c, ret);
@@ -629,8 +629,8 @@ static int bch2_check_extents_to_backpointers_pass(struct btree_trans *trans,
 
 		do {
 			ret = commit_do(trans, NULL, NULL,
-					BTREE_INSERT_LAZY_RW|
-					BTREE_INSERT_NOFAIL,
+					BCH_TRANS_COMMIT_lazy_rw|
+					BCH_TRANS_COMMIT_no_enospc,
 					check_extent_to_backpointers(trans, &iter,
 								bucket_start, bucket_end,
 								&last_flushed));
@@ -644,8 +644,8 @@ static int bch2_check_extents_to_backpointers_pass(struct btree_trans *trans,
 			break;
 
 		ret = commit_do(trans, NULL, NULL,
-				BTREE_INSERT_LAZY_RW|
-				BTREE_INSERT_NOFAIL,
+				BCH_TRANS_COMMIT_lazy_rw|
+				BCH_TRANS_COMMIT_no_enospc,
 				check_btree_root_to_backpointers(trans, btree_id,
 							bucket_start, bucket_end,
 							&last_flushed));
@@ -807,7 +807,7 @@ static int bch2_check_backpointers_to_extents_pass(struct btree_trans *trans,
 
 	return for_each_btree_key_commit(trans, iter, BTREE_ID_backpointers,
 				  POS_MIN, BTREE_ITER_PREFETCH, k,
-				  NULL, NULL, BTREE_INSERT_LAZY_RW|BTREE_INSERT_NOFAIL,
+				  NULL, NULL, BCH_TRANS_COMMIT_lazy_rw|BCH_TRANS_COMMIT_no_enospc,
 		check_one_backpointer(trans, start, end,
 				      bkey_s_c_to_backpointer(k),
 				      &last_flushed_pos));
