@@ -164,6 +164,8 @@ smb2_reconnect(__le16 smb2_command, struct cifs_tcon *tcon,
 	struct nls_table *nls_codepage = NULL;
 	struct cifs_ses *ses;
 	int xid;
+	struct TCP_Server_Info *pserver;
+	unsigned int chan_index;
 
 	/*
 	 * SMB2s NegProt, SessSetup, Logoff do not have tcon yet so
@@ -321,8 +323,15 @@ again:
 				}
 
 				ses->chans[chan_index].server = NULL;
-				cifs_put_tcp_session(server, 1);
 				spin_unlock(&ses->chan_lock);
+
+				/*
+				 * the above reference of server by channel
+				 * needs to be dropped without holding chan_lock
+				 * as cifs_put_tcp_session takes a higher lock
+				 * i.e. cifs_tcp_ses_lock
+				 */
+				cifs_put_tcp_session(server, 1);
 
 				server->terminate = true;
 				cifs_signal_cifsd_for_reconnect(server, false);
@@ -400,6 +409,10 @@ skip_sess_setup:
 	} else {
 		mutex_unlock(&ses->session_mutex);
 	}
+
+	if (smb2_command != SMB2_INTERNAL_CMD)
+		if (mod_delayed_work(cifsiod_wq, &server->reconnect, 0))
+			cifs_put_tcp_session(server, false);
 
 	atomic_inc(&tconInfoReconnectCount);
 out:

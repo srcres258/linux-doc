@@ -419,6 +419,7 @@ void xen_sanitize_proc_cap_bits(uint32_t *cap)
 	if (ret)
 		pr_err("sanitize of _PDC buffer bits from Xen failed: %d\n",
 		       ret);
-	*cap = buf[2];
+	else
+		*cap = buf[2];
 }
 #endif

@@ -848,10 +848,10 @@ void ceph_fill_file_time(struct inode *inode, int issued,
 		    ceph_seq_cmp(time_warp_seq, ci->i_time_warp_seq) > 0) {
 			/* the MDS did a utimes() */
 			doutc(cl, "mtime %lld.%09ld -> %lld.%09ld tw %d -> %d\n",
-			      inode_get_mtime_sec(inode),
-			      inode_get_mtime_nsec(inode),
-			      mtime->tv_sec, mtime->tv_nsec,
-			      ci->i_time_warp_seq, (int)time_warp_seq);
+			     inode_get_mtime_sec(inode),
+			     inode_get_mtime_nsec(inode),
+			     mtime->tv_sec, mtime->tv_nsec,
+			     ci->i_time_warp_seq, (int)time_warp_seq);
 
 			inode_set_mtime_to_ts(inode, *mtime);
 			inode_set_atime_to_ts(inode, *atime);
@@ -863,15 +863,15 @@ void ceph_fill_file_time(struct inode *inode, int issued,
 			ts = inode_get_mtime(inode);
 			if (timespec64_compare(mtime, &ts) > 0) {
 				doutc(cl, "mtime %lld.%09ld -> %lld.%09ld inc\n",
-				      ts.tv_sec, ts.tv_nsec,
-				      mtime->tv_sec, mtime->tv_nsec);
+				     ts.tv_sec, ts.tv_nsec,
+				     mtime->tv_sec, mtime->tv_nsec);
 				inode_set_mtime_to_ts(inode, *mtime);
 			}
 			ts = inode_get_atime(inode);
 			if (timespec64_compare(atime, &ts) > 0) {
 				doutc(cl, "atime %lld.%09ld -> %lld.%09ld inc\n",
-				      ts.tv_sec, ts.tv_nsec,
-				      atime->tv_sec, atime->tv_nsec);
+				     ts.tv_sec, ts.tv_nsec,
+				     atime->tv_sec, atime->tv_nsec);
 				inode_set_atime_to_ts(inode, *atime);
 			}
 		} else if (issued & CEPH_CAP_FILE_EXCL) {
@@ -2600,8 +2600,9 @@ retry:
 	if (ia_valid & ATTR_ATIME) {
 		struct timespec64 atime = inode_get_atime(inode);
 
-		doutc(cl, "%p %llx.%llx atime %lld.%ld -> %lld.%ld\n",
-		      inode, ceph_vinop(inode), atime.tv_sec, atime.tv_nsec,
+		doutc(cl, "%p %llx.%llx atime %lld.%09ld -> %lld.%09ld\n",
+		      inode, ceph_vinop(inode),
+		      atime.tv_sec, atime.tv_nsec,
 		      attr->ia_atime.tv_sec, attr->ia_atime.tv_nsec);
 		if (issued & CEPH_CAP_FILE_EXCL) {
 			ci->i_time_warp_seq++;
@@ -2676,8 +2677,9 @@ retry:
 	if (ia_valid & ATTR_MTIME) {
 		struct timespec64 mtime = inode_get_mtime(inode);
 
-		doutc(cl, "%p %llx.%llx mtime %lld.%ld -> %lld.%ld\n",
-		      inode, ceph_vinop(inode), mtime.tv_sec, mtime.tv_nsec,
+		doutc(cl, "%p %llx.%llx mtime %lld.%09ld -> %lld.%09ld\n",
+		      inode, ceph_vinop(inode),
+		      mtime.tv_sec, mtime.tv_nsec,
 		      attr->ia_mtime.tv_sec, attr->ia_mtime.tv_nsec);
 		if (issued & CEPH_CAP_FILE_EXCL) {
 			ci->i_time_warp_seq++;
@@ -2701,12 +2703,12 @@ retry:
 	if (ia_valid & ATTR_CTIME) {
 		bool only = (ia_valid & (ATTR_SIZE|ATTR_MTIME|ATTR_ATIME|
 					 ATTR_MODE|ATTR_UID|ATTR_GID)) == 0;
-		doutc(cl, "%p %llx.%llx ctime %lld.%ld -> %lld.%ld (%s)\n",
-		      inode, ceph_vinop(inode), inode_get_ctime_sec(inode),
+		doutc(cl, "%p %llx.%llx ctime %lld.%09ld -> %lld.%09ld (%s)\n",
+		      inode, ceph_vinop(inode),
+		      inode_get_ctime_sec(inode),
 		      inode_get_ctime_nsec(inode),
 		      attr->ia_ctime.tv_sec, attr->ia_ctime.tv_nsec,
 		      only ? "ctime only" : "ignored");
-
 		if (only) {
 			/*
 			 * if kernel wants to dirty ctime but nothing else,

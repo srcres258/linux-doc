@@ -133,6 +133,9 @@ smb2_query_server_interfaces(struct work_struct *work)
 	free_xid(xid);
 
 	if (rc) {
+		if (rc == -EOPNOTSUPP)
+			return;
+
 		cifs_dbg(FYI, "%s: failed to query server interfaces: %d\n",
 				__func__, rc);
 
@@ -263,7 +266,7 @@ cifs_mark_tcp_ses_conns_for_reconnect(struct TCP_Server_Info *server,
 			tcon->status = TID_NEED_RECON;
 			spin_unlock(&tcon->tc_lock);
 
-			cancel_delayed_work_sync(&tcon->query_interfaces);
+			cancel_delayed_work(&tcon->query_interfaces);
 		}
 		if (ses->tcon_ipc) {
 			ses->tcon_ipc->need_reconnect = true;

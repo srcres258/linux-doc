@@ -29,8 +29,6 @@ struct smb_mnt_fs_info {
 struct smb_mnt_tcon_info {
 	__u32	tid;
 	__u64	session_id;
-	int	tc_count;
-	__u16	flags;
 } __packed;
 
 struct smb_snapshot_array {
