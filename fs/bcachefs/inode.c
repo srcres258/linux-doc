@@ -830,7 +830,7 @@ static int bch2_inode_delete_keys(struct btree_trans *trans,
 
 		ret = bch2_trans_update(trans, &iter, &delete, 0) ?:
 		      bch2_trans_commit(trans, NULL, NULL,
-					BTREE_INSERT_NOFAIL);
+					BCH_TRANS_COMMIT_no_enospc);
 err:
 		if (ret && !bch2_err_matches(ret, BCH_ERR_transaction_restart))
 			break;
@@ -893,7 +893,7 @@ retry:
 
 	ret   = bch2_trans_update(trans, &iter, &delete.k_i, 0) ?:
 		bch2_trans_commit(trans, NULL, NULL,
-				BTREE_INSERT_NOFAIL);
+				BCH_TRANS_COMMIT_no_enospc);
 err:
 	bch2_trans_iter_exit(trans, &iter);
 	if (bch2_err_matches(ret, BCH_ERR_transaction_restart))
@@ -1057,7 +1057,7 @@ retry:
 
 	ret   = bch2_trans_update(trans, &iter, &delete.k_i, 0) ?:
 		bch2_trans_commit(trans, NULL, NULL,
-				BTREE_INSERT_NOFAIL);
+				BCH_TRANS_COMMIT_no_enospc);
 err:
 	bch2_trans_iter_exit(trans, &iter);
 	if (bch2_err_matches(ret, BCH_ERR_transaction_restart))
@@ -1124,7 +1124,10 @@ static int may_delete_deleted_inode(struct btree_trans *trans,
 		inode.bi_flags &= ~BCH_INODE_unlinked;
 
 		ret = bch2_inode_write_flags(trans, &inode_iter, &inode,
-					     BTREE_UPDATE_INTERNAL_SNAPSHOT_NODE);
+					     BTREE_UPDATE_INTERNAL_SNAPSHOT_NODE) ?:
+			bch2_trans_commit(trans, NULL, NULL,
+					  BCH_TRANS_COMMIT_no_enospc|
+					  BCH_TRANS_COMMIT_lazy_rw);
 		bch_err_msg(c, ret, "clearing inode unlinked flag");
 		if (ret)
 			goto out;
@@ -1134,7 +1137,7 @@ static int may_delete_deleted_inode(struct btree_trans *trans,
 		 * unlinked inodes in the snapshot leaves:
 		 */
 		*need_another_pass = true;
-		return 0;
+		goto out;
 	}
 
 	ret = 1;

@@ -13,47 +13,14 @@ struct kvm_gmem {
 	struct list_head entry;
 };
 
-static struct folio *kvm_gmem_get_huge_folio(struct inode *inode, pgoff_t index)
-{
-#ifdef CONFIG_TRANSPARENT_HUGEPAGE
-	unsigned long huge_index = round_down(index, HPAGE_PMD_NR);
-	unsigned long flags = (unsigned long)inode->i_private;
-	struct address_space *mapping  = inode->i_mapping;
-	gfp_t gfp = mapping_gfp_mask(mapping);
-	struct folio *folio;
-
-	if (!(flags & KVM_GUEST_MEMFD_ALLOW_HUGEPAGE))
-		return NULL;
-
-	if (filemap_range_has_page(mapping, huge_index << PAGE_SHIFT,
-				   (huge_index + HPAGE_PMD_NR - 1) << PAGE_SHIFT))
-		return NULL;
-
-	folio = filemap_alloc_folio(gfp, HPAGE_PMD_ORDER);
-	if (!folio)
-		return NULL;
-
-	if (filemap_add_folio(mapping, folio, huge_index, gfp)) {
-		folio_put(folio);
-		return NULL;
-	}
-
-	return folio;
-#else
-	return NULL;
-#endif
-}
-
 static struct folio *kvm_gmem_get_folio(struct inode *inode, pgoff_t index)
 {
 	struct folio *folio;
 
-	folio = kvm_gmem_get_huge_folio(inode, index);
-	if (!folio) {
-		folio = filemap_grab_folio(inode->i_mapping, index);
-		if (IS_ERR_OR_NULL(folio))
-			return NULL;
-	}
+	/* TODO: Support huge pages. */
+	folio = filemap_grab_folio(inode->i_mapping, index);
+	if (IS_ERR_OR_NULL(folio))
+		return NULL;
 
 	/*
 	 * Use the up-to-date flag to track whether or not the memory has been
@@ -136,7 +103,7 @@ static long kvm_gmem_punch_hole(struct inode *inode, loff_t offset, loff_t len)
 	struct kvm_gmem *gmem;
 
 	/*
-	 * Bindings must stable across invalidation to ensure the start+end
+	 * Bindings must be stable across invalidation to ensure the start+end
 	 * are balanced.
 	 */
 	filemap_invalidate_lock(inode->i_mapping);
@@ -270,17 +237,15 @@ static int kvm_gmem_release(struct inode *inode, struct file *file)
 	return 0;
 }
 
-static struct file *kvm_gmem_get_file(struct kvm_memory_slot *slot)
+static inline struct file *kvm_gmem_get_file(struct kvm_memory_slot *slot)
 {
-	struct file *file;
-
-	rcu_read_lock();
-
-	file = get_file_rcu(&slot->gmem.file);
-
-	rcu_read_unlock();
-
-	return file;
+	/*
+	 * Do not return slot->gmem.file if it has already been closed;
+	 * there might be some time between the last fput() and when
+	 * kvm_gmem_release() clears slot->gmem.file, and you do not
+	 * want to spin in the meanwhile.
+	 */
+	return get_file_active(&slot->gmem.file);
 }
 
 static struct file_operations kvm_gmem_fops = {
@@ -347,7 +312,6 @@ static int kvm_gmem_getattr(struct mnt_idmap *idmap, const struct path *path,
 {
 	struct inode *inode = path->dentry->d_inode;
 
-	/* TODO */
 	generic_fillattr(idmap, request_mask, inode, stat);
 	return 0;
 }
@@ -355,7 +319,6 @@ static int kvm_gmem_getattr(struct mnt_idmap *idmap, const struct path *path,
 static int kvm_gmem_setattr(struct mnt_idmap *idmap, struct dentry *dentry,
 			    struct iattr *attr)
 {
-	/* TODO */
 	return -EINVAL;
 }
 static const struct inode_operations kvm_gmem_iops = {
@@ -381,12 +344,7 @@ static int __kvm_gmem_create(struct kvm *kvm, loff_t size, u64 flags)
 		goto err_fd;
 	}
 
-	/*
-	 * Use the so called "secure" variant, which creates a unique inode
-	 * instead of reusing a single inode.  Each guest_memfd instance needs
-	 * its own inode to track the size, flags, etc.
-	 */
-	file = anon_inode_getfile_secure(anon_name, &kvm_gmem_fops, gmem,
+	file = anon_inode_create_getfile(anon_name, &kvm_gmem_fops, gmem,
 					 O_RDWR, NULL);
 	if (IS_ERR(file)) {
 		err = PTR_ERR(file);
@@ -404,7 +362,6 @@ static int __kvm_gmem_create(struct kvm *kvm, loff_t size, u64 flags)
 	inode->i_mode |= S_IFREG;
 	inode->i_size = size;
 	mapping_set_gfp_mask(inode->i_mapping, GFP_HIGHUSER);
-	mapping_set_large_folios(inode->i_mapping);
 	mapping_set_unmovable(inode->i_mapping);
 	/* Unmovable mappings are supposed to be marked unevictable as well. */
 	WARN_ON_ONCE(!mapping_unevictable(inode->i_mapping));
@@ -430,20 +387,11 @@ int kvm_gmem_create(struct kvm *kvm, struct kvm_create_guest_memfd *args)
 	u64 flags = args->flags;
 	u64 valid_flags = 0;
 
-	if (IS_ENABLED(CONFIG_TRANSPARENT_HUGEPAGE))
-		valid_flags |= KVM_GUEST_MEMFD_ALLOW_HUGEPAGE;
-
 	if (flags & ~valid_flags)
 		return -EINVAL;
 
-	if (size < 0 || !PAGE_ALIGNED(size))
+	if (size <= 0 || !PAGE_ALIGNED(size))
 		return -EINVAL;
-
-#ifdef CONFIG_TRANSPARENT_HUGEPAGE
-	if ((flags & KVM_GUEST_MEMFD_ALLOW_HUGEPAGE) &&
-	    !IS_ALIGNED(size, HPAGE_PMD_SIZE))
-		return -EINVAL;
-#endif
 
 	return __kvm_gmem_create(kvm, size, flags);
 }
@@ -456,6 +404,7 @@ int kvm_gmem_bind(struct kvm *kvm, struct kvm_memory_slot *slot,
 	struct kvm_gmem *gmem;
 	struct inode *inode;
 	struct file *file;
+	int r = -EINVAL;
 
 	BUILD_BUG_ON(sizeof(gfn_t) != sizeof(slot->gmem.pgoff));
 
@@ -472,10 +421,8 @@ int kvm_gmem_bind(struct kvm *kvm, struct kvm_memory_slot *slot,
 
 	inode = file_inode(file);
 
-	if (offset < 0 || !PAGE_ALIGNED(offset))
-		return -EINVAL;
-
-	if (offset + size > i_size_read(inode))
+	if (offset < 0 || !PAGE_ALIGNED(offset) ||
+	    offset + size > i_size_read(inode))
 		goto err;
 
 	filemap_invalidate_lock(inode->i_mapping);
@@ -505,12 +452,10 @@ int kvm_gmem_bind(struct kvm *kvm, struct kvm_memory_slot *slot,
 	 * not the other way 'round.  Active bindings are invalidated if the
 	 * file is closed before memslots are destroyed.
 	 */
-	fput(file);
-	return 0;
-
+	r = 0;
 err:
 	fput(file);
-	return -EINVAL;
+	return r;
 }
 
 void kvm_gmem_unbind(struct kvm_memory_slot *slot)
@@ -542,7 +487,7 @@ void kvm_gmem_unbind(struct kvm_memory_slot *slot)
 int kvm_gmem_get_pfn(struct kvm *kvm, struct kvm_memory_slot *slot,
 		     gfn_t gfn, kvm_pfn_t *pfn, int *max_order)
 {
-	pgoff_t index, huge_index;
+	pgoff_t index = gfn - slot->base_gfn + slot->gmem.pgoff;
 	struct kvm_gmem *gmem;
 	struct folio *folio;
 	struct page *page;
@@ -555,7 +500,6 @@ int kvm_gmem_get_pfn(struct kvm *kvm, struct kvm_memory_slot *slot,
 
 	gmem = file->private_data;
 
-	index = gfn - slot->base_gfn + slot->gmem.pgoff;
 	if (WARN_ON_ONCE(xa_load(&gmem->bindings, index) != slot)) {
 		r = -EIO;
 		goto out_fput;
@@ -575,24 +519,9 @@ int kvm_gmem_get_pfn(struct kvm *kvm, struct kvm_memory_slot *slot,
 	page = folio_file_page(folio, index);
 
 	*pfn = page_to_pfn(page);
-	if (!max_order)
-		goto success;
-
-	*max_order = compound_order(compound_head(page));
-	if (!*max_order)
-		goto success;
-
-	/*
-	 * The folio can be mapped with a hugepage if and only if the folio is
-	 * fully contained by the range the memslot is bound to.  Note, the
-	 * caller is responsible for handling gfn alignment, this only deals
-	 * with the file binding.
-	 */
-	huge_index = ALIGN(index, 1ull << *max_order);
-	if (huge_index < ALIGN(slot->gmem.pgoff, 1ull << *max_order) ||
-	    huge_index + (1ull << *max_order) > slot->gmem.pgoff + slot->npages)
+	if (max_order)
 		*max_order = 0;
-success:
+
 	r = 0;
 
 out_unlock:

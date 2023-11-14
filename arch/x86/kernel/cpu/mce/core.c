@@ -296,9 +296,11 @@ static noinstr void mce_panic(const char *msg, struct mce *final, char *exp)
 		 * panic.
 		 */
 		if (kexec_crash_loaded()) {
-			p = pfn_to_online_page(final->addr >> PAGE_SHIFT);
-			if (final && (final->status & MCI_STATUS_ADDRV) && p)
-				SetPageHWPoison(p);
+			if (final && (final->status & MCI_STATUS_ADDRV)) {
+				p = pfn_to_online_page(final->addr >> PAGE_SHIFT);
+				if (p)
+					SetPageHWPoison(p);
+			}
 		}
 		panic(msg);
 	} else

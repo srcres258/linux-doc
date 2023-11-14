@@ -1034,7 +1034,7 @@ static void kvm_destroy_dirty_bitmap(struct kvm_memory_slot *memslot)
 /* This does not remove the slot from struct kvm_memslots data structures */
 static void kvm_free_memslot(struct kvm *kvm, struct kvm_memory_slot *slot)
 {
-	if (slot->flags & KVM_MEM_PRIVATE)
+	if (slot->flags & KVM_MEM_GUEST_MEMFD)
 		kvm_gmem_unbind(slot);
 
 	kvm_destroy_dirty_bitmap(slot);
@@ -1608,16 +1608,24 @@ static void kvm_replace_memslot(struct kvm *kvm,
 	}
 }
 
+/*
+ * Flags that do not access any of the extra space of struct
+ * kvm_userspace_memory_region2.  KVM_SET_USER_MEMORY_REGION_V1_FLAGS
+ * only allows these.
+ */
+#define KVM_SET_USER_MEMORY_REGION_V1_FLAGS \
+	(KVM_MEM_LOG_DIRTY_PAGES | KVM_MEM_READONLY)
+
 static int check_memory_region_flags(struct kvm *kvm,
 				     const struct kvm_userspace_memory_region2 *mem)
 {
 	u32 valid_flags = KVM_MEM_LOG_DIRTY_PAGES;
 
 	if (kvm_arch_has_private_mem(kvm))
-		valid_flags |= KVM_MEM_PRIVATE;
+		valid_flags |= KVM_MEM_GUEST_MEMFD;
 
 	/* Dirty logging private memory is not currently supported. */
-	if (mem->flags & KVM_MEM_PRIVATE)
+	if (mem->flags & KVM_MEM_GUEST_MEMFD)
 		valid_flags &= ~KVM_MEM_LOG_DIRTY_PAGES;
 
 #ifdef __KVM_HAVE_READONLY_MEM
@@ -2047,7 +2055,7 @@ int __kvm_set_memory_region(struct kvm *kvm,
 	     !access_ok((void __user *)(unsigned long)mem->userspace_addr,
 			mem->memory_size))
 		return -EINVAL;
-	if (mem->flags & KVM_MEM_PRIVATE &&
+	if (mem->flags & KVM_MEM_GUEST_MEMFD &&
 	    (mem->guest_memfd_offset & (PAGE_SIZE - 1) ||
 	     mem->guest_memfd_offset + mem->memory_size < mem->guest_memfd_offset))
 		return -EINVAL;
@@ -2090,7 +2098,7 @@ int __kvm_set_memory_region(struct kvm *kvm,
 			return -EINVAL;
 	} else { /* Modify an existing slot. */
 		/* Private memslots are immutable, they can only be deleted. */
-		if (mem->flags & KVM_MEM_PRIVATE)
+		if (mem->flags & KVM_MEM_GUEST_MEMFD)
 			return -EINVAL;
 		if ((mem->userspace_addr != old->userspace_addr) ||
 		    (npages != old->npages) ||
@@ -2120,7 +2128,7 @@ int __kvm_set_memory_region(struct kvm *kvm,
 	new->npages = npages;
 	new->flags = mem->flags;
 	new->userspace_addr = mem->userspace_addr;
-	if (mem->flags & KVM_MEM_PRIVATE) {
+	if (mem->flags & KVM_MEM_GUEST_MEMFD) {
 		r = kvm_gmem_bind(kvm, new, mem->guest_memfd, mem->guest_memfd_offset);
 		if (r)
 			goto out;
@@ -2133,7 +2141,7 @@ int __kvm_set_memory_region(struct kvm *kvm,
 	return 0;
 
 out_unbind:
-	if (mem->flags & KVM_MEM_PRIVATE)
+	if (mem->flags & KVM_MEM_GUEST_MEMFD)
 		kvm_gmem_unbind(new);
 out:
 	kfree(new);
@@ -2492,16 +2500,6 @@ static __always_inline void kvm_handle_gfn_range(struct kvm *kvm,
 	gfn_range.arg = range->arg;
 	gfn_range.may_block = range->may_block;
 
-	/*
-	 * If/when KVM supports more attributes beyond private .vs shared, this
-	 * _could_ set only_{private,shared} appropriately if the entire target
-	 * range already has the desired private vs. shared state (it's unclear
-	 * if that is a net win).  For now, KVM reaches this point if and only
-	 * if the private flag is being toggled, i.e. all mappings are in play.
-	 */
-	gfn_range.only_private = false;
-	gfn_range.only_shared = false;
-
 	for (i = 0; i < kvm_arch_nr_memslot_as_ids(kvm); i++) {
 		slots = __kvm_memslots(kvm, i);
 
@@ -2542,7 +2540,7 @@ static bool kvm_pre_set_memory_attributes(struct kvm *kvm,
 	 * going from R=>RW, zapping isn't strictly necessary.  Unconditionally
 	 * adding the range allows KVM to require that MMU invalidations add at
 	 * least one range between begin() and end(), e.g. allows KVM to detect
-	 * bugs where the add() is missed.  Rexlaing the rule *might* be safe,
+	 * bugs where the add() is missed.  Relaxing the rule *might* be safe,
 	 * but it's not obvious that allowing new mappings while the attributes
 	 * are in flux is desirable or worth the complexity.
 	 */
@@ -5129,10 +5127,16 @@ static long kvm_vm_ioctl(struct file *filp,
 		struct kvm_userspace_memory_region2 mem;
 		unsigned long size;
 
-		if (ioctl == KVM_SET_USER_MEMORY_REGION)
+		if (ioctl == KVM_SET_USER_MEMORY_REGION) {
+			/*
+			 * Fields beyond struct kvm_userspace_memory_region shouldn't be
+			 * accessed, but avoid leaking kernel memory in case of a bug.
+			 */
+			memset(&mem, 0, sizeof(mem));
 			size = sizeof(struct kvm_userspace_memory_region);
-		else
+		} else {
 			size = sizeof(struct kvm_userspace_memory_region2);
+		}
 
 		/* Ensure the common parts of the two structs are identical. */
 		SANITY_CHECK_MEM_REGION_FIELD(slot);
@@ -5143,6 +5147,11 @@ static long kvm_vm_ioctl(struct file *filp,
 
 		r = -EFAULT;
 		if (copy_from_user(&mem, argp, size))
+			goto out;
+
+		r = -EINVAL;
+		if (ioctl == KVM_SET_USER_MEMORY_REGION &&
+		    (mem.flags & ~KVM_SET_USER_MEMORY_REGION_V1_FLAGS))
 			goto out;
 
 		r = kvm_vm_ioctl_set_memory_region(kvm, &mem);

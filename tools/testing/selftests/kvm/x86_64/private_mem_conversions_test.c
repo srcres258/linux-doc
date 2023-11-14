@@ -380,7 +380,6 @@ static void test_mem_conversions(enum vm_mem_backing_src_type src_type, uint32_t
 	const size_t slot_size = memfd_size / nr_memslots;
 	struct kvm_vcpu *vcpus[KVM_MAX_VCPUS];
 	pthread_t threads[KVM_MAX_VCPUS];
-	uint64_t memfd_flags;
 	struct kvm_vm *vm;
 	int memfd, i, r;
 
@@ -396,16 +395,12 @@ static void test_mem_conversions(enum vm_mem_backing_src_type src_type, uint32_t
 
 	vm_enable_cap(vm, KVM_CAP_EXIT_HYPERCALL, (1 << KVM_HC_MAP_GPA_RANGE));
 
-	if (backing_src_can_be_huge(src_type))
-		memfd_flags = KVM_GUEST_MEMFD_ALLOW_HUGEPAGE;
-	else
-		memfd_flags = 0;
-	memfd = vm_create_guest_memfd(vm, memfd_size, memfd_flags);
+	memfd = vm_create_guest_memfd(vm, memfd_size, 0);
 
 	for (i = 0; i < nr_memslots; i++)
 		vm_mem_add(vm, src_type, BASE_DATA_GPA + slot_size * i,
 			   BASE_DATA_SLOT + i, slot_size / vm->page_size,
-			   KVM_MEM_PRIVATE, memfd, slot_size * i);
+			   KVM_MEM_GUEST_MEMFD, memfd, slot_size * i);
 
 	for (i = 0; i < nr_vcpus; i++) {
 		uint64_t gpa =  BASE_DATA_GPA + i * per_cpu_size;

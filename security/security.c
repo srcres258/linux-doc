@@ -772,42 +772,49 @@ static int lsm_superblock_alloc(struct super_block *sb)
 
 /**
  * lsm_fill_user_ctx - Fill a user space lsm_ctx structure
- * @ctx: an LSM context to be filled
- * @context: the new context value
- * @context_size: the size of the new context value
+ * @uctx: a userspace LSM context to be filled
+ * @uctx_len: available uctx size (input), used uctx size (output)
+ * @val: the new LSM context value
+ * @val_len: the size of the new LSM context value
  * @id: LSM id
  * @flags: LSM defined flags
  *
- * Fill all of the fields in a user space lsm_ctx structure.
- * Caller is assumed to have verified that @ctx has enough space
- * for @context.
+ * Fill all of the fields in a userspace lsm_ctx structure.
  *
- * Returns 0 on success, -EFAULT on a copyout error, -ENOMEM
- * if memory can't be allocated.
+ * Returns 0 on success, -E2BIG if userspace buffer is not large enough,
+ * -EFAULT on a copyout error, -ENOMEM if memory can't be allocated.
  */
-int lsm_fill_user_ctx(struct lsm_ctx __user *ctx, void *context,
-		      size_t context_size, u64 id, u64 flags)
+int lsm_fill_user_ctx(struct lsm_ctx __user *uctx, size_t *uctx_len,
+		      void *val, size_t val_len,
+		      u64 id, u64 flags)
 {
-	struct lsm_ctx *lctx;
-	size_t locallen = struct_size(lctx, ctx, context_size);
+	struct lsm_ctx *nctx = NULL;
+	size_t nctx_len;
 	int rc = 0;
 
-	lctx = kzalloc(locallen, GFP_KERNEL);
-	if (lctx == NULL)
-		return -ENOMEM;
+	nctx_len = ALIGN(struct_size(nctx, ctx, val_len), sizeof(void *));
+	if (nctx_len > *uctx_len) {
+		rc = -E2BIG;
+		goto out;
+	}
 
-	lctx->id = id;
-	lctx->flags = flags;
-	lctx->ctx_len = context_size;
-	lctx->len = locallen;
+	nctx = kzalloc(nctx_len, GFP_KERNEL);
+	if (nctx == NULL) {
+		rc = -ENOMEM;
+		goto out;
+	}
+	nctx->id = id;
+	nctx->flags = flags;
+	nctx->len = nctx_len;
+	nctx->ctx_len = val_len;
+	memcpy(nctx->ctx, val, val_len);
 
-	memcpy(lctx->ctx, context, context_size);
-
-	if (copy_to_user(ctx, lctx, locallen))
+	if (copy_to_user(uctx, nctx, nctx_len))
 		rc = -EFAULT;
 
-	kfree(lctx);
-
+out:
+	kfree(nctx);
+	*uctx_len = nctx_len;
 	return rc;
 }
 
@@ -3922,9 +3929,9 @@ int security_getselfattr(unsigned int attr, struct lsm_ctx __user *uctx,
 		/*
 		 * Only flag supported is LSM_FLAG_SINGLE
 		 */
-		if (flags != LSM_FLAG_SINGLE)
+		if (flags != LSM_FLAG_SINGLE || !uctx)
 			return -EINVAL;
-		if (uctx && copy_from_user(&lctx, uctx, sizeof(lctx)))
+		if (copy_from_user(&lctx, uctx, sizeof(lctx)))
 			return -EFAULT;
 		/*
 		 * If the LSM ID isn't specified it is an error.
@@ -3950,8 +3957,9 @@ int security_getselfattr(unsigned int attr, struct lsm_ctx __user *uctx,
 			continue;
 		}
 		if (rc == -E2BIG) {
-			toobig = true;
+			rc = 0;
 			left = 0;
+			toobig = true;
 		} else if (rc < 0)
 			return rc;
 		else
@@ -4003,14 +4011,9 @@ int security_setselfattr(unsigned int attr, struct lsm_ctx __user *uctx,
 	if (size > PAGE_SIZE)
 		return -E2BIG;
 
-	lctx = kmalloc(size, GFP_KERNEL);
-	if (lctx == NULL)
-		return -ENOMEM;
-
-	if (copy_from_user(lctx, uctx, size)) {
-		rc = -EFAULT;
-		goto free_out;
-	}
+	lctx = memdup_user(uctx, size);
+	if (IS_ERR(lctx))
+		return PTR_ERR(lctx);
 
 	if (size < lctx->len || size < lctx->ctx_len + sizeof(*lctx) ||
 	    lctx->len < lctx->ctx_len + sizeof(*lctx)) {

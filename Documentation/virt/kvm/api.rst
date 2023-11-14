@@ -6222,8 +6222,8 @@ superset of the features supported by the system.
 
 KVM_SET_USER_MEMORY_REGION2 is an extension to KVM_SET_USER_MEMORY_REGION that
 allows mapping guest_memfd memory into a guest.  All fields shared with
-KVM_SET_USER_MEMORY_REGION identically.  Userspace can set KVM_MEM_PRIVATE in
-flags to have KVM bind the memory region to a given guest_memfd range of
+KVM_SET_USER_MEMORY_REGION identically.  Userspace can set KVM_MEM_GUEST_MEMFD
+in flags to have KVM bind the memory region to a given guest_memfd range of
 [guest_memfd_offset, guest_memfd_offset + memory_size].  The target guest_memfd
 must point at a file created via KVM_CREATE_GUEST_MEMFD on the current VM, and
 the target range must not be bound to any other memory region.  All standard
@@ -6237,13 +6237,13 @@ bounds checks apply (use common sense).
 	__u64 guest_phys_addr;
 	__u64 memory_size; /* bytes */
 	__u64 userspace_addr; /* start of the userspace allocated memory */
-  __u64 guest_memfd_offset;
+	__u64 guest_memfd_offset;
 	__u32 guest_memfd;
 	__u32 pad1;
 	__u64 pad2[14];
   };
 
-A KVM_MEM_PRIVATE region _must_ have a valid guest_memfd (private memory) and
+A KVM_MEM_GUEST_MEMFD region _must_ have a valid guest_memfd (private memory) and
 userspace_addr (shared memory).  However, "valid" for userspace_addr simply
 means that the address itself must be a legal userspace address.  The backing
 mapping for userspace_addr is not required to be valid/populated at the time of
@@ -6262,7 +6262,7 @@ toggling KVM_MEMORY_ATTRIBUTE_PRIVATE via KVM_SET_MEMORY_ATTRIBUTES as needed.
 :Capability: KVM_CAP_MEMORY_ATTRIBUTES
 :Architectures: x86
 :Type: vm ioctl
-:Parameters: struct kvm_memory_attributes(in)
+:Parameters: struct kvm_memory_attributes (in)
 :Returns: 0 on success, <0 on error
 
 KVM_SET_MEMORY_ATTRIBUTES allows userspace to set memory attributes for a range
@@ -6298,7 +6298,7 @@ The "flags" field is reserved for future extensions and must be '0'.
 :Capability: KVM_CAP_GUEST_MEMFD
 :Architectures: none
 :Type: vm ioctl
-:Parameters: struct struct kvm_create_guest_memfd(in)
+:Parameters: struct kvm_create_guest_memfd(in)
 :Returns: 0 on success, <0 on error
 
 KVM_CREATE_GUEST_MEMFD creates an anonymous file and returns a file descriptor
@@ -6317,8 +6317,6 @@ and cannot be resized  (guest_memfd files do however support PUNCH_HOLE).
 	__u64 reserved[6];
   };
 
-  #define KVM_GUEST_MEMFD_ALLOW_HUGEPAGE         (1ULL << 0)
-
 Conceptually, the inode backing a guest_memfd file represents physical memory,
 i.e. is coupled to the virtual machine as a thing, not to a "struct kvm".  The
 file itself, which is bound to a "struct kvm", is that instance's view of the
@@ -6334,11 +6332,6 @@ into the guest_memfd instance.  For a given guest_memfd file, there can be at
 most one mapping per page, i.e. binding multiple memory regions to a single
 guest_memfd range is not allowed (any number of memory regions can be bound to
 a single guest_memfd file, but the bound ranges must not overlap).
-
-If KVM_GUEST_MEMFD_ALLOW_HUGEPAGE is set in flags, KVM will attempt to allocate
-and map hugepages for the guest_memfd file.  This is currently best effort.  If
-KVM_GUEST_MEMFD_ALLOW_HUGEPAGE is set, the size must be aligned to the maximum
-transparent hugepage size supported by the kernel
 
 See KVM_SET_USER_MEMORY_REGION2 for additional details.
 
@@ -6982,7 +6975,7 @@ spec refer, https://github.com/riscv/riscv-sbi-doc.
 			__u64 flags;
 			__u64 gpa;
 			__u64 size;
-		} memory;
+		} memory_fault;
 
 KVM_EXIT_MEMORY_FAULT indicates the vCPU has encountered a memory fault that
 could not be resolved by KVM.  The 'gpa' and 'size' (in bytes) describe the

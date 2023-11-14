@@ -421,7 +421,7 @@ static unsigned long mmap_base(unsigned long rnd, struct rlimit *rlim_stack)
 	 * task. mmap_base starts directly below the stack and grows
 	 * downwards.
 	 */
-	return PAGE_ALIGN(mmap_upper_limit(rlim_stack) - rnd);
+	return PAGE_ALIGN_DOWN(mmap_upper_limit(rlim_stack) - rnd);
 #else
 	unsigned long gap = rlim_stack->rlim_cur;
 	unsigned long pad = stack_guard_gap;

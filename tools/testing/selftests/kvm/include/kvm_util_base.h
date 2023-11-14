@@ -819,6 +819,7 @@ static inline struct kvm_vm *vm_create_barebones(void)
 	return ____vm_create(VM_SHAPE_DEFAULT);
 }
 
+#ifdef __x86_64__
 static inline struct kvm_vm *vm_create_barebones_protected_vm(void)
 {
 	const struct vm_shape shape = {
@@ -828,6 +829,7 @@ static inline struct kvm_vm *vm_create_barebones_protected_vm(void)
 
 	return ____vm_create(shape);
 }
+#endif
 
 static inline struct kvm_vm *vm_create(uint32_t nr_runnable_vcpus)
 {

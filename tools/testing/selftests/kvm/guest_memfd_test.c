@@ -6,20 +6,21 @@
  */
 
 #define _GNU_SOURCE
-#include "test_util.h"
-#include "kvm_util_base.h"
-#include <linux/bitmap.h>
-#include <linux/falloc.h>
-#include <sys/mman.h>
-#include <sys/types.h>
-#include <sys/stat.h>
-
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 #include <errno.h>
 #include <stdio.h>
 #include <fcntl.h>
+
+#include <linux/bitmap.h>
+#include <linux/falloc.h>
+#include <sys/mman.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+
+#include "test_util.h"
+#include "kvm_util_base.h"
 
 static void test_file_read_write(int fd)
 {
@@ -123,7 +124,6 @@ static void test_invalid_punch_hole(int fd, size_t page_size, size_t total_size)
 
 static void test_create_guest_memfd_invalid(struct kvm_vm *vm)
 {
-	uint64_t valid_flags = 0;
 	size_t page_size = getpagesize();
 	uint64_t flag;
 	size_t size;
@@ -136,34 +136,13 @@ static void test_create_guest_memfd_invalid(struct kvm_vm *vm)
 			    size);
 	}
 
-	if (thp_configured()) {
-		for (size = page_size * 2; size < get_trans_hugepagesz(); size += page_size) {
-			fd = __vm_create_guest_memfd(vm, size, KVM_GUEST_MEMFD_ALLOW_HUGEPAGE);
-			TEST_ASSERT(fd == -1 && errno == EINVAL,
-				    "guest_memfd() with non-hugepage-aligned page size '0x%lx' should fail with EINVAL",
-				    size);
-		}
-
-		valid_flags = KVM_GUEST_MEMFD_ALLOW_HUGEPAGE;
-	}
-
-	for (flag = 1; flag; flag <<= 1) {
+	for (flag = 0; flag; flag <<= 1) {
 		uint64_t bit;
-
-		if (flag & valid_flags)
-			continue;
 
 		fd = __vm_create_guest_memfd(vm, page_size, flag);
 		TEST_ASSERT(fd == -1 && errno == EINVAL,
 			    "guest_memfd() with flag '0x%lx' should fail with EINVAL",
 			    flag);
-
-		for_each_set_bit(bit, &valid_flags, 64) {
-			fd = __vm_create_guest_memfd(vm, page_size, flag | BIT_ULL(bit));
-			TEST_ASSERT(fd == -1 && errno == EINVAL,
-				    "guest_memfd() with flags '0x%llx' should fail with EINVAL",
-				    flag | BIT_ULL(bit));
-		}
 	}
 }
 

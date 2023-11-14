@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * Copyright (C) 2022, Google LLC.
+ * Copyright (C) 2023, Google LLC.
  */
 #include <linux/kvm.h>
 #include <pthread.h>
@@ -58,7 +58,7 @@ static void test_private_access_memslot_deleted(void)
 	vm_userspace_mem_region_add(vm, VM_MEM_SRC_ANONYMOUS,
 				    EXITS_TEST_GPA, EXITS_TEST_SLOT,
 				    EXITS_TEST_NPAGES,
-				    KVM_MEM_PRIVATE);
+				    KVM_MEM_GUEST_MEMFD);
 
 	virt_map(vm, EXITS_TEST_GVA, EXITS_TEST_GPA, EXITS_TEST_NPAGES);
 
