@@ -65,6 +65,7 @@ extern int kern_path(const char *, unsigned, struct path *);
 extern struct dentry *kern_path_create(int, const char *, struct path *, unsigned int);
 extern struct dentry *user_path_create(int, const char __user *, struct path *, unsigned int);
 extern void done_path_create(struct path *, struct dentry *);
+extern struct dentry *filename_path_locked(int, struct filename *, struct path *);
 extern struct dentry *kern_path_locked(const char *, struct path *);
 int vfs_path_parent_lookup(struct filename *filename, unsigned int flags,
 			   struct path *parent, struct qstr *last, int *type,
