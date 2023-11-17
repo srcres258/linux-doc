@@ -1172,8 +1172,10 @@ again:
 	 */
 	for_each_btree_key(trans, iter, BTREE_ID_deleted_inodes, POS_MIN,
 			   BTREE_ITER_PREFETCH|BTREE_ITER_ALL_SNAPSHOTS, k, ret) {
-		ret = lockrestart_do(trans, may_delete_deleted_inode(trans, &iter, k.k->p,
-								     &need_another_pass));
+		ret = commit_do(trans, NULL, NULL,
+				BCH_TRANS_COMMIT_no_enospc|
+				BCH_TRANS_COMMIT_lazy_rw,
+			may_delete_deleted_inode(trans, &iter, k.k->p, &need_another_pass));
 		if (ret < 0)
 			break;
 

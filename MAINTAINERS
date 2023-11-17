@@ -893,6 +893,14 @@ Q:	https://patchwork.kernel.org/project/linux-rdma/list/
 F:	drivers/infiniband/hw/efa/
 F:	include/uapi/rdma/efa-abi.h
 
+AMD AXI W1 DRIVER
+M:	Kris Chaplin <kris.chaplin@amd.com>
+R:	Thomas Delev <thomas.delev@amd.com>
+R:	Michal Simek <michal.simek@amd.com>
+S:	Maintained
+F:	Documentation/devicetree/bindings/w1/amd,axi-1wire-host.yaml
+F:	drivers/w1/masters/amd_axi_w1.c
+
 AMD CDX BUS DRIVER
 M:	Nipun Gupta <nipun.gupta@amd.com>
 M:	Nikhil Agarwal <nikhil.agarwal@amd.com>
@@ -3339,13 +3347,17 @@ M:	Eric Paris <eparis@redhat.com>
 L:	audit@vger.kernel.org
 S:	Supported
 W:	https://github.com/linux-audit
-T:	git git://git.kernel.org/pub/scm/linux/kernel/git/pcmoore/audit.git
+Q:	https://patchwork.kernel.org/project/audit/list
+B:	mailto:audit@vger.kernel.org
+P:	https://github.com/linux-audit/audit-kernel/blob/main/README.md
+T:	git https://git.kernel.org/pub/scm/linux/kernel/git/pcmoore/audit.git
 F:	include/asm-generic/audit_*.h
 F:	include/linux/audit.h
 F:	include/linux/audit_arch.h
 F:	include/uapi/linux/audit.h
 F:	kernel/audit*
 F:	lib/*audit.c
+K:	\baudit_[a-z_0-9]\+\b
 
 AUXILIARY BUS DRIVER
 M:	Greg Kroah-Hartman <gregkh@linuxfoundation.org>
@@ -3640,7 +3652,7 @@ BOSCH SENSORTEC BMI323 IMU IIO DRIVER
 M:	Jagath Jog J <jagathjog1996@gmail.com>
 L:	linux-iio@vger.kernel.org
 S:	Maintained
-F:	Documentation/devicetree/bindings/iio/imu/bosch,bma400.yaml
+F:	Documentation/devicetree/bindings/iio/imu/bosch,bmi323.yaml
 F:	drivers/iio/imu/bmi323/
 
 BPF JIT for ARM
@@ -8943,7 +8955,6 @@ S:	Maintained
 F:	scripts/get_maintainer.pl
 
 GFS2 FILE SYSTEM
-M:	Bob Peterson <rpeterso@redhat.com>
 M:	Andreas Gruenbacher <agruenba@redhat.com>
 L:	gfs2@lists.linux.dev
 S:	Supported
@@ -10321,8 +10332,8 @@ IIO LIGHT SENSOR GAIN-TIME-SCALE HELPERS
 M:	Matti Vaittinen <mazziesaccount@gmail.com>
 L:	linux-iio@vger.kernel.org
 S:	Maintained
-F:	drivers/iio/light/gain-time-scale-helper.c
-F:	drivers/iio/light/gain-time-scale-helper.h
+F:	drivers/iio/industrialio-gts-helper.c
+F:	include/linux/iio/iio-gts-helper.h
 
 IIO MULTIPLEXER
 M:	Peter Rosin <peda@axentia.se>
@@ -11013,7 +11024,6 @@ F:	drivers/net/wireless/intel/iwlwifi/
 
 INTEL WMI SLIM BOOTLOADER (SBL) FIRMWARE UPDATE DRIVER
 M:	Jithu Joseph <jithu.joseph@intel.com>
-R:	Maurice Ma <maurice.ma@intel.com>
 S:	Maintained
 W:	https://slimbootloader.github.io/security/firmware-update.html
 F:	drivers/platform/x86/intel/wmi/sbl-fw-update.c
@@ -12196,6 +12206,13 @@ F:	include/linux/libnvdimm.h
 F:	include/linux/nd.h
 F:	include/uapi/linux/ndctl.h
 F:	tools/testing/nvdimm/
+
+LIBRARY CODE
+M:	Andrew Morton <akpm@linux-foundation.org>
+L:	linux-kernel@vger.kernel.org
+S:	Supported
+T:	git git://git.kernel.org/pub/scm/linux/kernel/git/akpm/mm.git mm-nonmm-unstable
+F:	lib/*
 
 LICENSES and SPDX stuff
 M:	Thomas Gleixner <tglx@linutronix.de>
@@ -19195,7 +19212,6 @@ R:	Alim Akhtar <alim.akhtar@samsung.com>
 L:	linux-samsung-soc@vger.kernel.org
 S:	Maintained
 T:	git git://git.kernel.org/pub/scm/linux/kernel/git/krzk/linux.git
-T:	git git://git.kernel.org/pub/scm/linux/kernel/git/snawrocki/clk.git
 F:	Documentation/devicetree/bindings/clock/samsung,*.yaml
 F:	Documentation/devicetree/bindings/clock/samsung,s3c*
 F:	drivers/clk/samsung/
@@ -19483,14 +19499,17 @@ SECURITY SUBSYSTEM
 M:	Paul Moore <paul@paul-moore.com>
 M:	James Morris <jmorris@namei.org>
 M:	"Serge E. Hallyn" <serge@hallyn.com>
-L:	linux-security-module@vger.kernel.org (suggested Cc:)
+L:	linux-security-module@vger.kernel.org
 S:	Supported
-W:	http://kernsec.org/
-T:	git git://git.kernel.org/pub/scm/linux/kernel/git/pcmoore/lsm.git
+Q:	https://patchwork.kernel.org/project/linux-security-module/list
+B:	mailto:linux-security-module@vger.kernel.org
+P:	https://github.com/LinuxSecurityModule/kernel/blob/main/README.md
+T:	git https://git.kernel.org/pub/scm/linux/kernel/git/pcmoore/lsm.git
 F:	include/uapi/linux/lsm.h
 F:	security/
 F:	tools/testing/selftests/lsm/
 X:	security/selinux/
+K:	\bsecurity_[a-z_0-9]\+\b
 
 SELINUX SECURITY MODULE
 M:	Paul Moore <paul@paul-moore.com>
@@ -19498,9 +19517,11 @@ M:	Stephen Smalley <stephen.smalley.work@gmail.com>
 M:	Eric Paris <eparis@parisplace.org>
 L:	selinux@vger.kernel.org
 S:	Supported
-W:	https://selinuxproject.org
 W:	https://github.com/SELinuxProject
-T:	git git://git.kernel.org/pub/scm/linux/kernel/git/pcmoore/selinux.git
+Q:	https://patchwork.kernel.org/project/selinux/list
+B:	mailto:selinux@vger.kernel.org
+P:	https://github.com/SELinuxProject/selinux-kernel/blob/main/README.md
+T:	git https://git.kernel.org/pub/scm/linux/kernel/git/pcmoore/selinux.git
 F:	Documentation/ABI/removed/sysfs-selinux-checkreqprot
 F:	Documentation/ABI/removed/sysfs-selinux-disable
 F:	Documentation/admin-guide/LSM/SELinux.rst
@@ -23859,8 +23880,7 @@ T:	git git://git.kernel.org/pub/scm/fs/xfs/xfs-linux.git
 P:	Documentation/filesystems/xfs-maintainer-entry-profile.rst
 F:	Documentation/ABI/testing/sysfs-fs-xfs
 F:	Documentation/admin-guide/xfs.rst
-F:	Documentation/filesystems/xfs-delayed-logging-design.rst
-F:	Documentation/filesystems/xfs-self-describing-metadata.rst
+F:	Documentation/filesystems/xfs-*
 F:	fs/xfs/
 F:	include/uapi/linux/dqblk_xfs.h
 F:	include/uapi/linux/fsmap.h

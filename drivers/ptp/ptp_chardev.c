@@ -176,8 +176,6 @@ long ptp_ioctl(struct posix_clock_context *pccontext, unsigned int cmd,
 	int enable, err = 0;
 
 	tsevq = pccontext->private_clkdata;
-	if (!tsevq)
-		return -EINVAL;
 
 	switch (cmd) {
 
@@ -574,7 +572,8 @@ ssize_t ptp_read(struct posix_clock_context *pccontext, uint rdflags,
 
 	for (i = 0; i < cnt; i++) {
 		event[i] = queue->buf[queue->head];
-		queue->head = (queue->head + 1) % PTP_MAX_TIMESTAMPS;
+		/* Paired with READ_ONCE() in queue_cnt() */
+		WRITE_ONCE(queue->head, (queue->head + 1) % PTP_MAX_TIMESTAMPS);
 	}
 
 	spin_unlock_irqrestore(&queue->lock, flags);

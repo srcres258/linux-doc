@@ -161,8 +161,8 @@ static int bch2_journal_replay(struct bch_fs *c)
 
 	/*
 	 * First, attempt to replay keys in sorted order. This is more
-	 * efficient, but some might fail if that would cause a journal
-	 * deadlock.
+	 * efficient - better locality of btree access -  but some might fail if
+	 * that would cause a journal deadlock.
 	 */
 	for (size_t i = 0; i < keys->nr; i++) {
 		cond_resched();
@@ -211,6 +211,10 @@ static int bch2_journal_replay(struct bch_fs *c)
 		BUG_ON(!k->overwritten);
 	}
 
+	/*
+	 * We need to put our btree_trans before calling flush_all_pins(), since
+	 * that will use a btree_trans internally
+	 */
 	bch2_trans_put(trans);
 	trans = NULL;
 
@@ -874,6 +878,8 @@ use_clean:
 	    test_bit(BCH_FS_ERRORS_FIXED, &c->flags) &&
 	    !test_bit(BCH_FS_ERRORS_NOT_FIXED, &c->flags) &&
 	    !test_bit(BCH_FS_ERROR, &c->flags)) {
+		bch2_flush_fsck_errs(c);
+
 		bch_info(c, "Fixed errors, running fsck a second time to verify fs is clean");
 		clear_bit(BCH_FS_ERRORS_FIXED, &c->flags);
 

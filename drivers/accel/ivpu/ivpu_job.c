@@ -7,7 +7,6 @@
 
 #include <linux/bitfield.h>
 #include <linux/highmem.h>
-#include <linux/kthread.h>
 #include <linux/pci.h>
 #include <linux/module.h>
 #include <uapi/drm/ivpu_accel.h>
@@ -23,10 +22,6 @@
 #define JOB_ID_JOB_MASK	     GENMASK(7, 0)
 #define JOB_ID_CONTEXT_MASK  GENMASK(31, 8)
 #define JOB_MAX_BUFFER_COUNT 65535
-
-static unsigned int ivpu_tdr_timeout_ms;
-module_param_named(tdr_timeout_ms, ivpu_tdr_timeout_ms, uint, 0644);
-MODULE_PARM_DESC(tdr_timeout_ms, "Timeout for device hang detection, in milliseconds, 0 - default");
 
 static void ivpu_cmdq_ring_db(struct ivpu_device *vdev, struct ivpu_cmdq *cmdq)
 {
@@ -342,21 +337,10 @@ static int ivpu_job_done(struct ivpu_device *vdev, u32 job_id, u32 job_status)
 	ivpu_dbg(vdev, JOB, "Job complete:  id %3u ctx %2d engine %d status 0x%x\n",
 		 job->job_id, job->file_priv->ctx.id, job->engine_idx, job_status);
 
+	ivpu_stop_job_timeout_detection(vdev);
+
 	job_put(job);
 	return 0;
-}
-
-static void ivpu_job_done_message(struct ivpu_device *vdev, void *msg)
-{
-	struct vpu_ipc_msg_payload_job_done *payload;
-	struct vpu_jsm_msg *job_ret_msg = msg;
-	int ret;
-
-	payload = (struct vpu_ipc_msg_payload_job_done *)&job_ret_msg->payload;
-
-	ret = ivpu_job_done(vdev, payload->job_id, payload->job_status);
-	if (ret)
-		ivpu_err(vdev, "Failed to finish job %d: %d\n", payload->job_id, ret);
 }
 
 void ivpu_jobs_abort_all(struct ivpu_device *vdev)
@@ -399,6 +383,8 @@ static int ivpu_direct_job_submission(struct ivpu_job *job)
 	ret = ivpu_cmdq_push_job(cmdq, job);
 	if (ret)
 		goto err_xa_erase;
+
+	ivpu_start_job_timeout_detection(vdev);
 
 	ivpu_dbg(vdev, JOB, "Job submitted: id %3u addr 0x%llx ctx %2d engine %d next %d\n",
 		 job->job_id, job->cmd_buf_vpu_addr, file_priv->ctx.id,
@@ -564,75 +550,36 @@ free_handles:
 	return ret;
 }
 
-static int ivpu_job_done_thread(void *arg)
+static void
+ivpu_job_done_callback(struct ivpu_device *vdev, struct ivpu_ipc_hdr *ipc_hdr,
+		       struct vpu_jsm_msg *jsm_msg)
 {
-	struct ivpu_device *vdev = (struct ivpu_device *)arg;
-	struct ivpu_ipc_consumer cons;
-	struct vpu_jsm_msg jsm_msg;
-	bool jobs_submitted;
-	unsigned int timeout;
+	struct vpu_ipc_msg_payload_job_done *payload;
 	int ret;
 
-	ivpu_dbg(vdev, JOB, "Started %s\n", __func__);
-
-	ivpu_ipc_consumer_add(vdev, &cons, VPU_IPC_CHAN_JOB_RET);
-
-	while (!kthread_should_stop()) {
-		cons.aborted = false;
-		timeout = ivpu_tdr_timeout_ms ? ivpu_tdr_timeout_ms : vdev->timeout.tdr;
-		jobs_submitted = !xa_empty(&vdev->submitted_jobs_xa);
-		ret = ivpu_ipc_receive(vdev, &cons, NULL, &jsm_msg, timeout);
-		if (!ret) {
-			ivpu_job_done_message(vdev, &jsm_msg);
-		} else if (ret == -ETIMEDOUT) {
-			if (jobs_submitted && !xa_empty(&vdev->submitted_jobs_xa)) {
-				ivpu_err(vdev, "TDR detected, timeout %d ms", timeout);
-				ivpu_hw_diagnose_failure(vdev);
-				ivpu_pm_schedule_recovery(vdev);
-			}
-		}
-		if (kthread_should_park()) {
-			ivpu_dbg(vdev, JOB, "Parked %s\n", __func__);
-			kthread_parkme();
-			ivpu_dbg(vdev, JOB, "Unparked %s\n", __func__);
-		}
+	if (!jsm_msg) {
+		ivpu_err(vdev, "IPC message has no JSM payload\n");
+		return;
 	}
 
-	ivpu_ipc_consumer_del(vdev, &cons);
-
-	ivpu_jobs_abort_all(vdev);
-
-	ivpu_dbg(vdev, JOB, "Stopped %s\n", __func__);
-	return 0;
-}
-
-int ivpu_job_done_thread_init(struct ivpu_device *vdev)
-{
-	struct task_struct *thread;
-
-	thread = kthread_run(&ivpu_job_done_thread, (void *)vdev, "ivpu_job_done_thread");
-	if (IS_ERR(thread)) {
-		ivpu_err(vdev, "Failed to start job completion thread\n");
-		return -EIO;
+	if (jsm_msg->result != VPU_JSM_STATUS_SUCCESS) {
+		ivpu_err(vdev, "Invalid JSM message result: %d\n", jsm_msg->result);
+		return;
 	}
 
-	vdev->job_done_thread = thread;
-
-	return 0;
+	payload = (struct vpu_ipc_msg_payload_job_done *)&jsm_msg->payload;
+	ret = ivpu_job_done(vdev, payload->job_id, payload->job_status);
+	if (!ret && !xa_empty(&vdev->submitted_jobs_xa))
+		ivpu_start_job_timeout_detection(vdev);
 }
 
-void ivpu_job_done_thread_fini(struct ivpu_device *vdev)
+void ivpu_job_done_consumer_init(struct ivpu_device *vdev)
 {
-	kthread_unpark(vdev->job_done_thread);
-	kthread_stop(vdev->job_done_thread);
+	ivpu_ipc_consumer_add(vdev, &vdev->job_done_consumer,
+			      VPU_IPC_CHAN_JOB_RET, ivpu_job_done_callback);
 }
 
-void ivpu_job_done_thread_disable(struct ivpu_device *vdev)
+void ivpu_job_done_consumer_fini(struct ivpu_device *vdev)
 {
-	kthread_park(vdev->job_done_thread);
-}
-
-void ivpu_job_done_thread_enable(struct ivpu_device *vdev)
-{
-	kthread_unpark(vdev->job_done_thread);
+	ivpu_ipc_consumer_del(vdev, &vdev->job_done_consumer);
 }

@@ -1960,6 +1960,7 @@ static struct dentry *sel_make_swapover_dir(struct super_block *sb,
 	inc_nlink(inode);
 	inode_lock(sb->s_root->d_inode);
 	d_add(dentry, inode);
+	inc_nlink(sb->s_root->d_inode);
 	inode_unlock(sb->s_root->d_inode);
 	return dentry;
 }

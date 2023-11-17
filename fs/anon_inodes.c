@@ -163,8 +163,10 @@ EXPORT_SYMBOL_GPL(anon_inode_getfile);
  *
  * Create a new anonymous inode and file pair.  This can be done for two
  * reasons:
+ *
  * - for the inode to have its own security context, so that LSMs can enforce
  *   policy on the inode's creation;
+ *
  * - if the caller needs a unique inode, for example in order to customize
  *   the size returned by fstat()
  *
@@ -250,8 +252,10 @@ EXPORT_SYMBOL_GPL(anon_inode_getfd);
  *
  * Create a new anonymous inode and file pair.  This can be done for two
  * reasons:
+ *
  * - for the inode to have its own security context, so that LSMs can enforce
  *   policy on the inode's creation;
+ *
  * - if the caller needs a unique inode, for example in order to customize
  *   the size returned by fstat()
  *

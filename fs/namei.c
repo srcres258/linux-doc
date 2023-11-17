@@ -218,6 +218,7 @@ getname(const char __user * filename)
 {
 	return getname_flags(filename, 0, NULL);
 }
+EXPORT_SYMBOL(getname);
 
 struct filename *
 getname_kernel(const char * filename)
@@ -2573,13 +2574,13 @@ static int filename_parentat(int dfd, struct filename *name,
 }
 
 /* does lookup, returns the object with parent locked */
-static struct dentry *__kern_path_locked(struct filename *name, struct path *path)
+struct dentry *filename_path_locked(int dfd, struct filename *name, struct path *path)
 {
 	struct dentry *d;
 	struct qstr last;
 	int type, error;
 
-	error = filename_parentat(AT_FDCWD, name, 0, path, &last, &type);
+	error = filename_parentat(dfd, name, 0, path, &last, &type);
 	if (error)
 		return ERR_PTR(error);
 	if (unlikely(type != LAST_NORM)) {
@@ -2594,11 +2595,12 @@ static struct dentry *__kern_path_locked(struct filename *name, struct path *pat
 	}
 	return d;
 }
+EXPORT_SYMBOL(filename_path_locked);
 
 struct dentry *kern_path_locked(const char *name, struct path *path)
 {
 	struct filename *filename = getname_kernel(name);
-	struct dentry *res = __kern_path_locked(filename, path);
+	struct dentry *res = filename_path_locked(AT_FDCWD, filename, path);
 
 	putname(filename);
 	return res;
