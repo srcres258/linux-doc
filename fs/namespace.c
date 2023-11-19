@@ -4994,22 +4994,33 @@ static ssize_t do_listmount(struct vfsmount *mnt, u64 __user *buf,
 			    unsigned int flags)
 {
 	struct mount *r, *m = real_mount(mnt);
-	struct path rootmnt = {
+	struct path path_mnt_root = {
 		.mnt = root->mnt,
 		.dentry = root->mnt->mnt_root
 	};
 	ssize_t ctr;
-	bool reachable_only = true;
+	bool unreachable = (flags & LISTMOUNT_UNREACHABLE);
 	bool recurse = flags & LISTMOUNT_RECURSIVE;
 	int err;
 
-	if (flags & LISTMOUNT_UNREACHABLE) {
-		if (!capable(CAP_SYS_ADMIN))
-			return -EPERM;
-		reachable_only = false;
-	}
+	/*
+	 * The caller explicitly requested to see all mounts including those
+	 * that aren't reachable from the caller's mount root so check that
+	 * they have the privileges to do so.
+	 */
+	if (unreachable && !capable(CAP_SYS_ADMIN))
+		return -EPERM;
 
-	if (reachable_only && !is_path_reachable(m, mnt->mnt_root, &rootmnt))
+	/*
+	 * The caller requested to only list reachable mounts so ensure that
+	 * the mount whose children we want to see is actually reachable from
+	 * the caller's mount root.
+	 *
+	 * If not, check whether the caller does have sufficient privileges to
+	 * also list unreachable mounts. If they lack privileges we need to
+	 * return a permission error and if they do, we need to return success.
+	 */
+	if (!unreachable && !is_path_reachable(m, mnt->mnt_root, &path_mnt_root))
 		return capable(CAP_SYS_ADMIN) ? 0 : -EPERM;
 
 	err = security_sb_statfs(mnt->mnt_root);
@@ -5017,8 +5028,7 @@ static ssize_t do_listmount(struct vfsmount *mnt, u64 __user *buf,
 		return err;
 
 	for (ctr = 0, r = listmnt_first(m); r; r = listmnt_next(r, m, recurse)) {
-		if (reachable_only &&
-		    !is_path_reachable(r, r->mnt.mnt_root, root))
+		if (!unreachable && !is_path_reachable(r, r->mnt.mnt_root, root))
 			continue;
 
 		if (ctr >= bufsize)
