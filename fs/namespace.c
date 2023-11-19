@@ -4699,73 +4699,16 @@ struct kstatmount {
 	size_t const bufsize;
 	struct vfsmount *const mnt;
 	u64 const mask;
-	struct seq_file seq;
 	struct path root;
 	struct statmount sm;
+	char *fs_type;
+	size_t fs_type_len;
+	char *mnt_root;
+	size_t mnt_root_len;
+	char *mnt_point;
+	size_t mnt_point_len;
 	size_t pos;
-	int err;
 };
-
-typedef int (*statmount_func_t)(struct kstatmount *);
-
-static int statmount_string_seq(struct kstatmount *s, statmount_func_t func)
-{
-	size_t rem = s->bufsize - s->pos - sizeof(s->sm);
-	struct seq_file *seq = &s->seq;
-	int ret;
-
-	seq->count = 0;
-	seq->size = min(seq->size, rem);
-	seq->buf = kvmalloc(seq->size, GFP_KERNEL_ACCOUNT);
-	if (!seq->buf)
-		return -ENOMEM;
-
-	ret = func(s);
-	if (ret)
-		return ret;
-
-	if (seq_has_overflowed(seq)) {
-		if (seq->size == rem)
-			return -EOVERFLOW;
-		seq->size *= 2;
-		if (seq->size > MAX_RW_COUNT)
-			return -ENOMEM;
-		kvfree(seq->buf);
-		return 0;
-	}
-
-	/* Done */
-	return 1;
-}
-
-static void statmount_string(struct kstatmount *s, u64 mask, statmount_func_t func,
-		       u32 *str)
-{
-	int ret = s->pos + sizeof(s->sm) >= s->bufsize ? -EOVERFLOW : 0;
-	struct statmount *sm = &s->sm;
-	struct seq_file *seq = &s->seq;
-
-	if (s->err || !(s->mask & mask))
-		return;
-
-	seq->size = PAGE_SIZE;
-	while (!ret)
-		ret = statmount_string_seq(s, func);
-
-	if (ret < 0) {
-		s->err = ret;
-	} else {
-		seq->buf[seq->count++] = '\0';
-		if (copy_to_user(s->buf->str + s->pos, seq->buf, seq->count)) {
-			s->err = -EFAULT;
-		} else {
-			*str = s->pos;
-			s->pos += seq->count;
-		}
-	}
-	kvfree(seq->buf);
-	sm->mask |= mask;
-}
 
 static u64 mnt_to_attr_flags(struct vfsmount *mnt)
 {
@@ -4849,11 +4792,11 @@ static void statmount_propagate_from(struct kstatmount *s)
 		s->sm.propagate_from = get_dominating_id(m, &current->fs->root);
 }
 
-static int statmount_mnt_root(struct kstatmount *s)
+static int statmount_mnt_root(struct kstatmount *s, struct seq_file *seq)
 {
-	struct seq_file *seq = &s->seq;
-	int err = show_path(seq, s->mnt->mnt_root);
+	int err;
 
+	err = show_path(seq, s->mnt->mnt_root);
 	if (!err && !seq_has_overflowed(seq)) {
 		seq->buf[seq->count] = '\0';
 		seq->count = string_unescape_inplace(seq->buf, UNESCAPE_OCTAL);
@@ -4861,29 +4804,122 @@ static int statmount_mnt_root(struct kstatmount *s)
 	return err;
 }
 
-static int statmount_mnt_point(struct kstatmount *s)
+static int statmount_mnt_point(struct kstatmount *s, struct seq_file *seq)
 {
 	struct vfsmount *mnt = s->mnt;
 	struct path mnt_path = { .dentry = mnt->mnt_root, .mnt = mnt };
-	int err = seq_path_root(&s->seq, &mnt_path, &s->root, "");
+	int err;
 
+	err = seq_path_root(seq, &mnt_path, &s->root, "");
 	return err == SEQ_SKIP ? 0 : err;
 }
 
-static int statmount_fs_type(struct kstatmount *s)
+static int statmount_fs_type(struct kstatmount *s, struct seq_file *seq)
 {
-	struct seq_file *seq = &s->seq;
 	struct super_block *sb = s->mnt->mnt_sb;
 
 	seq_puts(seq, sb->s_type->name);
 	return 0;
 }
 
-static int do_statmount(struct kstatmount *s)
+static int statmount_string(struct kstatmount *s, u64 flag)
+{
+	struct seq_file seq = {};
+	char *buf;
+	struct statmount *sm = &s->sm;
+	int ret;
+
+	if (s->pos + sizeof(s->sm) >= s->bufsize)
+		return -EOVERFLOW;
+
+	buf = __getname();
+	if (!buf)
+		return -ENOMEM;
+
+	seq.count = 0;
+	seq.size = PATH_MAX;
+	seq.buf = buf;
+
+	switch (flag) {
+	case STATMOUNT_FS_TYPE:
+		ret = statmount_fs_type(s, &seq);
+		break;
+	case STATMOUNT_MNT_ROOT:
+		ret = statmount_mnt_root(s, &seq);
+		break;
+	case STATMOUNT_MNT_POINT:
+		ret = statmount_mnt_point(s, &seq);
+		break;
+	default:
+		WARN_ON_ONCE(true);
+		ret = -EINVAL;
+	}
+	if (unlikely(seq_has_overflowed(&seq)))
+		ret = -EOVERFLOW;
+
+	if (ret) {
+		__putname(buf);
+		return ret;
+	}
+
+	/* Use the last byte as the \0 byte. */
+	seq.buf[seq.count++] = '\0';
+
+	switch (flag) {
+	case STATMOUNT_FS_TYPE:
+		sm->fs_type = s->pos;
+		s->fs_type = buf;
+		s->fs_type_len = seq.count;
+		break;
+	case STATMOUNT_MNT_ROOT:
+		sm->mnt_root = s->pos;
+		s->mnt_root = buf;
+		s->mnt_root_len = seq.count;
+		break;
+	case STATMOUNT_MNT_POINT:
+		sm->mnt_point = s->pos;
+		s->mnt_point = buf;
+		s->mnt_point_len = seq.count;
+		break;
+	}
+
+	s->pos += seq.count;
+	sm->mask |= flag;
+	return 0;
+}
+
+static int copy_statmount_to_user(struct kstatmount *s)
 {
 	struct statmount *sm = &s->sm;
-	struct mount *m = real_mount(s->mnt);
 	size_t copysize = min_t(size_t, s->bufsize, sizeof(*sm));
+	int ret = 0;
+
+	if (sm->mask & STATMOUNT_FS_TYPE)
+		ret = copy_to_user(s->buf->str + sm->fs_type,
+				   s->fs_type, s->fs_type_len);
+
+	if (!ret && sm->mask & STATMOUNT_MNT_ROOT)
+		ret = copy_to_user(s->buf->str + sm->mnt_root,
+				   s->mnt_root, s->mnt_root_len);
+
+	if (!ret && sm->mask & STATMOUNT_MNT_POINT)
+		ret = copy_to_user(s->buf->str + sm->mnt_point,
+				   s->mnt_point, s->mnt_point_len);
+
+	if (ret)
+		return -EFAULT;
+
+	/* Return the number of bytes copied to the buffer */
+	sm->size = copysize + s->pos;
+	if (copy_to_user(s->buf, sm, copysize))
+		return -EFAULT;
+
+	return 0;
+}
+
+static int do_statmount(struct kstatmount *s)
+{
+	struct mount *m = real_mount(s->mnt);
 	int err;
 
 	if (!capable(CAP_SYS_ADMIN) &&
@@ -4903,20 +4939,29 @@ static int do_statmount(struct kstatmount *s)
 	if (s->mask & STATMOUNT_PROPAGATE_FROM)
 		statmount_propagate_from(s);
 
-	statmount_string(s, STATMOUNT_FS_TYPE, statmount_fs_type, &sm->fs_type);
-	statmount_string(s, STATMOUNT_MNT_ROOT, statmount_mnt_root, &sm->mnt_root);
-	statmount_string(s, STATMOUNT_MNT_POINT, statmount_mnt_point, &sm->mnt_point);
+	if (s->mask & STATMOUNT_FS_TYPE)
+		err = statmount_string(s, STATMOUNT_FS_TYPE);
 
-	if (s->err)
-		return s->err;
+	if (!err && s->mask & STATMOUNT_MNT_ROOT)
+		err = statmount_string(s, STATMOUNT_MNT_ROOT);
 
-	/* Return the number of bytes copied to the buffer */
-	sm->size = copysize + s->pos;
+	if (!err && s->mask & STATMOUNT_MNT_POINT)
+		err = statmount_string(s, STATMOUNT_MNT_POINT);
 
-	if (copy_to_user(s->buf, sm, copysize))
-		return -EFAULT;
+	if (err)
+		return err;
 
 	return 0;
+}
+
+static inline void drop_kstatmount(struct kstatmount *ks)
+{
+	if (ks->fs_type)
+		__putname(ks->fs_type);
+	if (ks->mnt_root)
+		__putname(ks->mnt_root);
+	if (ks->mnt_point)
+		__putname(ks->mnt_point);
 }
 
 SYSCALL_DEFINE4(statmount, const struct mnt_id_req __user *, req,
@@ -4953,6 +4998,9 @@ SYSCALL_DEFINE4(statmount, const struct mnt_id_req __user *, req,
 	path_put(&ks->root);
 	up_read(&namespace_sem);
 
+	if (!ret)
+		ret = copy_statmount_to_user(ks);
+	drop_kstatmount(ks);
 	return ret;
 }
 
