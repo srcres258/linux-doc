@@ -528,14 +528,14 @@ bind and connect actions to only a set of allowed ports thanks to the new
 ``LANDLOCK_ACCESS_NET_BIND_TCP`` and ``LANDLOCK_ACCESS_NET_CONNECT_TCP``
 access rights.
 
-Ioctl (ABI < 5)
+IOCTL (ABI < 5)
 ---------------
 
-IOCTL operations could not be denied before the fourth Landlock ABI, so
+IOCTL operations could not be denied before the fifth Landlock ABI, so
 :manpage:`ioctl(2)` is always allowed when using a kernel that only supports an
 earlier ABI.
 
-Starting with the Landlock ABI version 4, it is possible to restrict the use of
+Starting with the Landlock ABI version 5, it is possible to restrict the use of
 :manpage:`ioctl(2)` using the new ``LANDLOCK_ACCESS_FS_IOCTL`` access right.
 
 .. _kernel_support:

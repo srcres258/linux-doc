@@ -1454,7 +1454,7 @@ static int smu_v13_0_6_register_irq_handler(struct smu_context *smu)
 
 static int smu_v13_0_6_notify_unload(struct smu_context *smu)
 {
-	if (smu->smc_fw_version <= 0x553500)
+	if (amdgpu_in_reset(smu->adev))
 		return 0;
 
 	dev_dbg(smu->adev->dev, "Notify PMFW about driver unload");
@@ -2095,6 +2095,14 @@ static ssize_t smu_v13_0_6_get_gpu_metrics(struct smu_context *smu, void **table
 			smu_v13_0_6_get_current_pcie_link_speed(smu);
 		gpu_metrics->pcie_bandwidth_acc =
 				SMUQ10_ROUND(metrics->PcieBandwidthAcc[0]);
+		gpu_metrics->pcie_bandwidth_inst =
+				SMUQ10_ROUND(metrics->PcieBandwidth[0]);
+		gpu_metrics->pcie_l0_to_recov_count_acc =
+				metrics->PCIeL0ToRecoveryCountAcc;
+		gpu_metrics->pcie_replay_count_acc =
+				metrics->PCIenReplayAAcc;
+		gpu_metrics->pcie_replay_rover_count_acc =
+				metrics->PCIenReplayARolloverCountAcc;
 	}
 
 	gpu_metrics->system_clock_counter = ktime_get_boottime_ns();
@@ -2384,8 +2392,8 @@ static const struct mca_bank_ipid smu_v13_0_6_mca_ipid_table[AMDGPU_MCA_IP_COUNT
 
 static void mca_bank_entry_info_decode(struct mca_bank_entry *entry, struct mca_bank_info *info)
 {
-	uint64_t ipid = entry->regs[MCA_REG_IDX_IPID];
-	uint32_t insthi;
+	u64 ipid = entry->regs[MCA_REG_IDX_IPID];
+	u32 instidhi, instid;
 
 	/* NOTE: All MCA IPID register share the same format,
 	 * so the driver can share the MCMP1 register header file.
@@ -2394,9 +2402,15 @@ static void mca_bank_entry_info_decode(struct mca_bank_entry *entry, struct mca_
 	info->hwid = REG_GET_FIELD(ipid, MCMP1_IPIDT0, HardwareID);
 	info->mcatype = REG_GET_FIELD(ipid, MCMP1_IPIDT0, McaType);
 
-	insthi = REG_GET_FIELD(ipid, MCMP1_IPIDT0, InstanceIdHi);
-	info->aid = ((insthi >> 2) & 0x03);
-	info->socket_id = insthi & 0x03;
+	/*
+	 * Unfied DieID Format: SAASS. A:AID, S:Socket.
+	 * Unfied DieID[4] = InstanceId[0]
+	 * Unfied DieID[0:3] = InstanceIdHi[0:3]
+	 */
+	instidhi = REG_GET_FIELD(ipid, MCMP1_IPIDT0, InstanceIdHi);
+	instid = REG_GET_FIELD(ipid, MCMP1_IPIDT0, InstanceIdLo);
+	info->aid = ((instidhi >> 2) & 0x03);
+	info->socket_id = ((instid & 0x1) << 2) | (instidhi & 0x03);
 }
 
 static int mca_bank_read_reg(struct amdgpu_device *adev, enum amdgpu_mca_error_type type,
@@ -2570,6 +2584,7 @@ static bool mca_gfx_smu_bank_is_valid(const struct mca_ras_info *mca_ras, struct
 	uint32_t instlo;
 
 	instlo = REG_GET_FIELD(entry->regs[MCA_REG_IDX_IPID], MCMP1_IPIDT0, InstanceIdLo);
+	instlo &= GENMASK(31, 1);
 	switch (instlo) {
 	case 0x36430400: /* SMNAID XCD 0 */
 	case 0x38430400: /* SMNAID XCD 1 */
@@ -2588,6 +2603,7 @@ static bool mca_smu_bank_is_valid(const struct mca_ras_info *mca_ras, struct amd
 	uint32_t errcode, instlo;
 
 	instlo = REG_GET_FIELD(entry->regs[MCA_REG_IDX_IPID], MCMP1_IPIDT0, InstanceIdLo);
+	instlo &= GENMASK(31, 1);
 	if (instlo != 0x03b30400)
 		return false;
 

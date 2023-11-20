@@ -857,10 +857,12 @@ out_dput:
 	return false;
 }
 
-static inline int d_revalidate(struct dentry *dentry, unsigned int flags)
+static inline int d_revalidate(struct dentry *dentry,
+			       const struct qstr *name,
+			       unsigned int flags)
 {
 	if (unlikely(dentry->d_flags & DCACHE_OP_REVALIDATE))
-		return dentry->d_op->d_revalidate(dentry, flags);
+		return dentry->d_op->d_revalidate(dentry, name, flags);
 	else
 		return 1;
 }
@@ -1570,7 +1572,7 @@ static struct dentry *lookup_dcache(const struct qstr *name,
 {
 	struct dentry *dentry = d_lookup(dir, name);
 	if (dentry) {
-		int error = d_revalidate(dentry, flags);
+		int error = d_revalidate(dentry, name, flags);
 		if (unlikely(error <= 0)) {
 			if (!error)
 				d_invalidate(dentry);
@@ -1641,19 +1643,19 @@ static struct dentry *lookup_fast(struct nameidata *nd)
 		if (read_seqcount_retry(&parent->d_seq, nd->seq))
 			return ERR_PTR(-ECHILD);
 
-		status = d_revalidate(dentry, nd->flags);
+		status = d_revalidate(dentry, &nd->last, nd->flags);
 		if (likely(status > 0))
 			return dentry;
 		if (!try_to_unlazy_next(nd, dentry))
 			return ERR_PTR(-ECHILD);
 		if (status == -ECHILD)
 			/* we'd been told to redo it in non-rcu mode */
-			status = d_revalidate(dentry, nd->flags);
+			status = d_revalidate(dentry, &nd->last, nd->flags);
 	} else {
 		dentry = __d_lookup(parent, &nd->last);
 		if (unlikely(!dentry))
 			return NULL;
-		status = d_revalidate(dentry, nd->flags);
+		status = d_revalidate(dentry, &nd->last, nd->flags);
 	}
 	if (unlikely(status <= 0)) {
 		if (!status)
@@ -1681,7 +1683,7 @@ again:
 	if (IS_ERR(dentry))
 		return dentry;
 	if (unlikely(!d_in_lookup(dentry))) {
-		int error = d_revalidate(dentry, flags);
+		int error = d_revalidate(dentry, name, flags);
 		if (unlikely(error <= 0)) {
 			if (!error) {
 				d_invalidate(dentry);
@@ -2574,7 +2576,7 @@ static int filename_parentat(int dfd, struct filename *name,
 }
 
 /* does lookup, returns the object with parent locked */
-struct dentry *filename_path_locked(int dfd, struct filename *name, struct path *path)
+static struct dentry *__kern_path_locked(int dfd, struct filename *name, struct path *path)
 {
 	struct dentry *d;
 	struct qstr last;
@@ -2600,11 +2602,21 @@ EXPORT_SYMBOL(filename_path_locked);
 struct dentry *kern_path_locked(const char *name, struct path *path)
 {
 	struct filename *filename = getname_kernel(name);
-	struct dentry *res = filename_path_locked(AT_FDCWD, filename, path);
+	struct dentry *res = __kern_path_locked(AT_FDCWD, filename, path);
 
 	putname(filename);
 	return res;
 }
+
+struct dentry *user_path_locked_at(int dfd, const char __user *name, struct path *path)
+{
+	struct filename *filename = getname(name);
+	struct dentry *res = __kern_path_locked(dfd, filename, path);
+
+	putname(filename);
+	return res;
+}
+EXPORT_SYMBOL(user_path_locked_at);
 
 int kern_path(const char *name, unsigned int flags, struct path *path)
 {
@@ -3408,7 +3420,7 @@ static struct dentry *lookup_open(struct nameidata *nd, struct file *file,
 		if (d_in_lookup(dentry))
 			break;
 
-		error = d_revalidate(dentry, nd->flags);
+		error = d_revalidate(dentry, &nd->last, nd->flags);
 		if (likely(error > 0))
 			break;
 		if (error)

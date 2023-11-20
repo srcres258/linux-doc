@@ -1018,6 +1018,7 @@ int nfsd_dispatch(struct svc_rqst *rqstp)
 		goto out_dropit;
 	}
 
+	nfs_reply = xdr_inline_decode(&rqstp->rq_res_stream, 0);
 	*statp = proc->pc_func(rqstp);
 	if (test_bit(RQ_DROPME, &rqstp->rq_flags))
 		goto out_update_drop;

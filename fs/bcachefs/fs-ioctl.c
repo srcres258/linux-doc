@@ -453,7 +453,7 @@ static long bch2_ioctl_subvolume_create(struct bch_fs *c, struct file *filp,
 static long bch2_ioctl_subvolume_destroy(struct bch_fs *c, struct file *filp,
 				struct bch_ioctl_subvolume arg)
 {
-	struct filename *name;
+	const char __user *name = (void __user *)(unsigned long)arg.dst_ptr;
 	struct path path;
 	struct inode *dir;
 	struct dentry *victim;
@@ -462,9 +462,7 @@ static long bch2_ioctl_subvolume_destroy(struct bch_fs *c, struct file *filp,
 	if (arg.flags)
 		return -EINVAL;
 
-	name = getname((const char __user *)(unsigned long)arg.dst_ptr);
-	victim = filename_path_locked(arg.dirfd, name, &path);
-	putname(name);
+	victim = user_path_locked_at(arg.dirfd, name, &path);
 	if (IS_ERR(victim))
 		return PTR_ERR(victim);
 
@@ -472,7 +470,10 @@ static long bch2_ioctl_subvolume_destroy(struct bch_fs *c, struct file *filp,
 		ret = -EXDEV;
 		goto err;
 	}
-
+	if (!d_is_positive(victim)) {
+		ret = -ENOENT;
+		goto err;
+	}
 	dir = d_inode(path.dentry);
 	ret = __bch2_unlink(dir, victim, true);
 	if (!ret) {

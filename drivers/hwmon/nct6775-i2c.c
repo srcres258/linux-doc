@@ -161,7 +161,7 @@ static int nct6775_i2c_probe(struct i2c_client *client)
 	if (!data)
 		return -ENOMEM;
 
-	data->kind = (enum kinds)i2c_get_match_data(client);
+	data->kind = (enum kinds)(uintptr_t)i2c_get_match_data(client);
 	data->read_only = true;
 	data->driver_data = client;
 	data->driver_init = nct6775_i2c_probe_init;

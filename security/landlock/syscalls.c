@@ -201,6 +201,10 @@ SYSCALL_DEFINE3(landlock_create_ruleset,
 	    LANDLOCK_MASK_ACCESS_NET)
 		return -EINVAL;
 
+	/* Expands synthetic IOCTL groups. */
+	ruleset_attr.handled_access_fs = landlock_expand_handled_access_fs(
+		ruleset_attr.handled_access_fs);
+
 	/* Checks arguments and transforms to kernel struct. */
 	ruleset = landlock_create_ruleset(ruleset_attr.handled_access_fs,
 					  ruleset_attr.handled_access_net);

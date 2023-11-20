@@ -229,6 +229,13 @@ struct landlock_net_port_attr {
  *   the affected IOCTL commands is not governed by %LANDLOCK_ACCESS_FS_IOCTL
  *   any more, but by the respective access right.
  *
+ *   All other IOCTL commands are not handled specially, and are governed by
+ *   %LANDLOCK_ACCESS_FS_IOCTL.  This includes %FS_IOC_GETFLAGS and
+ *   %FS_IOC_SETFLAGS for manipulating inode flags (:manpage:`ioctl_iflags(2)`),
+ *   %FS_IOC_FSFETXATTR and %FS_IOC_FSSETXATTR for manipulating extended
+ *   attributes, as well as %FIFREEZE and %FITHAW for freezing and thawing file
+ *   systems.
+ *
  *   This access right is available since the fifth version of the Landlock
  *   ABI.
  *
