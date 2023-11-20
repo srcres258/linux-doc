@@ -130,7 +130,7 @@ SECTIONS
 	RO_DATA(8)
 
 	/* unwind info */
-	.PARISC.unwind : {
+	.PARISC.unwind ALIGN(4) : {
 		__start___unwind = .;
 		*(.PARISC.unwind)
 		__stop___unwind = .;
@@ -149,7 +149,7 @@ SECTIONS
 
 	/* PA-RISC locks requires 16-byte alignment */
 	. = ALIGN(16);
-	.data..lock_aligned : {
+	.data..lock_aligned ALIGN(16) : {
 		*(.data..lock_aligned)
 	}
 
