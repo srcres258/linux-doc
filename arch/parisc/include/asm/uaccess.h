@@ -40,7 +40,8 @@ struct exception_table_entry {
 };
 
 #define ASM_EXCEPTIONTABLE_ENTRY( fault_addr, except_addr )\
-	".section __ex_table,\"aw\"\n"			   \
+	".section __ex_table,\"a\"\n"			   \
+	".align 4\n"					   \
 	".word (" #fault_addr " - .), (" #except_addr " - .)\n\t" \
 	".previous\n"
 
