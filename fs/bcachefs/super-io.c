@@ -166,6 +166,7 @@ void bch2_free_super(struct bch_sb_handle *sb)
 	if (!IS_ERR_OR_NULL(sb->bdev))
 		blkdev_put(sb->bdev, sb->holder);
 	kfree(sb->holder);
+	kfree(sb->sb_name);
 
 	kfree(sb->sb);
 	memset(sb, 0, sizeof(*sb));
@@ -657,12 +658,13 @@ reread:
 	return 0;
 }
 
-int bch2_read_super(const char *path, struct bch_opts *opts,
-		    struct bch_sb_handle *sb)
+int __bch2_read_super(const char *path, struct bch_opts *opts,
+		    struct bch_sb_handle *sb, bool ignore_notbchfs_msg)
 {
 	u64 offset = opt_get(*opts, sb);
 	struct bch_sb_layout layout;
 	struct printbuf err = PRINTBUF;
+	struct printbuf err2 = PRINTBUF;
 	__le64 *i;
 	int ret;
 #ifndef __KERNEL__
@@ -673,6 +675,10 @@ retry:
 	sb->have_bio	= true;
 	sb->holder	= kmalloc(1, GFP_KERNEL);
 	if (!sb->holder)
+		return -ENOMEM;
+
+	sb->sb_name = kstrdup(path, GFP_KERNEL);
+	if (!sb->sb_name)
 		return -ENOMEM;
 
 #ifndef __KERNEL__
@@ -721,8 +727,14 @@ retry:
 	if (opt_defined(*opts, sb))
 		goto err;
 
-	printk(KERN_ERR "bcachefs (%s): error reading default superblock: %s\n",
+	prt_printf(&err2, "bcachefs (%s): error reading default superblock: %s\n",
 	       path, err.buf);
+	if (ret == -BCH_ERR_invalid_sb_magic && ignore_notbchfs_msg)
+		printk(KERN_INFO "%s", err2.buf);
+	else
+		printk(KERN_ERR "%s", err2.buf);
+
+	printbuf_exit(&err2);
 	printbuf_reset(&err);
 
 	/*
@@ -796,6 +808,20 @@ err:
 err_no_print:
 	bch2_free_super(sb);
 	goto out;
+}
+
+int bch2_read_super(const char *path, struct bch_opts *opts,
+		    struct bch_sb_handle *sb)
+{
+	return __bch2_read_super(path, opts, sb, false);
+}
+
+/* provide a silenced version for mount.bcachefs */
+
+int bch2_read_super_silent(const char *path, struct bch_opts *opts,
+		    struct bch_sb_handle *sb)
+{
+	return __bch2_read_super(path, opts, sb, true);
 }
 
 /* write superblock: */
