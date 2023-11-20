@@ -503,7 +503,7 @@ int bch2_move_ratelimit(struct moving_context *ctxt)
 			set_current_state(TASK_INTERRUPTIBLE);
 		}
 
-		if ((current->flags & PF_KTHREAD) && kthread_should_stop()) {
+		if (kthread_should_stop()) {
 			__set_current_state(TASK_RUNNING);
 			return 1;
 		}
@@ -860,7 +860,6 @@ static int bch2_move_btree(struct bch_fs *c,
 			   move_btree_pred pred, void *arg,
 			   struct bch_move_stats *stats)
 {
-	bool kthread = (current->flags & PF_KTHREAD) != 0;
 	struct bch_io_opts io_opts = bch2_opts_to_inode_opts(c->opts);
 	struct moving_context ctxt;
 	struct btree_trans *trans;
@@ -892,7 +891,7 @@ retry:
 		while (bch2_trans_begin(trans),
 		       (b = bch2_btree_iter_peek_node(&iter)) &&
 		       !(ret = PTR_ERR_OR_ZERO(b))) {
-			if (kthread && kthread_should_stop())
+			if (kthread_should_stop())
 				break;
 
 			if ((cmp_int(id, end_btree_id) ?:
@@ -917,7 +916,7 @@ next:
 
 		bch2_trans_iter_exit(trans, &iter);
 
-		if (kthread && kthread_should_stop())
+		if (kthread_should_stop())
 			break;
 	}
 
