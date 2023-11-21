@@ -38,7 +38,7 @@ struct moving_context {
 	wait_queue_head_t	wait;
 };
 
-#define move_ctxt_wait_event(_ctxt, _cond)				\
+#define move_ctxt_wait_event_timeout(_ctxt, _cond, _timeout)		\
 do {									\
 	bool cond_finished = false;					\
 	bch2_moving_ctxt_do_pending_writes(_ctxt);			\
@@ -46,12 +46,15 @@ do {									\
 	if (_cond)							\
 		break;							\
 	bch2_trans_unlock_long((_ctxt)->trans);				\
-	__wait_event((_ctxt)->wait,					\
+	__wait_event_timeout((_ctxt)->wait,				\
 		     bch2_moving_ctxt_next_pending_write(_ctxt) ||	\
-		     (cond_finished = (_cond)));			\
+		     (cond_finished = (_cond)), _timeout);		\
 	if (cond_finished)						\
 		break;							\
 } while (1)
+
+#define move_ctxt_wait_event(_ctxt, _cond)				\
+	move_ctxt_wait_event_timeout(_ctxt, _cond, MAX_SCHEDULE_TIMEOUT)
 
 typedef bool (*move_pred_fn)(struct bch_fs *, void *, struct bkey_s_c,
 			     struct bch_io_opts *, struct data_update_opts *);

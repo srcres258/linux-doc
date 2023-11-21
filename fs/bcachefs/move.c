@@ -509,7 +509,7 @@ int bch2_move_ratelimit(struct moving_context *ctxt)
 		}
 
 		if (delay)
-			schedule_timeout(delay);
+			move_ctxt_wait_event_timeout(ctxt, false, delay);
 
 		if (unlikely(freezing(current))) {
 			move_ctxt_wait_event(ctxt, list_empty(&ctxt->reads));

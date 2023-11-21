@@ -139,15 +139,11 @@ $total_size = 0;
 while (my $line = <STDIN>) {
 	if ($line =~ m/$funcre/) {
 		$func = $1;
-		next if $line !~ m/^($xs*)/;
+		next if $line !~ m/^($x*)/;
 		if ($total_size > $min_stack) {
 			push @stack, "$intro$total_size\n";
 		}
-
-		$addr = $1;
-		$addr =~ s/ /0/g;
-		$addr = "0x$addr";
-
+		$addr = "0x$1";
 		$intro = "$addr $func [$file]:";
 		my $padlen = 56 - length($intro);
 		while ($padlen > 0) {
@@ -194,5 +190,20 @@ if ($total_size > $min_stack) {
 	push @stack, "$intro$total_size\n";
 }
 
-# Sort output by size (last field)
-print sort { ($b =~ /:\t*(\d+)$/)[0] <=> ($a =~ /:\t*(\d+)$/)[0] } @stack;
+# Sort output by size (last field) and function name if size is the same
+sub sort_lines {
+	my ($a, $b) = @_;
+
+	my $num_a = $1 if $a =~ /:\t*(\d+)$/;
+	my $num_b = $1 if $b =~ /:\t*(\d+)$/;
+	my $func_a = $1 if $a =~ / (.*):/;
+	my $func_b = $1 if $b =~ / (.*):/;
+
+	if ($num_a != $num_b) {
+		return $num_b <=> $num_a;
+	} else {
+		return $func_a cmp $func_b;
+	}
+}
+
+print sort { sort_lines($a, $b) } @stack;

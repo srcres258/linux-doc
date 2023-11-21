@@ -303,6 +303,13 @@ struct bkey_i {
 	struct bch_val	v;
 };
 
+#define POS_KEY(_pos)							\
+((struct bkey) {							\
+	.u64s		= BKEY_U64s,					\
+	.format		= KEY_FORMAT_CURRENT,				\
+	.p		= _pos,						\
+})
+
 #define KEY(_inode, _offset, _size)					\
 ((struct bkey) {							\
 	.u64s		= BKEY_U64s,					\
@@ -1436,7 +1443,7 @@ struct bch_sb_field_replicas_v0 {
 	struct bch_replicas_entry_v0 entries[];
 } __packed __aligned(8);
 
-struct bch_replicas_entry {
+struct bch_replicas_entry_v1 {
 	__u8			data_type;
 	__u8			nr_devs;
 	__u8			nr_required;
@@ -1448,7 +1455,7 @@ struct bch_replicas_entry {
 
 struct bch_sb_field_replicas {
 	struct bch_sb_field	field;
-	struct bch_replicas_entry entries[];
+	struct bch_replicas_entry_v1 entries[];
 } __packed __aligned(8);
 
 /* BCH_SB_FIELD_quota: */
@@ -2124,7 +2131,8 @@ static inline __u64 __bset_magic(struct bch_sb *sb)
 	x(clock,		7)		\
 	x(dev_usage,		8)		\
 	x(log,			9)		\
-	x(overwrite,		10)
+	x(overwrite,		10)		\
+	x(write_buffer_keys,	11)
 
 enum {
 #define x(f, nr)	BCH_JSET_ENTRY_##f	= nr,
@@ -2174,7 +2182,7 @@ struct jset_entry_usage {
 struct jset_entry_data_usage {
 	struct jset_entry	entry;
 	__le64			v;
-	struct bch_replicas_entry r;
+	struct bch_replicas_entry_v1 r;
 } __packed;
 
 struct jset_entry_clock {

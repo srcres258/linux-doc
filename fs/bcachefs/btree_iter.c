@@ -1854,19 +1854,11 @@ static struct bkey_i *bch2_btree_journal_peek(struct btree_trans *trans,
 					      struct btree_iter *iter,
 					      struct bpos end_pos)
 {
-	struct bkey_i *k;
-
-	if (bpos_lt(iter->path->pos, iter->journal_pos))
-		iter->journal_idx = 0;
-
-	k = bch2_journal_keys_peek_upto(trans->c, iter->btree_id,
-					iter->path->level,
-					iter->path->pos,
-					end_pos,
-					&iter->journal_idx);
-
-	iter->journal_pos = k ? k->k.p : end_pos;
-	return k;
+	return bch2_journal_keys_peek_upto(trans->c, iter->btree_id,
+					   iter->path->level,
+					   iter->path->pos,
+					   end_pos,
+					   &iter->journal_idx);
 }
 
 static noinline
@@ -2872,7 +2864,8 @@ struct btree_trans *__bch2_trans_get(struct bch_fs *c, unsigned fn_idx)
 	trans->fn_idx		= fn_idx;
 	trans->locking_wait.task = current;
 	trans->journal_replay_not_finished =
-		!test_bit(JOURNAL_REPLAY_DONE, &c->journal.flags);
+		unlikely(!test_bit(JOURNAL_REPLAY_DONE, &c->journal.flags)) &&
+		atomic_inc_not_zero(&c->journal_keys.ref);
 	closure_init_stack(&trans->ref);
 
 	s = btree_trans_stats(trans);
@@ -2988,6 +2981,9 @@ void bch2_trans_put(struct btree_trans *trans)
 		else
 			kfree(trans->fs_usage_deltas);
 	}
+
+	if (unlikely(trans->journal_replay_not_finished))
+		bch2_journal_keys_put(c);
 
 	if (trans->mem_bytes == BTREE_TRANS_MEM_MAX)
 		mempool_free(trans->mem, &c->btree_trans_mem_pool);

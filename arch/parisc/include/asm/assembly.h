@@ -573,7 +573,8 @@
 	 * Do not convert to a assembler macro. This won't work.
 	 */
 #define ASM_EXCEPTIONTABLE_ENTRY(fault_addr, except_addr)	\
-	.section __ex_table,"aw"			!	\
+	.section __ex_table,"a"			!	\
+	.align 4					!	\
 	.word (fault_addr - .), (except_addr - .)	!	\
 	.previous
 
