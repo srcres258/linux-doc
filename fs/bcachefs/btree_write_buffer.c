@@ -10,14 +10,23 @@
 #include "journal_io.h"
 #include "journal_reclaim.h"
 
+#include <linux/prefetch.h>
+
 static int bch2_btree_write_buffer_journal_flush(struct journal *,
 				struct journal_entry_pin *, u64);
 
 static int bch2_journal_keys_to_write_buffer(struct bch_fs *, struct journal_buf *);
 
-static inline bool wb_key_cmp(const void *_l, const void *_r)
+static inline bool __wb_key_cmp(const struct wb_key_ref *l, const struct wb_key_ref *r)
 {
-#if 0
+	return (cmp_int(l->hi, r->hi) ?:
+		cmp_int(l->mi, r->mi) ?:
+		cmp_int(l->lo, r->lo)) >= 0;
+}
+
+static inline bool wb_key_cmp(const struct wb_key_ref *l, const struct wb_key_ref *r)
+{
+#ifdef CONFIG_X86_64
 	int cmp;
 
 	asm(".intel_syntax noprefix;"
@@ -29,18 +38,25 @@ static inline bool wb_key_cmp(const void *_l, const void *_r)
 	    "sbb rax, [%[r] + 16];"
 	    ".att_syntax prefix;"
 	    : "=@ccae" (cmp)
-	    : [l] "r" (_l), [r] "r" (_r)
+	    : [l] "r" (l), [r] "r" (r)
 	    : "rax", "cc");
 
+	EBUG_ON(cmp != __wb_key_cmp(l, r));
 	return cmp;
 #else
+	return __wb_key_cmp(l, r);
+#endif
+}
+
+/* Compare excluding idx, the low 24 bits: */
+static inline bool wb_key_eq(const void *_l, const void *_r)
+{
 	const struct wb_key_ref *l = _l;
 	const struct wb_key_ref *r = _r;
 
-	return (cmp_int(l->hi, r->hi) ?:
-		cmp_int(l->mi, r->mi) ?:
-		cmp_int(l->lo, r->lo)) >= 0;
-#endif
+	return !((l->hi ^ r->hi)|
+		 (l->mi ^ r->mi)|
+		 ((l->lo >> 24) ^ (r->lo >> 24)));
 }
 
 static noinline void wb_sort(struct wb_key_ref *base, size_t num)
@@ -248,7 +264,7 @@ static int bch2_btree_write_buffer_flush_locked(struct btree_trans *trans)
 	for (size_t i = 0; i < wb->flushing.keys.nr; i++) {
 		wb->sorted.data[i].idx = i;
 		wb->sorted.data[i].btree = wb->flushing.keys.data[i].btree;
-		wb->sorted.data[i].pos = wb->flushing.keys.data[i].k.k.p;
+		memcpy(&wb->sorted.data[i].pos, &wb->flushing.keys.data[i].k.k.p, sizeof(struct bpos));
 	}
 	wb->sorted.nr = wb->flushing.keys.nr;
 
@@ -277,8 +293,7 @@ static int bch2_btree_write_buffer_flush_locked(struct btree_trans *trans)
 		BUG_ON(!k->journal_seq);
 
 		if (i + 1 < &darray_top(wb->sorted) &&
-		    i[0].btree == i[1].btree &&
-		    bpos_eq(i[0].pos, i[1].pos)) {
+		    wb_key_eq(i, i + 1)) {
 			struct btree_write_buffered_key *n = &wb->flushing.keys.data[i[1].idx];
 
 			skipped++;

@@ -12464,6 +12464,12 @@ T:	git git://git.kernel.org/pub/scm/linux/kernel/git/kees/linux.git for-next/har
 F:	Documentation/admin-guide/LSM/LoadPin.rst
 F:	security/loadpin/
 
+LOCKDOWN SECURITY MODULE
+L:	linux-security-module@vger.kernel.org
+S:	Odd Fixes
+T:	git https://git.kernel.org/pub/scm/linux/kernel/git/pcmoore/lsm.git
+F:	security/lockdown/
+
 LOCKING PRIMITIVES
 M:	Peter Zijlstra <peterz@infradead.org>
 M:	Ingo Molnar <mingo@redhat.com>
@@ -13796,7 +13802,6 @@ F:	drivers/net/ethernet/mellanox/mlxfw/
 MELLANOX HARDWARE PLATFORM SUPPORT
 M:	Hans de Goede <hdegoede@redhat.com>
 M:	Ilpo Järvinen <ilpo.jarvinen@linux.intel.com>
-M:	Mark Gross <markgross@kernel.org>
 M:	Vadim Pasternak <vadimp@nvidia.com>
 L:	platform-driver-x86@vger.kernel.org
 S:	Supported
@@ -14405,7 +14410,6 @@ F:	drivers/platform/surface/surface_gpe.c
 MICROSOFT SURFACE HARDWARE PLATFORM SUPPORT
 M:	Hans de Goede <hdegoede@redhat.com>
 M:	Ilpo Järvinen <ilpo.jarvinen@linux.intel.com>
-M:	Mark Gross <markgross@kernel.org>
 M:	Maximilian Luz <luzmaximilian@gmail.com>
 L:	platform-driver-x86@vger.kernel.org
 S:	Maintained
@@ -15075,6 +15079,7 @@ F:	Documentation/networking/
 F:	Documentation/process/maintainer-netdev.rst
 F:	Documentation/userspace-api/netlink/
 F:	include/linux/in.h
+F:	include/linux/indirect_call_wrapper.h
 F:	include/linux/net.h
 F:	include/linux/netdevice.h
 F:	include/net/
@@ -20439,7 +20444,7 @@ F:	drivers/pinctrl/spear/
 SPI NOR SUBSYSTEM
 M:	Tudor Ambarus <tudor.ambarus@linaro.org>
 M:	Pratyush Yadav <pratyush@kernel.org>
-R:	Michael Walle <michael@walle.cc>
+M:	Michael Walle <michael@walle.cc>
 L:	linux-mtd@lists.infradead.org
 S:	Maintained
 W:	http://www.linux-mtd.infradead.org/
@@ -23662,7 +23667,6 @@ F:	drivers/platform/x86/x86-android-tablets/
 X86 PLATFORM DRIVERS
 M:	Hans de Goede <hdegoede@redhat.com>
 M:	Ilpo Järvinen <ilpo.jarvinen@linux.intel.com>
-M:	Mark Gross <markgross@kernel.org>
 L:	platform-driver-x86@vger.kernel.org
 S:	Maintained
 Q:	https://patchwork.kernel.org/project/platform-driver-x86/list/

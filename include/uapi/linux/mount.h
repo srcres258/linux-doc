@@ -159,7 +159,7 @@ struct statmount {
 	__u32 sb_dev_major;	/* Device ID */
 	__u32 sb_dev_minor;
 	__u64 sb_magic;		/* ..._SUPER_MAGIC */
-	__u32 sb_flags;		/* MS_{RDONLY,SYNCHRONOUS,DIRSYNC,LAZYTIME} */
+	__u32 sb_flags;		/* SB_{RDONLY,SYNCHRONOUS,DIRSYNC,LAZYTIME} */
 	__u32 fs_type;		/* [str] Filesystem type */
 	__u64 mnt_id;		/* Unique ID of mount */
 	__u64 mnt_parent_id;	/* Unique ID of parent (for root == mnt_id) */
@@ -184,16 +184,16 @@ struct mnt_id_req {
 /*
  * @mask bits for statmount(2)
  */
-#define STMT_SB_BASIC		0x00000001U     /* Want/got sb_... */
-#define STMT_MNT_BASIC		0x00000002U	/* Want/got mnt_... */
-#define STMT_PROPAGATE_FROM	0x00000004U	/* Want/got propagate_from */
-#define STMT_MNT_ROOT		0x00000008U	/* Want/got mnt_root  */
-#define STMT_MNT_POINT		0x00000010U	/* Want/got mnt_point */
-#define STMT_FS_TYPE		0x00000020U	/* Want/got fs_type */
+#define STATMOUNT_SB_BASIC		0x00000001U     /* Want/got sb_... */
+#define STATMOUNT_MNT_BASIC		0x00000002U	/* Want/got mnt_... */
+#define STATMOUNT_PROPAGATE_FROM	0x00000004U	/* Want/got propagate_from */
+#define STATMOUNT_MNT_ROOT		0x00000008U	/* Want/got mnt_root  */
+#define STATMOUNT_MNT_POINT		0x00000010U	/* Want/got mnt_point */
+#define STATMOUNT_FS_TYPE		0x00000020U	/* Want/got fs_type */
 
 /* listmount(2) flags */
-#define LISTMOUNT_UNREACHABLE	0x01	/* List unreachable mounts too */
-#define LISTMOUNT_RECURSIVE	0x02	/* List a mount tree */
+#define LISTMOUNT_UNREACHABLE	0x01U	/* List unreachable mounts too */
+#define LISTMOUNT_RECURSIVE	0x02U	/* List a mount tree */
 
 /*
  * Special @mnt_id values that can be passed to listmount

@@ -80,8 +80,9 @@ void intel_dp_audio_compute_config(struct intel_encoder *encoder,
 				   struct drm_connector_state *conn_state);
 bool intel_dp_has_hdmi_sink(struct intel_dp *intel_dp);
 bool intel_dp_is_edp(struct intel_dp *intel_dp);
-bool intel_dp_is_uhbr_rate(int rate);
 bool intel_dp_is_uhbr(const struct intel_crtc_state *crtc_state);
+int intel_dp_link_symbol_size(int rate);
+int intel_dp_link_symbol_clock(int rate);
 bool intel_dp_is_port_edp(struct drm_i915_private *dev_priv, enum port port);
 enum irqreturn intel_dp_hpd_pulse(struct intel_digital_port *dig_port,
 				  bool long_hpd);
@@ -102,6 +103,8 @@ bool intel_dp_source_supports_tps4(struct drm_i915_private *i915);
 
 bool intel_dp_get_colorimetry_status(struct intel_dp *intel_dp);
 int intel_dp_link_required(int pixel_clock, int bpp);
+int intel_dp_effective_data_rate(int pixel_clock, int bpp_x16,
+				 int bw_overhead);
 int intel_dp_max_data_rate(int max_link_rate, int max_lanes);
 bool intel_dp_can_bigjoiner(struct intel_dp *intel_dp);
 bool intel_dp_needs_vsc_sdp(const struct intel_crtc_state *crtc_state,

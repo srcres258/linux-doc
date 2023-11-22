@@ -1042,10 +1042,9 @@ next_block:
 	return 0;
 }
 
-static void bch2_journal_read_device(struct closure *cl)
+static CLOSURE_CALLBACK(bch2_journal_read_device)
 {
-	struct journal_device *ja =
-		container_of(cl, struct journal_device, read);
+	closure_type(ja, struct journal_device, read);
 	struct bch_dev *ca = container_of(ja, struct bch_dev, journal);
 	struct bch_fs *c = ca->fs;
 	struct journal_list *jlist =
@@ -1544,9 +1543,9 @@ static inline struct journal_buf *journal_last_unwritten_buf(struct journal *j)
 	return j->buf + (journal_last_unwritten_seq(j) & JOURNAL_BUF_MASK);
 }
 
-static void journal_write_done(struct closure *cl)
+static CLOSURE_CALLBACK(journal_write_done)
 {
-	struct journal *j = container_of(cl, struct journal, io);
+	closure_type(j, struct journal, io);
 	struct bch_fs *c = container_of(j, struct bch_fs, journal);
 	struct journal_buf *w = journal_last_unwritten_buf(j);
 	struct bch_replicas_padded replicas;
@@ -1666,9 +1665,9 @@ static void journal_write_endio(struct bio *bio)
 	percpu_ref_put(&ca->io_ref);
 }
 
-static void do_journal_write(struct closure *cl)
+static CLOSURE_CALLBACK(do_journal_write)
 {
-	struct journal *j = container_of(cl, struct journal, io);
+	closure_type(j, struct journal, io);
 	struct bch_fs *c = container_of(j, struct bch_fs, journal);
 	struct bch_dev *ca;
 	struct journal_buf *w = journal_last_unwritten_buf(j);
@@ -1887,7 +1886,7 @@ static int bch2_journal_write_pick_flush(struct journal *j, struct journal_buf *
 	    (!w->must_flush &&
 	     (jiffies - j->last_flush_write) < msecs_to_jiffies(c->opts.journal_flush_delay) &&
 	     test_bit(JOURNAL_MAY_SKIP_FLUSH, &j->flags))) {
-		     w->noflush = true;
+		w->noflush = true;
 		SET_JSET_NO_FLUSH(w->data, true);
 		w->data->last_seq	= 0;
 		w->last_seq		= 0;
@@ -1902,9 +1901,9 @@ static int bch2_journal_write_pick_flush(struct journal *j, struct journal_buf *
 	return 0;
 }
 
-void bch2_journal_write(struct closure *cl)
+CLOSURE_CALLBACK(bch2_journal_write)
 {
-	struct journal *j = container_of(cl, struct journal, io);
+	closure_type(j, struct journal, io);
 	struct bch_fs *c = container_of(j, struct bch_fs, journal);
 	struct bch_dev *ca;
 	struct journal_buf *w = journal_last_unwritten_buf(j);

@@ -121,15 +121,34 @@ bool intel_dp_is_edp(struct intel_dp *intel_dp)
 
 static void intel_dp_unset_edid(struct intel_dp *intel_dp);
 
-bool intel_dp_is_uhbr_rate(int rate)
-{
-	return rate >= 1000000;
-}
-
 /* Is link rate UHBR and thus 128b/132b? */
 bool intel_dp_is_uhbr(const struct intel_crtc_state *crtc_state)
 {
-	return intel_dp_is_uhbr_rate(crtc_state->port_clock);
+	return drm_dp_is_uhbr_rate(crtc_state->port_clock);
+}
+
+/**
+ * intel_dp_link_symbol_size - get the link symbol size for a given link rate
+ * @rate: link rate in 10kbit/s units
+ *
+ * Returns the link symbol size in bits/symbol units depending on the link
+ * rate -> channel coding.
+ */
+int intel_dp_link_symbol_size(int rate)
+{
+	return drm_dp_is_uhbr_rate(rate) ? 32 : 10;
+}
+
+/**
+ * intel_dp_link_symbol_clock - convert link rate to link symbol clock
+ * @rate: link rate in 10kbit/s units
+ *
+ * Returns the link symbol clock frequency in kHz units depending on the
+ * link rate and channel coding.
+ */
+int intel_dp_link_symbol_clock(int rate)
+{
+	return DIV_ROUND_CLOSEST(rate * 10, intel_dp_link_symbol_size(rate));
 }
 
 static void intel_dp_set_default_sink_rates(struct intel_dp *intel_dp)
@@ -336,12 +355,31 @@ int intel_dp_max_lane_count(struct intel_dp *intel_dp)
 /*
  * The required data bandwidth for a mode with given pixel clock and bpp. This
  * is the required net bandwidth independent of the data bandwidth efficiency.
+ *
+ * TODO: check if callers of this functions should use
+ * intel_dp_effective_data_rate() instead.
  */
 int
 intel_dp_link_required(int pixel_clock, int bpp)
 {
 	/* pixel_clock is in kHz, divide bpp by 8 for bit to Byte conversion */
 	return DIV_ROUND_UP(pixel_clock * bpp, 8);
+}
+
+/**
+ * intel_dp_effective_data_rate - Return the pixel data rate accounting for BW allocation overhead
+ * @pixel_clock: pixel clock in kHz
+ * @bpp_x16: bits per pixel .4 fixed point format
+ * @bw_overhead: BW allocation overhead in 1ppm units
+ *
+ * Return the effective pixel data rate in kB/sec units taking into account
+ * the provided SSC, FEC, DSC BW allocation overhead.
+ */
+int intel_dp_effective_data_rate(int pixel_clock, int bpp_x16,
+				 int bw_overhead)
+{
+	return DIV_ROUND_UP_ULL(mul_u32_u32(pixel_clock * bpp_x16, bw_overhead),
+				1000000 * 16 * 8);
 }
 
 /*
@@ -367,29 +405,27 @@ intel_dp_link_required(int pixel_clock, int bpp)
 int
 intel_dp_max_data_rate(int max_link_rate, int max_lanes)
 {
-	if (max_link_rate >= 1000000) {
-		/*
-		 * UHBR rates always use 128b/132b channel encoding, and have
-		 * 97.71% data bandwidth efficiency. Consider max_link_rate the
-		 * link bit rate in units of 10000 bps.
-		 */
-		int max_link_rate_kbps = max_link_rate * 10;
+	int ch_coding_efficiency =
+		drm_dp_bw_channel_coding_efficiency(drm_dp_is_uhbr_rate(max_link_rate));
+	int max_link_rate_kbps = max_link_rate * 10;
 
-		max_link_rate_kbps = DIV_ROUND_CLOSEST_ULL(mul_u32_u32(max_link_rate_kbps, 9671), 10000);
-		max_link_rate = max_link_rate_kbps / 8;
-	}
-
+	/*
+	 * UHBR rates always use 128b/132b channel encoding, and have
+	 * 97.71% data bandwidth efficiency. Consider max_link_rate the
+	 * link bit rate in units of 10000 bps.
+	 */
 	/*
 	 * Lower than UHBR rates always use 8b/10b channel encoding, and have
 	 * 80% data bandwidth efficiency for SST non-FEC. However, this turns
-	 * out to be a nop by coincidence, and can be skipped:
+	 * out to be a nop by coincidence:
 	 *
 	 *	int max_link_rate_kbps = max_link_rate * 10;
-	 *	max_link_rate_kbps = DIV_ROUND_CLOSEST_ULL(max_link_rate_kbps * 8, 10);
+	 *	max_link_rate_kbps = DIV_ROUND_DOWN_ULL(max_link_rate_kbps * 8, 10);
 	 *	max_link_rate = max_link_rate_kbps / 8;
 	 */
-
-	return max_link_rate * max_lanes;
+	return DIV_ROUND_DOWN_ULL(mul_u32_u32(max_link_rate_kbps * max_lanes,
+					      ch_coding_efficiency),
+				  1000000 * 8);
 }
 
 bool intel_dp_can_bigjoiner(struct intel_dp *intel_dp)

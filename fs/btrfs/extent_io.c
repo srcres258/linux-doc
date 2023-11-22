@@ -871,7 +871,7 @@ static int attach_extent_buffer_page(struct extent_buffer *eb,
 	 * will not race with any other ebs.
 	 */
 	if (page->mapping)
-		lockdep_assert_held(&page->mapping->private_lock);
+		lockdep_assert_held(&page->mapping->i_private_lock);
 
 	if (fs_info->nodesize >= PAGE_SIZE) {
 		if (!PagePrivate(page))
@@ -1737,16 +1737,16 @@ static int submit_eb_subpage(struct page *page, struct writeback_control *wbc)
 		 * Take private lock to ensure the subpage won't be detached
 		 * in the meantime.
 		 */
-		spin_lock(&page->mapping->private_lock);
+		spin_lock(&page->mapping->i_private_lock);
 		if (!PagePrivate(page)) {
-			spin_unlock(&page->mapping->private_lock);
+			spin_unlock(&page->mapping->i_private_lock);
 			break;
 		}
 		spin_lock_irqsave(&subpage->lock, flags);
 		if (!test_bit(bit_start + fs_info->subpage_info->dirty_offset,
 			      subpage->bitmaps)) {
 			spin_unlock_irqrestore(&subpage->lock, flags);
-			spin_unlock(&page->mapping->private_lock);
+			spin_unlock(&page->mapping->i_private_lock);
 			bit_start++;
 			continue;
 		}
@@ -1760,7 +1760,7 @@ static int submit_eb_subpage(struct page *page, struct writeback_control *wbc)
 		 */
 		eb = find_extent_buffer_nolock(fs_info, start);
 		spin_unlock_irqrestore(&subpage->lock, flags);
-		spin_unlock(&page->mapping->private_lock);
+		spin_unlock(&page->mapping->i_private_lock);
 
 		/*
 		 * The eb has already reached 0 refs thus find_extent_buffer()
@@ -1812,9 +1812,9 @@ static int submit_eb_page(struct page *page, struct btrfs_eb_write_context *ctx)
 	if (btrfs_sb(page->mapping->host->i_sb)->nodesize < PAGE_SIZE)
 		return submit_eb_subpage(page, wbc);
 
-	spin_lock(&mapping->private_lock);
+	spin_lock(&mapping->i_private_lock);
 	if (!PagePrivate(page)) {
-		spin_unlock(&mapping->private_lock);
+		spin_unlock(&mapping->i_private_lock);
 		return 0;
 	}
 
@@ -1825,16 +1825,16 @@ static int submit_eb_page(struct page *page, struct btrfs_eb_write_context *ctx)
 	 * crashing the machine for something we can survive anyway.
 	 */
 	if (WARN_ON(!eb)) {
-		spin_unlock(&mapping->private_lock);
+		spin_unlock(&mapping->i_private_lock);
 		return 0;
 	}
 
 	if (eb == ctx->eb) {
-		spin_unlock(&mapping->private_lock);
+		spin_unlock(&mapping->i_private_lock);
 		return 0;
 	}
 	ret = atomic_inc_not_zero(&eb->refs);
-	spin_unlock(&mapping->private_lock);
+	spin_unlock(&mapping->i_private_lock);
 	if (!ret)
 		return 0;
 
@@ -3057,7 +3057,7 @@ static bool page_range_has_eb(struct btrfs_fs_info *fs_info, struct page *page)
 {
 	struct btrfs_subpage *subpage;
 
-	lockdep_assert_held(&page->mapping->private_lock);
+	lockdep_assert_held(&page->mapping->i_private_lock);
 
 	if (PagePrivate(page)) {
 		subpage = (struct btrfs_subpage *)page->private;
@@ -3080,14 +3080,14 @@ static void detach_extent_buffer_page(struct extent_buffer *eb, struct page *pag
 
 	/*
 	 * For mapped eb, we're going to change the page private, which should
-	 * be done under the private_lock.
+	 * be done under the i_private_lock.
 	 */
 	if (mapped)
-		spin_lock(&page->mapping->private_lock);
+		spin_lock(&page->mapping->i_private_lock);
 
 	if (!PagePrivate(page)) {
 		if (mapped)
-			spin_unlock(&page->mapping->private_lock);
+			spin_unlock(&page->mapping->i_private_lock);
 		return;
 	}
 
@@ -3111,7 +3111,7 @@ static void detach_extent_buffer_page(struct extent_buffer *eb, struct page *pag
 			detach_page_private(page);
 		}
 		if (mapped)
-			spin_unlock(&page->mapping->private_lock);
+			spin_unlock(&page->mapping->i_private_lock);
 		return;
 	}
 
@@ -3134,7 +3134,7 @@ static void detach_extent_buffer_page(struct extent_buffer *eb, struct page *pag
 	if (!page_range_has_eb(fs_info, page))
 		btrfs_detach_subpage(fs_info, page);
 
-	spin_unlock(&page->mapping->private_lock);
+	spin_unlock(&page->mapping->i_private_lock);
 }
 
 /* Release all pages attached to the extent buffer */
@@ -3558,7 +3558,7 @@ struct extent_buffer *alloc_extent_buffer(struct btrfs_fs_info *fs_info,
 
 	/*
 	 * Preallocate page->private for subpage case, so that we won't
-	 * allocate memory with private_lock nor page lock hold.
+	 * allocate memory with i_private_lock nor page lock hold.
 	 *
 	 * The memory will be freed by attach_extent_buffer_page() or freed
 	 * manually if we exit earlier.
@@ -3579,10 +3579,10 @@ struct extent_buffer *alloc_extent_buffer(struct btrfs_fs_info *fs_info,
 			goto free_eb;
 		}
 
-		spin_lock(&mapping->private_lock);
+		spin_lock(&mapping->i_private_lock);
 		exists = grab_extent_buffer(fs_info, p);
 		if (exists) {
-			spin_unlock(&mapping->private_lock);
+			spin_unlock(&mapping->i_private_lock);
 			unlock_page(p);
 			put_page(p);
 			mark_extent_buffer_accessed(exists, p);
@@ -3606,7 +3606,7 @@ struct extent_buffer *alloc_extent_buffer(struct btrfs_fs_info *fs_info,
 		 * Thus needs no special handling in error path.
 		 */
 		btrfs_page_inc_eb_refs(fs_info, p);
-		spin_unlock(&mapping->private_lock);
+		spin_unlock(&mapping->i_private_lock);
 
 		WARN_ON(btrfs_page_test_dirty(fs_info, p, eb->start, eb->len));
 		eb->pages[i] = p;
@@ -4464,12 +4464,12 @@ static int try_release_subpage_extent_buffer(struct page *page)
 	 * Finally to check if we have cleared page private, as if we have
 	 * released all ebs in the page, the page private should be cleared now.
 	 */
-	spin_lock(&page->mapping->private_lock);
+	spin_lock(&page->mapping->i_private_lock);
 	if (!PagePrivate(page))
 		ret = 1;
 	else
 		ret = 0;
-	spin_unlock(&page->mapping->private_lock);
+	spin_unlock(&page->mapping->i_private_lock);
 	return ret;
 
 }
@@ -4485,9 +4485,9 @@ int try_release_extent_buffer(struct page *page)
 	 * We need to make sure nobody is changing page->private, as we rely on
 	 * page->private as the pointer to extent buffer.
 	 */
-	spin_lock(&page->mapping->private_lock);
+	spin_lock(&page->mapping->i_private_lock);
 	if (!PagePrivate(page)) {
-		spin_unlock(&page->mapping->private_lock);
+		spin_unlock(&page->mapping->i_private_lock);
 		return 1;
 	}
 
@@ -4502,10 +4502,10 @@ int try_release_extent_buffer(struct page *page)
 	spin_lock(&eb->refs_lock);
 	if (atomic_read(&eb->refs) != 1 || extent_buffer_under_io(eb)) {
 		spin_unlock(&eb->refs_lock);
-		spin_unlock(&page->mapping->private_lock);
+		spin_unlock(&page->mapping->i_private_lock);
 		return 0;
 	}
-	spin_unlock(&page->mapping->private_lock);
+	spin_unlock(&page->mapping->i_private_lock);
 
 	/*
 	 * If tree ref isn't set then we know the ref on this eb is a real ref,
