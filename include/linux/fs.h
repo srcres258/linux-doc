@@ -463,9 +463,9 @@ extern const struct address_space_operations empty_aops;
  * @a_ops: Methods.
  * @flags: Error bits and flags (AS_*).
  * @wb_err: The most recent error which has occurred.
- * @private_lock: For use by the owner of the address_space.
- * @private_list: For use by the owner of the address_space.
- * @private_data: For use by the owner of the address_space.
+ * @i_private_lock: For use by the owner of the address_space.
+ * @i_private_list: For use by the owner of the address_space.
+ * @i_private_data: For use by the owner of the address_space.
  */
 struct address_space {
 	struct inode		*host;
@@ -484,9 +484,9 @@ struct address_space {
 	unsigned long		flags;
 	struct rw_semaphore	i_mmap_rwsem;
 	errseq_t		wb_err;
-	spinlock_t		private_lock;
-	struct list_head	private_list;
-	void			*private_data;
+	spinlock_t		i_private_lock;
+	struct list_head	i_private_list;
+	void *			i_private_data;
 } __attribute__((aligned(sizeof(long)))) __randomize_layout;
 	/*
 	 * On most architectures that alignment is already the case; but
@@ -1185,7 +1185,8 @@ enum {
 
 struct sb_writers {
 	unsigned short			frozen;		/* Is sb frozen? */
-	unsigned short			freeze_holders;	/* Who froze fs? */
+	int				freeze_kcount;	/* How many kernel freeze requests? */
+	int				freeze_ucount;	/* How many userspace freeze requests? */
 	struct percpu_rw_semaphore	rw_sem[SB_FREEZE_LEVELS];
 };
 
@@ -2051,9 +2052,24 @@ extern loff_t vfs_dedupe_file_range_one(struct file *src_file, loff_t src_pos,
 					struct file *dst_file, loff_t dst_pos,
 					loff_t len, unsigned int remap_flags);
 
+/**
+ * enum freeze_holder - holder of the freeze
+ * @FREEZE_HOLDER_KERNEL: kernel wants to freeze or thaw filesystem
+ * @FREEZE_HOLDER_USERSPACE: userspace wants to freeze or thaw filesystem
+ * @FREEZE_MAY_NEST: whether nesting freeze and thaw requests is allowed
+ *
+ * Indicate who the owner of the freeze or thaw request is and whether
+ * the freeze needs to be exclusive or can nest.
+ * Without @FREEZE_MAY_NEST, multiple freeze and thaw requests from the
+ * same holder aren't allowed. It is however allowed to hold a single
+ * @FREEZE_HOLDER_USERSPACE and a single @FREEZE_HOLDER_KERNEL freeze at
+ * the same time. This is relied upon by some filesystems during online
+ * repair or similar.
+ */
 enum freeze_holder {
 	FREEZE_HOLDER_KERNEL	= (1U << 0),
 	FREEZE_HOLDER_USERSPACE	= (1U << 1),
+	FREEZE_MAY_NEST		= (1U << 2),
 };
 
 struct super_operations {
@@ -3121,7 +3137,6 @@ extern int vfs_readlink(struct dentry *, char __user *, int);
 extern struct file_system_type *get_filesystem(struct file_system_type *fs);
 extern void put_filesystem(struct file_system_type *fs);
 extern struct file_system_type *get_fs_type(const char *name);
-extern struct super_block *get_active_super(struct block_device *bdev);
 extern void drop_super(struct super_block *sb);
 extern void drop_super_exclusive(struct super_block *sb);
 extern void iterate_supers(void (*)(struct super_block *, void *), void *);
