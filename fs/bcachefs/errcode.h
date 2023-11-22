@@ -73,7 +73,6 @@
 	x(ENOMEM,			ENOMEM_fsck_add_nlink)			\
 	x(ENOMEM,			ENOMEM_journal_key_insert)		\
 	x(ENOMEM,			ENOMEM_journal_keys_sort)		\
-	x(ENOMEM,			ENOMEM_journal_replay)			\
 	x(ENOMEM,			ENOMEM_read_superblock_clean)		\
 	x(ENOMEM,			ENOMEM_fs_alloc)			\
 	x(ENOMEM,			ENOMEM_fs_name_alloc)			\
@@ -151,7 +150,6 @@
 	x(BCH_ERR_btree_insert_fail,	btree_insert_need_mark_replicas)	\
 	x(BCH_ERR_btree_insert_fail,	btree_insert_need_journal_res)		\
 	x(BCH_ERR_btree_insert_fail,	btree_insert_need_journal_reclaim)	\
-	x(BCH_ERR_btree_insert_fail,	btree_insert_need_flush_buffer)		\
 	x(0,				backpointer_to_overwritten_btree_node)	\
 	x(0,				lock_fail_root_changed)			\
 	x(0,				journal_reclaim_would_deadlock)		\
