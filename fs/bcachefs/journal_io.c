@@ -4,6 +4,7 @@
 #include "alloc_foreground.h"
 #include "btree_io.h"
 #include "btree_update_interior.h"
+#include "btree_write_buffer.h"
 #include "buckets.h"
 #include "checksum.h"
 #include "disk_groups.h"
@@ -713,6 +714,22 @@ static void journal_entry_overwrite_to_text(struct printbuf *out, struct bch_fs 
 	journal_entry_btree_keys_to_text(out, c, entry);
 }
 
+static int journal_entry_write_buffer_keys_validate(struct bch_fs *c,
+				struct jset *jset,
+				struct jset_entry *entry,
+				unsigned version, int big_endian,
+				enum bkey_invalid_flags flags)
+{
+	return journal_entry_btree_keys_validate(c, jset, entry,
+				version, big_endian, READ);
+}
+
+static void journal_entry_write_buffer_keys_to_text(struct printbuf *out, struct bch_fs *c,
+					    struct jset_entry *entry)
+{
+	journal_entry_btree_keys_to_text(out, c, entry);
+}
+
 struct jset_entry_ops {
 	int (*validate)(struct bch_fs *, struct jset *,
 			struct jset_entry *, unsigned, int,
@@ -1025,10 +1042,9 @@ next_block:
 	return 0;
 }
 
-static void bch2_journal_read_device(struct closure *cl)
+static CLOSURE_CALLBACK(bch2_journal_read_device)
 {
-	struct journal_device *ja =
-		container_of(cl, struct journal_device, read);
+	closure_type(ja, struct journal_device, read);
 	struct bch_dev *ca = container_of(ja, struct bch_dev, journal);
 	struct bch_fs *c = ca->fs;
 	struct journal_list *jlist =
@@ -1494,11 +1510,18 @@ done:
 
 static void journal_buf_realloc(struct journal *j, struct journal_buf *buf)
 {
+	struct bch_fs *c = container_of(j, struct bch_fs, journal);
+
 	/* we aren't holding j->lock: */
 	unsigned new_size = READ_ONCE(j->buf_size_want);
 	void *new_buf;
 
 	if (buf->buf_size >= new_size)
+		return;
+
+	size_t btree_write_buffer_size = new_size / 64;
+
+	if (bch2_btree_write_buffer_resize(c, btree_write_buffer_size))
 		return;
 
 	new_buf = kvpmalloc(new_size, GFP_NOFS|__GFP_NOWARN);
@@ -1520,9 +1543,9 @@ static inline struct journal_buf *journal_last_unwritten_buf(struct journal *j)
 	return j->buf + (journal_last_unwritten_seq(j) & JOURNAL_BUF_MASK);
 }
 
-static void journal_write_done(struct closure *cl)
+static CLOSURE_CALLBACK(journal_write_done)
 {
-	struct journal *j = container_of(cl, struct journal, io);
+	closure_type(j, struct journal, io);
 	struct bch_fs *c = container_of(j, struct bch_fs, journal);
 	struct journal_buf *w = journal_last_unwritten_buf(j);
 	struct bch_replicas_padded replicas;
@@ -1590,7 +1613,11 @@ static void journal_write_done(struct closure *cl)
 	} while ((v = atomic64_cmpxchg(&j->reservations.counter,
 				       old.v, new.v)) != old.v);
 
+	bch2_journal_reclaim_fast(j);
 	bch2_journal_space_available(j);
+
+	track_event_change(&c->times[BCH_TIME_blocked_journal_max_in_flight],
+			   &j->max_in_flight_start, false);
 
 	closure_wake_up(&w->wait);
 	journal_wake(j);
@@ -1638,9 +1665,9 @@ static void journal_write_endio(struct bio *bio)
 	percpu_ref_put(&ca->io_ref);
 }
 
-static void do_journal_write(struct closure *cl)
+static CLOSURE_CALLBACK(do_journal_write)
 {
-	struct journal *j = container_of(cl, struct journal, io);
+	closure_type(j, struct journal, io);
 	struct bch_fs *c = container_of(j, struct bch_fs, journal);
 	struct bch_dev *ca;
 	struct journal_buf *w = journal_last_unwritten_buf(j);
@@ -1690,9 +1717,11 @@ static int bch2_journal_write_prep(struct journal *j, struct journal_buf *w)
 	struct bch_fs *c = container_of(j, struct bch_fs, journal);
 	struct jset_entry *start, *end, *i, *next, *prev = NULL;
 	struct jset *jset = w->data;
+	struct journal_keys_to_wb wb = { NULL };
 	unsigned sectors, bytes, u64s;
-	bool validate_before_checksum = false;
 	unsigned long btree_roots_have = 0;
+	bool validate_before_checksum = false;
+	u64 seq = le64_to_cpu(jset->seq);
 	int ret;
 
 	/*
@@ -1720,9 +1749,28 @@ static int bch2_journal_write_prep(struct journal *j, struct journal_buf *w)
 		 * to c->btree_roots we have to get any missing btree roots and
 		 * add them to this journal entry:
 		 */
-		if (i->type == BCH_JSET_ENTRY_btree_root) {
+		switch (i->type) {
+		case BCH_JSET_ENTRY_btree_root:
 			bch2_journal_entry_to_btree_root(c, i);
 			__set_bit(i->btree_id, &btree_roots_have);
+			break;
+		case BCH_JSET_ENTRY_write_buffer_keys:
+			EBUG_ON(!w->need_flush_to_write_buffer);
+
+			if (!wb.wb)
+				bch2_journal_keys_to_write_buffer_start(c, &wb, seq);
+
+			struct bkey_i *k;
+			jset_entry_for_each_key(i, k) {
+				ret = bch2_journal_key_to_wb(c, &wb, i->btree_id, k);
+				if (ret) {
+					bch2_fs_fatal_error(c, "-ENOMEM flushing journal keys to btree write buffer");
+					bch2_journal_keys_to_write_buffer_end(c, &wb);
+					return ret;
+				}
+			}
+			i->type = BCH_JSET_ENTRY_btree_keys;
+			break;
 		}
 
 		/* Can we merge with previous entry? */
@@ -1745,6 +1793,10 @@ static int bch2_journal_write_prep(struct journal *j, struct journal_buf *w)
 			memmove_u64s_down(prev, i, jset_u64s(u64s));
 	}
 
+	if (wb.wb)
+		bch2_journal_keys_to_write_buffer_end(c, &wb);
+	w->need_flush_to_write_buffer = false;
+
 	prev = prev ? vstruct_next(prev) : jset->start;
 	jset->u64s = cpu_to_le32((u64 *) prev - jset->_data);
 
@@ -1752,8 +1804,7 @@ static int bch2_journal_write_prep(struct journal *j, struct journal_buf *w)
 
 	end	= bch2_btree_roots_to_journal_entries(c, end, btree_roots_have);
 
-	bch2_journal_super_entries_add_common(c, &end,
-				le64_to_cpu(jset->seq));
+	bch2_journal_super_entries_add_common(c, &end, seq);
 	u64s	= (u64 *) end - (u64 *) start;
 	BUG_ON(u64s > j->entry_u64s_reserved);
 
@@ -1776,7 +1827,7 @@ static int bch2_journal_write_prep(struct journal *j, struct journal_buf *w)
 	SET_JSET_CSUM_TYPE(jset, bch2_meta_checksum_type(c));
 
 	if (!JSET_NO_FLUSH(jset) && journal_entry_empty(jset))
-		j->last_empty_seq = le64_to_cpu(jset->seq);
+		j->last_empty_seq = seq;
 
 	if (bch2_csum_type_is_encryption(JSET_CSUM_TYPE(jset)))
 		validate_before_checksum = true;
@@ -1835,7 +1886,7 @@ static int bch2_journal_write_pick_flush(struct journal *j, struct journal_buf *
 	    (!w->must_flush &&
 	     (jiffies - j->last_flush_write) < msecs_to_jiffies(c->opts.journal_flush_delay) &&
 	     test_bit(JOURNAL_MAY_SKIP_FLUSH, &j->flags))) {
-		     w->noflush = true;
+		w->noflush = true;
 		SET_JSET_NO_FLUSH(w->data, true);
 		w->data->last_seq	= 0;
 		w->last_seq		= 0;
@@ -1850,9 +1901,9 @@ static int bch2_journal_write_pick_flush(struct journal *j, struct journal_buf *
 	return 0;
 }
 
-void bch2_journal_write(struct closure *cl)
+CLOSURE_CALLBACK(bch2_journal_write)
 {
-	struct journal *j = container_of(cl, struct journal, io);
+	closure_type(j, struct journal, io);
 	struct bch_fs *c = container_of(j, struct bch_fs, journal);
 	struct bch_dev *ca;
 	struct journal_buf *w = journal_last_unwritten_buf(j);
@@ -1872,11 +1923,15 @@ void bch2_journal_write(struct closure *cl)
 	if (ret)
 		goto err;
 
+	mutex_lock(&j->buf_lock);
 	journal_buf_realloc(j, w);
 
 	ret = bch2_journal_write_prep(j, w);
+	mutex_unlock(&j->buf_lock);
 	if (ret)
 		goto err;
+
+	j->entry_bytes_written += vstruct_bytes(w->data);
 
 	while (1) {
 		spin_lock(&j->lock);

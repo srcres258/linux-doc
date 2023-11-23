@@ -314,7 +314,8 @@ void bch2_fs_read_only(struct bch_fs *c)
 		BUG_ON(c->journal.last_empty_seq != journal_cur_seq(&c->journal));
 		BUG_ON(atomic_read(&c->btree_cache.dirty));
 		BUG_ON(atomic_long_read(&c->btree_key_cache.nr_dirty));
-		BUG_ON(c->btree_write_buffer.state.nr);
+		BUG_ON(c->btree_write_buffer.inc.keys.nr);
+		BUG_ON(c->btree_write_buffer.flushing.keys.nr);
 
 		bch_verbose(c, "marking filesystem clean");
 		bch2_fs_mark_clean(c);
@@ -504,8 +505,8 @@ static void __bch2_fs_free(struct bch_fs *c)
 	bch2_io_clock_exit(&c->io_clock[WRITE]);
 	bch2_io_clock_exit(&c->io_clock[READ]);
 	bch2_fs_compress_exit(c);
-	bch2_journal_keys_free(&c->journal_keys);
-	bch2_journal_entries_free(c);
+	bch2_journal_keys_put_initial(c);
+	BUG_ON(atomic_read(&c->journal_keys.ref));
 	bch2_fs_btree_write_buffer_exit(c);
 	percpu_free_rwsem(&c->mark_lock);
 	free_percpu(c->online_reserved);
@@ -641,7 +642,9 @@ static int bch2_fs_online(struct bch_fs *c)
 	ret = kobject_add(&c->kobj, NULL, "%pU", c->sb.user_uuid.b) ?:
 	    kobject_add(&c->internal, &c->kobj, "internal") ?:
 	    kobject_add(&c->opts_dir, &c->kobj, "options") ?:
+#ifndef CONFIG_BCACHEFS_NO_LATENCY_ACCT
 	    kobject_add(&c->time_stats, &c->kobj, "time_stats") ?:
+#endif
 	    kobject_add(&c->counters_kobj, &c->kobj, "counters") ?:
 	    bch2_opts_create_sysfs_files(&c->opts_dir);
 	if (ret) {
@@ -702,6 +705,8 @@ static struct bch_fs *bch2_fs_alloc(struct bch_sb *sb, struct bch_opts opts)
 
 	init_rwsem(&c->gc_lock);
 	mutex_init(&c->gc_gens_lock);
+	atomic_set(&c->journal_keys.ref, 1);
+	c->journal_keys.initial_ref_held = true;
 
 	for (i = 0; i < BCH_TIME_STAT_NR; i++)
 		bch2_time_stats_init(&c->times[i]);
@@ -750,7 +755,6 @@ static struct bch_fs *bch2_fs_alloc(struct bch_sb *sb, struct bch_opts opts)
 
 	c->journal.flush_write_time	= &c->times[BCH_TIME_journal_flush_write];
 	c->journal.noflush_write_time	= &c->times[BCH_TIME_journal_noflush_write];
-	c->journal.blocked_time		= &c->times[BCH_TIME_blocked_journal];
 	c->journal.flush_seq_time	= &c->times[BCH_TIME_journal_flush_seq];
 
 	bch2_fs_btree_cache_init_early(&c->btree_cache);
