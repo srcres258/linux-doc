@@ -531,7 +531,7 @@ static __always_inline void slab_unlock(struct slab *slab)
 	struct page *page = slab_page(slab);
 
 	VM_BUG_ON_PAGE(PageTail(page), page);
-	__bit_spin_unlock(PG_locked, &page->flags);
+	bit_spin_unlock(PG_locked, &page->flags);
 }
 
 static inline bool
@@ -2136,12 +2136,12 @@ static inline bool slab_test_node_partial(const struct slab *slab)
 
 static inline void slab_set_node_partial(struct slab *slab)
 {
-	__set_bit(PG_workingset, folio_flags(slab_folio(slab), 0));
+	set_bit(PG_workingset, folio_flags(slab_folio(slab), 0));
 }
 
 static inline void slab_clear_node_partial(struct slab *slab)
 {
-	__clear_bit(PG_workingset, folio_flags(slab_folio(slab), 0));
+	clear_bit(PG_workingset, folio_flags(slab_folio(slab), 0));
 }
 
 /*
