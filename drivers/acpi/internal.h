@@ -85,6 +85,11 @@ bool acpi_scan_is_offline(struct acpi_device *adev, bool uevent);
 acpi_status acpi_sysfs_table_handler(u32 event, void *table, void *context);
 void acpi_scan_table_notify(void);
 
+int acpi_active_trip_temp(struct acpi_device *adev, int id, int *ret_temp);
+int acpi_passive_trip_temp(struct acpi_device *adev, int *ret_temp);
+int acpi_hot_trip_temp(struct acpi_device *adev, int *ret_temp);
+int acpi_critical_trip_temp(struct acpi_device *adev, int *ret_temp);
+
 /* --------------------------------------------------------------------------
                      Device Node Initialization / Removal
    -------------------------------------------------------------------------- */
@@ -275,5 +280,14 @@ void acpi_init_lpit(void);
 #else
 static inline void acpi_init_lpit(void) { }
 #endif
+
+/*--------------------------------------------------------------------------
+		ACPI _CRS CSI-2 and MIPI DisCo for Imaging
+  -------------------------------------------------------------------------- */
+
+void acpi_mipi_check_crs_csi2(acpi_handle handle);
+void acpi_mipi_scan_crs_csi2(void);
+void acpi_mipi_init_crs_csi2_swnodes(void);
+void acpi_mipi_crs_csi2_cleanup(void);
 
 #endif /* _ACPI_INTERNAL_H_ */
