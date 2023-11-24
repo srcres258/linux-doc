@@ -1319,7 +1319,7 @@ static bool _psr_compute_config(struct intel_dp *intel_dp,
 {
 	struct drm_i915_private *dev_priv = dp_to_i915(intel_dp);
 	const struct drm_display_mode *adjusted_mode = &crtc_state->hw.adjusted_mode;
-	u8 entry_setup_frames;
+	int entry_setup_frames;
 
 	/*
 	 * Current PSR panels don't work reliably with VRR enabled
@@ -1372,6 +1372,9 @@ void intel_psr_compute_config(struct intel_dp *intel_dp,
 		crtc_state->has_panel_replay = true;
 	else
 		crtc_state->has_psr = _psr_compute_config(intel_dp, crtc_state);
+
+	if (!(crtc_state->has_panel_replay || crtc_state->has_psr))
+		return;
 
 	crtc_state->has_psr2 = intel_psr2_config_valid(intel_dp, crtc_state);
 
