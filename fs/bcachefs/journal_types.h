@@ -202,7 +202,6 @@ struct journal {
 	/* Used when waiting because the journal was full */
 	wait_queue_head_t	wait;
 	struct closure_waitlist	async_wait;
-	struct closure_waitlist	preres_wait;
 
 	struct closure		io;
 	struct delayed_work	write_work;
@@ -278,7 +277,6 @@ struct journal {
 	u64			low_on_space_start;
 	u64			low_on_pin_start;
 	u64			max_in_flight_start;
-	u64			write_buffer_full_start;
 
 	struct bch2_time_stats	*flush_write_time;
 	struct bch2_time_stats	*noflush_write_time;

@@ -56,17 +56,6 @@ static void trace_move_extent_read2(struct bch_fs *c, struct bkey_s_c k)
 	}
 }
 
-static void trace_move_extent_alloc_mem_fail2(struct bch_fs *c, struct bkey_s_c k)
-{
-	if (trace_move_extent_alloc_mem_fail_enabled()) {
-		struct printbuf buf = PRINTBUF;
-
-		bch2_bkey_val_to_text(&buf, c, k);
-		trace_move_extent_alloc_mem_fail(c, buf.buf);
-		printbuf_exit(&buf);
-	}
-}
-
 struct moving_io {
 	struct list_head		read_list;
 	struct list_head		io_list;
@@ -173,6 +162,7 @@ void bch2_move_ctxt_wait_for_io(struct moving_context *ctxt)
 static void bch2_moving_ctxt_flush_all(struct moving_context *ctxt)
 {
 	move_ctxt_wait_event(ctxt, list_empty(&ctxt->reads));
+	bch2_trans_unlock_long(ctxt->trans);
 	closure_sync(&ctxt->cl);
 }
 
@@ -233,49 +223,6 @@ void bch2_move_stats_init(struct bch_move_stats *stats, const char *name)
 	memset(stats, 0, sizeof(*stats));
 	stats->data_type = BCH_DATA_user;
 	scnprintf(stats->name, sizeof(stats->name), "%s", name);
-}
-
-static int bch2_extent_drop_ptrs(struct btree_trans *trans,
-				 struct btree_iter *iter,
-				 struct bkey_s_c k,
-				 struct data_update_opts data_opts)
-{
-	struct bch_fs *c = trans->c;
-	struct bkey_i *n;
-	int ret;
-
-	n = bch2_bkey_make_mut_noupdate(trans, k);
-	ret = PTR_ERR_OR_ZERO(n);
-	if (ret)
-		return ret;
-
-	while (data_opts.kill_ptrs) {
-		unsigned i = 0, drop = __fls(data_opts.kill_ptrs);
-		struct bch_extent_ptr *ptr;
-
-		bch2_bkey_drop_ptrs(bkey_i_to_s(n), ptr, i++ == drop);
-		data_opts.kill_ptrs ^= 1U << drop;
-	}
-
-	/*
-	 * If the new extent no longer has any pointers, bch2_extent_normalize()
-	 * will do the appropriate thing with it (turning it into a
-	 * KEY_TYPE_error key, or just a discard if it was a cached extent)
-	 */
-	bch2_extent_normalize(c, bkey_i_to_s(n));
-
-	/*
-	 * Since we're not inserting through an extent iterator
-	 * (BTREE_ITER_ALL_SNAPSHOTS iterators aren't extent iterators),
-	 * we aren't using the extent overwrite path to delete, we're
-	 * just using the normal key deletion path:
-	 */
-	if (bkey_deleted(&n->k))
-		n->k.size = 0;
-
-	return bch2_trans_relock(trans) ?:
-		bch2_trans_update(trans, iter, n, BTREE_UPDATE_INTERNAL_SNAPSHOT_NODE) ?:
-		bch2_trans_commit(trans, NULL, NULL, BCH_TRANS_COMMIT_no_enospc);
 }
 
 int bch2_move_extent(struct moving_context *ctxt,
@@ -347,18 +294,10 @@ int bch2_move_extent(struct moving_context *ctxt,
 	io->rbio.bio.bi_iter.bi_sector	= bkey_start_offset(k.k);
 	io->rbio.bio.bi_end_io		= move_read_endio;
 
-	ret = bch2_data_update_init(trans, ctxt, &io->write, ctxt->wp,
+	ret = bch2_data_update_init(trans, iter, ctxt, &io->write, ctxt->wp,
 				    io_opts, data_opts, iter->btree_id, k);
-	if (ret && ret != -BCH_ERR_unwritten_extent_update)
+	if (ret)
 		goto err_free_pages;
-
-	if (ret == -BCH_ERR_unwritten_extent_update) {
-		bch2_update_unwritten_extent(trans, &io->write);
-		move_free(io);
-		return 0;
-	}
-
-	BUG_ON(ret);
 
 	io->write.op.end_io = move_write_done;
 
@@ -403,8 +342,22 @@ err_free_pages:
 err_free:
 	kfree(io);
 err:
-	this_cpu_inc(c->counters[BCH_COUNTER_move_extent_alloc_mem_fail]);
-	trace_move_extent_alloc_mem_fail2(c, k);
+	if (ret == -BCH_ERR_data_update_done)
+		return 0;
+
+	if (bch2_err_matches(ret, EROFS))
+		return ret;
+
+	this_cpu_inc(c->counters[BCH_COUNTER_move_extent_start_fail]);
+	if (trace_move_extent_start_fail_enabled()) {
+		struct printbuf buf = PRINTBUF;
+
+		bch2_bkey_val_to_text(&buf, c, k);
+		prt_str(&buf, ": ");
+		prt_str(&buf, bch2_err_str(ret));
+		trace_move_extent_start_fail(c, buf.buf);
+		printbuf_exit(&buf);
+	}
 	return ret;
 }
 
@@ -506,22 +459,13 @@ int bch2_move_ratelimit(struct moving_context *ctxt)
 	do {
 		delay = ctxt->rate ? bch2_ratelimit_delay(ctxt->rate) : 0;
 
-
-		if (delay) {
-			if (delay > HZ / 10)
-				bch2_trans_unlock_long(ctxt->trans);
-			else
-				bch2_trans_unlock(ctxt->trans);
-			set_current_state(TASK_INTERRUPTIBLE);
-		}
-
-		if (kthread_should_stop()) {
-			__set_current_state(TASK_RUNNING);
+		if (kthread_should_stop())
 			return 1;
-		}
 
 		if (delay)
-			move_ctxt_wait_event_timeout(ctxt, false, delay);
+			move_ctxt_wait_event_timeout(ctxt,
+					freezing(current) || kthread_should_stop(),
+					delay);
 
 		if (unlikely(freezing(current))) {
 			bch2_moving_ctxt_flush_all(ctxt);
@@ -729,7 +673,7 @@ int __bch2_evacuate_bucket(struct moving_context *ctxt,
 	}
 
 	a = bch2_alloc_to_v4(k, &a_convert);
-	dirty_sectors = a->dirty_sectors;
+	dirty_sectors = bch2_bucket_sectors_dirty(*a);
 	bucket_size = bch_dev_bkey_exists(c, bucket.inode)->mi.bucket_size;
 	fragmentation = a->fragmentation_lru;
 

@@ -482,7 +482,7 @@ static int lm25066_probe(struct i2c_client *client)
 	if (config < 0)
 		return config;
 
-	data->id = (enum chips)i2c_get_match_data(client);
+	data->id = (enum chips)(unsigned long)i2c_get_match_data(client);
 
 	info = &data->info;
 

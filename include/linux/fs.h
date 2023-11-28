@@ -1655,6 +1655,7 @@ static inline bool __sb_start_write_trylock(struct super_block *sb, int level)
 /**
  * __sb_write_started - check if sb freeze level is held
  * @sb: the super we write to
+ * @level: the freeze level
  *
  * > 0 sb freeze level is held
  *   0 sb freeze level is not held

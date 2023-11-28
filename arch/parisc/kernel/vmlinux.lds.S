@@ -130,7 +130,8 @@ SECTIONS
 	RO_DATA(8)
 
 	/* unwind info */
-	.PARISC.unwind ALIGN(4) : {
+	. = ALIGN(4);
+	.PARISC.unwind : {
 		__start___unwind = .;
 		*(.PARISC.unwind)
 		__stop___unwind = .;

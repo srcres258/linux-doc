@@ -687,6 +687,7 @@ iter_file_splice_write(struct pipe_inode_info *pipe, struct file *out,
 
 	splice_from_pipe_begin(&sd);
 	while (sd.total_len) {
+		struct kiocb kiocb;
 		struct iov_iter from;
 		unsigned int head, tail, mask;
 		size_t left;
@@ -736,7 +737,10 @@ iter_file_splice_write(struct pipe_inode_info *pipe, struct file *out,
 		}
 
 		iov_iter_bvec(&from, ITER_SOURCE, array, n, sd.total_len - left);
-		ret = do_iter_writev(out, &from, &sd.pos, 0);
+		init_sync_kiocb(&kiocb, out);
+		kiocb.ki_pos = sd.pos;
+		ret = call_write_iter(out, &kiocb, &from);
+		sd.pos = kiocb.ki_pos;
 		if (ret <= 0)
 			break;
 

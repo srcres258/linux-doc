@@ -287,7 +287,7 @@ inline void bch2_btree_insert_key_leaf(struct btree_trans *trans,
 	bch2_btree_add_journal_pin(c, b, journal_seq);
 
 	if (unlikely(!btree_node_dirty(b))) {
-		EBUG_ON(test_bit(BCH_FS_CLEAN_SHUTDOWN, &c->flags));
+		EBUG_ON(test_bit(BCH_FS_clean_shutdown, &c->flags));
 		set_btree_node_dirty_acct(c, b);
 	}
 
@@ -361,7 +361,6 @@ noinline static int
 btree_key_can_insert_cached_slowpath(struct btree_trans *trans, unsigned flags,
 				     struct btree_path *path, unsigned new_u64s)
 {
-	struct bch_fs *c = trans->c;
 	struct btree_insert_entry *i;
 	struct bkey_cached *ck = (void *) path->l[0].b;
 	struct bkey_i *new_k;
@@ -372,7 +371,7 @@ btree_key_can_insert_cached_slowpath(struct btree_trans *trans, unsigned flags,
 
 	new_k = kmalloc(new_u64s * sizeof(u64), GFP_KERNEL);
 	if (!new_k) {
-		bch_err(c, "error allocating memory for key cache key, btree %s u64s %u",
+		bch_err(trans->c, "error allocating memory for key cache key, btree %s u64s %u",
 			bch2_btree_id_str(path->btree_id), new_u64s);
 		return -BCH_ERR_ENOMEM_btree_key_cache_insert;
 	}
@@ -660,6 +659,9 @@ bch2_trans_commit_write_locked(struct btree_trans *trans, unsigned flags,
 		i->k->k.needs_whiteout = false;
 	}
 
+		i->k->k.needs_whiteout = false;
+	}
+
 	/*
 	 * Don't get journal reservation until after we know insert will
 	 * succeed:
@@ -693,6 +695,14 @@ bch2_trans_commit_write_locked(struct btree_trans *trans, unsigned flags,
 	if (trans->fs_usage_deltas &&
 	    bch2_trans_fs_usage_apply(trans, trans->fs_usage_deltas))
 		return -BCH_ERR_btree_insert_need_mark_replicas;
+
+	if (trans->nr_wb_updates) {
+		EBUG_ON(flags & BCH_TRANS_COMMIT_no_journal_res);
+
+		ret = bch2_btree_insert_keys_write_buffer(trans);
+		if (ret)
+			goto revert_fs_usage;
+	}
 
 	h = trans->hooks;
 	while (h) {
@@ -939,6 +949,30 @@ int bch2_trans_commit_error(struct btree_trans *trans, unsigned flags,
 
 		ret = bch2_trans_relock(trans);
 		break;
+	case -BCH_ERR_btree_insert_need_flush_buffer: {
+		struct btree_write_buffer *wb = &c->btree_write_buffer;
+
+		ret = 0;
+
+		if (wb->state.nr > wb->size * 3 / 4) {
+			bch2_trans_unlock(trans);
+			mutex_lock(&wb->flush_lock);
+
+			if (wb->state.nr > wb->size * 3 / 4) {
+				bch2_trans_begin(trans);
+				ret = __bch2_btree_write_buffer_flush(trans,
+						flags|BCH_TRANS_COMMIT_no_check_rw, true);
+				if (!ret) {
+					trace_and_count(c, trans_restart_write_buffer_flush, trans, _THIS_IP_);
+					ret = btree_trans_restart(trans, BCH_ERR_transaction_restart_write_buffer_flush);
+				}
+			} else {
+				mutex_unlock(&wb->flush_lock);
+				ret = bch2_trans_relock(trans);
+			}
+		}
+		break;
+	}
 	default:
 		BUG_ON(ret >= 0);
 		break;
@@ -960,7 +994,7 @@ bch2_trans_commit_get_rw_cold(struct btree_trans *trans, unsigned flags)
 	int ret;
 
 	if (likely(!(flags & BCH_TRANS_COMMIT_lazy_rw)) ||
-	    test_bit(BCH_FS_STARTED, &c->flags))
+	    test_bit(BCH_FS_started, &c->flags))
 		return -BCH_ERR_erofs_trans_commit;
 
 	ret = drop_locks_do(trans, bch2_fs_read_write_early(c));
@@ -1025,7 +1059,7 @@ int __bch2_trans_commit(struct btree_trans *trans, unsigned flags)
 			return ret;
 	}
 
-	if (unlikely(!test_bit(BCH_FS_MAY_GO_RW, &c->flags))) {
+	if (unlikely(!test_bit(BCH_FS_may_go_rw, &c->flags))) {
 		ret = do_bch2_trans_commit_to_journal_replay(trans);
 		goto out_reset;
 	}
@@ -1037,7 +1071,21 @@ int __bch2_trans_commit(struct btree_trans *trans, unsigned flags)
 			goto out_reset;
 	}
 
-	EBUG_ON(test_bit(BCH_FS_CLEAN_SHUTDOWN, &c->flags));
+	if (c->btree_write_buffer.state.nr > c->btree_write_buffer.size / 2 &&
+	    mutex_trylock(&c->btree_write_buffer.flush_lock)) {
+		bch2_trans_begin(trans);
+		bch2_trans_unlock(trans);
+
+		ret = __bch2_btree_write_buffer_flush(trans,
+					flags|BCH_TRANS_COMMIT_no_check_rw, true);
+		if (!ret) {
+			trace_and_count(c, trans_restart_write_buffer_flush, trans, _THIS_IP_);
+			ret = btree_trans_restart(trans, BCH_ERR_transaction_restart_write_buffer_flush);
+		}
+		goto out;
+	}
+
+	EBUG_ON(test_bit(BCH_FS_clean_shutdown, &c->flags));
 
 	trans->journal_u64s		= trans->extra_journal_entries.nr;
 	trans->journal_transaction_names = READ_ONCE(c->opts.journal_transaction_names);

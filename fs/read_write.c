@@ -784,19 +784,6 @@ static ssize_t do_loop_readv_writev(struct file *filp, struct iov_iter *iter,
 	return ret;
 }
 
-/*
- * Low-level helpers don't perform rw sanity checks.
- * The caller is responsible for that.
- */
-static ssize_t do_iter_read(struct file *file, struct iov_iter *iter,
-			    loff_t *pos, rwf_t flags)
-{
-	if (file->f_op->read_iter)
-		return do_iter_readv_writev(file, iter, pos, READ, flags);
-
-	return do_loop_readv_writev(file, iter, pos, READ, flags);
-}
-
 ssize_t vfs_iocb_iter_read(struct file *file, struct kiocb *iocb,
 			   struct iov_iter *iter)
 {
@@ -845,22 +832,13 @@ ssize_t vfs_iter_read(struct file *file, struct iov_iter *iter, loff_t *ppos,
 	if (ret < 0)
 		return ret;
 
-	ret = do_iter_read(file, iter, ppos, flags);
+	ret = do_iter_readv_writev(file, iter, ppos, READ, flags);
 out:
 	if (ret >= 0)
 		fsnotify_access(file);
 	return ret;
 }
 EXPORT_SYMBOL(vfs_iter_read);
-
-static ssize_t do_iter_write(struct file *file, struct iov_iter *iter,
-			     loff_t *pos, rwf_t flags)
-{
-	if (file->f_op->write_iter)
-		return do_iter_readv_writev(file, iter, pos, WRITE, flags);
-
-	return do_loop_readv_writev(file, iter, pos, WRITE, flags);
-}
 
 /*
  * Caller is responsible for calling kiocb_end_write() on completion
@@ -919,7 +897,7 @@ ssize_t vfs_iter_write(struct file *file, struct iov_iter *iter, loff_t *ppos,
 		return ret;
 
 	file_start_write(file);
-	ret = do_iter_write(file, iter, ppos, flags);
+	ret = do_iter_readv_writev(file, iter, ppos, WRITE, flags);
 	if (ret > 0)
 		fsnotify_modify(file);
 	file_end_write(file);
@@ -947,7 +925,7 @@ static ssize_t vfs_readv(struct file *file, const struct iovec __user *vec,
 	if (ret < 0)
 		return ret;
 
-	ret = tot_len = iov_iter_count(&iter);
+	tot_len = iov_iter_count(&iter);
 	if (!tot_len)
 		goto out;
 
@@ -955,7 +933,10 @@ static ssize_t vfs_readv(struct file *file, const struct iovec __user *vec,
 	if (ret < 0)
 		goto out;
 
-	ret = do_iter_read(file, &iter, pos, flags);
+	if (file->f_op->read_iter)
+		ret = do_iter_readv_writev(file, &iter, pos, READ, flags);
+	else
+		ret = do_loop_readv_writev(file, &iter, pos, READ, flags);
 out:
 	if (ret >= 0)
 		fsnotify_access(file);
@@ -982,7 +963,7 @@ static ssize_t vfs_writev(struct file *file, const struct iovec __user *vec,
 	if (ret < 0)
 		return ret;
 
-	ret = tot_len = iov_iter_count(&iter);
+	tot_len = iov_iter_count(&iter);
 	if (!tot_len)
 		goto out;
 
@@ -991,7 +972,10 @@ static ssize_t vfs_writev(struct file *file, const struct iovec __user *vec,
 		goto out;
 
 	file_start_write(file);
-	ret = do_iter_write(file, &iter, pos, flags);
+	if (file->f_op->write_iter)
+		ret = do_iter_readv_writev(file, &iter, pos, WRITE, flags);
+	else
+		ret = do_loop_readv_writev(file, &iter, pos, WRITE, flags);
 	if (ret > 0)
 		fsnotify_modify(file);
 	file_end_write(file);

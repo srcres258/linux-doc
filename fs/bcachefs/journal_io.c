@@ -548,6 +548,7 @@ static int journal_entry_data_usage_validate(struct bch_fs *c,
 	struct jset_entry_data_usage *u =
 		container_of(entry, struct jset_entry_data_usage, entry);
 	unsigned bytes = jset_u64s(le16_to_cpu(entry->u64s)) * sizeof(u64);
+	struct printbuf err = PRINTBUF;
 	int ret = 0;
 
 	if (journal_entry_err_on(bytes < sizeof(*u) ||
@@ -556,10 +557,19 @@ static int journal_entry_data_usage_validate(struct bch_fs *c,
 				 journal_entry_data_usage_bad_size,
 				 "invalid journal entry usage: bad size")) {
 		journal_entry_null_range(entry, vstruct_next(entry));
-		return ret;
+		goto out;
 	}
 
+	if (journal_entry_err_on(bch2_replicas_entry_validate(&u->r, c->disk_sb.sb, &err),
+				 c, version, jset, entry,
+				 journal_entry_data_usage_bad_size,
+				 "invalid journal entry usage: %s", err.buf)) {
+		journal_entry_null_range(entry, vstruct_next(entry));
+		goto out;
+	}
+out:
 fsck_err:
+	printbuf_exit(&err);
 	return ret;
 }
 
@@ -676,8 +686,6 @@ static void journal_entry_dev_usage_to_text(struct printbuf *out, struct bch_fs 
 		       le64_to_cpu(u->d[i].sectors),
 		       le64_to_cpu(u->d[i].fragmented));
 	}
-
-	prt_printf(out, " buckets_ec: %llu", le64_to_cpu(u->buckets_ec));
 }
 
 static int journal_entry_log_validate(struct bch_fs *c,

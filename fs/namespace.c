@@ -2878,7 +2878,12 @@ static int do_remount(struct path *path, int ms_flags, int sb_flags,
 	if (IS_ERR(fc))
 		return PTR_ERR(fc);
 
+	/*
+	 * Indicate to the filesystem that the remount request is coming
+	 * from the legacy mount system call.
+	 */
 	fc->oldapi = true;
+
 	err = parse_monolithic_mount_data(fc, data);
 	if (!err) {
 		down_write(&sb->s_umount);
@@ -3327,6 +3332,12 @@ static int do_new_mount(struct path *path, const char *fstype, int sb_flags,
 	put_filesystem(type);
 	if (IS_ERR(fc))
 		return PTR_ERR(fc);
+
+	/*
+	 * Indicate to the filesystem that the mount request is coming
+	 * from the legacy mount system call.
+	 */
+	fc->oldapi = true;
 
 	if (subtype)
 		err = vfs_parse_fs_string(fc, "subtype",
@@ -4288,7 +4299,7 @@ static int can_idmap_mount(const struct mount_kattr *kattr, struct mount *mnt)
 	 * Creating an idmapped mount with the filesystem wide idmapping
 	 * doesn't make sense so block that. We don't allow mushy semantics.
 	 */
-	if (!check_fsmapping(kattr->mnt_idmap, m->mnt_sb))
+	if (kattr->mnt_userns == m->mnt_sb->s_user_ns)
 		return -EINVAL;
 
 	/*
@@ -4789,7 +4800,24 @@ static void statmount_propagate_from(struct kstatmount *s)
 
 static int statmount_mnt_root(struct kstatmount *s, struct seq_file *seq)
 {
-	return show_path(seq, s->mnt->mnt_root);
+	int ret;
+	size_t start = seq->count;
+
+	ret = show_path(seq, s->mnt->mnt_root);
+	if (ret)
+		return ret;
+
+	if (unlikely(seq_has_overflowed(seq)))
+		return -EAGAIN;
+
+	/*
+         * Unescape the result. It would be better if supplied string was not
+         * escaped in the first place, but that's a pretty invasive change.
+         */
+	seq->buf[seq->count] = '\0';
+	seq->count = start;
+	seq_commit(seq, string_unescape_inplace(seq->buf + start, UNESCAPE_OCTAL));
+	return 0;
 }
 
 static int statmount_mnt_point(struct kstatmount *s, struct seq_file *seq)
@@ -4798,7 +4826,7 @@ static int statmount_mnt_point(struct kstatmount *s, struct seq_file *seq)
 	struct path mnt_path = { .dentry = mnt->mnt_root, .mnt = mnt };
 	int err;
 
-	err = seq_path_root(seq, &mnt_path, &s->root, " \t\n\\");
+	err = seq_path_root(seq, &mnt_path, &s->root, "");
 	return err == SEQ_SKIP ? 0 : err;
 }
 
@@ -4812,12 +4840,10 @@ static int statmount_fs_type(struct kstatmount *s, struct seq_file *seq)
 
 static int statmount_string(struct kstatmount *s, u64 flag)
 {
+	int ret;
+	size_t kbufsize;
 	struct seq_file *seq = &s->seq;
 	struct statmount *sm = &s->sm;
-	int ret;
-
-	if (seq->count + sizeof(s->sm) >= s->bufsize)
-		return -EOVERFLOW;
 
 	switch (flag) {
 	case STATMOUNT_FS_TYPE:
@@ -4837,6 +4863,11 @@ static int statmount_string(struct kstatmount *s, u64 flag)
 		return -EINVAL;
 	}
 
+	if (unlikely(check_add_overflow(sizeof(*sm), seq->count, &kbufsize)))
+		return -EOVERFLOW;
+	if (kbufsize >= s->bufsize)
+		return -EOVERFLOW;
+
 	/* signal a retry */
 	if (unlikely(seq_has_overflowed(seq)))
 		return -EAGAIN;
@@ -4853,9 +4884,10 @@ static int copy_statmount_to_user(struct kstatmount *s)
 {
 	struct statmount *sm = &s->sm;
 	struct seq_file *seq = &s->seq;
+	char __user *str = ((char __user *)s->buf) + sizeof(*sm);
 	size_t copysize = min_t(size_t, s->bufsize, sizeof(*sm));
 
-	if (seq->count && copy_to_user(s->buf->str, seq->buf, seq->count))
+	if (seq->count && copy_to_user(str, seq->buf, seq->count))
 		return -EFAULT;
 
 	/* Return the number of bytes copied to the buffer */
@@ -4900,6 +4932,38 @@ static int do_statmount(struct kstatmount *s)
 	if (err)
 		return err;
 
+	return 0;
+}
+
+static inline bool retry_statmount(const long ret, size_t *seq_size)
+{
+	if (likely(ret != -EAGAIN))
+		return false;
+	if (unlikely(check_mul_overflow(*seq_size, 2, seq_size)))
+		return false;
+	if (unlikely(*seq_size > MAX_RW_COUNT))
+		return false;
+	return true;
+}
+
+static int prepare_kstatmount(struct kstatmount *ks, struct mnt_id_req *kreq,
+			      struct statmount __user *buf, size_t bufsize,
+			      size_t seq_size)
+{
+	if (!access_ok(buf, bufsize))
+		return -EFAULT;
+
+	*ks = (struct kstatmount){
+		.mask		= kreq->request_mask,
+		.buf		= buf,
+		.bufsize	= bufsize,
+		.seq = {
+			.size	= seq_size,
+			.buf	= kvmalloc(seq_size, GFP_KERNEL_ACCOUNT),
+		},
+	};
+	if (!ks->seq.buf)
+		return -ENOMEM;
 	return 0;
 }
 
@@ -5005,33 +5069,22 @@ static ssize_t do_listmount(struct vfsmount *mnt, u64 __user *buf,
 			    unsigned int flags)
 {
 	struct mount *r, *m = real_mount(mnt);
-	struct path path_mnt_root = {
+	struct path rootmnt = {
 		.mnt = root->mnt,
 		.dentry = root->mnt->mnt_root
 	};
 	ssize_t ctr;
-	bool unreachable = (flags & LISTMOUNT_UNREACHABLE);
+	bool reachable_only = true;
 	bool recurse = flags & LISTMOUNT_RECURSIVE;
 	int err;
 
-	/*
-	 * The caller explicitly requested to see all mounts including those
-	 * that aren't reachable from the caller's mount root so check that
-	 * they have the privileges to do so.
-	 */
-	if (unreachable && !capable(CAP_SYS_ADMIN))
-		return -EPERM;
+	if (flags & LISTMOUNT_UNREACHABLE) {
+		if (!capable(CAP_SYS_ADMIN))
+			return -EPERM;
+		reachable_only = false;
+	}
 
-	/*
-	 * The caller requested to only list reachable mounts so ensure that
-	 * the mount whose children we want to see is actually reachable from
-	 * the caller's mount root.
-	 *
-	 * If not, check whether the caller does have sufficient privileges to
-	 * also list unreachable mounts. If they lack privileges we need to
-	 * return a permission error and if they do, we need to return success.
-	 */
-	if (!unreachable && !is_path_reachable(m, mnt->mnt_root, &path_mnt_root))
+	if (reachable_only && !is_path_reachable(m, mnt->mnt_root, &rootmnt))
 		return capable(CAP_SYS_ADMIN) ? 0 : -EPERM;
 
 	err = security_sb_statfs(mnt->mnt_root);
@@ -5039,7 +5092,8 @@ static ssize_t do_listmount(struct vfsmount *mnt, u64 __user *buf,
 		return err;
 
 	for (ctr = 0, r = listmnt_first(m); r; r = listmnt_next(r, m, recurse)) {
-		if (!unreachable && !is_path_reachable(r, r->mnt.mnt_root, root))
+		if (reachable_only &&
+		    !is_path_reachable(r, r->mnt.mnt_root, root))
 			continue;
 
 		if (ctr >= bufsize)
