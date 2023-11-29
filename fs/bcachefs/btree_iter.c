@@ -1492,6 +1492,22 @@ static void bch2_trans_update_max_paths(struct btree_trans *trans)
 	trans->nr_max_paths = hweight64(trans->paths_allocated);
 }
 
+noinline __cold
+int __bch2_btree_trans_too_many_iters(struct btree_trans *trans)
+{
+	if (trace_trans_restart_too_many_iters_enabled()) {
+		struct printbuf buf = PRINTBUF;
+
+		bch2_trans_paths_to_text(&buf, trans);
+		trace_trans_restart_too_many_iters(trans, _THIS_IP_, buf.buf);
+		printbuf_exit(&buf);
+	}
+
+	count_event(trans->c, trans_restart_too_many_iters);
+
+	return btree_trans_restart(trans, BCH_ERR_transaction_restart_too_many_iters);
+}
+
 static noinline void btree_path_overflow(struct btree_trans *trans)
 {
 	bch2_dump_trans_paths_updates(trans);
@@ -3025,6 +3041,7 @@ void bch2_btree_trans_to_text(struct printbuf *out, struct btree_trans *trans)
 	struct btree_path *path;
 	struct btree_bkey_cached_common *b;
 	static char lock_types[] = { 'r', 'i', 'w' };
+	struct task_struct *task = READ_ONCE(trans->locking_wait.task);
 	unsigned l, idx;
 
 	if (!out->nr_tabstops) {
@@ -3032,7 +3049,7 @@ void bch2_btree_trans_to_text(struct printbuf *out, struct btree_trans *trans)
 		printbuf_tabstop_push(out, 32);
 	}
 
-	prt_printf(out, "%i %s\n", trans->locking_wait.task->pid, trans->fn);
+	prt_printf(out, "%i %s\n", task ? task->pid : 0, trans->fn);
 
 	trans_for_each_path_safe(trans, path, idx) {
 		if (!path->nodes_locked)

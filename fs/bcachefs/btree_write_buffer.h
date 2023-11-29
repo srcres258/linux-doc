@@ -2,25 +2,9 @@
 #ifndef _BCACHEFS_BTREE_WRITE_BUFFER_H
 #define _BCACHEFS_BTREE_WRITE_BUFFER_H
 
-#include "bkey.h"
-
-static inline bool bch2_btree_write_buffer_should_flush(struct bch_fs *c)
-{
-	struct btree_write_buffer *wb = &c->btree_write_buffer;
-
-	return wb->inc.keys.nr + wb->flushing.keys.nr > wb->inc.keys.size / 4;
-}
-
-static inline bool bch2_btree_write_buffer_must_wait(struct bch_fs *c)
-{
-	struct btree_write_buffer *wb = &c->btree_write_buffer;
-
-	return wb->inc.keys.nr > wb->inc.keys.size * 3 / 4;
-}
-
-struct btree_trans;
-int bch2_btree_write_buffer_flush_sync(struct btree_trans *);
+int bch2_btree_write_buffer_flush_locked(struct btree_trans *);
 int bch2_btree_write_buffer_flush_nocheck_rw(struct btree_trans *);
+int bch2_btree_write_buffer_flush_sync(struct btree_trans *);
 int bch2_btree_write_buffer_tryflush(struct btree_trans *);
 
 struct journal_keys_to_wb {

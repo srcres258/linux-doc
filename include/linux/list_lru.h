@@ -90,19 +90,15 @@ void memcg_reparent_list_lrus(struct mem_cgroup *memcg, struct mem_cgroup *paren
 bool list_lru_add(struct list_lru *lru, struct list_head *item);
 
 /**
- * __list_lru_add: add an element to a specific sublist.
- * @list_lru: the lru pointer
- * @item: the item to be added.
- * @memcg: the cgroup of the sublist to add the item to.
- * @nid: the node id of the sublist to add the item to.
+ * list_lru_del: delete an element to the lru list
+ * @lru: the lru pointer
+ * @item: the item to be deleted.
  *
- * This function is similar to list_lru_add(), but it allows the caller to
- * specify the sublist to which the item should be added. This can be useful
- * when the list_head node is not necessarily in the same cgroup and NUMA node
- * as the data it represents, such as zswap, where the list_head node could be
- * from kswapd and the data from a different cgroup altogether.
+ * This function works analogously as list_lru_add() in terms of list
+ * manipulation. The comments about an element already pertaining to
+ * a list are also valid for list_lru_del().
  *
- * Return value: true if the list was updated, false otherwise
+ * Return: true if the list was updated, false otherwise
  */
 bool __list_lru_add(struct list_lru *lru, struct list_head *item, int nid,
 		struct mem_cgroup *memcg);
