@@ -1256,6 +1256,45 @@ out:
 	return rc < 0 ? rc : len;
 }
 
+/*
+ * Flush out either the folio that overlaps the beginning of a range in which
+ * pos resides (if _fstart is given) or the folio that overlaps the end of a
+ * range (if _fstart is NULL) unless that folio is entirely within the range
+ * we're going to invalidate.
+ */
+static int cifs_flush_folio(struct inode *inode, loff_t pos, loff_t *_fstart, loff_t *_fend)
+{
+	struct folio *folio;
+	unsigned long long fpos, fend;
+	pgoff_t index = pos / PAGE_SIZE;
+	size_t size;
+	int rc = 0;
+
+	folio = filemap_get_folio(inode->i_mapping, index);
+	if (IS_ERR(folio)) {
+		if (_fstart)
+			*_fstart = pos;
+		*_fend = pos;
+		return 0;
+	}
+
+	size = folio_size(folio);
+	fpos = folio_pos(folio);
+	fend = fpos + size - 1;
+	if (_fstart)
+		*_fstart = fpos;
+	*_fend = fend;
+	if (_fstart && pos == fpos)
+		goto out;
+	if (!_fstart && pos == fend)
+		goto out;
+
+	rc = filemap_write_and_wait_range(inode->i_mapping, fpos, fend);
+out:
+	folio_put(folio);
+	return rc;
+}
+
 ssize_t cifs_file_copychunk_range(unsigned int xid,
 				struct file *src_file, loff_t off,
 				struct file *dst_file, loff_t destoff,
@@ -1263,10 +1302,12 @@ ssize_t cifs_file_copychunk_range(unsigned int xid,
 {
 	struct inode *src_inode = file_inode(src_file);
 	struct inode *target_inode = file_inode(dst_file);
+	struct cifsInodeInfo *src_cifsi = CIFS_I(src_inode);
 	struct cifsFileInfo *smb_file_src;
 	struct cifsFileInfo *smb_file_target;
 	struct cifs_tcon *src_tcon;
 	struct cifs_tcon *target_tcon;
+	unsigned long long destend, fstart, fend;
 	ssize_t rc;
 
 	cifs_dbg(FYI, "copychunk range\n");
@@ -1306,13 +1347,46 @@ ssize_t cifs_file_copychunk_range(unsigned int xid,
 	if (rc)
 		goto unlock;
 
-	/* should we flush first and last page first */
-	truncate_inode_pages(&target_inode->i_data, 0);
+	/* The server-side copy will fail if the source crosses the EOF marker.
+	 * Advance the EOF marker after the flush above to the end of the range
+	 * if it's short of that.
+	 */
+	if (src_cifsi->server_eof < off + len) {
+		rc = src_tcon->ses->server->ops->set_file_size(
+			xid, src_tcon, smb_file_src, off + len, false);
+		if (rc < 0)
+			goto unlock;
+
+		fscache_resize_cookie(cifs_inode_cookie(src_inode),
+				      i_size_read(src_inode));
+	}
+
+	destend = destoff + len - 1;
+
+	/* Flush the folios at either end of the destination range to prevent
+	 * accidental loss of dirty data outside of the range.
+	 */
+	fstart = destoff;
+
+	rc = cifs_flush_folio(target_inode, destoff, &fstart, &fend);
+	if (rc)
+		goto unlock;
+	if (destend > fend) {
+		rc = cifs_flush_folio(target_inode, destend, NULL, &fend);
+		if (rc)
+			goto unlock;
+	}
+
+	/* Discard all the folios that overlap the destination region. */
+	truncate_inode_pages_range(&target_inode->i_data, fstart, fend);
 
 	rc = file_modified(dst_file);
-	if (!rc)
+	if (!rc) {
 		rc = target_tcon->ses->server->ops->copychunk_range(xid,
 			smb_file_src, smb_file_target, off, len, destoff);
+		if (rc > 0 && destoff + rc > i_size_read(target_inode))
+			truncate_setsize(target_inode, destoff + rc);
+	}
 
 	file_accessed(src_file);
 
