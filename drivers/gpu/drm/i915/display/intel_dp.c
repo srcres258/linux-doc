@@ -1227,6 +1227,10 @@ intel_dp_mode_valid(struct drm_connector *_connector,
 	enum drm_mode_status status;
 	bool dsc = false, bigjoiner = false;
 
+	status = intel_cpu_transcoder_mode_valid(dev_priv, mode);
+	if (status != MODE_OK)
+		return status;
+
 	if (mode->flags & DRM_MODE_FLAG_DBLCLK)
 		return MODE_H_ILLEGAL;
 
@@ -1886,7 +1890,7 @@ static int dsc_src_max_compressed_bpp(struct intel_dp *intel_dp)
 	 * Max Compressed bpp for Gen 13+ is 27bpp.
 	 * For earlier platform is 23bpp. (Bspec:49259).
 	 */
-	if (DISPLAY_VER(i915) <= 12)
+	if (DISPLAY_VER(i915) < 13)
 		return 23;
 	else
 		return 27;

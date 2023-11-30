@@ -84,9 +84,9 @@ static inline unsigned bch2_bucket_sectors_dirty(struct bch_alloc_v4 a)
 static inline unsigned bch2_bucket_sectors_fragmented(struct bch_dev *ca,
 						 struct bch_alloc_v4 a)
 {
-	unsigned d = bch2_bucket_sectors_dirty(a);
+	int d = bch2_bucket_sectors_dirty(a);
 
-	return d ? max(0U, ca->mi.bucket_size - d) : 0;
+	return d ? max(0, ca->mi.bucket_size - d) : 0;
 }
 
 static inline u64 alloc_lru_idx_read(struct bch_alloc_v4 a)

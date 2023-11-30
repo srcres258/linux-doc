@@ -736,7 +736,7 @@ static const struct dc_debug_options debug_defaults_drv = {
 			.i2c = true,
 			.dmcu = false, // This is previously known to cause hang on S3 cycles if enabled
 			.dscl = true,
-			.cm = true,
+			.cm = false,
 			.mpc = true,
 			.optc = true,
 			.vpg = true,
@@ -1724,6 +1724,13 @@ static bool dcn35_validate_bandwidth(struct dc *dc,
 
 	out = dml2_validate(dc, context, fast_validate);
 
+	if (fast_validate)
+		return out;
+
+	DC_FP_START();
+	dcn35_decide_zstate_support(dc, context);
+	DC_FP_END();
+
 	return out;
 }
 
@@ -1869,7 +1876,7 @@ static bool dcn35_resource_construct(
 
 	/* Use pipe context based otg sync logic */
 	dc->config.use_pipe_ctx_sync_logic = true;
-	dc->config.use_default_clock_table = false;
+
 	/* read VBIOS LTTPR caps */
 	{
 		if (ctx->dc_bios->funcs->get_lttpr_caps) {

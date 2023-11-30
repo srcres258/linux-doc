@@ -4144,7 +4144,7 @@ int read_extent_buffer_to_user_nofault(const struct extent_buffer *eb,
 
 	if (eb->addr) {
 		if (copy_to_user_nofault(dstv, eb->addr + start, len))
-			ret = EFAULT;
+			ret = -EFAULT;
 		return ret;
 	}
 
@@ -4288,6 +4288,11 @@ static void memset_extent_buffer(const struct extent_buffer *eb, int c,
 				 unsigned long start, unsigned long len)
 {
 	void *eb_addr = btrfs_get_eb_addr(eb);
+
+	if (eb->addr) {
+		memset(eb->addr + start, c, len);
+		return;
+	}
 
 	if (eb->addr) {
 		memset(eb->addr + start, c, len);

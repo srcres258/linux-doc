@@ -185,8 +185,7 @@ union abm_flags {
 		unsigned int disable_abm_requested : 1;
 
 		/**
-		 * @disable_abm_immediately: Indicates if driver has requested ABM to be disabled
-		 * immediately.
+		 * @disable_abm_immediately: Indicates if driver has requested ABM to be disabled immediately.
 		 */
 		unsigned int disable_abm_immediately : 1;
 
@@ -866,6 +865,13 @@ enum dmub_gpint_command {
 	 * DESC: Updates the trace buffer mask bit32~bit63.
 	 */
 	DMUB_GPINT__GET_TRACE_BUFFER_MASK_WORD3 = 119,
+
+	/**
+	 * DESC: Enable measurements for various task duration
+	 * ARGS: 0 - Disable measurement
+	 *       1 - Enable measurement
+	 */
+	DMUB_GPINT__TRACE_DMUB_WAKE_ACTIVITY = 123,
 };
 
 /**
@@ -1339,6 +1345,10 @@ enum dmub_cmd_cab_type {
 	 * Fit surfaces in CAB (i.e. CAB enable)
 	 */
 	DMUB_CMD__CAB_DCN_SS_FIT_IN_CAB = 2,
+	/**
+	 * Do not fit surfaces in CAB (i.e. no CAB)
+	 */
+	DMUB_CMD__CAB_DCN_SS_NOT_FIT_IN_CAB = 3,
 };
 
 /**
@@ -2880,6 +2890,10 @@ enum dmub_cmd_replay_type {
 	 * Set disabled iiming sync.
 	 */
 	DMUB_CMD__REPLAY_SET_TIMING_SYNC_SUPPORTED	= 5,
+	/**
+	 * Set Residency Frameupdate Timer.
+	 */
+	DMUB_CMD__REPLAY_SET_RESIDENCY_FRAMEUPDATE_TIMER = 6,
 };
 
 /**
@@ -3052,15 +3066,14 @@ struct dmub_cmd_replay_set_timing_sync_data {
 	 * Currently the support is only for 0 or 1
 	 */
 	uint8_t panel_inst;
-
-	/**
-	 * Explicit padding to 4 byte boundary.
-	 */
-	uint8_t pad[3];
 	/**
 	 * REPLAY set_timing_sync
 	 */
-	bool timing_sync_supported;
+	uint8_t timing_sync_supported;
+	/**
+	 * Explicit padding to 4 byte boundary.
+	 */
+	uint8_t pad[2];
 };
 
 /**
@@ -3141,6 +3154,59 @@ struct dmub_rb_cmd_replay_set_timing_sync {
 	 * Definition of DMUB_CMD__REPLAY_SET_TIMING_SYNC_SUPPORTED command.
 	 */
 	struct dmub_cmd_replay_set_timing_sync_data replay_set_timing_sync_data;
+};
+
+/**
+ * Data passed from driver to FW in  DMUB_CMD__REPLAY_SET_RESIDENCY_FRAMEUPDATE_TIMER command.
+ */
+struct dmub_cmd_replay_frameupdate_timer_data {
+	/**
+	 * Panel Instance.
+	 * Panel isntance to identify which replay_state to use
+	 * Currently the support is only for 0 or 1
+	 */
+	uint8_t panel_inst;
+	/**
+	 * Replay Frameupdate Timer Enable or not
+	 */
+	uint8_t enable;
+	/**
+	 * REPLAY force reflash frame update number
+	 */
+	uint16_t frameupdate_count;
+};
+/**
+ * Definition of DMUB_CMD__REPLAY_SET_RESIDENCY_FRAMEUPDATE_TIMER
+ */
+struct dmub_rb_cmd_replay_set_frameupdate_timer {
+	/**
+	 * Command header.
+	 */
+	struct dmub_cmd_header header;
+	/**
+	 * Definition of a DMUB_CMD__SET_REPLAY_POWER_OPT command.
+	 */
+	struct dmub_cmd_replay_frameupdate_timer_data data;
+};
+
+/**
+ * Definition union of replay command set
+ */
+union dmub_replay_cmd_set {
+	/**
+	 * Panel Instance.
+	 * Panel isntance to identify which replay_state to use
+	 * Currently the support is only for 0 or 1
+	 */
+	uint8_t panel_inst;
+	/**
+	 * Definition of DMUB_CMD__REPLAY_SET_TIMING_SYNC_SUPPORTED command data.
+	 */
+	struct dmub_cmd_replay_set_timing_sync_data sync_data;
+	/**
+	 * Definition of DMUB_CMD__REPLAY_SET_RESIDENCY_FRAMEUPDATE_TIMER command data.
+	 */
+	struct dmub_cmd_replay_frameupdate_timer_data timer_data;
 };
 
 /**
@@ -4278,6 +4344,10 @@ union dmub_rb_cmd {
 	struct dmub_rb_cmd_replay_set_power_opt_and_coasting_vtotal replay_set_power_opt_and_coasting_vtotal;
 
 	struct dmub_rb_cmd_replay_set_timing_sync replay_set_timing_sync;
+	/**
+	 * Definition of a DMUB_CMD__REPLAY_SET_RESIDENCY_FRAMEUPDATE_TIMER command.
+	 */
+	struct dmub_rb_cmd_replay_set_frameupdate_timer replay_set_frameupdate_timer;
 };
 
 /**

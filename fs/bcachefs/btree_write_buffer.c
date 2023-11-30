@@ -15,6 +15,9 @@
 static int bch2_btree_write_buffer_journal_flush(struct journal *,
 				struct journal_entry_pin *, u64);
 
+static int bch2_btree_write_buffer_journal_flush(struct journal *,
+				struct journal_entry_pin *, u64);
+
 static int btree_write_buffered_key_cmp(const void *_l, const void *_r)
 {
 	return (cmp_int(l->hi, r->hi) ?:
@@ -46,62 +49,6 @@ static inline bool wb_key_cmp(const struct wb_key_ref *l, const struct wb_key_re
 #endif
 }
 
-/* Compare excluding idx, the low 24 bits: */
-static inline bool wb_key_eq(const void *_l, const void *_r)
-{
-	const struct wb_key_ref *l = _l;
-	const struct wb_key_ref *r = _r;
-
-	return !((l->hi ^ r->hi)|
-		 (l->mi ^ r->mi)|
-		 ((l->lo >> 24) ^ (r->lo >> 24)));
-}
-
-static noinline void wb_sort(struct wb_key_ref *base, size_t num)
-{
-	size_t n = num, a = num / 2;
-
-	if (!a)		/* num < 2 || size == 0 */
-		return;
-
-	for (;;) {
-		size_t b, c, d;
-
-		if (a)			/* Building heap: sift down --a */
-			--a;
-		else if (--n)		/* Sorting: Extract root to --n */
-			swap(base[0], base[n]);
-		else			/* Sort complete */
-			break;
-
-		/*
-		 * Sift element at "a" down into heap.  This is the
-		 * "bottom-up" variant, which significantly reduces
-		 * calls to cmp_func(): we find the sift-down path all
-		 * the way to the leaves (one compare per level), then
-		 * backtrack to find where to insert the target element.
-		 *
-		 * Because elements tend to sift down close to the leaves,
-		 * this uses fewer compares than doing two per level
-		 * on the way down.  (A bit more than half as many on
-		 * average, 3/4 worst-case.)
-		 */
-		for (b = a; c = 2*b + 1, (d = c + 1) < n;)
-			b = wb_key_cmp(base + c, base + d) ? c : d;
-		if (d == n)		/* Special case last leaf with no sibling */
-			b = c;
-
-		/* Now backtrack from "b" to the correct location for "a" */
-		while (b != a && wb_key_cmp(base + a, base + b))
-			b = (b - 1) / 2;
-		c = b;			/* Where "a" belongs */
-		while (b != a) {	/* Shift it into place */
-			b = (b - 1) / 2;
-			swap(base[b], base[c]);
-		}
-	}
-}
-
 static noinline int wb_flush_one_slowpath(struct btree_trans *trans,
 					  struct btree_iter *iter,
 					  struct btree_write_buffered_key *wb)
@@ -128,9 +75,6 @@ static inline int wb_flush_one(struct btree_trans *trans, struct btree_iter *ite
 	int ret;
 
 	EBUG_ON(!wb->journal_seq);
-	EBUG_ON(!c->btree_write_buffer.flushing.pin.seq);
-	EBUG_ON(c->btree_write_buffer.flushing.pin.seq > wb->journal_seq);
-
 	ret = bch2_btree_iter_traverse(iter);
 	if (ret)
 		return ret;
@@ -161,17 +105,6 @@ static inline int wb_flush_one(struct btree_trans *trans, struct btree_iter *ite
 	bch2_btree_insert_key_leaf(trans, path, &wb->k, wb->journal_seq);
 	(*fast)++;
 	return 0;
-trans_commit:
-	trans->journal_res.seq = wb->journal_seq;
-
-	return  bch2_trans_update(trans, iter, &wb->k,
-				  BTREE_UPDATE_INTERNAL_SNAPSHOT_NODE) ?:
-		bch2_trans_commit(trans, NULL, NULL,
-				  commit_flags|
-				  BCH_TRANS_COMMIT_no_check_rw|
-				  BCH_TRANS_COMMIT_no_enospc|
-				  BCH_TRANS_COMMIT_no_journal_res|
-				  BCH_TRANS_COMMIT_journal_reclaim);
 }
 
 static union btree_write_buffer_state btree_write_buffer_switch(struct btree_write_buffer *wb)
@@ -245,9 +178,6 @@ int bch2_btree_write_buffer_flush_locked(struct btree_trans *trans)
 	keys = wb->keys[s.idx];
 	nr = s.nr;
 
-	if (race_fault())
-		goto slowpath;
-
 	/*
 	 * We first sort so that we can detect and skip redundant updates, and
 	 * then we attempt to flush in sorted btree order, as this is most
@@ -299,14 +229,18 @@ int bch2_btree_write_buffer_flush_locked(struct btree_trans *trans)
 		iter.path->preserve = false;
 
 		do {
-			ret = bch2_btree_write_buffer_flush_one(trans, &iter, i, 0,
-								&write_locked, &fast);
+			if (race_fault()) {
+				ret = -BCH_ERR_journal_reclaim_would_deadlock;
+				break;
+			}
+
+			ret = wb_flush_one(trans, &iter, i, &write_locked, &fast);
 			if (!write_locked)
 				bch2_trans_begin(trans);
 		} while (bch2_err_matches(ret, BCH_ERR_transaction_restart));
 
 		if (!ret) {
-			k->journal_seq = 0;
+			i->journal_seq = 0;
 		} else if (ret == -BCH_ERR_journal_reclaim_would_deadlock) {
 			slowpath++;
 			ret = 0;
@@ -328,57 +262,34 @@ int bch2_btree_write_buffer_flush_locked(struct btree_trans *trans)
 		 * The fastpath zapped the seq of keys that were successfully flushed so
 		 * we can skip those here.
 		 */
-		trace_write_buffer_flush_slowpath(trans, slowpath, wb->flushing.keys.nr);
+		trace_and_count(c, write_buffer_flush_slowpath, trans, slowpath, nr);
 
-	bch2_fs_fatal_err_on(ret, c, "%s: insert error %s", __func__, bch2_err_str(ret));
-out:
-	bch2_journal_pin_drop(j, &pin);
-	return ret;
-slowpath:
-	trace_and_count(c, write_buffer_flush_slowpath, trans, slowpath, nr);
+		sort(keys, nr, sizeof(keys[0]),
+		     btree_write_buffered_journal_cmp,
+		     NULL);
 
-			bch2_journal_pin_update(j, i->journal_seq, &wb->flushing.pin,
-						bch2_btree_write_buffer_journal_flush);
+		for (i = keys; i < keys + nr; i++) {
+			if (!i->journal_seq)
+				continue;
 
-	for (i = keys; i < keys + nr; i++) {
-		if (!i->journal_seq)
-			continue;
+			bch2_journal_pin_update(j, i->journal_seq, &pin,
+				      bch2_btree_write_buffer_journal_flush);
 
-		bch2_journal_pin_update(j, i->journal_seq, &pin,
-			      bch2_btree_write_buffer_journal_flush);
-
-		ret = commit_do(trans, NULL, NULL,
-				BCH_WATERMARK_reclaim|
-				BCH_TRANS_COMMIT_no_check_rw|
-				BCH_TRANS_COMMIT_no_enospc|
-				BCH_TRANS_COMMIT_no_journal_res|
-				BCH_TRANS_COMMIT_journal_reclaim,
-				btree_write_buffered_insert(trans, i));
-		if (bch2_fs_fatal_err_on(ret, c, "%s: insert error %s", __func__, bch2_err_str(ret)))
-			break;
+			ret = commit_do(trans, NULL, NULL,
+					BCH_WATERMARK_reclaim|
+					BCH_TRANS_COMMIT_no_check_rw|
+					BCH_TRANS_COMMIT_no_enospc|
+					BCH_TRANS_COMMIT_no_journal_res|
+					BCH_TRANS_COMMIT_journal_reclaim,
+					btree_write_buffered_insert(trans, i));
+			if (ret)
+				goto err;
+		}
 	}
 err:
 	bch2_fs_fatal_err_on(ret, c, "%s: insert error %s", __func__, bch2_err_str(ret));
-	trace_write_buffer_flush(trans, wb->flushing.keys.nr, skipped, fast, 0);
-	bch2_journal_pin_drop(j, &wb->flushing.pin);
-	wb->flushing.keys.nr = 0;
-	return ret;
-}
-
-static int fetch_wb_keys_from_journal(struct bch_fs *c, u64 seq)
-{
-	struct journal *j = &c->journal;
-	struct journal_buf *buf;
-	int ret = 0;
-
-	mutex_lock(&j->buf_lock);
-	while ((buf = bch2_next_write_buffer_flush_journal_buf(j, seq)))
-		if (bch2_journal_keys_to_write_buffer(c, buf)) {
-			ret = -ENOMEM;
-			break;
-		}
-	mutex_unlock(&j->buf_lock);
-
+	trace_write_buffer_flush(trans, nr, skipped, fast, wb->size);
+	bch2_journal_pin_drop(j, &pin);
 	return ret;
 }
 

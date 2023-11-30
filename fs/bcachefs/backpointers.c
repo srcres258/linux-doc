@@ -397,7 +397,7 @@ int bch2_check_btree_backpointers(struct bch_fs *c)
 	ret = bch2_trans_run(c,
 		for_each_btree_key_commit(trans, iter,
 			BTREE_ID_backpointers, POS_MIN, 0, k,
-			NULL, NULL, BCH_TRANS_COMMIT_lazy_rw|BCH_TRANS_COMMIT_no_enospc,
+			NULL, NULL, BCH_TRANS_COMMIT_no_enospc,
 		  bch2_check_btree_backpointer(trans, &iter, k)));
 	if (ret)
 		bch_err_fn(c, ret);
@@ -621,7 +621,6 @@ static int bch2_check_extents_to_backpointers_pass(struct btree_trans *trans,
 		int level, depth = btree_type_has_ptrs(btree_id) ? 0 : 1;
 
 		ret = commit_do(trans, NULL, NULL,
-				BCH_TRANS_COMMIT_lazy_rw|
 				BCH_TRANS_COMMIT_no_enospc,
 				check_btree_root_to_backpointers(trans, btree_id,
 							bucket_start, bucket_end,
@@ -635,7 +634,6 @@ static int bch2_check_extents_to_backpointers_pass(struct btree_trans *trans,
 						  BTREE_ITER_PREFETCH);
 			for_each_btree_key_continue(trans, iter, BTREE_ITER_PREFETCH, k, ret) {
 				ret = commit_do(trans, NULL, NULL,
-						BCH_TRANS_COMMIT_lazy_rw|
 						BCH_TRANS_COMMIT_no_enospc,
 					check_extent_to_backpointers(trans, btree_id, level,
 								     bucket_start, bucket_end,
@@ -810,7 +808,7 @@ static int bch2_check_backpointers_to_extents_pass(struct btree_trans *trans,
 
 	return for_each_btree_key_commit(trans, iter, BTREE_ID_backpointers,
 				  POS_MIN, BTREE_ITER_PREFETCH, k,
-				  NULL, NULL, BCH_TRANS_COMMIT_lazy_rw|BCH_TRANS_COMMIT_no_enospc,
+				  NULL, NULL, BCH_TRANS_COMMIT_no_enospc,
 		check_one_backpointer(trans, start, end,
 				      bkey_s_c_to_backpointer(k),
 				      &last_flushed_pos));

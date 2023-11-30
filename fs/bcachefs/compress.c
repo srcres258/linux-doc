@@ -576,7 +576,7 @@ static int __bch2_fs_compress_init(struct bch_fs *c, u64 features)
 	 * ZSTD is lying: if we allocate the size of the workspace it says it
 	 * requires, it returns memory allocation errors
 	 */
-	c->zstd_workspace_size = zstd_cctx_workspace_bound(&params.cParams) * 2;
+	c->zstd_workspace_size = zstd_cctx_workspace_bound(&params.cParams);
 
 	struct {
 		unsigned			feature;

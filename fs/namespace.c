@@ -1010,7 +1010,7 @@ void mnt_change_mountpoint(struct mount *parent, struct mountpoint *mp, struct m
 
 static inline struct mount *node_to_mount(struct rb_node *node)
 {
-	return rb_entry(node, struct mount, mnt_node);
+	return node ? rb_entry(node, struct mount, mnt_node) : NULL;
 }
 
 static void mnt_add_to_ns(struct mnt_namespace *ns, struct mount *mnt)
@@ -4903,7 +4903,11 @@ static int do_statmount(struct kstatmount *s)
 	struct mount *m = real_mount(s->mnt);
 	int err;
 
-	if (!capable(CAP_SYS_ADMIN) &&
+	/*
+	 * Don't trigger audit denials. We just want to determine what
+	 * mounts to show users.
+	 */
+	if (!ns_capable_noaudit(&init_user_ns, CAP_SYS_ADMIN) &&
 	    !is_path_reachable(m, m->mnt.mnt_root, &s->root))
 		return -EPERM;
 
@@ -4954,7 +4958,7 @@ static int prepare_kstatmount(struct kstatmount *ks, struct mnt_id_req *kreq,
 		return -EFAULT;
 
 	*ks = (struct kstatmount){
-		.mask		= kreq->request_mask,
+		.mask		= kreq->param,
 		.buf		= buf,
 		.bufsize	= bufsize,
 		.seq = {
@@ -4967,43 +4971,25 @@ static int prepare_kstatmount(struct kstatmount *ks, struct mnt_id_req *kreq,
 	return 0;
 }
 
-static inline bool retry_statmount(const long ret, size_t *seq_size)
+static int copy_mnt_id_req(const struct mnt_id_req __user *req,
+			   struct mnt_id_req *kreq)
 {
-	if (likely(ret != -EAGAIN))
-		return false;
-	if (unlikely(check_mul_overflow(*seq_size, 2, seq_size)))
-		return false;
-	if (unlikely(*seq_size > MAX_RW_COUNT))
-		return false;
-	return true;
-}
+	int ret;
+	size_t usize;
 
-static int prepare_kstatmount(struct kstatmount *ks, struct mnt_id_req *kreq,
-			      struct statmount __user *buf, size_t bufsize,
-			      size_t seq_size)
-{
-	*ks = (struct kstatmount){
-		.mask		= kreq->request_mask,
-		.buf		= buf,
-		.bufsize	= bufsize,
-		.seq = {
-			.size	= seq_size,
-			.buf	= kvmalloc(seq_size, GFP_KERNEL_ACCOUNT),
-		},
-	};
-	if (!ks->seq.buf)
-		return -ENOMEM;
-	return 0;
-}
+	BUILD_BUG_ON(sizeof(struct mnt_id_req) != MNT_ID_REQ_SIZE_VER0);
 
-static inline void drop_kstatmount(struct kstatmount *ks)
-{
-	if (ks->fs_type)
-		__putname(ks->fs_type);
-	if (ks->mnt_root)
-		__putname(ks->mnt_root);
-	if (ks->mnt_point)
-		__putname(ks->mnt_point);
+	ret = get_user(usize, &req->size);
+	if (ret)
+		return -EFAULT;
+	if (!usize)
+		usize = MNT_ID_REQ_SIZE_VER0;
+	if (unlikely(usize > PAGE_SIZE))
+		return -E2BIG;
+	if (unlikely(usize < MNT_ID_REQ_SIZE_VER0))
+		return -EINVAL;
+	memset(kreq, 0, sizeof(*kreq));
+	return copy_struct_from_user(kreq, sizeof(*kreq), req, usize);
 }
 
 SYSCALL_DEFINE4(statmount, const struct mnt_id_req __user *, req,
@@ -5020,8 +5006,9 @@ SYSCALL_DEFINE4(statmount, const struct mnt_id_req __user *, req,
 	if (flags)
 		return -EINVAL;
 
-	if (copy_from_user(&kreq, req, sizeof(kreq)))
-		return -EFAULT;
+	ret = copy_mnt_id_req(req, &kreq);
+	if (ret)
+		return ret;
 
 retry:
 	ret = prepare_kstatmount(&ks, &kreq, buf, bufsize, seq_size);
@@ -5050,54 +5037,36 @@ retry:
 	return ret;
 }
 
-static struct mount *listmnt_first(struct mount *root)
+static struct mount *listmnt_next(struct mount *curr)
 {
-	return list_first_entry_or_null(&root->mnt_mounts, struct mount, mnt_child);
+	return node_to_mount(rb_next(&curr->mnt_node));
 }
 
-static struct mount *listmnt_next(struct mount *curr, struct mount *root, bool recurse)
+static ssize_t do_listmount(struct mount *first, struct path *orig, u64 mnt_id,
+			    u64 __user *buf, size_t bufsize,
+			    const struct path *root)
 {
-	if (recurse)
-		return next_mnt(curr, root);
-	if (!list_is_head(curr->mnt_child.next, &root->mnt_mounts))
-		return list_next_entry(curr, mnt_child);
-	return NULL;
-}
-
-static ssize_t do_listmount(struct vfsmount *mnt, u64 __user *buf,
-			    size_t bufsize, const struct path *root,
-			    unsigned int flags)
-{
-	struct mount *r, *m = real_mount(mnt);
-	struct path rootmnt = {
-		.mnt = root->mnt,
-		.dentry = root->mnt->mnt_root
-	};
+	struct mount *r;
 	ssize_t ctr;
-	bool reachable_only = true;
-	bool recurse = flags & LISTMOUNT_RECURSIVE;
 	int err;
 
-	if (flags & LISTMOUNT_UNREACHABLE) {
-		if (!capable(CAP_SYS_ADMIN))
-			return -EPERM;
-		reachable_only = false;
-	}
+	/*
+	 * Don't trigger audit denials. We just want to determine what
+	 * mounts to show users.
+	 */
+	if (!ns_capable_noaudit(&init_user_ns, CAP_SYS_ADMIN) &&
+	    !is_path_reachable(real_mount(orig->mnt), orig->dentry, root))
+		return -EPERM;
 
-	if (reachable_only && !is_path_reachable(m, mnt->mnt_root, &rootmnt))
-		return capable(CAP_SYS_ADMIN) ? 0 : -EPERM;
-
-	err = security_sb_statfs(mnt->mnt_root);
+	err = security_sb_statfs(orig->dentry);
 	if (err)
 		return err;
 
-	for (ctr = 0, r = listmnt_first(m); r; r = listmnt_next(r, m, recurse)) {
-		if (reachable_only &&
-		    !is_path_reachable(r, r->mnt.mnt_root, root))
+	for (ctr = 0, r = first; r && ctr < bufsize; r = listmnt_next(r)) {
+		if (r->mnt_id_unique == mnt_id)
 			continue;
-
-		if (ctr >= bufsize)
-			return -EOVERFLOW;
+		if (!is_path_reachable(r, r->mnt.mnt_root, orig))
+			continue;
 		ctr = array_index_nospec(ctr, bufsize);
 		if (put_user(r->mnt_id_unique, buf + ctr))
 			return -EFAULT;
@@ -5110,36 +5079,40 @@ static ssize_t do_listmount(struct vfsmount *mnt, u64 __user *buf,
 SYSCALL_DEFINE4(listmount, const struct mnt_id_req __user *, req,
 		u64 __user *, buf, size_t, bufsize, unsigned int, flags)
 {
+	struct mnt_namespace *ns = current->nsproxy->mnt_ns;
 	struct mnt_id_req kreq;
-	struct vfsmount *mnt;
-	struct path root;
-	u64 mnt_id;
+	struct mount *first;
+	struct path root, orig;
+	u64 mnt_id, last_mnt_id;
 	ssize_t ret;
 
-	if (flags & ~(LISTMOUNT_UNREACHABLE | LISTMOUNT_RECURSIVE))
+	if (flags)
 		return -EINVAL;
 
-	if (copy_from_user(&kreq, req, sizeof(kreq)))
-		return -EFAULT;
-	if (kreq.request_mask != 0)
-		return -EINVAL;
+	ret = copy_mnt_id_req(req, &kreq);
+	if (ret)
+		return ret;
 	mnt_id = kreq.mnt_id;
+	last_mnt_id = kreq.param;
 
 	down_read(&namespace_sem);
-	if (mnt_id == LSMT_ROOT)
-		mnt = &current->nsproxy->mnt_ns->root->mnt;
-	else
-		mnt = lookup_mnt_in_ns(mnt_id, current->nsproxy->mnt_ns);
-	if (!mnt) {
-		up_read(&namespace_sem);
-		return -ENOENT;
-	}
-
 	get_fs_root(current->fs, &root);
-	/* Skip unreachable for LSMT_ROOT */
-	if (mnt_id == LSMT_ROOT && !(flags & LISTMOUNT_UNREACHABLE))
-		mnt = root.mnt;
-	ret = do_listmount(mnt, buf, bufsize, &root, flags);
+	if (mnt_id == LSMT_ROOT) {
+		orig = root;
+	} else {
+		ret = -ENOENT;
+		orig.mnt  = lookup_mnt_in_ns(mnt_id, ns);
+		if (!orig.mnt)
+			goto err;
+		orig.dentry = orig.mnt->mnt_root;
+	}
+	if (!last_mnt_id)
+		first = node_to_mount(rb_first(&ns->mounts));
+	else
+		first = mnt_find_id_at(ns, last_mnt_id + 1);
+
+	ret = do_listmount(first, &orig, mnt_id, buf, bufsize, &root);
+err:
 	path_put(&root);
 	up_read(&namespace_sem);
 	return ret;

@@ -594,7 +594,7 @@ static const unsigned int memcg_vm_event_stat[] = {
 #if defined(CONFIG_MEMCG_KMEM) && defined(CONFIG_ZSWAP)
 	ZSWPIN,
 	ZSWPOUT,
-	ZSWPOUT_FAIL,
+	ZSWP_WB,
 #endif
 #ifdef CONFIG_TRANSPARENT_HUGEPAGE
 	THP_FAULT_ALLOC,
@@ -752,17 +752,19 @@ void mem_cgroup_flush_stats(struct mem_cgroup *memcg)
 {
 	static DEFINE_MUTEX(memcg_stats_flush_mutex);
 
+	if (mem_cgroup_disabled())
+		return;
+
 	if (!memcg)
 		memcg = root_mem_cgroup;
 
-	if (!memcg_should_flush_stats(memcg))
-		return;
-
-	mutex_lock(&memcg_stats_flush_mutex);
-	/* An overlapping flush may have occurred, check again after locking */
-	if (memcg_should_flush_stats(memcg))
-		do_flush_stats(memcg);
-	mutex_unlock(&memcg_stats_flush_mutex);
+	if (memcg_should_flush_stats(memcg)) {
+		mutex_lock(&memcg_stats_flush_mutex);
+		/* Check again after locking, another flush may have occurred */
+		if (memcg_should_flush_stats(memcg))
+			do_flush_stats(memcg);
+		mutex_unlock(&memcg_stats_flush_mutex);
+	}
 }
 
 void mem_cgroup_flush_stats_ratelimited(struct mem_cgroup *memcg)
@@ -1138,10 +1140,11 @@ again:
 }
 
 /**
- * mem_cgroup_iter - iterate over memory cgroup hierarchy
+ * mem_cgroup_iter_online - iterate over memory cgroup hierarchy
  * @root: hierarchy root
  * @prev: previously returned memcg, NULL on first invocation
  * @reclaim: cookie for shared reclaim walks, NULL for full walks
+ * @online: whether to skip offline memcgs
  *
  * Returns references to children of the hierarchy below @root, or
  * @root itself, or %NULL after a full round-trip.
@@ -1150,13 +1153,16 @@ again:
  * invocations for reference counting, or use mem_cgroup_iter_break()
  * to cancel a hierarchy walk before the round-trip is complete.
  *
+ * Caller can skip offline memcgs by passing true for @online.
+ *
  * Reclaimers can specify a node in @reclaim to divide up the memcgs
  * in the hierarchy among all concurrent reclaimers operating on the
  * same node.
  */
-struct mem_cgroup *mem_cgroup_iter(struct mem_cgroup *root,
+struct mem_cgroup *mem_cgroup_iter_online(struct mem_cgroup *root,
 				   struct mem_cgroup *prev,
-				   struct mem_cgroup_reclaim_cookie *reclaim)
+				   struct mem_cgroup_reclaim_cookie *reclaim,
+				   bool online)
 {
 	struct mem_cgroup_reclaim_iter *iter;
 	struct cgroup_subsys_state *css = NULL;
@@ -1226,7 +1232,8 @@ struct mem_cgroup *mem_cgroup_iter(struct mem_cgroup *root,
 		 * is provided by the caller, so we know it's alive
 		 * and kicking, and don't take an extra reference.
 		 */
-		if (css == &root->css || css_tryget(css)) {
+		if (css == &root->css || (!online && css_tryget(css)) ||
+				css_tryget_online(css)) {
 			memcg = mem_cgroup_from_css(css);
 			break;
 		}
@@ -1253,6 +1260,22 @@ out_unlock:
 		css_put(&prev->css);
 
 	return memcg;
+}
+
+/**
+ * mem_cgroup_iter - iterate over memory cgroup hierarchy
+ * @root: hierarchy root
+ * @prev: previously returned memcg, NULL on first invocation
+ * @reclaim: cookie for shared reclaim walks, NULL for full walks
+ *
+ * Perform an iteration on the memory cgroup hierarchy without skipping
+ * offline memcgs.
+ */
+struct mem_cgroup *mem_cgroup_iter(struct mem_cgroup *root,
+				   struct mem_cgroup *prev,
+				   struct mem_cgroup_reclaim_cookie *reclaim)
+{
+	return mem_cgroup_iter_online(root, prev, reclaim, false);
 }
 
 /**
@@ -5644,6 +5667,8 @@ static void mem_cgroup_css_offline(struct cgroup_subsys_state *css)
 
 	page_counter_set_min(&memcg->memory, 0);
 	page_counter_set_low(&memcg->memory, 0);
+
+	zswap_memcg_offline_cleanup(memcg);
 
 	memcg_offline_kmem(memcg);
 	reparent_shrinker_deferred(memcg);

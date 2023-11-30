@@ -967,7 +967,7 @@ static inline struct file *__fget_files_rcu(struct files_struct *files,
 		/*
 		 * fdentry points to the 'fd' offset, or fdt->fd[0].
 		 * Loading from fdt->fd[0] is always safe, because the
-		 * array always exists"
+		 * array always exists.
 		 */
 		fdentry = fdt->fd + (fd & nospec_mask);
 

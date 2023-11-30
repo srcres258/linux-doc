@@ -86,18 +86,8 @@ list_lru_from_memcg_idx(struct list_lru *lru, int nid, int idx)
 }
 #endif /* CONFIG_MEMCG_KMEM */
 
-bool list_lru_add(struct list_lru *lru, struct list_head *item)
-{
-	int nid = page_to_nid(virt_to_page(item));
-	struct mem_cgroup *memcg = list_lru_memcg_aware(lru) ?
-		mem_cgroup_from_slab_obj(item) : NULL;
-
-	return __list_lru_add(lru, item, nid, memcg);
-}
-EXPORT_SYMBOL_GPL(list_lru_add);
-
-bool __list_lru_add(struct list_lru *lru, struct list_head *item, int nid,
-		struct mem_cgroup *memcg)
+bool list_lru_add(struct list_lru *lru, struct list_head *item, int nid,
+		    struct mem_cgroup *memcg)
 {
 	struct list_lru_node *nlru = &lru->node[nid];
 	struct list_lru_one *l;
@@ -118,18 +108,18 @@ bool __list_lru_add(struct list_lru *lru, struct list_head *item, int nid,
 }
 EXPORT_SYMBOL_GPL(__list_lru_add);
 
-bool list_lru_del(struct list_lru *lru, struct list_head *item)
+bool list_lru_add_obj(struct list_lru *lru, struct list_head *item)
 {
 	int nid = page_to_nid(virt_to_page(item));
 	struct mem_cgroup *memcg = list_lru_memcg_aware(lru) ?
 		mem_cgroup_from_slab_obj(item) : NULL;
 
-	return __list_lru_del(lru, item, nid, memcg);
+	return list_lru_add(lru, item, nid, memcg);
 }
-EXPORT_SYMBOL_GPL(list_lru_del);
+EXPORT_SYMBOL_GPL(list_lru_add_obj);
 
-bool __list_lru_del(struct list_lru *lru, struct list_head *item, int nid,
-		struct mem_cgroup *memcg)
+bool list_lru_del(struct list_lru *lru, struct list_head *item, int nid,
+		    struct mem_cgroup *memcg)
 {
 	struct list_lru_node *nlru = &lru->node[nid];
 	struct list_lru_one *l;
@@ -148,6 +138,16 @@ bool __list_lru_del(struct list_lru *lru, struct list_head *item, int nid,
 }
 EXPORT_SYMBOL_GPL(__list_lru_del);
 
+bool list_lru_del_obj(struct list_lru *lru, struct list_head *item)
+{
+	int nid = page_to_nid(virt_to_page(item));
+	struct mem_cgroup *memcg = list_lru_memcg_aware(lru) ?
+		mem_cgroup_from_slab_obj(item) : NULL;
+
+	return list_lru_del(lru, item, nid, memcg);
+}
+EXPORT_SYMBOL_GPL(list_lru_del_obj);
+
 void list_lru_isolate(struct list_lru_one *list, struct list_head *item)
 {
 	list_del_init(item);
@@ -164,7 +164,7 @@ void list_lru_isolate_move(struct list_lru_one *list, struct list_head *item,
 EXPORT_SYMBOL_GPL(list_lru_isolate_move);
 
 void list_lru_putback(struct list_lru *lru, struct list_head *item, int nid,
-		struct mem_cgroup *memcg)
+		      struct mem_cgroup *memcg)
 {
 	struct list_lru_one *list =
 		list_lru_from_memcg_idx(lru, nid, memcg_kmem_id(memcg));

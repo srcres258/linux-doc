@@ -176,10 +176,22 @@ struct statmount {
 	char str[];		/* Variable size part containing strings */
 };
 
+/*
+ * Structure for passing mount ID and miscellaneous parameters to statmount(2)
+ * and listmount(2).
+ *
+ * For statmount(2) @param represents the request mask.
+ * For listmount(2) @param represents the last listed mount id (or zero).
+ */
 struct mnt_id_req {
+	__u32 size;
+	__u32 spare;
 	__u64 mnt_id;
-	__u64 request_mask;
+	__u64 param;
 };
+
+/* List of all mnt_id_req versions. */
+#define MNT_ID_REQ_SIZE_VER0	24 /* sizeof first published struct */
 
 /*
  * @mask bits for statmount(2)
@@ -190,10 +202,6 @@ struct mnt_id_req {
 #define STATMOUNT_MNT_ROOT		0x00000008U	/* Want/got mnt_root  */
 #define STATMOUNT_MNT_POINT		0x00000010U	/* Want/got mnt_point */
 #define STATMOUNT_FS_TYPE		0x00000020U	/* Want/got fs_type */
-
-/* listmount(2) flags */
-#define LISTMOUNT_UNREACHABLE	0x01U	/* List unreachable mounts too */
-#define LISTMOUNT_RECURSIVE	0x02U	/* List a mount tree */
 
 /*
  * Special @mnt_id values that can be passed to listmount

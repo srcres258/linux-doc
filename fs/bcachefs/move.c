@@ -70,7 +70,7 @@ struct moving_io {
 
 	struct data_update		write;
 	/* Must be last since it is variable size */
-	struct bio_vec			bi_inline_vecs[0];
+	struct bio_vec			bi_inline_vecs[];
 };
 
 static void move_free(struct moving_io *io)
@@ -345,7 +345,8 @@ err:
 	if (ret == -BCH_ERR_data_update_done)
 		return 0;
 
-	if (bch2_err_matches(ret, EROFS))
+	if (bch2_err_matches(ret, EROFS) ||
+	    bch2_err_matches(ret, BCH_ERR_transaction_restart))
 		return ret;
 
 	count_event(c, move_extent_start_fail);
@@ -465,7 +466,8 @@ int bch2_move_ratelimit(struct moving_context *ctxt)
 
 		if (delay)
 			move_ctxt_wait_event_timeout(ctxt,
-					freezing(current) || kthread_should_stop(),
+					freezing(current) ||
+					kthread_should_stop(),
 					delay);
 
 		if (unlikely(freezing(current))) {
@@ -684,6 +686,9 @@ int __bch2_evacuate_bucket(struct moving_context *ctxt,
 		goto err;
 
 	while (!(ret = bch2_move_ratelimit(ctxt))) {
+		if (kthread_should_stop())
+			break;
+
 		bch2_trans_begin(trans);
 
 		ret = bch2_get_next_backpointer(trans, bucket, gen,

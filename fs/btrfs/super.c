@@ -210,23 +210,23 @@ static const struct constant_table btrfs_parameter_fragment[] = {
 
 static const struct fs_parameter_spec btrfs_fs_parameters[] = {
 	fsparam_flag_no("acl", Opt_acl),
+	fsparam_flag_no("autodefrag", Opt_defrag),
+	fsparam_flag_no("barrier", Opt_barrier),
 	fsparam_flag("clear_cache", Opt_clear_cache),
 	fsparam_u32("commit", Opt_commit_interval),
 	fsparam_flag("compress", Opt_compress),
 	fsparam_string("compress", Opt_compress_type),
 	fsparam_flag("compress-force", Opt_compress_force),
 	fsparam_string("compress-force", Opt_compress_force_type),
+	fsparam_flag_no("datacow", Opt_datacow),
+	fsparam_flag_no("datasum", Opt_datasum),
 	fsparam_flag("degraded", Opt_degraded),
 	fsparam_string("device", Opt_device),
+	fsparam_flag_no("discard", Opt_discard),
+	fsparam_enum("discard", Opt_discard_mode, btrfs_parameter_discard),
 	fsparam_enum("fatal_errors", Opt_fatal_errors, btrfs_parameter_fatal_errors),
 	fsparam_flag_no("flushoncommit", Opt_flushoncommit),
 	fsparam_string("max_inline", Opt_max_inline),
-	fsparam_flag_no("barrier", Opt_barrier),
-	fsparam_flag_no("datacow", Opt_datacow),
-	fsparam_flag_no("datasum", Opt_datasum),
-	fsparam_flag_no("autodefrag", Opt_defrag),
-	fsparam_flag_no("discard", Opt_discard),
-	fsparam_enum("discard", Opt_discard_mode, btrfs_parameter_discard),
 	fsparam_u32("metadata_ratio", Opt_ratio),
 	fsparam_flag("rescan_uuid_tree", Opt_rescan_uuid_tree),
 	fsparam_flag("skip_balance", Opt_skip_balance),
@@ -241,16 +241,14 @@ static const struct fs_parameter_spec btrfs_fs_parameters[] = {
 	fsparam_flag_no("treelog", Opt_treelog),
 	fsparam_flag("user_subvol_rm_allowed", Opt_user_subvol_rm_allowed),
 
-	/* Rescue options */
+	/* Rescue options. */
 	fsparam_enum("rescue", Opt_rescue, btrfs_parameter_rescue),
 	/* Deprecated, with alias rescue=nologreplay */
-	__fsparam(NULL, "nologreplay", Opt_nologreplay, fs_param_deprecated,
-		  NULL),
+	__fsparam(NULL, "nologreplay", Opt_nologreplay, fs_param_deprecated, NULL),
 	/* Deprecated, with alias rescue=usebackuproot */
-	__fsparam(NULL, "usebackuproot", Opt_usebackuproot, fs_param_deprecated,
-		  NULL),
+	__fsparam(NULL, "usebackuproot", Opt_usebackuproot, fs_param_deprecated, NULL),
 
-	/* Debugging options */
+	/* Debugging options. */
 	fsparam_flag_no("enospc_debug", Opt_enospc_debug),
 #ifdef CONFIG_BTRFS_DEBUG
 	fsparam_enum("fragment", Opt_fragment, btrfs_parameter_fragment),
@@ -261,8 +259,7 @@ static const struct fs_parameter_spec btrfs_fs_parameters[] = {
 	{}
 };
 
-static int btrfs_parse_param(struct fs_context *fc,
-			     struct fs_parameter *param)
+static int btrfs_parse_param(struct fs_context *fc, struct fs_parameter *param)
 {
 	struct btrfs_fs_context *ctx = fc->fs_private;
 	struct fs_parse_result result;
@@ -299,6 +296,7 @@ static int btrfs_parse_param(struct fs_context *fc,
 	case Opt_device: {
 		struct btrfs_device *device;
 		blk_mode_t mode = sb_open_mode(fc->sb_flags);
+		mode &= ~BLK_OPEN_RESTRICT_WRITES;
 
 		mutex_lock(&uuid_mutex);
 		device = btrfs_scan_one_device(param->string, mode, false);
@@ -412,15 +410,14 @@ static int btrfs_parse_param(struct fs_context *fc,
 #ifdef CONFIG_BTRFS_FS_POSIX_ACL
 			fc->sb_flags |= SB_POSIXACL;
 #else
-			btrfs_err(NULL, "support for ACL not compiled in!");
-			ret = -EINVAL;
-			goto out;
+			btrfs_err(NULL, "support for ACL not compiled in");
+			return -EINVAL;
 #endif
 		}
 		/*
 		 * VFS limits the ability to toggle ACL on and off via remount,
-		 * despite every file system allowing this.  This seems to be an
-		 * oversight since we all do, but it'll fail if we're
+		 * despite every file system allowing this.  This seems to be
+		 * an oversight since we all do, but it'll fail if we're
 		 * remounting.  So don't set the mask here, we'll check it in
 		 * btrfs_reconfigure and do the toggling ourselves.
 		 */
@@ -435,7 +432,7 @@ static int btrfs_parse_param(struct fs_context *fc,
 		break;
 	case Opt_nologreplay:
 		btrfs_warn(NULL,
-			   "'nologreplay' is deprecated, use 'rescue=nologreplay' instead");
+		"'nologreplay' is deprecated, use 'rescue=nologreplay' instead");
 		btrfs_set_opt(ctx->mount_opt, NOLOGREPLAY);
 		break;
 	case Opt_flushoncommit:
@@ -548,7 +545,7 @@ static int btrfs_parse_param(struct fs_context *fc,
 		break;
 	case Opt_commit_interval:
 		ctx->commit_interval = result.uint_32;
-		if (!ctx->commit_interval)
+		if (ctx->commit_interval == 0)
 			ctx->commit_interval = BTRFS_DEFAULT_COMMIT_INTERVAL;
 		break;
 	case Opt_rescue:
@@ -647,12 +644,12 @@ bool btrfs_check_options(struct btrfs_fs_info *info, unsigned long *mount_opt,
 	if (btrfs_fs_compat_ro(info, FREE_SPACE_TREE) &&
 	    !btrfs_raw_test_opt(*mount_opt, FREE_SPACE_TREE) &&
 	    !btrfs_raw_test_opt(*mount_opt, CLEAR_CACHE)) {
-		btrfs_err(info, "cannot disable free space tree");
+		btrfs_err(info, "cannot disable free-space-tree");
 		ret = false;
 	}
 	if (btrfs_fs_compat_ro(info, BLOCK_GROUP_TREE) &&
 	     !btrfs_raw_test_opt(*mount_opt, FREE_SPACE_TREE)) {
-		btrfs_err(info, "cannot disable free space tree with block-group-tree feature");
+		btrfs_err(info, "cannot disable free-space-tree with block-group-tree feature");
 		ret = false;
 	}
 
@@ -663,7 +660,7 @@ bool btrfs_check_options(struct btrfs_fs_info *info, unsigned long *mount_opt,
 		if (btrfs_raw_test_opt(*mount_opt, SPACE_CACHE))
 			btrfs_info(info, "disk space caching is enabled");
 		if (btrfs_raw_test_opt(*mount_opt, FREE_SPACE_TREE))
-			btrfs_info(info, "using free space tree");
+			btrfs_info(info, "using free-space-tree");
 	}
 
 	return ret;
@@ -1252,7 +1249,7 @@ static int btrfs_remount_rw(struct btrfs_fs_info *fs_info)
 
 	if (BTRFS_FS_ERROR(fs_info)) {
 		btrfs_err(fs_info,
-			  "Remounting read-write after error is not allowed");
+			  "remounting read-write after error is not allowed");
 		return -EINVAL;
 	}
 
@@ -1285,7 +1282,7 @@ static int btrfs_remount_rw(struct btrfs_fs_info *fs_info)
 	set_bit(BTRFS_FS_OPEN, &fs_info->flags);
 
 	/*
-	 * If we've gone from readonly -> read/write, we need to get our
+	 * If we've gone from readonly -> read-write, we need to get our
 	 * sync/async discard lists in the right state.
 	 */
 	btrfs_discard_resume(fs_info);
@@ -1296,51 +1293,47 @@ static int btrfs_remount_rw(struct btrfs_fs_info *fs_info)
 static int btrfs_remount_ro(struct btrfs_fs_info *fs_info)
 {
 	/*
-	 * this also happens on 'umount -rf' or on shutdown, when
-	 * the filesystem is busy.
+	 * This also happens on 'umount -rf' or on shutdown, when the
+	 * filesystem is busy.
 	 */
 	cancel_work_sync(&fs_info->async_reclaim_work);
 	cancel_work_sync(&fs_info->async_data_reclaim_work);
 
 	btrfs_discard_cleanup(fs_info);
 
-	/* wait for the uuid_scan task to finish */
+	/* Wait for the uuid_scan task to finish */
 	down(&fs_info->uuid_tree_rescan_sem);
-	/* avoid complains from lockdep et al. */
+	/* Avoid complains from lockdep et al. */
 	up(&fs_info->uuid_tree_rescan_sem);
 
 	btrfs_set_sb_rdonly(fs_info->sb);
 
 	/*
-	 * Setting SB_RDONLY will put the cleaner thread to
-	 * sleep at the next loop if it's already active.
-	 * If it's already asleep, we'll leave unused block
-	 * groups on disk until we're mounted read-write again
+	 * Setting SB_RDONLY will put the cleaner thread to sleep at the next
+	 * loop if it's already active.  If it's already asleep, we'll leave
+	 * unused block groups on disk until we're mounted read-write again
 	 * unless we clean them up here.
 	 */
 	btrfs_delete_unused_bgs(fs_info);
 
 	/*
-	 * The cleaner task could be already running before we set the
-	 * flag BTRFS_FS_STATE_RO (and SB_RDONLY in the superblock).
-	 * We must make sure that after we finish the remount, i.e. after
-	 * we call btrfs_commit_super(), the cleaner can no longer start
-	 * a transaction - either because it was dropping a dead root,
-	 * running delayed iputs or deleting an unused block group (the
-	 * cleaner picked a block group from the list of unused block
-	 * groups before we were able to in the previous call to
-	 * btrfs_delete_unused_bgs()).
+	 * The cleaner task could be already running before we set the flag
+	 * BTRFS_FS_STATE_RO (and SB_RDONLY in the superblock).  We must make
+	 * sure that after we finish the remount, i.e. after we call
+	 * btrfs_commit_super(), the cleaner can no longer start a transaction
+	 * - either because it was dropping a dead root, running delayed iputs
+	 *   or deleting an unused block group (the cleaner picked a block
+	 *   group from the list of unused block groups before we were able to
+	 *   in the previous call to btrfs_delete_unused_bgs()).
 	 */
-	wait_on_bit(&fs_info->flags, BTRFS_FS_CLEANER_RUNNING,
-		    TASK_UNINTERRUPTIBLE);
+	wait_on_bit(&fs_info->flags, BTRFS_FS_CLEANER_RUNNING, TASK_UNINTERRUPTIBLE);
 
 	/*
-	 * We've set the superblock to RO mode, so we might have made
-	 * the cleaner task sleep without running all pending delayed
-	 * iputs. Go through all the delayed iputs here, so that if an
-	 * unmount happens without remounting RW we don't end up at
-	 * finishing close_ctree() with a non-empty list of delayed
-	 * iputs.
+	 * We've set the superblock to RO mode, so we might have made the
+	 * cleaner task sleep without running all pending delayed iputs. Go
+	 * through all the delayed iputs here, so that if an unmount happens
+	 * without remounting RW we don't end up at finishing close_ctree()
+	 * with a non-empty list of delayed iputs.
 	 */
 	btrfs_run_delayed_iputs(fs_info);
 
@@ -1349,18 +1342,17 @@ static int btrfs_remount_ro(struct btrfs_fs_info *fs_info)
 	btrfs_pause_balance(fs_info);
 
 	/*
-	 * Pause the qgroup rescan worker if it is running. We don't want
-	 * it to be still running after we are in RO mode, as after that,
-	 * by the time we unmount, it might have left a transaction open,
-	 * so we would leak the transaction and/or crash.
+	 * Pause the qgroup rescan worker if it is running. We don't want it to
+	 * be still running after we are in RO mode, as after that, by the time
+	 * we unmount, it might have left a transaction open, so we would leak
+	 * the transaction and/or crash.
 	 */
 	btrfs_qgroup_wait_for_completion(fs_info, false);
 
 	return btrfs_commit_super(fs_info);
 }
 
-static void btrfs_ctx_to_info(struct btrfs_fs_info *fs_info,
-			      struct btrfs_fs_context *ctx)
+static void btrfs_ctx_to_info(struct btrfs_fs_info *fs_info, struct btrfs_fs_context *ctx)
 {
 	fs_info->max_inline = ctx->max_inline;
 	fs_info->commit_interval = ctx->commit_interval;
@@ -1371,8 +1363,7 @@ static void btrfs_ctx_to_info(struct btrfs_fs_info *fs_info,
 	fs_info->compress_level = ctx->compress_level;
 }
 
-static void btrfs_info_to_ctx(struct btrfs_fs_info *fs_info,
-			      struct btrfs_fs_context *ctx)
+static void btrfs_info_to_ctx(struct btrfs_fs_info *fs_info, struct btrfs_fs_context *ctx)
 {
 	ctx->max_inline = fs_info->max_inline;
 	ctx->commit_interval = fs_info->commit_interval;
@@ -1439,8 +1430,7 @@ static void btrfs_emit_options(struct btrfs_fs_info *info,
 	     old->compress_level != info->compress_level ||
 	     (!btrfs_raw_test_opt(old->mount_opt, FORCE_COMPRESS) &&
 	      btrfs_raw_test_opt(info->mount_opt, FORCE_COMPRESS)))) {
-		const char *compress_type =
-			btrfs_compress_type2str(info->compress_type);
+		const char *compress_type = btrfs_compress_type2str(info->compress_type);
 
 		btrfs_info(info, "%s %s compression, level %d",
 			   btrfs_test_opt(info, FORCE_COMPRESS) ? "force" : "use",
@@ -1448,8 +1438,7 @@ static void btrfs_emit_options(struct btrfs_fs_info *info,
 	}
 
 	if (info->max_inline != BTRFS_DEFAULT_MAX_INLINE)
-		btrfs_info(info, "max_inline at %llu",
-			   info->max_inline);
+		btrfs_info(info, "max_inline set to %llu", info->max_inline);
 }
 
 static int btrfs_reconfigure(struct fs_context *fc)
@@ -1483,8 +1472,8 @@ static int btrfs_reconfigure(struct fs_context *fc)
 	    (bool)btrfs_fs_compat_ro(fs_info, FREE_SPACE_TREE) &&
 	    (!sb_rdonly(sb) || (fc->sb_flags & SB_RDONLY))) {
 		btrfs_warn(fs_info,
-		"remount supports changing free space tree only from ro to rw");
-		/* Make sure free space cache options match the state on disk */
+		"remount supports changing free space tree only from RO to RW");
+		/* Make sure free space cache options match the state on disk. */
 		if (btrfs_fs_compat_ro(fs_info, FREE_SPACE_TREE)) {
 			btrfs_set_opt(fs_info->mount_opt, FREE_SPACE_TREE);
 			btrfs_clear_opt(fs_info->mount_opt, SPACE_CACHE);
@@ -1504,7 +1493,7 @@ static int btrfs_reconfigure(struct fs_context *fc)
 		goto restore;
 
 	/*
-	 * If we set the mask during the parameter parsing vfs would reject the
+	 * If we set the mask during the parameter parsing VFS would reject the
 	 * remount.  Here we can set the mask and the value will be updated
 	 * appropriately.
 	 */
@@ -1782,10 +1771,10 @@ static int btrfs_statfs(struct dentry *dentry, struct kstatfs *buf)
 	return 0;
 }
 
-static int btrfs_fc_test_super(struct super_block *s, struct fs_context *fc)
+static int btrfs_fc_test_super(struct super_block *sb, struct fs_context *fc)
 {
 	struct btrfs_fs_info *p = fc->s_fs_info;
-	struct btrfs_fs_info *fs_info = btrfs_sb(s);
+	struct btrfs_fs_info *fs_info = btrfs_sb(sb);
 
 	return fs_info->fs_devices == p->fs_devices;
 }
@@ -1797,9 +1786,11 @@ static int btrfs_get_tree_super(struct fs_context *fc)
 	struct btrfs_fs_devices *fs_devices = NULL;
 	struct block_device *bdev;
 	struct btrfs_device *device;
-	struct super_block *s;
+	struct super_block *sb;
 	blk_mode_t mode = sb_open_mode(fc->sb_flags);
 	int ret;
+
+	mode &= ~BLK_OPEN_RESTRICT_WRITES;
 
 	btrfs_ctx_to_info(fs_info, ctx);
 	mutex_lock(&uuid_mutex);
@@ -1831,42 +1822,41 @@ static int btrfs_get_tree_super(struct fs_context *fc)
 	bdev = fs_devices->latest_dev->bdev;
 
 	/*
+	 * From now on the error handling is not straightforward.
+	 *
 	 * If successful, this will transfer the fs_info into the super block,
 	 * and fc->s_fs_info will be NULL.  However if there's an existing
 	 * super, we'll still have fc->s_fs_info populated.  If we error
 	 * completely out it'll be cleaned up when we drop the fs_context,
 	 * otherwise it's tied to the lifetime of the super_block.
-	 *
-	 * Adding this comment because I was horribly confused about the error
-	 * handling from here on out.
 	 */
-	s = sget_fc(fc, btrfs_fc_test_super, set_anon_super_fc);
-	if (IS_ERR(s)) {
-		ret = PTR_ERR(s);
+	sb = sget_fc(fc, btrfs_fc_test_super, set_anon_super_fc);
+	if (IS_ERR(sb)) {
+		ret = PTR_ERR(sb);
 		goto error;
 	}
 
 	set_device_specific_options(fs_info);
 
-	if (s->s_root) {
+	if (sb->s_root) {
 		btrfs_close_devices(fs_devices);
-		if ((fc->sb_flags ^ s->s_flags) & SB_RDONLY)
+		if ((fc->sb_flags ^ sb->s_flags) & SB_RDONLY)
 			ret = -EBUSY;
 	} else {
-		snprintf(s->s_id, sizeof(s->s_id), "%pg", bdev);
-		shrinker_debugfs_rename(s->s_shrink, "sb-btrfs:%s", s->s_id);
-		btrfs_sb(s)->bdev_holder = &btrfs_fs_type;
-		ret = btrfs_fill_super(s, fs_devices, NULL);
+		snprintf(sb->s_id, sizeof(sb->s_id), "%pg", bdev);
+		shrinker_debugfs_rename(sb->s_shrink, "sb-btrfs:%s", sb->s_id);
+		btrfs_sb(sb)->bdev_holder = &btrfs_fs_type;
+		ret = btrfs_fill_super(sb, fs_devices, NULL);
 	}
 
 	if (ret) {
-		deactivate_locked_super(s);
+		deactivate_locked_super(sb);
 		return ret;
 	}
 
 	btrfs_clear_oneshot_options(fs_info);
 
-	fc->root = dget(s->s_root);
+	fc->root = dget(sb->s_root);
 	return 0;
 
 error:
@@ -1875,19 +1865,16 @@ error:
 }
 
 /*
- * Christian wrote this long comment about what we're doing here, preserving it
- * so the history of this change is preserved.
- *
- * Ever since commit 0723a0473fb4 ("btrfs: allow * mounting btrfs subvolumes
- * with different ro/rw * options") the following works:
+ * Ever since commit 0723a0473fb4 ("btrfs: allow mounting btrfs subvolumes
+ * with different ro/rw options") the following works:
  *
  *        (i) mount /dev/sda3 -o subvol=foo,ro /mnt/foo
  *       (ii) mount /dev/sda3 -o subvol=bar,rw /mnt/bar
  *
- * which looks nice and innocent but is actually pretty * intricate and
- * deserves a long comment.
+ * which looks nice and innocent but is actually pretty intricate and deserves
+ * a long comment.
  *
- * On another filesystem a subvolume mount is close to * something like:
+ * On another filesystem a subvolume mount is close to something like:
  *
  *	(iii) # create rw superblock + initial mount
  *	      mount -t xfs /dev/sdb /opt/
@@ -1902,7 +1889,7 @@ error:
  * sb->s_root dentry is really swapped after mount_subtree(). But conceptually
  * it's very close and will help us understand the issue.
  *
- * The old mount api didn't cleanly distinguish between a mount being made ro
+ * The old mount API didn't cleanly distinguish between a mount being made ro
  * and a superblock being made ro.  The only way to change the ro state of
  * either object was by passing ms_rdonly. If a new mount was created via
  * mount(2) such as:
@@ -1921,60 +1908,59 @@ error:
  * Creating a subtree mount via (iii) ends up leaving a rw superblock with a
  * subtree mounted ro.
  *
- * But consider the effect on the old mount api on btrfs subvolume mounting
- * which combines the distinct step in (iii) into a a single step.
+ * But consider the effect on the old mount API on btrfs subvolume mounting
+ * which combines the distinct step in (iii) into a single step.
  *
  * By issuing (i) both the mount and the superblock are turned ro. Now when (ii)
  * is issued the superblock is ro and thus even if the mount created for (ii) is
  * rw it wouldn't help. Hence, btrfs needed to transition the superblock from ro
- * to rw for (ii) which it did using an internal remount call (a bold
- * choice...).
+ * to rw for (ii) which it did using an internal remount call.
  *
- * IOW, subvolume mounting was inherently messy due to the ambiguity of
+ * IOW, subvolume mounting was inherently complicated due to the ambiguity of
  * MS_RDONLY in mount(2). Note, this ambiguity has mount(8) always translate
  * "ro" to MS_RDONLY. IOW, in both (i) and (ii) "ro" becomes MS_RDONLY when
  * passed by mount(8) to mount(2).
  *
- * Enter the new mount api. the new mount api disambiguates making a mount ro
+ * Enter the new mount API. The new mount API disambiguates making a mount ro
  * and making a superblock ro.
  *
  * (3) To turn a mount ro the MOUNT_ATTR_ONLY flag can be used with either
- *     fsmount() or mount_setattr() this is a pure vfs level change for a
+ *     fsmount() or mount_setattr() this is a pure VFS level change for a
  *     specific mount or mount tree that is never seen by the filesystem itself.
  *
  * (4) To turn a superblock ro the "ro" flag must be used with
- *     fsconfig(FSCONFIG_SET_FLAG, "ro"). This option is seen by the filesytem
+ *     fsconfig(FSCONFIG_SET_FLAG, "ro"). This option is seen by the filesystem
  *     in fc->sb_flags.
  *
  * This disambiguation has rather positive consequences.  Mounting a subvolume
  * ro will not also turn the superblock ro. Only the mount for the subvolume
  * will become ro.
  *
- * So, if the superblock creation request comes from the new mount api the
- * caller must've explicitly done:
+ * So, if the superblock creation request comes from the new mount API the
+ * caller must have explicitly done:
  *
  *      fsconfig(FSCONFIG_SET_FLAG, "ro")
  *      fsmount/mount_setattr(MOUNT_ATTR_RDONLY)
  *
  * IOW, at some point the caller must have explicitly turned the whole
  * superblock ro and we shouldn't just undo it like we did for the old mount
- * api. In any case, it lets us avoid this nasty hack in the new mount api.
+ * API. In any case, it lets us avoid the hack in the new mount API.
  *
  * Consequently, the remounting hack must only be used for requests originating
- * from the old mount api and should be marked for full deprecation so it can be
+ * from the old mount API and should be marked for full deprecation so it can be
  * turned off in a couple of years.
  *
- * The new mount api has no reason to support this hack.
+ * The new mount API has no reason to support this hack.
  */
 static struct vfsmount *btrfs_reconfigure_for_mount(struct fs_context *fc)
 {
 	struct vfsmount *mnt;
 	int ret;
-	bool ro2rw = !(fc->sb_flags & SB_RDONLY);
+	const bool ro2rw = !(fc->sb_flags & SB_RDONLY);
 
 	/*
 	 * We got an EBUSY because our SB_RDONLY flag didn't match the existing
-	 * super block, so invert our setting here and re-try the mount so we
+	 * super block, so invert our setting here and retry the mount so we
 	 * can get our vfsmount.
 	 */
 	if (ro2rw)
@@ -1989,7 +1975,7 @@ static struct vfsmount *btrfs_reconfigure_for_mount(struct fs_context *fc)
 	if (!fc->oldapi || !ro2rw)
 		return mnt;
 
-	/* We need to convert to rw, call reconfigure */
+	/* We need to convert to rw, call reconfigure. */
 	fc->sb_flags &= ~SB_RDONLY;
 	down_write(&mnt->mnt_sb->s_umount);
 	ret = btrfs_reconfigure(fc);
@@ -2111,8 +2097,7 @@ static void btrfs_free_fs_context(struct fs_context *fc)
 	}
 }
 
-static int btrfs_dup_fs_context(struct fs_context *fc,
-				struct fs_context *src_fc)
+static int btrfs_dup_fs_context(struct fs_context *fc, struct fs_context *src_fc)
 {
 	struct btrfs_fs_context *ctx = src_fc->fs_private;
 
