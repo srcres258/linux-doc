@@ -313,8 +313,13 @@ static int add_rule_path_beneath(struct landlock_ruleset *const ruleset,
 	if (!path_beneath_attr.allowed_access)
 		return -ENOMSG;
 
-	/* Checks that allowed_access matches the @ruleset constraints. */
-	mask = landlock_get_raw_fs_access_mask(ruleset, 0);
+	/*
+	 * Checks that allowed_access matches the @ruleset constraints and only
+	 * consists of publicly visible access rights (as opposed to synthetic
+	 * ones).
+	 */
+	mask = landlock_get_raw_fs_access_mask(ruleset, 0) &
+	       LANDLOCK_MASK_PUBLIC_ACCESS_FS;
 	if ((path_beneath_attr.allowed_access | mask) != mask)
 		return -EINVAL;
 

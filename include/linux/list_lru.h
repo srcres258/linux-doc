@@ -103,20 +103,6 @@ bool list_lru_add(struct list_lru *lru, struct list_head *item, int nid,
  *
  * Return: true if the list was updated, false otherwise
  */
-bool __list_lru_add(struct list_lru *lru, struct list_head *item, int nid,
-		struct mem_cgroup *memcg);
-
-/**
- * list_lru_del: delete an element to the lru list
- * @lru: the lru pointer
- * @item: the item to be deleted.
- *
- * This function works analogously as list_lru_add() in terms of list
- * manipulation. The comments about an element already pertaining to
- * a list are also valid for list_lru_del().
- *
- * Return: true if the list was updated, false otherwise
- */
 bool list_lru_add_obj(struct list_lru *lru, struct list_head *item);
 
 /**
@@ -147,18 +133,6 @@ bool list_lru_del(struct list_lru *lru, struct list_head *item, int nid,
  * Return value: true if the list was updated, false otherwise.
  */
 bool list_lru_del_obj(struct list_lru *lru, struct list_head *item);
-
-/**
- * __list_lru_delete: delete an element from a specific sublist.
- * @list_lru: the lru pointer
- * @item: the item to be deleted.
- * @memcg: the cgroup of the sublist to delete the item from.
- * @nid: the node id of the sublist to delete the item from.
- *
- * Return value: true if the list was updated, false otherwise.
- */
-bool __list_lru_del(struct list_lru *lru, struct list_head *item, int nid,
-		struct mem_cgroup *memcg);
 
 /**
  * list_lru_count_one: return the number of objects currently held by @lru
@@ -212,15 +186,6 @@ void list_lru_isolate_move(struct list_lru_one *list, struct list_head *item,
  */
 void list_lru_putback(struct list_lru *lru, struct list_head *item, int nid,
 		      struct mem_cgroup *memcg);
-
-/*
- * list_lru_putback: undo list_lru_isolate.
- *
- * Since we might have dropped the LRU lock in between, recompute list_lru_one
- * from the node's id and memcg.
- */
-void list_lru_putback(struct list_lru *lru, struct list_head *item, int nid,
-		struct mem_cgroup *memcg);
 
 typedef enum lru_status (*list_lru_walk_cb)(struct list_head *item,
 		struct list_lru_one *list, spinlock_t *lock, void *cb_arg);

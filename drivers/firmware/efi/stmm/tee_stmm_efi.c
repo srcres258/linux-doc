@@ -521,7 +521,7 @@ static void tee_stmm_efi_close_session(void *data)
 	tee_client_close_session(pvt_data.ctx, pvt_data.session);
 }
 
-void tee_stmm_restore_efivars_generic_ops(void)
+static void tee_stmm_restore_efivars_generic_ops(void)
 {
 	efivars_unregister(&tee_efivars);
 	efivars_generic_ops_register();
@@ -564,15 +564,15 @@ static int tee_stmm_efi_probe(struct device *dev)
 			  MM_VARIABLE_COMMUNICATE_SIZE +
 			  max_payload_size;
 
-	tee_efivar_ops.get_variable = tee_get_variable;
-	tee_efivar_ops.get_next_variable = tee_get_next_variable;
-	tee_efivar_ops.set_variable = tee_set_variable;
-	tee_efivar_ops.set_variable_nonblocking = tee_set_variable_nonblocking;
-	tee_efivar_ops.query_variable_store = efi_query_variable_store;
-	tee_efivar_ops.query_variable_info = tee_query_variable_info;
+	tee_efivar_ops.get_variable		= tee_get_variable;
+	tee_efivar_ops.get_next_variable	= tee_get_next_variable;
+	tee_efivar_ops.set_variable		= tee_set_variable;
+	tee_efivar_ops.set_variable_nonblocking	= tee_set_variable_nonblocking;
+	tee_efivar_ops.query_variable_store	= efi_query_variable_store;
+	tee_efivar_ops.query_variable_info	= tee_query_variable_info;
 
 	efivars_generic_ops_unregister();
-	pr_info("Use tee-based EFI runtime variable services\n");
+	pr_info("Using TEE-based EFI runtime variable services\n");
 	efivars_register(&tee_efivars, &tee_efivar_ops);
 
 	return 0;

@@ -450,7 +450,7 @@ static int ptrace_attach(struct task_struct *task, long request,
 				return retval;
 		}
 
-		scoped_guard (write_lock, &tasklist_lock) {
+		scoped_guard (write_lock_irq, &tasklist_lock) {
 			if (unlikely(task->exit_state))
 				return -EPERM;
 			if (task->ptrace)

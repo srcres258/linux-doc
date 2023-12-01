@@ -441,11 +441,13 @@ static int check_bp_exists(struct btree_trans *trans,
 	    memcmp(bkey_s_c_to_backpointer(bp_k).v, &bp, sizeof(bp))) {
 		if (last_flushed->level != bp.level ||
 		    !bpos_eq(last_flushed->pos, orig_k.k->p)) {
+			ret = bch2_btree_write_buffer_flush_sync(trans);
+			if (ret)
+				goto err;
+
 			last_flushed->level = bp.level;
 			last_flushed->pos = orig_k.k->p;
-
-			ret = bch2_btree_write_buffer_flush_sync(trans) ?:
-				-BCH_ERR_transaction_restart_write_buffer_flush;
+			ret = -BCH_ERR_transaction_restart_write_buffer_flush;
 			goto out;
 		}
 		goto missing;
@@ -614,10 +616,10 @@ static int bch2_check_extents_to_backpointers_pass(struct btree_trans *trans,
 	struct btree_iter iter;
 	enum btree_id btree_id;
 	struct bkey_s_c k;
-	struct bpos_level last_flushed = { UINT_MAX, POS_MIN };
 	int ret = 0;
 
 	for (btree_id = 0; btree_id < btree_id_nr_alive(c); btree_id++) {
+		struct bpos_level last_flushed = { UINT_MAX, POS_MIN };
 		int level, depth = btree_type_has_ptrs(btree_id) ? 0 : 1;
 
 		ret = commit_do(trans, NULL, NULL,
@@ -632,17 +634,26 @@ static int bch2_check_extents_to_backpointers_pass(struct btree_trans *trans,
 			bch2_trans_node_iter_init(trans, &iter, btree_id, POS_MIN, 0,
 						  level,
 						  BTREE_ITER_PREFETCH);
-			for_each_btree_key_continue(trans, iter, BTREE_ITER_PREFETCH, k, ret) {
-				ret = commit_do(trans, NULL, NULL,
-						BCH_TRANS_COMMIT_no_enospc,
+			while (1) {
+				bch2_trans_begin(trans);
+				k = bch2_btree_iter_peek(&iter);
+				if (!k.k)
+					break;
+				ret = bkey_err(k) ?:
 					check_extent_to_backpointers(trans, btree_id, level,
 								     bucket_start, bucket_end,
-								     &last_flushed, k));
+								     &last_flushed, k) ?:
+					bch2_trans_commit(trans, NULL, NULL,
+							  BCH_TRANS_COMMIT_no_enospc);
+				if (bch2_err_matches(ret, BCH_ERR_transaction_restart)) {
+					ret = 0;
+					continue;
+				}
 				if (ret)
 					break;
-
 				if (bpos_eq(iter.pos, SPOS_MAX))
 					break;
+				bch2_btree_iter_advance(&iter);
 			}
 			bch2_trans_iter_exit(trans, &iter);
 

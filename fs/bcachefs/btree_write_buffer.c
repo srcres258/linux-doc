@@ -167,8 +167,7 @@ int bch2_btree_write_buffer_flush_locked(struct btree_trans *trans)
 	bool write_locked = false;
 	int ret = 0;
 
-	bch2_trans_unlock(trans);
-	bch2_trans_begin(trans);
+	memset(&pin, 0, sizeof(pin));
 
 	bch2_journal_pin_copy(j, &pin, &wb->journal_pin,
 			      bch2_btree_write_buffer_journal_flush);

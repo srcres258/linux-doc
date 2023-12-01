@@ -32,6 +32,7 @@
 #include <linux/mm_types.h>
 #include <linux/page-flags.h>
 #include <linux/swapops.h>
+#include <linux/memcontrol.h>
 #include <linux/writeback.h>
 #include <linux/pagemap.h>
 #include <linux/workqueue.h>
@@ -983,7 +984,9 @@ static void shrink_worker(struct work_struct *w)
 		 * Acquire an extra reference to the iterated memcg in case the
 		 * original reference is dropped by the zswap offlining callback.
 		 */
+#ifdef CONFIG_MEMCG
 		css_get(&memcg->css);
+#endif
 		spin_unlock(&zswap_pools_lock);
 
 		ret = shrink_memcg(memcg);
