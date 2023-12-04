@@ -278,8 +278,8 @@ static int bch2_compression_stats_to_text(struct printbuf *out, struct bch_fs *c
 		if (!btree_type_has_ptrs(id))
 			continue;
 
-		for_each_btree_key(trans, iter, id, POS_MIN,
-				   BTREE_ITER_ALL_SNAPSHOTS, k, ret) {
+		ret = for_each_btree_key2(trans, iter, id, POS_MIN,
+					  BTREE_ITER_ALL_SNAPSHOTS, k, ({
 			struct bkey_ptrs_c ptrs = bch2_bkey_ptrs_c(k);
 			struct bch_extent_crc_unpacked crc;
 			const union bch_extent_entry *entry;
@@ -305,8 +305,8 @@ static int bch2_compression_stats_to_text(struct printbuf *out, struct bch_fs *c
 				s[t].sectors_compressed += k.k->size;
 				s[t].sectors_uncompressed += k.k->size;
 			}
-		}
-		bch2_trans_iter_exit(trans, &iter);
+			0;
+		}));
 	}
 
 	bch2_trans_put(trans);
