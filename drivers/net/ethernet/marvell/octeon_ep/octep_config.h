@@ -13,11 +13,15 @@
 #define OCTEP_64BYTE_INSTR  64
 
 /* Tx Queue: maximum descriptors per ring */
+/* This needs to be a power of 2 */
 #define OCTEP_IQ_MAX_DESCRIPTORS    1024
 /* Minimum input (Tx) requests to be enqueued to ring doorbell */
-#define OCTEP_DB_MIN                1
+#define OCTEP_DB_MIN                8
 /* Packet threshold for Tx queue interrupt */
 #define OCTEP_IQ_INTR_THRESHOLD     0x0
+
+/* Minimum watermark for backpressure */
+#define OCTEP_OQ_WMARK_MIN 256
 
 /* Rx Queue: maximum descriptors per ring */
 #define OCTEP_OQ_MAX_DESCRIPTORS   1024
@@ -44,8 +48,6 @@
 
 /* Minimum MTU supported by Octeon network interface */
 #define OCTEP_MIN_MTU        ETH_MIN_MTU
-/* Maximum MTU supported by Octeon interface*/
-#define OCTEP_MAX_MTU        (10000 - (ETH_HLEN + ETH_FCS_LEN))
 /* Default MTU */
 #define OCTEP_DEFAULT_MTU    1500
 
@@ -68,6 +70,7 @@
 #define CFG_GET_OQ_REFILL_THRESHOLD(cfg)  ((cfg)->oq.refill_threshold)
 #define CFG_GET_OQ_INTR_PKT(cfg)          ((cfg)->oq.oq_intr_pkt)
 #define CFG_GET_OQ_INTR_TIME(cfg)         ((cfg)->oq.oq_intr_time)
+#define CFG_GET_OQ_WMARK(cfg)             ((cfg)->oq.wmark)
 
 #define CFG_GET_PORTS_MAX_IO_RINGS(cfg)    ((cfg)->pf_ring_cfg.max_io_rings)
 #define CFG_GET_PORTS_ACTIVE_IO_RINGS(cfg) ((cfg)->pf_ring_cfg.active_io_rings)
@@ -137,6 +140,12 @@ struct octep_oq_config {
 	 * default. The time is specified in microseconds.
 	 */
 	u32 oq_intr_time;
+
+	/* Water mark for backpressure.
+	 * Output queue sends backpressure signal to source when
+	 * free buffer count falls below wmark.
+	 */
+	u32 wmark;
 };
 
 /* Tx/Rx configuration */
