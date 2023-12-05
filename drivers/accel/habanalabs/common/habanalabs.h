@@ -1262,6 +1262,7 @@ struct hl_dec {
  * @ASIC_GAUDI_SEC: Gaudi secured device (HL-2000).
  * @ASIC_GAUDI2: Gaudi2 device.
  * @ASIC_GAUDI2B: Gaudi2B device.
+ * @ASIC_GAUDI2C: Gaudi2C device.
  */
 enum hl_asic_type {
 	ASIC_INVALID,
@@ -1270,6 +1271,7 @@ enum hl_asic_type {
 	ASIC_GAUDI_SEC,
 	ASIC_GAUDI2,
 	ASIC_GAUDI2B,
+	ASIC_GAUDI2C,
 };
 
 struct hl_cs_parser;
@@ -3594,6 +3596,14 @@ static inline bool hl_is_fw_sw_ver_below(struct hl_device *hdev, u32 fw_sw_major
 	return false;
 }
 
+static inline bool hl_is_fw_sw_ver_equal_or_greater(struct hl_device *hdev, u32 fw_sw_major,
+							u32 fw_sw_minor)
+{
+	return (hdev->fw_sw_major_ver > fw_sw_major ||
+			(hdev->fw_sw_major_ver == fw_sw_major &&
+					hdev->fw_sw_minor_ver >= fw_sw_minor));
+}
+
 /*
  * Kernel module functions that can be accessed by entire module
  */
@@ -3954,6 +3964,8 @@ long hl_fw_get_max_power(struct hl_device *hdev);
 void hl_fw_set_max_power(struct hl_device *hdev);
 int hl_fw_get_sec_attest_info(struct hl_device *hdev, struct cpucp_sec_attest_info *sec_attest_info,
 				u32 nonce);
+int hl_fw_get_dev_info_signed(struct hl_device *hdev,
+			      struct cpucp_dev_info_signed *dev_info_signed, u32 nonce);
 int hl_set_voltage(struct hl_device *hdev, int sensor_index, u32 attr, long value);
 int hl_set_current(struct hl_device *hdev, int sensor_index, u32 attr, long value);
 int hl_set_power(struct hl_device *hdev, int sensor_index, u32 attr, long value);
