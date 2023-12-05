@@ -2474,7 +2474,7 @@ static inline void remove_partial(struct kmem_cache_node *n,
 }
 
 /*
- * Called only for kmem_cache_debug() caches instead of acquire_slab(), with a
+ * Called only for kmem_cache_debug() caches instead of remove_partial(), with a
  * slab from the n->partial list. Remove only a single object from the slab, do
  * the alloc_debug_processing() checks and leave the slab on the list, or move
  * it to full list if it was the last free object.

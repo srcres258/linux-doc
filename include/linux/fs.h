@@ -997,8 +997,10 @@ static inline int ra_has_index(struct file_ra_state *ra, pgoff_t index)
  */
 struct file {
 	union {
+		/* fput() uses task work when closing and freeing file (default). */
+		struct callback_head 	f_task_work;
+		/* fput() must use workqueue (most kernel threads). */
 		struct llist_node	f_llist;
-		struct rcu_head 	f_rcuhead;
 		unsigned int 		f_iocb_flags;
 	};
 
@@ -3074,8 +3076,6 @@ ssize_t copy_splice_read(struct file *in, loff_t *ppos,
 			 size_t len, unsigned int flags);
 extern ssize_t iter_file_splice_write(struct pipe_inode_info *,
 		struct file *, loff_t *, size_t, unsigned int);
-extern long do_splice_direct(struct file *in, loff_t *ppos, struct file *out,
-		loff_t *opos, size_t len, unsigned int flags);
 
 
 extern void

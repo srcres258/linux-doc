@@ -738,7 +738,7 @@ PsxDelete:
 
 int
 CIFSSMBDelFile(const unsigned int xid, struct cifs_tcon *tcon, const char *name,
-	       struct cifs_sb_info *cifs_sb)
+	       struct cifs_sb_info *cifs_sb, struct dentry *dentry)
 {
 	DELETE_FILE_REQ *pSMB = NULL;
 	DELETE_FILE_RSP *pSMBr = NULL;
@@ -2149,10 +2149,10 @@ CIFSSMBFlush(const unsigned int xid, struct cifs_tcon *tcon, int smb_file_id)
 	return rc;
 }
 
-int CIFSSMBRename(const unsigned int xid, struct cifs_tcon *tcon,
-		  struct dentry *source_dentry,
-		  const char *from_name, const char *to_name,
-		  struct cifs_sb_info *cifs_sb)
+int
+CIFSSMBRename(const unsigned int xid, struct cifs_tcon *tcon,
+	      const char *from_name, const char *to_name,
+	      struct cifs_sb_info *cifs_sb, struct dentry *dentry)
 {
 	int rc = 0;
 	RENAME_REQ *pSMB = NULL;
@@ -4983,7 +4983,7 @@ QFSPosixRetry:
 int
 CIFSSMBSetEOF(const unsigned int xid, struct cifs_tcon *tcon,
 	      const char *file_name, __u64 size, struct cifs_sb_info *cifs_sb,
-	      bool set_allocation)
+	      bool set_allocation, struct dentry *dentry)
 {
 	struct smb_com_transaction2_spi_req *pSMB = NULL;
 	struct smb_com_transaction2_spi_rsp *pSMBr = NULL;

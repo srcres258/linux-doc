@@ -48,9 +48,6 @@ enum netdev_xdp_act {
 enum netdev_xdp_rx_metadata {
 	NETDEV_XDP_RX_METADATA_TIMESTAMP = 1,
 	NETDEV_XDP_RX_METADATA_HASH = 2,
-
-	/* private: */
-	NETDEV_XDP_RX_METADATA_MASK = 3,
 };
 
 /**
@@ -63,9 +60,6 @@ enum netdev_xdp_rx_metadata {
 enum netdev_xsk_flags {
 	NETDEV_XSK_FLAGS_TX_TIMESTAMP = 1,
 	NETDEV_XSK_FLAGS_TX_CHECKSUM = 2,
-
-	/* private: */
-	NETDEV_XSK_FLAGS_MASK = 3,
 };
 
 enum {

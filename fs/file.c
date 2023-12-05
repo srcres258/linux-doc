@@ -629,18 +629,22 @@ void fd_install(unsigned int fd, struct file *file)
 EXPORT_SYMBOL(fd_install);
 
 /**
- * pick_file - return file associatd with fd
+ * file_close_fd_locked - return file associated with fd
  * @files: file struct to retrieve file from
  * @fd: file descriptor to retrieve file for
+ *
+ * Doesn't take a separate reference count.
  *
  * Context: files_lock must be held.
  *
  * Returns: The file associated with @fd (NULL if @fd is not open)
  */
-static struct file *pick_file(struct files_struct *files, unsigned fd)
+struct file *file_close_fd_locked(struct files_struct *files, unsigned fd)
 {
 	struct fdtable *fdt = files_fdtable(files);
 	struct file *file;
+
+	lockdep_assert_held(&files->file_lock);
 
 	if (fd >= fdt->max_fds)
 		return NULL;
@@ -660,7 +664,7 @@ int close_fd(unsigned fd)
 	struct file *file;
 
 	spin_lock(&files->file_lock);
-	file = pick_file(files, fd);
+	file = file_close_fd_locked(files, fd);
 	spin_unlock(&files->file_lock);
 	if (!file)
 		return -EBADF;
@@ -707,7 +711,7 @@ static inline void __range_close(struct files_struct *files, unsigned int fd,
 	max_fd = min(max_fd, n);
 
 	for (; fd <= max_fd; fd++) {
-		file = pick_file(files, fd);
+		file = file_close_fd_locked(files, fd);
 		if (file) {
 			spin_unlock(&files->file_lock);
 			filp_close(file, files);
@@ -795,26 +799,21 @@ int __close_range(unsigned fd, unsigned max_fd, unsigned int flags)
 	return 0;
 }
 
-/*
- * See close_fd_get_file() below, this variant assumes current->files->file_lock
- * is held.
+/**
+ * file_close_fd - return file associated with fd
+ * @fd: file descriptor to retrieve file for
+ *
+ * Doesn't take a separate reference count.
+ *
+ * Returns: The file associated with @fd (NULL if @fd is not open)
  */
-struct file *__close_fd_get_file(unsigned int fd)
-{
-	return pick_file(current->files, fd);
-}
-
-/*
- * variant of close_fd that gets a ref on the file for later fput.
- * The caller must ensure that filp_close() called on the file.
- */
-struct file *close_fd_get_file(unsigned int fd)
+struct file *file_close_fd(unsigned int fd)
 {
 	struct files_struct *files = current->files;
 	struct file *file;
 
 	spin_lock(&files->file_lock);
-	file = pick_file(files, fd);
+	file = file_close_fd_locked(files, fd);
 	spin_unlock(&files->file_lock);
 
 	return file;
@@ -1297,7 +1296,7 @@ out_unlock:
 }
 
 /**
- * __receive_fd() - Install received file into file descriptor table
+ * receive_fd() - Install received file into file descriptor table
  * @file: struct file that was received from another process
  * @ufd: __user pointer to write new fd number to
  * @o_flags: the O_* flags to apply to the new fd entry
@@ -1311,7 +1310,7 @@ out_unlock:
  *
  * Returns newly install fd or -ve on error.
  */
-int __receive_fd(struct file *file, int __user *ufd, unsigned int o_flags)
+int receive_fd(struct file *file, int __user *ufd, unsigned int o_flags)
 {
 	int new_fd;
 	int error;
@@ -1336,6 +1335,7 @@ int __receive_fd(struct file *file, int __user *ufd, unsigned int o_flags)
 	__receive_sock(file);
 	return new_fd;
 }
+EXPORT_SYMBOL_GPL(receive_fd);
 
 int receive_fd_replace(int new_fd, struct file *file, unsigned int o_flags)
 {
@@ -1350,12 +1350,6 @@ int receive_fd_replace(int new_fd, struct file *file, unsigned int o_flags)
 	__receive_sock(file);
 	return new_fd;
 }
-
-int receive_fd(struct file *file, unsigned int o_flags)
-{
-	return __receive_fd(file, NULL, o_flags);
-}
-EXPORT_SYMBOL_GPL(receive_fd);
 
 static int ksys_dup3(unsigned int oldfd, unsigned int newfd, int flags)
 {

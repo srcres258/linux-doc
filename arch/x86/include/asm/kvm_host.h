@@ -501,8 +501,23 @@ struct kvm_pmc {
 	u8 idx;
 	bool is_paused;
 	bool intr;
+	/*
+	 * Base value of the PMC counter, relative to the *consumed* count in
+	 * the associated perf_event.  This value includes counter updates from
+	 * the perf_event and emulated_count since the last time the counter
+	 * was reprogrammed, but it is *not* the current value as seen by the
+	 * guest or userspace.
+	 *
+	 * The count is relative to the associated perf_event so that KVM
+	 * doesn't need to reprogram the perf_event every time the guest writes
+	 * to the counter.
+	 */
 	u64 counter;
-	u64 prev_counter;
+	/*
+	 * PMC events triggered by KVM emulation that haven't been fully
+	 * processed, i.e. haven't undergone overflow detection.
+	 */
+	u64 emulated_counter;
 	u64 eventsel;
 	struct perf_event *perf_event;
 	struct kvm_vcpu *vcpu;
@@ -1408,9 +1423,8 @@ struct kvm_arch {
 	 *	the MMU lock in read mode + RCU or
 	 *	the MMU lock in write mode
 	 *
-	 * For writes, this list is protected by:
-	 *	the MMU lock in read mode + the tdp_mmu_pages_lock or
-	 *	the MMU lock in write mode
+	 * For writes, this list is protected by tdp_mmu_pages_lock; see
+	 * below for the details.
 	 *
 	 * Roots will remain in the list until their tdp_mmu_root_count
 	 * drops to zero, at which point the thread that decremented the
@@ -1427,8 +1441,10 @@ struct kvm_arch {
 	 *  - possible_nx_huge_pages;
 	 *  - the possible_nx_huge_page_link field of kvm_mmu_page structs used
 	 *    by the TDP MMU
-	 * It is acceptable, but not necessary, to acquire this lock when
-	 * the thread holds the MMU lock in write mode.
+	 * Because the lock is only taken within the MMU lock, strictly
+	 * speaking it is redundant to acquire this lock when the thread
+	 * holds the MMU lock in write mode.  However it often simplifies
+	 * the code to do so.
 	 */
 	spinlock_t tdp_mmu_pages_lock;
 #endif /* CONFIG_X86_64 */

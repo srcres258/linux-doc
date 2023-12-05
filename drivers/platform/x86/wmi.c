@@ -106,6 +106,7 @@ MODULE_DEVICE_TABLE(acpi, wmi_device_ids);
 static const char * const allow_duplicates[] = {
 	"05901221-D566-11D1-B2F0-00A0C9062910",	/* wmi-bmof */
 	"8A42EA14-4F2A-FD45-6422-0087F7A7E608",	/* dell-wmi-ddv */
+	"F1DDEE52-063C-4784-A11E-8A06684B9B01",	/* dell-smm-hwmon */
 	"44FADEB1-B204-40F2-8581-394BBDC1B651",	/* intel-wmi-sbl-fw-update */
 	"86CCFD48-205E-4A77-9C48-2021CBEDE341",	/* intel-wmi-thunderbolt */
 	NULL
@@ -1345,6 +1346,11 @@ static int parse_wdg(struct device *wmi_bus_dev, struct platform_device *pdev)
 	for (i = 0; i < total; i++) {
 		if (debug_dump_wdg)
 			wmi_dump_wdg(&gblock[i]);
+
+		if (!gblock[i].instance_count) {
+			dev_info(wmi_bus_dev, FW_INFO "%pUL has zero instances\n", &gblock[i].guid);
+			continue;
+		}
 
 		if (guid_already_parsed_for_legacy(device, &gblock[i].guid))
 			continue;

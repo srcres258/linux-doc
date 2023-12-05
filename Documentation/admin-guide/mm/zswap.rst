@@ -160,6 +160,9 @@ User can enable it as follows:
 
   echo Y > /sys/module/zswap/parameters/shrinker_enabled
 
+This can be enabled at the boot time if ``CONFIG_ZSWAP_SHRINKER_DEFAULT_ON`` is
+selected.
+
 A debugfs interface is provided for various statistic about pool size, number
 of pages stored, same-value filled pages and various counters for the reasons
 pages are rejected.

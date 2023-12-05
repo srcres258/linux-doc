@@ -237,16 +237,38 @@ static void svc_rdma_send_ctxt_release(struct svcxprt_rdma *rdma,
 	 * remains mapped until @ctxt is destroyed.
 	 */
 	for (i = 1; i < ctxt->sc_send_wr.num_sge; i++) {
+		trace_svcrdma_dma_unmap_page(&ctxt->sc_cid,
+					     ctxt->sc_sges[i].addr,
+					     ctxt->sc_sges[i].length);
 		ib_dma_unmap_page(device,
 				  ctxt->sc_sges[i].addr,
 				  ctxt->sc_sges[i].length,
 				  DMA_TO_DEVICE);
-		trace_svcrdma_dma_unmap_page(rdma,
-					     ctxt->sc_sges[i].addr,
-					     ctxt->sc_sges[i].length);
 	}
 
 	llist_add(&ctxt->sc_node, &rdma->sc_send_ctxts);
+}
+
+static void svc_rdma_send_ctxt_put_async(struct work_struct *work)
+{
+	struct svc_rdma_send_ctxt *ctxt;
+
+	ctxt = container_of(work, struct svc_rdma_send_ctxt, sc_work);
+	svc_rdma_send_ctxt_release(ctxt->sc_rdma, ctxt);
+}
+
+/**
+ * svc_rdma_send_ctxt_put - Return send_ctxt to free list
+ * @rdma: controlling svcxprt_rdma
+ * @ctxt: object to return to the free list
+ *
+ * Pages left in sc_pages are DMA unmapped and released.
+ */
+void svc_rdma_send_ctxt_put(struct svcxprt_rdma *rdma,
+			    struct svc_rdma_send_ctxt *ctxt)
+{
+	INIT_WORK(&ctxt->sc_work, svc_rdma_send_ctxt_put_async);
+	queue_work(svcrdma_wq, &ctxt->sc_work);
 }
 
 static void svc_rdma_send_ctxt_put_async(struct work_struct *work)
@@ -305,7 +327,7 @@ static void svc_rdma_wc_send(struct ib_cq *cq, struct ib_wc *wc)
 	if (unlikely(wc->status != IB_WC_SUCCESS))
 		goto flushed;
 
-	trace_svcrdma_wc_send(wc, &ctxt->sc_cid);
+	trace_svcrdma_wc_send(&ctxt->sc_cid);
 	svc_rdma_send_ctxt_put(rdma, ctxt);
 	return;
 
@@ -343,13 +365,13 @@ int svc_rdma_send(struct svcxprt_rdma *rdma, struct svc_rdma_send_ctxt *ctxt)
 	while (1) {
 		if ((atomic_dec_return(&rdma->sc_sq_avail) < 0)) {
 			percpu_counter_inc(&svcrdma_stat_sq_starve);
-			trace_svcrdma_sq_full(rdma);
+			trace_svcrdma_sq_full(rdma, &ctxt->sc_cid);
 			atomic_inc(&rdma->sc_sq_avail);
 			wait_event(rdma->sc_send_wait,
 				   atomic_read(&rdma->sc_sq_avail) > 1);
 			if (test_bit(XPT_CLOSE, &rdma->sc_xprt.xpt_flags))
 				return -ENOTCONN;
-			trace_svcrdma_sq_retry(rdma);
+			trace_svcrdma_sq_retry(rdma, &ctxt->sc_cid);
 			continue;
 		}
 
@@ -360,7 +382,7 @@ int svc_rdma_send(struct svcxprt_rdma *rdma, struct svc_rdma_send_ctxt *ctxt)
 		return 0;
 	}
 
-	trace_svcrdma_sq_post_err(rdma, ret);
+	trace_svcrdma_sq_post_err(rdma, &ctxt->sc_cid, ret);
 	svc_xprt_deferred_close(&rdma->sc_xprt);
 	wake_up(&rdma->sc_send_wait);
 	return ret;
@@ -550,14 +572,14 @@ static int svc_rdma_page_dma_map(void *data, struct page *page,
 	if (ib_dma_mapping_error(dev, dma_addr))
 		goto out_maperr;
 
-	trace_svcrdma_dma_map_page(rdma, dma_addr, len);
+	trace_svcrdma_dma_map_page(&ctxt->sc_cid, dma_addr, len);
 	ctxt->sc_sges[ctxt->sc_cur_sge_no].addr = dma_addr;
 	ctxt->sc_sges[ctxt->sc_cur_sge_no].length = len;
 	ctxt->sc_send_wr.num_sge++;
 	return 0;
 
 out_maperr:
-	trace_svcrdma_dma_map_err(rdma, dma_addr, len);
+	trace_svcrdma_dma_map_err(&ctxt->sc_cid, dma_addr, len);
 	return -EIO;
 }
 

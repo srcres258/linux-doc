@@ -150,7 +150,8 @@ module_param_named(exclusive_loads, zswap_exclusive_loads_enabled, bool, 0644);
 #define ZSWAP_NR_ZPOOLS 32
 
 /* Enable/disable memory pressure-based shrinker. */
-static bool zswap_shrinker_enabled;
+static bool zswap_shrinker_enabled = IS_ENABLED(
+		CONFIG_ZSWAP_SHRINKER_DEFAULT_ON);
 module_param_named(shrinker_enabled, zswap_shrinker_enabled, bool, 0644);
 
 /*********************************
@@ -310,10 +311,17 @@ static void zswap_update_total_size(void)
 }
 
 /* should be called under RCU */
+#ifdef CONFIG_MEMCG
 static inline struct mem_cgroup *mem_cgroup_from_entry(struct zswap_entry *entry)
 {
 	return entry->objcg ? obj_cgroup_memcg(entry->objcg) : NULL;
 }
+#else
+static inline struct mem_cgroup *mem_cgroup_from_entry(struct zswap_entry *entry)
+{
+	return NULL;
+}
+#endif
 
 static inline int entry_to_nid(struct zswap_entry *entry)
 {
@@ -328,8 +336,7 @@ void zswap_memcg_offline_cleanup(struct mem_cgroup *memcg)
 	spin_lock(&zswap_pools_lock);
 	list_for_each_entry(pool, &zswap_pools, list) {
 		if (pool->next_shrink == memcg)
-			pool->next_shrink =
-				mem_cgroup_iter_online(NULL, pool->next_shrink, NULL, true);
+			pool->next_shrink = mem_cgroup_iter(NULL, pool->next_shrink, NULL);
 	}
 	spin_unlock(&zswap_pools_lock);
 }
@@ -363,7 +370,7 @@ void zswap_lruvec_state_init(struct lruvec *lruvec)
 	atomic_long_set(&lruvec->zswap_lruvec_state.nr_zswap_protected, 0);
 }
 
-void zswap_lruvec_swapin(struct page *page)
+void zswap_page_swapin(struct page *page)
 {
 	struct lruvec *lruvec;
 
@@ -598,6 +605,13 @@ static unsigned long zswap_shrinker_scan(struct shrinker *shrinker,
 	/*
 	 * Abort if the shrinker is disabled or if we are shrinking into the
 	 * protected region.
+	 *
+	 * This short-circuiting is necessary because if we have too many multiple
+	 * concurrent reclaimers getting the freeable zswap object counts at the
+	 * same time (before any of them made reasonable progress), the total
+	 * number of reclaimed objects might be more than the number of unprotected
+	 * objects (i.e the reclaimers will reclaim into the protected area of the
+	 * zswap LRU).
 	 */
 	if (!zswap_shrinker_enabled || nr_protected >= lru_size - sc->nr_to_scan) {
 		sc->nr_scanned = 0;
@@ -916,6 +930,7 @@ static enum lru_status shrink_memcg_cb(struct list_head *item, struct list_lru_o
 	if (entry->objcg)
 		count_objcg_event(entry->objcg, ZSWP_WB);
 
+	count_vm_event(ZSWP_WB);
 	/*
 	 * Writeback started successfully, the page now belongs to the
 	 * swapcache. Drop the entry from zswap - unless invalidate already
@@ -968,10 +983,20 @@ static void shrink_worker(struct work_struct *w)
 	/* global reclaim will select cgroup in a round-robin fashion. */
 	do {
 		spin_lock(&zswap_pools_lock);
-		memcg = pool->next_shrink =
-			mem_cgroup_iter_online(NULL, pool->next_shrink, NULL, true);
+		pool->next_shrink = mem_cgroup_iter(NULL, pool->next_shrink, NULL);
+		memcg = pool->next_shrink;
 
-		/* full round trip */
+		/*
+		 * We need to retry if we have gone through a full round trip, or if we
+		 * got an offline memcg (or else we risk undoing the effect of the
+		 * zswap memcg offlining cleanup callback). This is not catastrophic
+		 * per se, but it will keep the now offlined memcg hostage for a while.
+		 *
+		 * Note that if we got an online memcg, we will keep the extra
+		 * reference in case the original reference obtained by mem_cgroup_iter
+		 * is dropped by the zswap memcg offlining callback, ensuring that the
+		 * memcg is not killed when we are reclaiming.
+		 */
 		if (!memcg) {
 			spin_unlock(&zswap_pools_lock);
 			if (++failures == MAX_RECLAIM_RETRIES)
@@ -980,16 +1005,21 @@ static void shrink_worker(struct work_struct *w)
 			goto resched;
 		}
 
-		/*
-		 * Acquire an extra reference to the iterated memcg in case the
-		 * original reference is dropped by the zswap offlining callback.
-		 */
-#ifdef CONFIG_MEMCG
-		css_get(&memcg->css);
-#endif
+		if (!mem_cgroup_online(memcg)) {
+			/* drop the reference from mem_cgroup_iter() */
+			mem_cgroup_put(memcg);
+			pool->next_shrink = NULL;
+			spin_unlock(&zswap_pools_lock);
+
+			if (++failures == MAX_RECLAIM_RETRIES)
+				break;
+
+			goto resched;
+		}
 		spin_unlock(&zswap_pools_lock);
 
 		ret = shrink_memcg(memcg);
+		/* drop the extra reference */
 		mem_cgroup_put(memcg);
 
 		if (ret == -EINVAL)
