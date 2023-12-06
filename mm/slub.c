@@ -93,6 +93,12 @@
  *   by clearing the PG_workingset flag when moving out of the node
  *   partial list. Please see __slab_free() for more details.
  *
+ *   To sum up, the current scheme is:
+ *   - node partial slab: PG_Workingset && !frozen
+ *   - cpu partial slab: !PG_Workingset && !frozen
+ *   - cpu slab: !PG_Workingset && frozen
+ *   - full slab: !PG_Workingset && !frozen
+ *
  *   list_lock
  *
  *   The list_lock protects the partial and full list on each node and

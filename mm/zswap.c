@@ -928,9 +928,9 @@ static enum lru_status shrink_memcg_cb(struct list_head *item, struct list_lru_o
 	zswap_written_back_pages++;
 
 	if (entry->objcg)
-		count_objcg_event(entry->objcg, ZSWP_WB);
+		count_objcg_event(entry->objcg, ZSWPWB);
 
-	count_vm_event(ZSWP_WB);
+	count_vm_event(ZSWPWB);
 	/*
 	 * Writeback started successfully, the page now belongs to the
 	 * swapcache. Drop the entry from zswap - unless invalidate already
@@ -1005,9 +1005,9 @@ static void shrink_worker(struct work_struct *w)
 			goto resched;
 		}
 
-		if (!mem_cgroup_online(memcg)) {
+		if (!mem_cgroup_tryget_online(memcg)) {
 			/* drop the reference from mem_cgroup_iter() */
-			mem_cgroup_put(memcg);
+			mem_cgroup_iter_break(NULL, memcg);
 			pool->next_shrink = NULL;
 			spin_unlock(&zswap_pools_lock);
 
@@ -1168,7 +1168,7 @@ static void zswap_pool_destroy(struct zswap_pool *pool)
 	list_lru_destroy(&pool->list_lru);
 
 	spin_lock(&zswap_pools_lock);
-	mem_cgroup_put(pool->next_shrink);
+	mem_cgroup_iter_break(NULL, pool->next_shrink);
 	pool->next_shrink = NULL;
 	spin_unlock(&zswap_pools_lock);
 

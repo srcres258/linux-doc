@@ -1525,6 +1525,7 @@ ssize_t vfs_copy_file_range(struct file *file_in, loff_t pos_in,
 {
 	ssize_t ret;
 	bool splice = flags & COPY_FILE_SPLICE;
+	bool samesb = file_inode(file_in)->i_sb == file_inode(file_out)->i_sb;
 
 	if (flags & ~COPY_FILE_SPLICE)
 		return -EINVAL;
@@ -1556,8 +1557,7 @@ ssize_t vfs_copy_file_range(struct file *file_in, loff_t pos_in,
 		ret = file_out->f_op->copy_file_range(file_in, pos_in,
 						      file_out, pos_out,
 						      len, flags);
-	} else if (!splice && file_in->f_op->remap_file_range &&
-		   file_inode(file_in)->i_sb == file_inode(file_out)->i_sb) {
+	} else if (!splice && file_in->f_op->remap_file_range && samesb) {
 		ret = file_in->f_op->remap_file_range(file_in, pos_in,
 				file_out, pos_out,
 				min_t(loff_t, MAX_RW_COUNT, len),
@@ -1565,6 +1565,9 @@ ssize_t vfs_copy_file_range(struct file *file_in, loff_t pos_in,
 		/* fallback to splice */
 		if (ret <= 0)
 			splice = true;
+	} else if (samesb) {
+		/* Fallback to splice for same sb copy for backward compat */
+		splice = true;
 	}
 
 	file_end_write(file_out);

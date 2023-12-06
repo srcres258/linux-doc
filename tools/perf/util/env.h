@@ -53,6 +53,10 @@ struct pmu_caps {
 	char            *pmu_name;
 };
 
+typedef const char *(arch_syscalls__strerrno_t)(int err);
+
+arch_syscalls__strerrno_t *arch_syscalls__strerrno_function(const char *arch);
+
 struct perf_env {
 	char			*hostname;
 	char			*os_release;
@@ -135,6 +139,7 @@ struct perf_env {
 		 */
 		bool	enabled;
 	} clock;
+	arch_syscalls__strerrno_t *arch_strerrno;
 };
 
 enum perf_compress_type {
@@ -164,6 +169,7 @@ int perf_env__read_cpu_topology_map(struct perf_env *env);
 void cpu_cache_level__free(struct cpu_cache_level *cache);
 
 const char *perf_env__arch(struct perf_env *env);
+const char *perf_env__arch_strerrno(struct perf_env *env, int err);
 const char *perf_env__cpuid(struct perf_env *env);
 const char *perf_env__raw_arch(struct perf_env *env);
 int perf_env__nr_cpus_avail(struct perf_env *env);

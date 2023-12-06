@@ -175,9 +175,6 @@ static void qlink_free(struct qlist_node *qlink, struct kmem_cache *cache)
 	 */
 	*(u8 *)kasan_mem_to_shadow(object) = KASAN_SLAB_FREE;
 
-	if (IS_ENABLED(CONFIG_SLAB))
-		local_irq_save(flags);
-
 	___cache_free(cache, object, _THIS_IP_);
 }
 

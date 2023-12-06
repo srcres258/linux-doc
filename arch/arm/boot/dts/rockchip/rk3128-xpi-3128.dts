@@ -12,13 +12,8 @@
 
 	aliases {
 		ethernet0 = &gmac;
-		gpio0 = &gpio0;
-		gpio1 = &gpio1;
-		gpio2 = &gpio2;
-		gpio3 = &gpio3;
 		mmc0 = &emmc;
 		mmc1 = &sdmmc;
-		serial0 = &uart1;
 	};
 
 	memory@60000000 {
@@ -27,7 +22,7 @@
 	};
 
 	chosen {
-		stdout-path = "serial0:115200n8";
+		stdout-path = &uart1;
 	};
 
 	adc-keys {
@@ -326,6 +321,11 @@
 			  /* GPIO3 D0-D7 */
 			  "", "", "", "HEADER_15",
 			  "", "", "", "";
+};
+
+&gpu {
+	mali-supply = <&vdd_log>;
+	status = "okay";
 };
 
 &mdio {
