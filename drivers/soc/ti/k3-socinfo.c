@@ -89,8 +89,9 @@ k3_chipinfo_variant_to_sr(unsigned int partno, unsigned int variant,
 						   j721e_rev_string_map[variant]);
 		break;
 	default:
+		variant++;
 		soc_dev_attr->revision = kasprintf(GFP_KERNEL, "SR%x.0",
-						   variant + 1);
+						   variant);
 	}
 
 	if (!soc_dev_attr->revision)

@@ -5,6 +5,7 @@
 #include <dt-bindings/gpio/aspeed-gpio.h>
 #include <dt-bindings/i2c/i2c.h>
 #include <dt-bindings/interrupt-controller/irq.h>
+#include <dt-bindings/leds/common.h>
 #include <dt-bindings/watchdog/aspeed-wdt.h>
 
 /{
@@ -22,7 +23,6 @@
 
 	chosen {
 		stdout-path = &uart5;
-		bootargs = "console=tty0 console=ttyS4,115200 earlycon";
 	};
 
 	memory@80000000 {
@@ -32,13 +32,19 @@
 	leds {
 		compatible = "gpio-leds";
 
-		heartbeat {
+		/* BMC heartbeat */
+		led-0 {
 			gpios = <&gpio ASPEED_GPIO(H, 6) GPIO_ACTIVE_LOW>;
+			function = LED_FUNCTION_HEARTBEAT;
+			color = <LED_COLOR_ID_GREEN>;
 			linux,default-trigger = "timer";
 		};
 
-		system-fault {
+		/* system fault */
+		led-1 {
 			gpios = <&gpio ASPEED_GPIO(Z, 2) GPIO_ACTIVE_LOW>;
+			function = LED_FUNCTION_FAULT;
+			color = <LED_COLOR_ID_RED>;
 			panic-indicator;
 		};
 	};
@@ -183,10 +189,10 @@
 	/* FRU eeprom */
 	eeprom@57 {
 		compatible = "st,24c128", "atmel,24c128";
-		#address-cells = <1>;
-		#size-cells = <1>;
 		reg = <0x57>;
 		pagesize = <16>;
+		#address-cells = <1>;
+		#size-cells = <1>;
 
 		eth0_macaddress: macaddress@3f80 {
 			reg = <0x3f80 6>;

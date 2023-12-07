@@ -2437,7 +2437,7 @@ D: work on suspend-to-ram/disk, killing duplicates from ioctl32,
 D: Altera SoCFPGA and Nokia N900 support.
 S: Czech Republic
 
-N: Olivia Mackal
+N: Olivia Mackall
 E: olivia@selenic.com
 D: SLOB slab allocator
 

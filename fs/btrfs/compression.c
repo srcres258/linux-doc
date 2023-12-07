@@ -584,7 +584,7 @@ void btrfs_submit_compressed_read(struct btrfs_bio *bbio)
 		goto out;
 	}
 
-	ASSERT(em->compress_type != BTRFS_COMPRESS_NONE);
+	ASSERT(extent_map_is_compressed(em));
 	compressed_len = em->block_len;
 
 	cb = alloc_compressed_bio(inode, file_offset, REQ_OP_READ,
@@ -596,7 +596,7 @@ void btrfs_submit_compressed_read(struct btrfs_bio *bbio)
 
 	cb->len = bbio->bio.bi_iter.bi_size;
 	cb->compressed_len = compressed_len;
-	cb->compress_type = em->compress_type;
+	cb->compress_type = extent_map_compression(em);
 	cb->orig_bbio = bbio;
 
 	free_extent_map(em);
@@ -608,7 +608,7 @@ void btrfs_submit_compressed_read(struct btrfs_bio *bbio)
 		goto out_free_bio;
 	}
 
-	ret2 = btrfs_alloc_page_array(cb->nr_pages, cb->compressed_pages);
+	ret2 = btrfs_alloc_page_array(cb->nr_pages, cb->compressed_pages, 0);
 	if (ret2) {
 		ret = BLK_STS_RESOURCE;
 		goto out_free_compressed_pages;

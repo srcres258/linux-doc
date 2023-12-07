@@ -117,17 +117,10 @@ void drm_handle_vblank_works(struct drm_vblank_crtc *vblank);
 /* IOCTLS */
 int drm_wait_vblank_ioctl(struct drm_device *dev, void *data,
 			  struct drm_file *filp);
-int drm_legacy_modeset_ctl_ioctl(struct drm_device *dev, void *data,
-				 struct drm_file *file_priv);
 
 /* drm_irq.c */
 
 /* IOCTLS */
-#if IS_ENABLED(CONFIG_DRM_LEGACY)
-int drm_legacy_irq_control(struct drm_device *dev, void *data,
-			   struct drm_file *file_priv);
-#endif
-
 int drm_crtc_get_sequence_ioctl(struct drm_device *dev, void *data,
 				struct drm_file *filp);
 
