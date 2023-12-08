@@ -8,6 +8,7 @@
 #include "habanalabs.h"
 
 #include <linux/pci.h>
+#include <linux/types.h>
 
 static ssize_t clk_max_freq_mhz_show(struct device *dev, struct device_attribute *attr, char *buf)
 {
@@ -80,12 +81,27 @@ static ssize_t vrm_ver_show(struct device *dev, struct device_attribute *attr, c
 {
 	struct hl_device *hdev = dev_get_drvdata(dev);
 	struct cpucp_info *cpucp_info;
+	u32 infineon_second_stage_version;
+	u32 infineon_second_stage_first_instance;
+	u32 infineon_second_stage_second_instance;
+	u32 infineon_second_stage_third_instance;
+	u32 mask = 0xff;
 
 	cpucp_info = &hdev->asic_prop.cpucp_info;
 
+	infineon_second_stage_version = le32_to_cpu(cpucp_info->infineon_second_stage_version);
+	infineon_second_stage_first_instance = infineon_second_stage_version & mask;
+	infineon_second_stage_second_instance =
+					(infineon_second_stage_version >> 8) & mask;
+	infineon_second_stage_third_instance =
+					(infineon_second_stage_version >> 16) & mask;
+
 	if (cpucp_info->infineon_second_stage_version)
-		return sprintf(buf, "%#04x %#04x\n", le32_to_cpu(cpucp_info->infineon_version),
-				le32_to_cpu(cpucp_info->infineon_second_stage_version));
+		return sprintf(buf, "%#04x %#04x:%#04x:%#04x\n",
+				le32_to_cpu(cpucp_info->infineon_version),
+				infineon_second_stage_first_instance,
+				infineon_second_stage_second_instance,
+				infineon_second_stage_third_instance);
 	else
 		return sprintf(buf, "%#04x\n", le32_to_cpu(cpucp_info->infineon_version));
 }
@@ -394,6 +410,13 @@ static ssize_t module_id_show(struct device *dev,
 	return sprintf(buf, "%u\n", le32_to_cpu(hdev->asic_prop.cpucp_info.card_location));
 }
 
+static ssize_t parent_device_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	struct hl_device *hdev = dev_get_drvdata(dev);
+
+	return sprintf(buf, "%s\n", HL_DEV_NAME(hdev));
+}
+
 static DEVICE_ATTR_RO(armcp_kernel_ver);
 static DEVICE_ATTR_RO(armcp_ver);
 static DEVICE_ATTR_RO(cpld_ver);
@@ -414,6 +437,7 @@ static DEVICE_ATTR_RO(uboot_ver);
 static DEVICE_ATTR_RO(fw_os_ver);
 static DEVICE_ATTR_RO(security_enabled);
 static DEVICE_ATTR_RO(module_id);
+static DEVICE_ATTR_RO(parent_device);
 
 static struct bin_attribute bin_attr_eeprom = {
 	.attr = {.name = "eeprom", .mode = (0444)},
@@ -440,6 +464,7 @@ static struct attribute *hl_dev_attrs[] = {
 	&dev_attr_fw_os_ver.attr,
 	&dev_attr_security_enabled.attr,
 	&dev_attr_module_id.attr,
+	&dev_attr_parent_device.attr,
 	NULL,
 };
 

@@ -1257,6 +1257,7 @@ struct hl_info_dev_memalloc_page_sizes {
 #define SEC_SIGNATURE_BUF_SZ	255	/* (256 - 1) 1 byte used for size */
 #define SEC_PUB_DATA_BUF_SZ	510	/* (512 - 2) 2 bytes used for size */
 #define SEC_CERTIFICATE_BUF_SZ	2046	/* (2048 - 2) 2 bytes used for size */
+#define SEC_DEV_INFO_BUF_SZ	5120
 
 /*
  * struct hl_info_sec_attest - attestation report of the boot
@@ -1301,6 +1302,8 @@ struct hl_info_sec_attest {
  * @public_data: public key info signed info data (outPublic + name + qualifiedName)
  * @certificate: certificate for the signing key
  * @info_sig: signature of the info + nonce data.
+ * @dev_info_len: length of device info (bytes)
+ * @dev_info: device info as byte array.
  */
 struct hl_info_signed {
 	__u32 nonce;
@@ -1310,7 +1313,9 @@ struct hl_info_signed {
 	__u8 public_data[SEC_PUB_DATA_BUF_SZ];
 	__u8 certificate[SEC_CERTIFICATE_BUF_SZ];
 	__u8 info_sig[SEC_SIGNATURE_BUF_SZ];
-	__u8 pad[4];
+	__u16 dev_info_len;
+	__u8 dev_info[SEC_DEV_INFO_BUF_SZ];
+	__u8 pad[2];
 };
 
 /**

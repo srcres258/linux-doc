@@ -19,6 +19,9 @@
 
 #include <asm/msr.h>
 
+/* make sure there is space for all the signed info */
+static_assert(sizeof(struct cpucp_info) <= SEC_DEV_INFO_BUF_SZ);
+
 static u32 hl_debug_struct_size[HL_DEBUG_OP_TIMESTAMP + 1] = {
 	[HL_DEBUG_OP_ETR] = sizeof(struct hl_debug_params_etr),
 	[HL_DEBUG_OP_ETF] = sizeof(struct hl_debug_params_etf),
@@ -707,6 +710,7 @@ static int sec_attest_info(struct hl_fpriv *hpriv, struct hl_info_args *args)
 	memcpy(&info->public_data, &sec_attest_info->public_data, sizeof(info->public_data));
 	memcpy(&info->certificate, &sec_attest_info->certificate, sizeof(info->certificate));
 	memcpy(&info->quote_sig, &sec_attest_info->quote_sig, sizeof(info->quote_sig));
+	memset(&info->pad0, 0, sizeof(info->pad0));
 
 	rc = copy_to_user(out, info,
 				min_t(size_t, max_size, sizeof(*info))) ? -EFAULT : 0;
@@ -749,9 +753,11 @@ static int dev_info_signed(struct hl_fpriv *hpriv, struct hl_info_args *args)
 	info->info_sig_len = dev_info_signed->info_sig_len;
 	info->pub_data_len = le16_to_cpu(dev_info_signed->pub_data_len);
 	info->certificate_len = le16_to_cpu(dev_info_signed->certificate_len);
+	info->dev_info_len = sizeof(struct cpucp_info);
 	memcpy(&info->info_sig, &dev_info_signed->info_sig, sizeof(info->info_sig));
 	memcpy(&info->public_data, &dev_info_signed->public_data, sizeof(info->public_data));
 	memcpy(&info->certificate, &dev_info_signed->certificate, sizeof(info->certificate));
+	memcpy(&info->dev_info, &dev_info_signed->info, info->dev_info_len);
 
 	rc = copy_to_user(out, info, min_t(size_t, max_size, sizeof(*info))) ? -EFAULT : 0;
 

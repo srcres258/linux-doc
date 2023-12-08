@@ -1096,7 +1096,7 @@ static void uffd_move_handle_fault(struct uffd_msg *msg,
 static void uffd_move_pmd_handle_fault(struct uffd_msg *msg,
 				       struct uffd_args *args)
 {
-	uffd_move_handle_fault_common(msg, args, default_huge_page_size());
+	uffd_move_handle_fault_common(msg, args, read_pmd_pagesize());
 }
 
 static void
@@ -1128,7 +1128,7 @@ uffd_move_test_common(uffd_test_args_t *targs, unsigned long chunk_size,
 	step_size = chunk_size / page_size;
 	step_count = nr_pages / step_size;
 
-	if (step_size > page_size) {
+	if (chunk_size > page_size) {
 		char *aligned_src = ALIGN_UP(area_src, chunk_size);
 		char *aligned_dst = ALIGN_UP(area_dst, chunk_size);
 
@@ -1199,7 +1199,7 @@ static void uffd_move_test(uffd_test_args_t *targs)
 
 static void uffd_move_pmd_test(uffd_test_args_t *targs)
 {
-	uffd_move_test_common(targs, default_huge_page_size(),
+	uffd_move_test_common(targs, read_pmd_pagesize(),
 			      uffd_move_pmd_handle_fault);
 }
 
