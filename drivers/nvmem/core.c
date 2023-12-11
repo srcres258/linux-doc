@@ -1491,6 +1491,11 @@ struct nvmem_cell *of_nvmem_cell_get(struct device_node *np, const char *id)
 	return cell;
 }
 EXPORT_SYMBOL_GPL(of_nvmem_cell_get);
+
+#else /* IS_ENABLED(CONFIG_OF) */
+
+static inline void nvmem_layout_module_put(struct nvmem_device *nvmem) { }
+
 #endif
 
 /**
