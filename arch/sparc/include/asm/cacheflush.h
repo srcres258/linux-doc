@@ -10,4 +10,11 @@
 #else
 #include <asm/cacheflush_32.h>
 #endif
+
+#ifndef __ASSEMBLY__
+static inline void flush_cache_vmap_early(unsigned long start, unsigned long end)
+{
+}
+#endif
+
 #endif
