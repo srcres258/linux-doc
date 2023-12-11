@@ -268,8 +268,8 @@ restart:
 			 * cleared *pmd but not decremented compound_mapcount().
 			 */
 			if ((pvmw->flags & PVMW_SYNC) &&
-			    transhuge_vma_suitable(vma, pvmw->address,
-						   BIT(PMD_ORDER)) &&
+			    thp_vma_suitable_order(vma, pvmw->address,
+						   PMD_ORDER) &&
 			    (pvmw->nr_pages >= HPAGE_PMD_NR)) {
 				spinlock_t *ptl = pmd_lock(mm, pvmw->pmd);
 

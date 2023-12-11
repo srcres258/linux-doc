@@ -94,13 +94,13 @@ enum ht_aggre_mode {
 struct rt_hi_throughput {
 	u8 enable_ht;
 	u8 current_ht_support;
-	u8 bRegBW40MHz;
+	u8 reg_bw_40mhz;
 	u8 cur_bw_40mhz;
-	u8 bRegShortGI40MHz;
+	u8 reg_short_gi_40mhz;
 	u8 bCurShortGI40MHz;
-	u8 bRegShortGI20MHz;
+	u8 reg_short_gi_20mhz;
 	u8 bCurShortGI20MHz;
-	u8 bRegSuppCCK;
+	u8 reg_supp_cck;
 	u8 bCurSuppCCK;
 	enum ht_spec_ver ePeerHTSpecVer;
 	struct ht_capab_ele SelfHTCap;
@@ -108,7 +108,7 @@ struct rt_hi_throughput {
 	u8 PeerHTCapBuf[32];
 	u8 PeerHTInfoBuf[32];
 	u8 bAMSDU_Support;
-	u16 nAMSDU_MaxSize;
+	u16 amsdu_max_size;
 	u8 bCurrent_AMSDU_Support;
 	u16 nCurrent_AMSDU_MaxSize;
 	u8 bAMPDUEnable;

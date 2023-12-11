@@ -71,17 +71,17 @@ void ht_update_default_setting(struct rtllib_device *ieee)
 {
 	struct rt_hi_throughput *ht_info = ieee->ht_info;
 
-	ht_info->bRegShortGI20MHz = 1;
-	ht_info->bRegShortGI40MHz = 1;
+	ht_info->reg_short_gi_20mhz = 1;
+	ht_info->reg_short_gi_40mhz = 1;
 
-	ht_info->bRegBW40MHz = 1;
+	ht_info->reg_bw_40mhz = 1;
 
-	if (ht_info->bRegBW40MHz)
-		ht_info->bRegSuppCCK = 1;
+	if (ht_info->reg_bw_40mhz)
+		ht_info->reg_supp_cck = 1;
 	else
-		ht_info->bRegSuppCCK = true;
+		ht_info->reg_supp_cck = true;
 
-	ht_info->nAMSDU_MaxSize = 7935UL;
+	ht_info->amsdu_max_size = 7935UL;
 	ht_info->bAMSDU_Support = 0;
 
 	ht_info->bAMPDUEnable = 1;
@@ -275,7 +275,7 @@ void HTConstructCapabilityElement(struct rtllib_device *ieee, u8 *posHTCap,
 	if (ieee->GetHalfNmodeSupportByAPsHandler(ieee->dev))
 		pCapELE->ChlWidth = 0;
 	else
-		pCapELE->ChlWidth = (pHT->bRegBW40MHz ? 1 : 0);
+		pCapELE->ChlWidth = (pHT->reg_bw_40mhz ? 1 : 0);
 
 	pCapELE->MimoPwrSave		= pHT->self_mimo_ps;
 	pCapELE->GreenField		= 0;
@@ -286,7 +286,7 @@ void HTConstructCapabilityElement(struct rtllib_device *ieee, u8 *posHTCap,
 	pCapELE->RxSTBC			= 0;
 	pCapELE->DelayBA		= 0;
 	pCapELE->MaxAMSDUSize = (MAX_RECEIVE_BUFFER_SIZE >= 7935) ? 1 : 0;
-	pCapELE->DssCCk = ((pHT->bRegBW40MHz) ? (pHT->bRegSuppCCK ? 1 : 0) : 0);
+	pCapELE->DssCCk = ((pHT->reg_bw_40mhz) ? (pHT->reg_supp_cck ? 1 : 0) : 0);
 	pCapELE->PSMP = 0;
 	pCapELE->LSigTxopProtect = 0;
 
@@ -478,14 +478,14 @@ void HTOnAssocRsp(struct rtllib_device *ieee)
 	ht_info->cur_tx_bw40mhz = ((pPeerHTInfo->RecommemdedTxWidth == 1) ?
 				 true : false);
 
-	ht_info->bCurShortGI20MHz = ((ht_info->bRegShortGI20MHz) ?
+	ht_info->bCurShortGI20MHz = ((ht_info->reg_short_gi_20mhz) ?
 				    ((pPeerHTCap->ShortGI20Mhz == 1) ?
 				    true : false) : false);
-	ht_info->bCurShortGI40MHz = ((ht_info->bRegShortGI40MHz) ?
+	ht_info->bCurShortGI40MHz = ((ht_info->reg_short_gi_40mhz) ?
 				     ((pPeerHTCap->ShortGI40Mhz == 1) ?
 				     true : false) : false);
 
-	ht_info->bCurSuppCCK = ((ht_info->bRegSuppCCK) ?
+	ht_info->bCurSuppCCK = ((ht_info->reg_supp_cck) ?
 			       ((pPeerHTCap->DssCCk == 1) ? true :
 			       false) : false);
 
@@ -493,10 +493,10 @@ void HTOnAssocRsp(struct rtllib_device *ieee)
 
 	nMaxAMSDUSize = (pPeerHTCap->MaxAMSDUSize == 0) ? 3839 : 7935;
 
-	if (ht_info->nAMSDU_MaxSize > nMaxAMSDUSize)
+	if (ht_info->amsdu_max_size > nMaxAMSDUSize)
 		ht_info->nCurrent_AMSDU_MaxSize = nMaxAMSDUSize;
 	else
-		ht_info->nCurrent_AMSDU_MaxSize = ht_info->nAMSDU_MaxSize;
+		ht_info->nCurrent_AMSDU_MaxSize = ht_info->amsdu_max_size;
 
 	ht_info->current_ampdu_enable = ht_info->bAMPDUEnable;
 	if (ieee->rtllib_ap_sec_type &&
@@ -569,7 +569,7 @@ void HTInitializeHTInfo(struct rtllib_device *ieee)
 	ht_info->bCurSuppCCK = true;
 
 	ht_info->bCurrent_AMSDU_Support = false;
-	ht_info->nCurrent_AMSDU_MaxSize = ht_info->nAMSDU_MaxSize;
+	ht_info->nCurrent_AMSDU_MaxSize = ht_info->amsdu_max_size;
 	ht_info->current_mpdu_density = ht_info->MPDU_Density;
 	ht_info->CurrentAMPDUFactor = ht_info->AMPDU_Factor;
 
@@ -734,7 +734,7 @@ void HTSetConnectBwMode(struct rtllib_device *ieee,
 {
 	struct rt_hi_throughput *ht_info = ieee->ht_info;
 
-	if (!ht_info->bRegBW40MHz)
+	if (!ht_info->reg_bw_40mhz)
 		return;
 
 	if (ieee->GetHalfNmodeSupportByAPsHandler(ieee->dev))

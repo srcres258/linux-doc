@@ -20,8 +20,6 @@
 
 #include "internal.h"
 
-LIST_HEAD(efivarfs_list);
-
 struct efivarfs_info {
 	struct super_block *sb;
 	struct notifier_block nb;
@@ -192,7 +190,8 @@ static struct dentry *efivarfs_alloc_dentry(struct dentry *parent, char *name)
 }
 
 static int efivarfs_callback(efi_char16_t *name16, efi_guid_t vendor,
-			     unsigned long name_size, void *data)
+			     unsigned long name_size, void *data,
+			     struct list_head *list)
 {
 	struct super_block *sb = (struct super_block *)data;
 	struct efivar_entry *entry;
@@ -247,7 +246,7 @@ static int efivarfs_callback(efi_char16_t *name16, efi_guid_t vendor,
 	}
 
 	__efivar_entry_get(entry, NULL, &size, NULL);
-	__efivar_entry_add(entry, &efivarfs_list);
+	__efivar_entry_add(entry, list);
 
 	/* copied by the above to local storage in the dentry. */
 	kfree(name);
@@ -317,12 +316,10 @@ static int efivarfs_parse_param(struct fs_context *fc, struct fs_parameter *para
 
 static int efivarfs_fill_super(struct super_block *sb, struct fs_context *fc)
 {
+	struct efivarfs_fs_info *einfo = sb->s_fs_info;
 	struct inode *inode = NULL;
 	struct dentry *root;
 	int err;
-
-	if (!efivar_is_available())
-		return -EOPNOTSUPP;
 
 	sb->s_maxbytes          = MAX_LFS_FILESIZE;
 	sb->s_blocksize         = PAGE_SIZE;
@@ -351,11 +348,10 @@ static int efivarfs_fill_super(struct super_block *sb, struct fs_context *fc)
 	if (err)
 		return err;
 
-	INIT_LIST_HEAD(&efivarfs_list);
-
-	err = efivar_init(efivarfs_callback, (void *)sb, true, &efivarfs_list);
+	err = efivar_init(efivarfs_callback, (void *)sb, true,
+			  &einfo->efivarfs_list);
 	if (err)
-		efivar_entry_iter(efivarfs_destroy, &efivarfs_list, NULL);
+		efivar_entry_iter(efivarfs_destroy, &einfo->efivarfs_list, NULL);
 
 	return err;
 }
@@ -385,9 +381,14 @@ static int efivarfs_init_fs_context(struct fs_context *fc)
 {
 	struct efivarfs_fs_info *sfi;
 
+	if (!efivar_is_available())
+		return -EOPNOTSUPP;
+
 	sfi = kzalloc(sizeof(*sfi), GFP_KERNEL);
 	if (!sfi)
 		return -ENOMEM;
+
+	INIT_LIST_HEAD(&sfi->efivarfs_list);
 
 	sfi->mount_opts.uid = GLOBAL_ROOT_UID;
 	sfi->mount_opts.gid = GLOBAL_ROOT_GID;
@@ -399,15 +400,15 @@ static int efivarfs_init_fs_context(struct fs_context *fc)
 
 static void efivarfs_kill_sb(struct super_block *sb)
 {
+	struct efivarfs_fs_info *sfi = sb->s_fs_info;
+
 	blocking_notifier_chain_unregister(&efivar_ops_nh, &info.nb);
 	info.sb = NULL;
 	kill_litter_super(sb);
 
-	if (!efivar_is_available())
-		return;
-
 	/* Remove all entries and destroy */
-	efivar_entry_iter(efivarfs_destroy, &efivarfs_list, NULL);
+	efivar_entry_iter(efivarfs_destroy, &sfi->efivarfs_list, NULL);
+	kfree(sfi);
 }
 
 static struct file_system_type efivarfs_type = {

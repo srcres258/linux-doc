@@ -1050,8 +1050,7 @@ retry:
 			}
 
 			folio = vm_normal_folio(src_vma, src_addr, orig_src_pte);
-			if (!folio || folio_test_large(folio) ||
-			    !PageAnonExclusive(&folio->page)) {
+			if (!folio || !PageAnonExclusive(&folio->page)) {
 				spin_unlock(src_ptl);
 				err = -EBUSY;
 				goto out;
@@ -1075,6 +1074,13 @@ retry:
 				err = -EBUSY;
 				goto out;
 			}
+		}
+
+		/* at this point we have src_folio locked */
+		if (folio_test_large(src_folio)) {
+			err = split_folio(src_folio);
+			if (err)
+				goto out;
 		}
 
 		if (!src_anon_vma) {
@@ -1382,8 +1388,17 @@ ssize_t move_pages(struct userfaultfd_ctx *ctx, struct mm_struct *mm,
 			/* Check if we can move the pmd without splitting it. */
 			if (move_splits_huge_pmd(dst_addr, src_addr, src_start + len) ||
 			    !pmd_none(dst_pmdval)) {
+				struct folio *folio = pfn_folio(pmd_pfn(*src_pmd));
+
+				if (!folio || !PageAnonExclusive(&folio->page)) {
+					spin_unlock(ptl);
+					err = -EBUSY;
+					break;
+				}
+
 				spin_unlock(ptl);
 				split_huge_pmd(src_vma, src_pmd, src_addr);
+				/* The folio will be split by move_pages_pte() */
 				continue;
 			}
 

@@ -301,9 +301,7 @@ static int kvm_gmem_error_folio(struct address_space *mapping,
 
 static const struct address_space_operations kvm_gmem_aops = {
 	.dirty_folio = noop_dirty_folio,
-#ifdef CONFIG_MIGRATION
 	.migrate_folio	= kvm_gmem_migrate_folio,
-#endif
 	.error_remove_folio = kvm_gmem_error_folio,
 };
 

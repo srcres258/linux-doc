@@ -27,6 +27,9 @@ static int bch2_btree_write_buffer_journal_flush(struct journal *,
 static int bch2_btree_write_buffer_journal_flush(struct journal *,
 				struct journal_entry_pin *, u64);
 
+static int bch2_btree_write_buffer_journal_flush(struct journal *,
+				struct journal_entry_pin *, u64);
+
 static int btree_write_buffered_key_cmp(const void *_l, const void *_r)
 {
 	return (cmp_int(l->hi, r->hi) ?:

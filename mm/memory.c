@@ -4128,37 +4128,34 @@ out_release:
 	return ret;
 }
 
-static bool vmf_pte_range_changed(struct vm_fault *vmf, int nr_pages)
+static bool pte_range_none(pte_t *pte, int nr_pages)
 {
 	int i;
 
-	if (nr_pages == 1)
-		return vmf_pte_changed(vmf);
-
 	for (i = 0; i < nr_pages; i++) {
-		if (!pte_none(ptep_get_lockless(vmf->pte + i)))
-			return true;
+		if (!pte_none(ptep_get_lockless(pte + i)))
+			return false;
 	}
 
-	return false;
+	return true;
 }
 
 #ifdef CONFIG_TRANSPARENT_HUGEPAGE
 static struct folio *alloc_anon_folio(struct vm_fault *vmf)
 {
-	gfp_t gfp;
-	pte_t *pte;
-	unsigned long addr;
-	struct folio *folio;
 	struct vm_area_struct *vma = vmf->vma;
-	unsigned int orders;
+	unsigned long orders;
+	struct folio *folio;
+	unsigned long addr;
+	pte_t *pte;
+	gfp_t gfp;
 	int order;
 
 	/*
 	 * If uffd is active for the vma we need per-page fault fidelity to
 	 * maintain the uffd semantics.
 	 */
-	if (userfaultfd_armed(vma))
+	if (unlikely(userfaultfd_armed(vma)))
 		goto fallback;
 
 	/*
@@ -4166,9 +4163,9 @@ static struct folio *alloc_anon_folio(struct vm_fault *vmf)
 	 * for this vma. Then filter out the orders that can't be allocated over
 	 * the faulting address and still be fully contained in the vma.
 	 */
-	orders = hugepage_vma_check(vma, vma->vm_flags, false, true, true,
-				    BIT(PMD_ORDER) - 1);
-	orders = transhuge_vma_suitable(vma, vmf->address, orders);
+	orders = thp_vma_allowable_orders(vma, vma->vm_flags, false, true, true,
+					  BIT(PMD_ORDER) - 1);
+	orders = thp_vma_suitable_orders(vma, vmf->address, orders);
 
 	if (!orders)
 		goto fallback;
@@ -4177,25 +4174,28 @@ static struct folio *alloc_anon_folio(struct vm_fault *vmf)
 	if (!pte)
 		return ERR_PTR(-EAGAIN);
 
-	order = first_order(orders);
+	/*
+	 * Find the highest order where the aligned range is completely
+	 * pte_none(). Note that all remaining orders will be completely
+	 * pte_none().
+	 */
+	order = highest_order(orders);
 	while (orders) {
 		addr = ALIGN_DOWN(vmf->address, PAGE_SIZE << order);
-		vmf->pte = pte + pte_index(addr);
-		if (!vmf_pte_range_changed(vmf, 1 << order))
+		if (pte_range_none(pte + pte_index(addr), 1 << order))
 			break;
 		order = next_order(&orders, order);
 	}
 
-	vmf->pte = NULL;
 	pte_unmap(pte);
 
+	/* Try allocating the highest of the remaining orders. */
 	gfp = vma_thp_gfp_mask(vma);
-
 	while (orders) {
 		addr = ALIGN_DOWN(vmf->address, PAGE_SIZE << order);
 		folio = vma_alloc_folio(gfp, order, vma, addr, true);
 		if (folio) {
-			clear_huge_page(&folio->page, addr, 1 << order);
+			clear_huge_page(&folio->page, vmf->address, 1 << order);
 			return folio;
 		}
 		order = next_order(&orders, order);
@@ -4221,9 +4221,12 @@ static vm_fault_t do_anonymous_page(struct vm_fault *vmf)
 	unsigned long addr = vmf->address;
 	bool uffd_wp = vmf_orig_pte_uffd_wp(vmf);
 	struct vm_area_struct *vma = vmf->vma;
+	unsigned long addr = vmf->address;
 	struct folio *folio;
 	vm_fault_t ret = 0;
+	int nr_pages = 1;
 	pte_t entry;
+	int i;
 
 	/* File mapping without ->vm_ops ? */
 	if (vma->vm_flags & VM_SHARED)
@@ -4291,7 +4294,10 @@ static vm_fault_t do_anonymous_page(struct vm_fault *vmf)
 	vmf->pte = pte_offset_map_lock(vma->vm_mm, vmf->pmd, addr, &vmf->ptl);
 	if (!vmf->pte)
 		goto release;
-	if (vmf_pte_range_changed(vmf, nr_pages)) {
+	if (nr_pages == 1 && vmf_pte_changed(vmf)) {
+		update_mmu_tlb(vma, addr, vmf->pte);
+		goto release;
+	} else if (nr_pages > 1 && !pte_range_none(vmf->pte, nr_pages)) {
 		for (i = 0; i < nr_pages; i++)
 			update_mmu_tlb(vma, addr + PAGE_SIZE * i, vmf->pte + i);
 		goto release;
@@ -4415,7 +4421,7 @@ vm_fault_t do_set_pmd(struct vm_fault *vmf, struct page *page)
 	pmd_t entry;
 	vm_fault_t ret = VM_FAULT_FALLBACK;
 
-	if (!transhuge_vma_suitable(vma, haddr, BIT(PMD_ORDER)))
+	if (!thp_vma_suitable_order(vma, haddr, PMD_ORDER))
 		return ret;
 
 	page = compound_head(page);
@@ -5209,7 +5215,7 @@ static vm_fault_t __handle_mm_fault(struct vm_area_struct *vma,
 		return VM_FAULT_OOM;
 retry_pud:
 	if (pud_none(*vmf.pud) &&
-	    hugepage_vma_check(vma, vm_flags, false, true, true, BIT(PUD_ORDER))) {
+	    thp_vma_allowable_order(vma, vm_flags, false, true, true, PUD_ORDER)) {
 		ret = create_huge_pud(&vmf);
 		if (!(ret & VM_FAULT_FALLBACK))
 			return ret;
@@ -5243,7 +5249,7 @@ retry_pud:
 		goto retry_pud;
 
 	if (pmd_none(*vmf.pmd) &&
-	    hugepage_vma_check(vma, vm_flags, false, true, true, BIT(PMD_ORDER))) {
+	    thp_vma_allowable_order(vma, vm_flags, false, true, true, PMD_ORDER)) {
 		ret = create_huge_pmd(&vmf);
 		if (!(ret & VM_FAULT_FALLBACK))
 			return ret;

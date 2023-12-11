@@ -80,6 +80,32 @@ const char * const bch2_fs_flag_strs[] = {
 	NULL
 };
 
+void __bch2_print(struct bch_fs *c, const char *fmt, ...)
+{
+	struct log_output *output = c->output;
+	va_list args;
+
+	if (c->output_filter && c->output_filter != current)
+		output = NULL;
+
+	va_start(args, fmt);
+	if (likely(!output)) {
+		vprintk(fmt, args);
+	} else {
+		unsigned long flags;
+
+		if (fmt[0] == KERN_SOH[0])
+			fmt += 2;
+
+		spin_lock_irqsave(&output->lock, flags);
+		prt_vprintf(&output->buf, fmt, args);
+		spin_unlock_irqrestore(&output->lock, flags);
+
+		wake_up(&output->wait);
+	}
+	va_end(args);
+}
+
 #define KTYPE(type)							\
 static const struct attribute_group type ## _group = {			\
 	.attrs = type ## _files						\
@@ -594,6 +620,9 @@ void __bch2_fs_stop(struct bch_fs *c)
 	bch2_fs_debug_exit(c);
 	bch2_fs_chardev_exit(c);
 
+	bch2_ro_ref_put(c);
+	wait_event(c->ro_ref_wait, !refcount_read(&c->ro_ref));
+
 	kobject_put(&c->counters_kobj);
 	kobject_put(&c->time_stats);
 	kobject_put(&c->opts_dir);
@@ -704,6 +733,8 @@ static struct bch_fs *bch2_fs_alloc(struct bch_sb *sb, struct bch_opts opts)
 		goto out;
 	}
 
+	c->output = (void *)(unsigned long) opts.log_output;
+
 	__module_get(THIS_MODULE);
 
 	closure_init(&c->cl, NULL);
@@ -723,6 +754,10 @@ static struct bch_fs *bch2_fs_alloc(struct bch_sb *sb, struct bch_opts opts)
 	mutex_init(&c->replicas_gc_lock);
 	mutex_init(&c->btree_root_lock);
 	INIT_WORK(&c->read_only_work, bch2_fs_read_only_work);
+
+	refcount_set(&c->ro_ref, 1);
+	init_waitqueue_head(&c->ro_ref_wait);
+	sema_init(&c->online_fsck_mutex, 1);
 
 	init_rwsem(&c->gc_lock);
 	mutex_init(&c->gc_gens_lock);

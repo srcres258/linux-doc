@@ -1538,8 +1538,8 @@ static int bch2_gc_alloc_start(struct bch_fs *c, bool metadata_only)
 		rcu_assign_pointer(ca->buckets_gc, buckets);
 	}
 
-	ret = for_each_btree_key2(trans, iter, BTREE_ID_alloc, POS_MIN,
-				  BTREE_ITER_PREFETCH, k, ({
+	ret = for_each_btree_key(trans, iter, BTREE_ID_alloc, POS_MIN,
+				 BTREE_ITER_PREFETCH, k, ({
 		ca = bch_dev_bkey_exists(c, k.k->p.inode);
 		g = gc_bucket(ca, k.k->p.offset);
 
@@ -1665,7 +1665,6 @@ static int bch2_gc_reflink_done(struct bch_fs *c, bool metadata_only)
 static int bch2_gc_reflink_start(struct bch_fs *c,
 				 bool metadata_only)
 {
-	struct btree_trans *trans;
 	struct btree_iter iter;
 	struct bkey_s_c k;
 	struct reflink_gc *r;
@@ -1674,30 +1673,30 @@ static int bch2_gc_reflink_start(struct bch_fs *c,
 	if (metadata_only)
 		return 0;
 
-	trans = bch2_trans_get(c);
 	c->reflink_gc_nr = 0;
 
-	for_each_btree_key(trans, iter, BTREE_ID_reflink, POS_MIN,
-			   BTREE_ITER_PREFETCH, k, ret) {
-		const __le64 *refcount = bkey_refcount_c(k);
+	ret = bch2_trans_run(c,
+		for_each_btree_key(trans, iter, BTREE_ID_reflink, POS_MIN,
+				   BTREE_ITER_PREFETCH, k, ({
+			const __le64 *refcount = bkey_refcount_c(k);
 
-		if (!refcount)
-			continue;
+			if (!refcount)
+				continue;
 
-		r = genradix_ptr_alloc(&c->reflink_gc_table, c->reflink_gc_nr++,
-				       GFP_KERNEL);
-		if (!r) {
-			ret = -BCH_ERR_ENOMEM_gc_reflink_start;
-			break;
-		}
+			r = genradix_ptr_alloc(&c->reflink_gc_table, c->reflink_gc_nr++,
+					       GFP_KERNEL);
+			if (!r) {
+				ret = -BCH_ERR_ENOMEM_gc_reflink_start;
+				break;
+			}
 
-		r->offset	= k.k->p.offset;
-		r->size		= k.k->size;
-		r->refcount	= 0;
-	}
-	bch2_trans_iter_exit(trans, &iter);
+			r->offset	= k.k->p.offset;
+			r->size		= k.k->size;
+			r->refcount	= 0;
+			0;
+		})));
 
-	bch2_trans_put(trans);
+	bch_err_fn(c, ret);
 	return ret;
 }
 

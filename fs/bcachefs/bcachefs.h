@@ -264,36 +264,54 @@ do {									\
 
 #define bch2_fmt(_c, fmt)		bch2_log_msg(_c, fmt "\n")
 
+void __bch2_print(struct bch_fs *c, const char *fmt, ...);
+
+#define maybe_dev_to_fs(_c)	_Generic((_c),				\
+	struct bch_dev *:	((struct bch_dev *) (_c))->fs,		\
+	struct bch_fs *:	(_c))
+
+#define bch2_print(_c, ...) __bch2_print(maybe_dev_to_fs(_c), __VA_ARGS__)
+
+#define bch2_print_ratelimited(_c, ...)					\
+do {									\
+	static DEFINE_RATELIMIT_STATE(_rs,				\
+				      DEFAULT_RATELIMIT_INTERVAL,	\
+				      DEFAULT_RATELIMIT_BURST);		\
+									\
+	if (__ratelimit(&_rs))						\
+		bch2_print(_c, __VA_ARGS__);				\
+} while (0)
+
 #define bch_info(c, fmt, ...) \
-	printk(KERN_INFO bch2_fmt(c, fmt), ##__VA_ARGS__)
+	bch2_print(c, KERN_INFO bch2_fmt(c, fmt), ##__VA_ARGS__)
 #define bch_notice(c, fmt, ...) \
-	printk(KERN_NOTICE bch2_fmt(c, fmt), ##__VA_ARGS__)
+	bch2_print(c, KERN_NOTICE bch2_fmt(c, fmt), ##__VA_ARGS__)
 #define bch_warn(c, fmt, ...) \
-	printk(KERN_WARNING bch2_fmt(c, fmt), ##__VA_ARGS__)
+	bch2_print(c, KERN_WARNING bch2_fmt(c, fmt), ##__VA_ARGS__)
 #define bch_warn_ratelimited(c, fmt, ...) \
-	printk_ratelimited(KERN_WARNING bch2_fmt(c, fmt), ##__VA_ARGS__)
+	bch2_print_ratelimited(c, KERN_WARNING bch2_fmt(c, fmt), ##__VA_ARGS__)
 
 #define bch_err(c, fmt, ...) \
-	printk(KERN_ERR bch2_fmt(c, fmt), ##__VA_ARGS__)
+	bch2_print(c, KERN_ERR bch2_fmt(c, fmt), ##__VA_ARGS__)
 #define bch_err_dev(ca, fmt, ...) \
-	printk(KERN_ERR bch2_fmt_dev(ca, fmt), ##__VA_ARGS__)
+	bch2_print(c, KERN_ERR bch2_fmt_dev(ca, fmt), ##__VA_ARGS__)
 #define bch_err_dev_offset(ca, _offset, fmt, ...) \
-	printk(KERN_ERR bch2_fmt_dev_offset(ca, _offset, fmt), ##__VA_ARGS__)
+	bch2_print(c, KERN_ERR bch2_fmt_dev_offset(ca, _offset, fmt), ##__VA_ARGS__)
 #define bch_err_inum(c, _inum, fmt, ...) \
-	printk(KERN_ERR bch2_fmt_inum(c, _inum, fmt), ##__VA_ARGS__)
+	bch2_print(c, KERN_ERR bch2_fmt_inum(c, _inum, fmt), ##__VA_ARGS__)
 #define bch_err_inum_offset(c, _inum, _offset, fmt, ...) \
-	printk(KERN_ERR bch2_fmt_inum_offset(c, _inum, _offset, fmt), ##__VA_ARGS__)
+	bch2_print(c, KERN_ERR bch2_fmt_inum_offset(c, _inum, _offset, fmt), ##__VA_ARGS__)
 
 #define bch_err_ratelimited(c, fmt, ...) \
-	printk_ratelimited(KERN_ERR bch2_fmt(c, fmt), ##__VA_ARGS__)
+	bch2_print_ratelimited(c, KERN_ERR bch2_fmt(c, fmt), ##__VA_ARGS__)
 #define bch_err_dev_ratelimited(ca, fmt, ...) \
-	printk_ratelimited(KERN_ERR bch2_fmt_dev(ca, fmt), ##__VA_ARGS__)
+	bch2_print_ratelimited(ca, KERN_ERR bch2_fmt_dev(ca, fmt), ##__VA_ARGS__)
 #define bch_err_dev_offset_ratelimited(ca, _offset, fmt, ...) \
-	printk_ratelimited(KERN_ERR bch2_fmt_dev_offset(ca, _offset, fmt), ##__VA_ARGS__)
+	bch2_print_ratelimited(ca, KERN_ERR bch2_fmt_dev_offset(ca, _offset, fmt), ##__VA_ARGS__)
 #define bch_err_inum_ratelimited(c, _inum, fmt, ...) \
-	printk_ratelimited(KERN_ERR bch2_fmt_inum(c, _inum, fmt), ##__VA_ARGS__)
+	bch2_print_ratelimited(c, KERN_ERR bch2_fmt_inum(c, _inum, fmt), ##__VA_ARGS__)
 #define bch_err_inum_offset_ratelimited(c, _inum, _offset, fmt, ...) \
-	printk_ratelimited(KERN_ERR bch2_fmt_inum_offset(c, _inum, _offset, fmt), ##__VA_ARGS__)
+	bch2_print_ratelimited(c, KERN_ERR bch2_fmt_inum_offset(c, _inum, _offset, fmt), ##__VA_ARGS__)
 
 #define bch_err_fn(_c, _ret)						\
 do {									\
@@ -446,6 +464,12 @@ enum bch_time_stats {
 #define BTREE_NODE_OPEN_BUCKET_RESERVE	(BTREE_RESERVE_MAX * BCH_REPLICAS_MAX)
 
 struct btree;
+
+struct log_output {
+	spinlock_t		lock;
+	wait_queue_head_t	wait;
+	struct printbuf		buf;
+};
 
 enum gc_phase {
 	GC_PHASE_NOT_RUNNING,
@@ -701,6 +725,8 @@ struct bch_fs {
 	struct super_block	*vfs_sb;
 	dev_t			dev;
 	char			name[40];
+	struct log_output	*output;
+	struct task_struct	*output_filter;
 
 	/* ro/rw, add/remove/resize devices: */
 	struct rw_semaphore	state_lock;
@@ -711,6 +737,13 @@ struct bch_fs {
 #else
 	struct percpu_ref	writes;
 #endif
+	/*
+	 * Analagous to c->writes, for asynchronous ops that don't necessarily
+	 * need fs to be read-write
+	 */
+	refcount_t		ro_ref;
+	wait_queue_head_t	ro_ref_wait;
+
 	struct work_struct	read_only_work;
 
 	struct bch_dev __rcu	*devs[BCH_SB_MEMBERS_MAX];
@@ -1013,10 +1046,18 @@ struct bch_fs {
 	/* RECOVERY */
 	u64			journal_replay_seq_start;
 	u64			journal_replay_seq_end;
+	/*
+	 * Two different uses:
+	 * "Has this fsck pass?" - i.e. should this type of error be an
+	 * emergency read-only
+	 * And, in certain situations fsck will rewind to an earlier pass: used
+	 * for signaling to the toplevel code which pass we want to run now.
+	 */
 	enum bch_recovery_pass	curr_recovery_pass;
 	/* bitmap of explicitly enabled recovery passes: */
 	u64			recovery_passes_explicit;
 	u64			recovery_passes_complete;
+	struct semaphore	online_fsck_mutex;
 
 	/* DEBUG JUNK */
 	struct dentry		*fs_debug_dir;
@@ -1113,6 +1154,20 @@ static inline void bch2_write_ref_put(struct bch_fs *c, enum bch_write_ref ref)
 #else
 	percpu_ref_put(&c->writes);
 #endif
+}
+
+static inline bool bch2_ro_ref_tryget(struct bch_fs *c)
+{
+	if (test_bit(BCH_FS_stopping, &c->flags))
+		return false;
+
+	return refcount_inc_not_zero(&c->ro_ref);
+}
+
+static inline void bch2_ro_ref_put(struct bch_fs *c)
+{
+	if (refcount_dec_and_test(&c->ro_ref))
+		wake_up(&c->ro_ref_wait);
 }
 
 static inline void bch2_set_ra_pages(struct bch_fs *c, unsigned ra_pages)

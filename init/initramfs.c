@@ -727,7 +727,7 @@ done:
 	 */
 	if (!do_retain_initrd && initrd_start && !kexec_free_initrd()) {
 		free_initrd_mem(initrd_start, initrd_end);
-	} else if (do_retain_initrd) {
+	} else if (do_retain_initrd && initrd_start) {
 		bin_attr_initrd.size = initrd_end - initrd_start;
 		bin_attr_initrd.private = (void *)initrd_start;
 		if (sysfs_create_bin_file(firmware_kobj, &bin_attr_initrd))

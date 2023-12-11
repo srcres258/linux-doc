@@ -29,17 +29,50 @@
 #include "../../../../mm/gup_test.h"
 #include "../kselftest.h"
 #include "vm_util.h"
+#include "thp_settings.h"
 
 static size_t pagesize;
 static int pagemap_fd;
 static size_t pmdsize;
-static size_t ptesize;
+static int nr_thpsizes;
+static size_t thpsizes[20];
 static int nr_hugetlbsizes;
 static size_t hugetlbsizes[10];
 static int gup_fd;
 static bool has_huge_zeropage;
 static unsigned int orig_anon_orders;
 static bool orig_anon_orders_valid;
+
+static int sz2ord(size_t size)
+{
+	return __builtin_ctzll(size / pagesize);
+}
+
+static int detect_thp_sizes(size_t sizes[], int max)
+{
+	int count = 0;
+	unsigned long orders;
+	size_t kb;
+	int i;
+
+	/* thp not supported at all. */
+	if (!pmdsize)
+		return 0;
+
+	orders = 1UL << sz2ord(pmdsize);
+	orders |= thp_supported_orders();
+
+	for (i = 0; orders && count < max; i++) {
+		if (!(orders & (1UL << i)))
+			continue;
+		orders &= ~(1UL << i);
+		kb = (pagesize >> 10) << i;
+		sizes[count++] = kb * 1024;
+		ksft_print_msg("[INFO] detected THP size: %zu KiB\n", kb);
+	}
+
+	return count;
+}
 
 static void detect_huge_zeropage(void)
 {
@@ -737,7 +770,7 @@ enum thp_run {
 	THP_RUN_PARTIAL_SHARED,
 };
 
-static void do_run_with_thp(test_fn fn, enum thp_run thp_run, size_t size)
+static void do_run_with_thp(test_fn fn, enum thp_run thp_run, size_t thpsize)
 {
 	char *mem, *mmap_mem, *tmp, *mremap_mem = MAP_FAILED;
 	size_t mmap_size, mremap_size;
@@ -766,7 +799,7 @@ static void do_run_with_thp(test_fn fn, enum thp_run thp_run, size_t size)
 	 * we get the last sub-page populated automatically.
 	 */
 	mem[0] = 0;
-	if (!pagemap_is_populated(pagemap_fd, mem + size - pagesize)) {
+	if (!pagemap_is_populated(pagemap_fd, mem + thpsize - pagesize)) {
 		ksft_test_result_skip("Did not get a THP populated\n");
 		goto munmap;
 	}
@@ -775,10 +808,7 @@ static void do_run_with_thp(test_fn fn, enum thp_run thp_run, size_t size)
 	switch (thp_run) {
 	case THP_RUN_PMD:
 	case THP_RUN_PMD_SWAPOUT:
-		if (size != pmdsize) {
-			ksft_test_result_fail("test bug: can't PMD-map size\n");
-			goto munmap;
-		}
+		assert(thpsize == pmdsize);
 		break;
 	case THP_RUN_PTE:
 	case THP_RUN_PTE_SWAPOUT:
@@ -882,64 +912,59 @@ munmap:
 		munmap(mremap_mem, mremap_size);
 }
 
-static int sz2ord(size_t size)
-{
-	return __builtin_ctzll(size / pagesize);
-}
-
 static void run_with_thp(test_fn fn, const char *desc, size_t size)
 {
-	ksft_print_msg("[RUN] %s ... with order-%d THP\n",
-		desc, sz2ord(size));
+	ksft_print_msg("[RUN] %s ... with THP (%zu kB)\n",
+		desc, size / 1024);
 	do_run_with_thp(fn, THP_RUN_PMD, size);
 }
 
 static void run_with_thp_swap(test_fn fn, const char *desc, size_t size)
 {
-	ksft_print_msg("[RUN] %s ... with swapped-out order-%d THP\n",
-		desc, sz2ord(size));
+	ksft_print_msg("[RUN] %s ... with swapped-out THP (%zu kB)\n",
+		desc, size / 1024);
 	do_run_with_thp(fn, THP_RUN_PMD_SWAPOUT, size);
 }
 
 static void run_with_pte_mapped_thp(test_fn fn, const char *desc, size_t size)
 {
-	ksft_print_msg("[RUN] %s ... with PTE-mapped order-%d THP\n",
-		desc, sz2ord(size));
+	ksft_print_msg("[RUN] %s ... with PTE-mapped THP (%zu kB)\n",
+		desc, size / 1024);
 	do_run_with_thp(fn, THP_RUN_PTE, size);
 }
 
 static void run_with_pte_mapped_thp_swap(test_fn fn, const char *desc, size_t size)
 {
-	ksft_print_msg("[RUN] %s ... with swapped-out, PTE-mapped order-%d THP\n",
-		desc, sz2ord(size));
+	ksft_print_msg("[RUN] %s ... with swapped-out, PTE-mapped THP (%zu kB)\n",
+		desc, size / 1024);
 	do_run_with_thp(fn, THP_RUN_PTE_SWAPOUT, size);
 }
 
 static void run_with_single_pte_of_thp(test_fn fn, const char *desc, size_t size)
 {
-	ksft_print_msg("[RUN] %s ... with single PTE of order-%d THP\n",
-		desc, sz2ord(size));
+	ksft_print_msg("[RUN] %s ... with single PTE of THP (%zu kB)\n",
+		desc, size / 1024);
 	do_run_with_thp(fn, THP_RUN_SINGLE_PTE, size);
 }
 
 static void run_with_single_pte_of_thp_swap(test_fn fn, const char *desc, size_t size)
 {
-	ksft_print_msg("[RUN] %s ... with single PTE of swapped-out order-%d THP\n",
-		desc, sz2ord(size));
+	ksft_print_msg("[RUN] %s ... with single PTE of swapped-out THP (%zu kB)\n",
+		desc, size / 1024);
 	do_run_with_thp(fn, THP_RUN_SINGLE_PTE_SWAPOUT, size);
 }
 
 static void run_with_partial_mremap_thp(test_fn fn, const char *desc, size_t size)
 {
-	ksft_print_msg("[RUN] %s ... with partially mremap()'ed order-%d THP\n",
-		desc, sz2ord(size));
+	ksft_print_msg("[RUN] %s ... with partially mremap()'ed THP (%zu kB)\n",
+		desc, size / 1024);
 	do_run_with_thp(fn, THP_RUN_PARTIAL_MREMAP, size);
 }
 
 static void run_with_partial_shared_thp(test_fn fn, const char *desc, size_t size)
 {
-	ksft_print_msg("[RUN] %s ... with partially shared order-%d THP\n",
-		desc, sz2ord(size));
+	ksft_print_msg("[RUN] %s ... with partially shared THP (%zu kB)\n",
+		desc, size / 1024);
 	do_run_with_thp(fn, THP_RUN_PARTIAL_SHARED, size);
 }
 
@@ -1111,23 +1136,27 @@ static void run_anon_test_case(struct test_case const *test_case)
 
 	run_with_base_page(test_case->fn, test_case->desc);
 	run_with_base_page_swap(test_case->fn, test_case->desc);
-	if (pmdsize) {
-		run_with_thp(test_case->fn, test_case->desc, pmdsize);
-		run_with_thp_swap(test_case->fn, test_case->desc, pmdsize);
-		run_with_pte_mapped_thp(test_case->fn, test_case->desc, pmdsize);
-		run_with_pte_mapped_thp_swap(test_case->fn, test_case->desc, pmdsize);
-		run_with_single_pte_of_thp(test_case->fn, test_case->desc, pmdsize);
-		run_with_single_pte_of_thp_swap(test_case->fn, test_case->desc, pmdsize);
-		run_with_partial_mremap_thp(test_case->fn, test_case->desc, pmdsize);
-		run_with_partial_shared_thp(test_case->fn, test_case->desc, pmdsize);
-	}
-	if (ptesize) {
-		run_with_pte_mapped_thp(test_case->fn, test_case->desc, ptesize);
-		run_with_pte_mapped_thp_swap(test_case->fn, test_case->desc, ptesize);
-		run_with_single_pte_of_thp(test_case->fn, test_case->desc, ptesize);
-		run_with_single_pte_of_thp_swap(test_case->fn, test_case->desc, ptesize);
-		run_with_partial_mremap_thp(test_case->fn, test_case->desc, ptesize);
-		run_with_partial_shared_thp(test_case->fn, test_case->desc, ptesize);
+	for (i = 0; i < nr_thpsizes; i++) {
+		size_t size = thpsizes[i];
+		struct thp_settings settings = *thp_current_settings();
+
+		settings.hugepages[sz2ord(pmdsize)].enabled = THP_NEVER;
+		settings.hugepages[sz2ord(size)].enabled = THP_ALWAYS;
+		thp_push_settings(&settings);
+
+		if (size == pmdsize) {
+			run_with_thp(test_case->fn, test_case->desc, size);
+			run_with_thp_swap(test_case->fn, test_case->desc, size);
+		}
+
+		run_with_pte_mapped_thp(test_case->fn, test_case->desc, size);
+		run_with_pte_mapped_thp_swap(test_case->fn, test_case->desc, size);
+		run_with_single_pte_of_thp(test_case->fn, test_case->desc, size);
+		run_with_single_pte_of_thp_swap(test_case->fn, test_case->desc, size);
+		run_with_partial_mremap_thp(test_case->fn, test_case->desc, size);
+		run_with_partial_shared_thp(test_case->fn, test_case->desc, size);
+
+		thp_pop_settings();
 	}
 	for (i = 0; i < nr_hugetlbsizes; i++)
 		run_with_hugetlb(test_case->fn, test_case->desc,
@@ -1148,10 +1177,9 @@ static int tests_per_anon_test_case(void)
 {
 	int tests = 2 + nr_hugetlbsizes;
 
+	tests += 6 * nr_thpsizes;
 	if (pmdsize)
-		tests += 8;
-	if (ptesize)
-		tests += 6;
+		tests += 2;
 	return tests;
 }
 
@@ -1783,21 +1811,29 @@ static void restore_thp_anon_orders(void)
 int main(int argc, char **argv)
 {
 	int err;
+	struct thp_settings default_settings;
+
+	ksft_print_header();
 
 	pagesize = getpagesize();
 	pmdsize = read_pmd_pagesize();
-	if (pmdsize)
-		ksft_print_msg("[INFO] detected PMD-mapped THP size: %zu KiB\n",
+	if (pmdsize) {
+		/* Only if THP is supported. */
+		thp_read_settings(&default_settings);
+		default_settings.hugepages[sz2ord(pmdsize)].enabled = THP_INHERIT;
+		thp_save_settings();
+		thp_push_settings(&default_settings);
+
+		ksft_print_msg("[INFO] detected PMD size: %zu KiB\n",
 			       pmdsize / 1024);
-	ptesize = save_thp_anon_orders();
-	if (ptesize)
-		ksft_print_msg("[INFO] configured PTE-mapped THP size: %zu KiB\n",
-			       ptesize / 1024);
+
+		nr_thpsizes = detect_thp_sizes(thpsizes, ARRAY_SIZE(thpsizes));
+	}
+
 	nr_hugetlbsizes = detect_hugetlb_page_sizes(hugetlbsizes,
 						    ARRAY_SIZE(hugetlbsizes));
 	detect_huge_zeropage();
 
-	ksft_print_header();
 	ksft_set_plan(ARRAY_SIZE(anon_test_cases) * tests_per_anon_test_case() +
 		      ARRAY_SIZE(anon_thp_test_cases) * tests_per_anon_thp_test_case() +
 		      ARRAY_SIZE(non_anon_test_cases) * tests_per_non_anon_test_case());
@@ -1811,7 +1847,10 @@ int main(int argc, char **argv)
 	run_anon_thp_test_cases();
 	run_non_anon_test_cases();
 
-	restore_thp_anon_orders();
+	if (pmdsize) {
+		/* Only if THP is supported. */
+		thp_restore_settings();
+	}
 
 	err = ksft_get_fail_cnt();
 	if (err)

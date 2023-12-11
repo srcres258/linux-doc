@@ -627,18 +627,6 @@ interrupt number dequeues the interrupt.
 This is an asynchronous vcpu ioctl and can be invoked from any thread.
 
 
-4.17 KVM_DEBUG_GUEST
---------------------
-
-:Capability: basic
-:Architectures: none
-:Type: vcpu ioctl
-:Parameters: none)
-:Returns: -1 on error
-
-Support for this has been removed.  Use KVM_SET_GUEST_DEBUG instead.
-
-
 4.18 KVM_GET_MSRS
 -----------------
 
@@ -8562,6 +8550,7 @@ PVHVM guests. Valid flags are::
   #define KVM_XEN_HVM_CONFIG_EVTCHN_2LEVEL		(1 << 4)
   #define KVM_XEN_HVM_CONFIG_EVTCHN_SEND		(1 << 5)
   #define KVM_XEN_HVM_CONFIG_RUNSTATE_UPDATE_FLAG	(1 << 6)
+  #define KVM_XEN_HVM_CONFIG_PVCLOCK_TSC_UNSTABLE	(1 << 7)
 
 The KVM_XEN_HVM_CONFIG_HYPERCALL_MSR flag indicates that the KVM_XEN_HVM_CONFIG
 ioctl is available, for the guest to set its hypercall page.
@@ -8604,6 +8593,11 @@ which is perhaps counterintuitive. When this flag is advertised, KVM will
 behave more correctly, not using the XEN_RUNSTATE_UPDATE flag until/unless
 specifically enabled (by the guest making the hypercall, causing the VMM
 to enable the KVM_XEN_ATTR_TYPE_RUNSTATE_UPDATE_FLAG attribute).
+
+The KVM_XEN_HVM_CONFIG_PVCLOCK_TSC_UNSTABLE flag indicates that KVM supports
+clearing the PVCLOCK_TSC_STABLE_BIT flag in Xen pvclock sources. This will be
+done when the KVM_CAP_XEN_HVM ioctl sets the
+KVM_XEN_HVM_CONFIG_PVCLOCK_TSC_UNSTABLE flag.
 
 8.31 KVM_CAP_PPC_MULTITCE
 -------------------------

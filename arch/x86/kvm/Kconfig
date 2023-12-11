@@ -27,13 +27,11 @@ config KVM
 	select KVM_GENERIC_MMU_NOTIFIER
 	select HAVE_KVM_IRQCHIP
 	select HAVE_KVM_PFNCACHE
-	select HAVE_KVM_IRQFD
 	select HAVE_KVM_DIRTY_RING_TSO
 	select HAVE_KVM_DIRTY_RING_ACQ_REL
 	select IRQ_BYPASS_MANAGER
 	select HAVE_KVM_IRQ_BYPASS
 	select HAVE_KVM_IRQ_ROUTING
-	select HAVE_KVM_EVENTFD
 	select KVM_ASYNC_PF
 	select USER_RETURN_NOTIFIER
 	select KVM_MMIO
@@ -140,6 +138,20 @@ config KVM_SMM
 	  firmware to implement UEFI secure boot.
 
 	  If unsure, say Y.
+
+config KVM_HYPERV
+	bool "Support for Microsoft Hyper-V emulation"
+	depends on KVM
+	default y
+	help
+	  Provides KVM support for emulating Microsoft Hyper-V.  This allows KVM
+	  to expose a subset of the paravirtualized interfaces defined in the
+	  Hyper-V Hypervisor Top-Level Functional Specification (TLFS):
+	  https://docs.microsoft.com/en-us/virtualization/hyper-v-on-windows/reference/tlfs
+	  These interfaces are required for the correct and performant functioning
+	  of Windows and Hyper-V guests on KVM.
+
+	  If unsure, say "Y".
 
 config KVM_XEN
 	bool "Support for Xen hypercall interface"
