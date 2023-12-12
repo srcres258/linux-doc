@@ -1366,6 +1366,12 @@ nvmem_cell_get_from_lookup(struct device *dev, const char *con_id)
 	return cell;
 }
 
+static void nvmem_layout_module_put(struct nvmem_device *nvmem)
+{
+	if (nvmem->layout && nvmem->layout->dev.driver)
+		module_put(nvmem->layout->dev.driver->owner);
+}
+
 #if IS_ENABLED(CONFIG_OF)
 static struct nvmem_cell_entry *
 nvmem_find_cell_entry_by_node(struct nvmem_device *nvmem, struct device_node *np)
@@ -1394,12 +1400,6 @@ static int nvmem_layout_module_get_optional(struct nvmem_device *nvmem)
 		return -EPROBE_DEFER;
 
 	return 0;
-}
-
-static void nvmem_layout_module_put(struct nvmem_device *nvmem)
-{
-	if (nvmem->layout && nvmem->layout->dev.driver)
-		module_put(nvmem->layout->dev.driver->owner);
 }
 
 /**

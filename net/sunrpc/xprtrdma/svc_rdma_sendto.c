@@ -271,28 +271,6 @@ void svc_rdma_send_ctxt_put(struct svcxprt_rdma *rdma,
 	queue_work(svcrdma_wq, &ctxt->sc_work);
 }
 
-static void svc_rdma_send_ctxt_put_async(struct work_struct *work)
-{
-	struct svc_rdma_send_ctxt *ctxt;
-
-	ctxt = container_of(work, struct svc_rdma_send_ctxt, sc_work);
-	svc_rdma_send_ctxt_release(ctxt->sc_rdma, ctxt);
-}
-
-/**
- * svc_rdma_send_ctxt_put - Return send_ctxt to free list
- * @rdma: controlling svcxprt_rdma
- * @ctxt: object to return to the free list
- *
- * Pages left in sc_pages are DMA unmapped and released.
- */
-void svc_rdma_send_ctxt_put(struct svcxprt_rdma *rdma,
-			    struct svc_rdma_send_ctxt *ctxt)
-{
-	INIT_WORK(&ctxt->sc_work, svc_rdma_send_ctxt_put_async);
-	queue_work(svcrdma_wq, &ctxt->sc_work);
-}
-
 /**
  * svc_rdma_wake_send_waiters - manage Send Queue accounting
  * @rdma: controlling transport

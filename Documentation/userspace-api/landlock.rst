@@ -336,11 +336,56 @@ opening a file for reading or writing, where permissions are checked during
 :manpage:`open(2)`, but not during the subsequent :manpage:`read(2)` and
 :manpage:`write(2)` calls.
 
-As a consequence, it is possible to have multiple open file descriptors
-referring to the same file, where one grants the truncate or ioctl right and the
-other does not.  It is also possible to pass such file descriptors between
-processes, keeping their Landlock properties, even when these processes do not
-have an enforced Landlock ruleset.
+As a consequence, it is possible that a process has multiple open file
+descriptors referring to the same file, but Landlock enforces different things
+when operating with these file descriptors.  This can happen when a Landlock
+ruleset gets enforced and the process keeps file descriptors which were opened
+both before and after the enforcement.  It is also possible to pass such file
+descriptors between processes, keeping their Landlock properties, even when some
+of the involved processes do not have an enforced Landlock ruleset.
+
+Restricting IOCTL commands
+--------------------------
+
+When the ``LANDLOCK_ACCESS_FS_IOCTL`` access right is handled, Landlock will
+restrict the invocation of IOCTL commands.  However, to *permit* these IOCTL
+commands again, some of these IOCTL commands are then granted through other,
+preexisting access rights.
+
+For example, consider a program which handles ``LANDLOCK_ACCESS_FS_IOCTL`` and
+``LANDLOCK_ACCESS_FS_READ_FILE``.  The program *permits*
+``LANDLOCK_ACCESS_FS_READ_FILE`` on a file ``foo.log``.
+
+By virtue of granting this access on the ``foo.log`` file, it is now possible to
+use common and harmless IOCTL commands which are useful when reading files, such
+as ``FIONREAD``.
+
+On the other hand, if the program permits ``LANDLOCK_ACCESS_FS_IOCTL`` on
+another file, ``FIONREAD`` will not work on that file when it is opened.  As
+soon as ``LANDLOCK_ACCESS_FS_READ_FILE`` is *handled* in the ruleset, the IOCTL
+commands affected by it can not be reenabled though ``LANDLOCK_ACCESS_FS_IOCTL``
+any more, but are then governed by ``LANDLOCK_ACCESS_FS_READ_FILE``.
+
+The following table illustrates how IOCTL attempts for ``FIONREAD`` are
+filtered, depending on how a Landlock ruleset handles and permits the
+``LANDLOCK_ACCESS_FS_IOCTL`` and ``LANDLOCK_ACCESS_FS_READ_FILE`` access rights:
+
++------------------------+-------------+-------------------+-------------------+
+|                        | ``IOCTL``   | ``IOCTL`` handled | ``IOCTL`` handled |
+|                        | not handled | and permitted     | and not permitted |
++------------------------+-------------+-------------------+-------------------+
+| ``READ_FILE`` not      | allow       | allow             | deny              |
+| handled                |             |                   |                   |
++------------------------+             +-------------------+-------------------+
+| ``READ_FILE`` handled  |             | allow                                 |
+| and permitted          |             |                                       |
++------------------------+             +-------------------+-------------------+
+| ``READ_FILE`` handled  |             | deny                                  |
+| and not permitted      |             |                                       |
++------------------------+-------------+-------------------+-------------------+
+
+The full list of IOCTL commands and the access rights which affect them is
+documented below.
 
 Compatibility
 =============

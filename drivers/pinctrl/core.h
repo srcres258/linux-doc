@@ -194,19 +194,24 @@ struct pinctrl_maps {
 
 #ifdef CONFIG_GENERIC_PINCTRL_GROUPS
 
+#include <linux/pinctrl/pinctrl.h>
+
 /**
  * struct group_desc - generic pin group descriptor
- * @name: name of the pin group
- * @pins: array of pins that belong to the group
- * @num_pins: number of pins in the group
+ * @grp: generic data of the pin group (name and pins)
  * @data: pin controller driver specific data
  */
 struct group_desc {
-	const char *name;
-	const unsigned int *pins;
-	int num_pins;
+	struct pingroup grp;
 	void *data;
 };
+
+/* Convenience macro to define a generic pin group descriptor */
+#define PINCTRL_GROUP_DESC(_name, _pins, _num_pins, _data)	\
+(struct group_desc) {						\
+	.grp = PINCTRL_PINGROUP(_name, _pins, _num_pins),	\
+	.data = _data,						\
+}
 
 int pinctrl_generic_get_group_count(struct pinctrl_dev *pctldev);
 

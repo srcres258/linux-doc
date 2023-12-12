@@ -82,11 +82,11 @@ void ht_update_default_setting(struct rtllib_device *ieee)
 		ht_info->reg_supp_cck = true;
 
 	ht_info->amsdu_max_size = 7935UL;
-	ht_info->bAMSDU_Support = 0;
+	ht_info->amsdu_support = 0;
 
-	ht_info->bAMPDUEnable = 1;
-	ht_info->AMPDU_Factor = 2;
-	ht_info->MPDU_Density = 0;
+	ht_info->ampdu_enable = 1;
+	ht_info->ampdu_factor = 2;
+	ht_info->mpdu_density = 0;
 
 	ht_info->self_mimo_ps = 3;
 	if (ht_info->self_mimo_ps == 2)
@@ -94,7 +94,7 @@ void ht_update_default_setting(struct rtllib_device *ieee)
 	ieee->tx_dis_rate_fallback = 0;
 	ieee->tx_use_drv_assinged_rate = 0;
 
-	ieee->bTxEnableFwCalcDur = 1;
+	ieee->tx_enable_fw_calc_dur = 1;
 
 	ht_info->reg_rt2rt_aggregation = 1;
 
@@ -109,20 +109,20 @@ static u16 ht_mcs_to_data_rate(struct rtllib_device *ieee, u8 mcs_rate)
 
 	u8	is40MHz = (ht_info->cur_bw_40mhz) ? 1 : 0;
 	u8	isShortGI = (ht_info->cur_bw_40mhz) ?
-			    ((ht_info->bCurShortGI40MHz) ? 1 : 0) :
-			    ((ht_info->bCurShortGI20MHz) ? 1 : 0);
+			    ((ht_info->cur_short_gi_40mhz) ? 1 : 0) :
+			    ((ht_info->cur_short_gi_20mhz) ? 1 : 0);
 	return MCS_DATA_RATE[is40MHz][isShortGI][(mcs_rate & 0x7f)];
 }
 
 u16  tx_count_to_data_rate(struct rtllib_device *ieee, u8 data_rate)
 {
-	u16	CCKOFDMRate[12] = {0x02, 0x04, 0x0b, 0x16, 0x0c, 0x12, 0x18,
+	u16	cck_of_dm_rate[12] = {0x02, 0x04, 0x0b, 0x16, 0x0c, 0x12, 0x18,
 				   0x24, 0x30, 0x48, 0x60, 0x6c};
 	u8	is40MHz = 0;
 	u8	isShortGI = 0;
 
 	if (data_rate < 12)
-		return CCKOFDMRate[data_rate];
+		return cck_of_dm_rate[data_rate];
 	if (data_rate >= 0x10 && data_rate <= 0x1f) {
 		is40MHz = 0;
 		isShortGI = 0;
@@ -170,41 +170,41 @@ static void ht_iot_peer_determine(struct rtllib_device *ieee)
 	struct rtllib_network *net = &ieee->current_network;
 
 	if (net->bssht.bd_rt2rt_aggregation) {
-		ht_info->IOTPeer = HT_IOT_PEER_REALTEK;
+		ht_info->iot_peer = HT_IOT_PEER_REALTEK;
 		if (net->bssht.rt2rt_ht_mode & RT_HT_CAP_USE_92SE)
-			ht_info->IOTPeer = HT_IOT_PEER_REALTEK_92SE;
+			ht_info->iot_peer = HT_IOT_PEER_REALTEK_92SE;
 		if (net->bssht.rt2rt_ht_mode & RT_HT_CAP_USE_SOFTAP)
-			ht_info->IOTPeer = HT_IOT_PEER_92U_SOFTAP;
+			ht_info->iot_peer = HT_IOT_PEER_92U_SOFTAP;
 	} else if (net->broadcom_cap_exist) {
-		ht_info->IOTPeer = HT_IOT_PEER_BROADCOM;
+		ht_info->iot_peer = HT_IOT_PEER_BROADCOM;
 	} else if (!memcmp(net->bssid, UNKNOWN_BORADCOM, 3) ||
 		 !memcmp(net->bssid, LINKSYSWRT330_LINKSYSWRT300_BROADCOM, 3) ||
 		 !memcmp(net->bssid, LINKSYSWRT350_LINKSYSWRT150_BROADCOM, 3)) {
-		ht_info->IOTPeer = HT_IOT_PEER_BROADCOM;
+		ht_info->iot_peer = HT_IOT_PEER_BROADCOM;
 	} else if ((memcmp(net->bssid, BELKINF5D8233V1_RALINK, 3) == 0) ||
 		 (memcmp(net->bssid, BELKINF5D82334V3_RALINK, 3) == 0) ||
 		 (memcmp(net->bssid, PCI_RALINK, 3) == 0) ||
 		 (memcmp(net->bssid, EDIMAX_RALINK, 3) == 0) ||
 		 (memcmp(net->bssid, AIRLINK_RALINK, 3) == 0) ||
 		  net->ralink_cap_exist) {
-		ht_info->IOTPeer = HT_IOT_PEER_RALINK;
+		ht_info->iot_peer = HT_IOT_PEER_RALINK;
 	} else if ((net->atheros_cap_exist) ||
 		(memcmp(net->bssid, DLINK_ATHEROS_1, 3) == 0) ||
 		(memcmp(net->bssid, DLINK_ATHEROS_2, 3) == 0)) {
-		ht_info->IOTPeer = HT_IOT_PEER_ATHEROS;
+		ht_info->iot_peer = HT_IOT_PEER_ATHEROS;
 	} else if ((memcmp(net->bssid, CISCO_BROADCOM, 3) == 0) ||
 		  net->cisco_cap_exist) {
-		ht_info->IOTPeer = HT_IOT_PEER_CISCO;
+		ht_info->iot_peer = HT_IOT_PEER_CISCO;
 	} else if ((memcmp(net->bssid, LINKSYS_MARVELL_4400N, 3) == 0) ||
 		  net->marvell_cap_exist) {
-		ht_info->IOTPeer = HT_IOT_PEER_MARVELL;
+		ht_info->iot_peer = HT_IOT_PEER_MARVELL;
 	} else if (net->airgo_cap_exist) {
-		ht_info->IOTPeer = HT_IOT_PEER_AIRGO;
+		ht_info->iot_peer = HT_IOT_PEER_AIRGO;
 	} else {
-		ht_info->IOTPeer = HT_IOT_PEER_UNKNOWN;
+		ht_info->iot_peer = HT_IOT_PEER_UNKNOWN;
 	}
 
-	netdev_dbg(ieee->dev, "IOTPEER: %x\n", ht_info->IOTPeer);
+	netdev_dbg(ieee->dev, "IOTPEER: %x\n", ht_info->iot_peer);
 }
 
 static u8 ht_iot_act_is_mgnt_use_cck_6m(struct rtllib_device *ieee,
@@ -212,17 +212,17 @@ static u8 ht_iot_act_is_mgnt_use_cck_6m(struct rtllib_device *ieee,
 {
 	u8	retValue = 0;
 
-	if (ieee->ht_info->IOTPeer == HT_IOT_PEER_BROADCOM)
+	if (ieee->ht_info->iot_peer == HT_IOT_PEER_BROADCOM)
 		retValue = 1;
 
 	return retValue;
 }
 
-static u8 HTIOTActIsCCDFsync(struct rtllib_device *ieee)
+static u8 ht_iot_act_is_ccd_fsync(struct rtllib_device *ieee)
 {
 	u8	retValue = 0;
 
-	if (ieee->ht_info->IOTPeer == HT_IOT_PEER_BROADCOM)
+	if (ieee->ht_info->iot_peer == HT_IOT_PEER_BROADCOM)
 		retValue = 1;
 	return retValue;
 }
@@ -233,7 +233,7 @@ static void HTIOTActDetermineRaFunc(struct rtllib_device *ieee, bool bPeerRx2ss)
 
 	ht_info->iot_ra_func &= HT_IOT_RAFUNC_DISABLE_ALL;
 
-	if (ht_info->IOTPeer == HT_IOT_PEER_RALINK && !bPeerRx2ss)
+	if (ht_info->iot_peer == HT_IOT_PEER_RALINK && !bPeerRx2ss)
 		ht_info->iot_ra_func |= HT_IOT_RAFUNC_PEER_1R;
 
 	if (ht_info->iot_action & HT_IOT_ACT_AMSDU_ENABLE)
@@ -243,7 +243,7 @@ static void HTIOTActDetermineRaFunc(struct rtllib_device *ieee, bool bPeerRx2ss)
 void HTResetIOTSetting(struct rt_hi_throughput *ht_info)
 {
 	ht_info->iot_action = 0;
-	ht_info->IOTPeer = HT_IOT_PEER_UNKNOWN;
+	ht_info->iot_peer = HT_IOT_PEER_UNKNOWN;
 	ht_info->iot_ra_func = 0;
 }
 
@@ -478,10 +478,10 @@ void HTOnAssocRsp(struct rtllib_device *ieee)
 	ht_info->cur_tx_bw40mhz = ((pPeerHTInfo->RecommemdedTxWidth == 1) ?
 				 true : false);
 
-	ht_info->bCurShortGI20MHz = ((ht_info->reg_short_gi_20mhz) ?
+	ht_info->cur_short_gi_20mhz = ((ht_info->reg_short_gi_20mhz) ?
 				    ((pPeerHTCap->ShortGI20Mhz == 1) ?
 				    true : false) : false);
-	ht_info->bCurShortGI40MHz = ((ht_info->reg_short_gi_40mhz) ?
+	ht_info->cur_short_gi_40mhz = ((ht_info->reg_short_gi_40mhz) ?
 				     ((pPeerHTCap->ShortGI40Mhz == 1) ?
 				     true : false) : false);
 
@@ -489,7 +489,7 @@ void HTOnAssocRsp(struct rtllib_device *ieee)
 			       ((pPeerHTCap->DssCCk == 1) ? true :
 			       false) : false);
 
-	ht_info->bCurrent_AMSDU_Support = ht_info->bAMSDU_Support;
+	ht_info->bCurrent_AMSDU_Support = ht_info->amsdu_support;
 
 	nMaxAMSDUSize = (pPeerHTCap->MaxAMSDUSize == 0) ? 3839 : 7935;
 
@@ -498,20 +498,20 @@ void HTOnAssocRsp(struct rtllib_device *ieee)
 	else
 		ht_info->nCurrent_AMSDU_MaxSize = ht_info->amsdu_max_size;
 
-	ht_info->current_ampdu_enable = ht_info->bAMPDUEnable;
+	ht_info->current_ampdu_enable = ht_info->ampdu_enable;
 	if (ieee->rtllib_ap_sec_type &&
 	    (ieee->rtllib_ap_sec_type(ieee) & (SEC_ALG_WEP | SEC_ALG_TKIP))) {
-		if ((ht_info->IOTPeer == HT_IOT_PEER_ATHEROS) ||
-		    (ht_info->IOTPeer == HT_IOT_PEER_UNKNOWN))
+		if ((ht_info->iot_peer == HT_IOT_PEER_ATHEROS) ||
+		    (ht_info->iot_peer == HT_IOT_PEER_UNKNOWN))
 			ht_info->current_ampdu_enable = false;
 	}
 
 	if (!ht_info->reg_rt2rt_aggregation) {
-		if (ht_info->AMPDU_Factor > pPeerHTCap->MaxRxAMPDUFactor)
+		if (ht_info->ampdu_factor > pPeerHTCap->MaxRxAMPDUFactor)
 			ht_info->CurrentAMPDUFactor =
 						 pPeerHTCap->MaxRxAMPDUFactor;
 		else
-			ht_info->CurrentAMPDUFactor = ht_info->AMPDU_Factor;
+			ht_info->CurrentAMPDUFactor = ht_info->ampdu_factor;
 
 	} else {
 		if (ieee->current_network.bssht.bd_rt2rt_aggregation) {
@@ -525,7 +525,7 @@ void HTOnAssocRsp(struct rtllib_device *ieee)
 							    HT_AGG_SIZE_32K);
 		}
 	}
-	ht_info->current_mpdu_density = max_t(u8, ht_info->MPDU_Density,
+	ht_info->current_mpdu_density = max_t(u8, ht_info->mpdu_density,
 					      pPeerHTCap->MPDUDensity);
 	if (ht_info->iot_action & HT_IOT_ACT_TX_USE_AMSDU_8K) {
 		ht_info->current_ampdu_enable = false;
@@ -562,16 +562,16 @@ void HTInitializeHTInfo(struct rtllib_device *ieee)
 	ht_info->cur_bw_40mhz = false;
 	ht_info->cur_tx_bw40mhz = false;
 
-	ht_info->bCurShortGI20MHz = false;
-	ht_info->bCurShortGI40MHz = false;
+	ht_info->cur_short_gi_20mhz = false;
+	ht_info->cur_short_gi_40mhz = false;
 	ht_info->forced_short_gi = false;
 
 	ht_info->bCurSuppCCK = true;
 
 	ht_info->bCurrent_AMSDU_Support = false;
 	ht_info->nCurrent_AMSDU_MaxSize = ht_info->amsdu_max_size;
-	ht_info->current_mpdu_density = ht_info->MPDU_Density;
-	ht_info->CurrentAMPDUFactor = ht_info->AMPDU_Factor;
+	ht_info->current_mpdu_density = ht_info->mpdu_density;
+	ht_info->CurrentAMPDUFactor = ht_info->ampdu_factor;
 
 	memset((void *)(&ht_info->SelfHTCap), 0,
 	       sizeof(ht_info->SelfHTCap));
@@ -590,7 +590,7 @@ void HTInitializeHTInfo(struct rtllib_device *ieee)
 	ht_info->current_rt2rt_long_slot_time = false;
 	ht_info->RT2RT_HT_Mode = (enum rt_ht_capability)0;
 
-	ht_info->IOTPeer = 0;
+	ht_info->iot_peer = 0;
 	ht_info->iot_action = 0;
 	ht_info->iot_ra_func = 0;
 
@@ -662,7 +662,7 @@ void HTResetSelfAndSavePeerSetting(struct rtllib_device *ieee,
 		bIOTAction = ht_iot_act_is_mgnt_use_cck_6m(ieee, pNetwork);
 		if (bIOTAction)
 			ht_info->iot_action |= HT_IOT_ACT_MGNT_USE_CCK_6M;
-		bIOTAction = HTIOTActIsCCDFsync(ieee);
+		bIOTAction = ht_iot_act_is_ccd_fsync(ieee);
 		if (bIOTAction)
 			ht_info->iot_action |= HT_IOT_ACT_CDD_FSYNC;
 	} else {

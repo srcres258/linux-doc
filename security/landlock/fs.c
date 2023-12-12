@@ -99,9 +99,15 @@ static const struct landlock_object_underops landlock_fs_underops = {
 #define LANDLOCK_ACCESS_FS_IOCTL_GROUP4 (LANDLOCK_LAST_PUBLIC_ACCESS_FS << 4)
 
 /* ioctl_groups - all synthetic access rights for IOCTL command groups */
-static const access_mask_t ioctl_groups =
-	LANDLOCK_ACCESS_FS_IOCTL_GROUP1 | LANDLOCK_ACCESS_FS_IOCTL_GROUP2 |
-	LANDLOCK_ACCESS_FS_IOCTL_GROUP3 | LANDLOCK_ACCESS_FS_IOCTL_GROUP4;
+/* clang-format off */
+#define IOCTL_GROUPS (			  \
+	LANDLOCK_ACCESS_FS_IOCTL_GROUP1 | \
+	LANDLOCK_ACCESS_FS_IOCTL_GROUP2 | \
+	LANDLOCK_ACCESS_FS_IOCTL_GROUP3 | \
+	LANDLOCK_ACCESS_FS_IOCTL_GROUP4)
+/* clang-format on */
+
+static_assert((IOCTL_GROUPS & LANDLOCK_MASK_ACCESS_FS) == IOCTL_GROUPS);
 
 /**
  * required_ioctl_access(): Determine required IOCTL access rights.
@@ -155,12 +161,12 @@ static access_mask_t required_ioctl_access(unsigned int cmd)
  * %LANDLOCK_ACCESS_FS_IOCTL flag, depending on whether the
  * %LANDLOCK_ACCESS_FS_IOCTL and src access rights are handled or not.
  *
- * @handled: Handled access rights
- * @access: The access mask to copy values from
+ * @handled: Handled access rights.
+ * @access: The access mask to copy values from.
  * @src: A single access right to copy from in @access.
- * @dst: One or more access rights to copy to
+ * @dst: One or more access rights to copy to.
  *
- * Returns: @dst, or 0
+ * Returns: @dst, or 0.
  */
 static access_mask_t expand_ioctl(const access_mask_t handled,
 				  const access_mask_t access,
@@ -209,10 +215,10 @@ static access_mask_t landlock_expand_access_fs(const access_mask_t handled,
  * landlock_expand_handled_access_fs() - add synthetic IOCTL access rights to an
  * access mask of handled accesses.
  *
- * @handled: The handled accesses of a ruleset that is being created
+ * @handled: The handled accesses of a ruleset that is being created.
  *
  * Returns: @handled, with the bits for the synthetic IOCTL access rights set,
- * if %LANDLOCK_ACCESS_FS_IOCTL is handled
+ * if %LANDLOCK_ACCESS_FS_IOCTL is handled.
  */
 access_mask_t landlock_expand_handled_access_fs(const access_mask_t handled)
 {
@@ -1269,7 +1275,7 @@ static int hook_file_open(struct file *const file)
 	access_mask_t open_access_request, full_access_request, allowed_access;
 	const access_mask_t optional_access = LANDLOCK_ACCESS_FS_TRUNCATE |
 					      LANDLOCK_ACCESS_FS_IOCTL |
-					      ioctl_groups;
+					      IOCTL_GROUPS;
 	const struct landlock_ruleset *const dom = get_current_fs_domain();
 
 	if (!dom)

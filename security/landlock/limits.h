@@ -18,6 +18,12 @@
 #define LANDLOCK_MAX_NUM_LAYERS		16
 #define LANDLOCK_MAX_NUM_RULES		U32_MAX
 
+/*
+ * For file system access rights, Landlock distinguishes between the publicly
+ * visible access rights (1 to LANDLOCK_LAST_PUBLIC_ACCESS_FS) and the private
+ * ones which are not exposed to userspace (LANDLOCK_LAST_PUBLIC_ACCESS_FS + 1
+ * to LANDLOCK_LAST_ACCESS_FS).  The private access rights are defined in fs.c.
+ */
 #define LANDLOCK_LAST_PUBLIC_ACCESS_FS	LANDLOCK_ACCESS_FS_IOCTL
 #define LANDLOCK_MASK_PUBLIC_ACCESS_FS	((LANDLOCK_LAST_PUBLIC_ACCESS_FS << 1) - 1)
 

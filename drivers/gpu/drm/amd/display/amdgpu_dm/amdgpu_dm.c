@@ -1711,7 +1711,7 @@ static int amdgpu_dm_init(struct amdgpu_device *adev)
 	init_data.clk_reg_offsets = adev->reg_offset[CLK_HWIP][0];
 
 	/* Enable DWB for tested platforms only */
-	if (adev->ip_versions[DCE_HWIP][0] >= IP_VERSION(3, 0, 0))
+	if (amdgpu_ip_version(adev, DCE_HWIP, 0) >= IP_VERSION(3, 0, 0))
 		init_data.num_virtual_links = 1;
 
 	INIT_LIST_HEAD(&adev->dm.da_list);
@@ -4065,6 +4065,11 @@ static int amdgpu_dm_mode_config_init(struct amdgpu_device *adev)
 		kfree(state);
 		return r;
 	}
+
+#ifdef AMD_PRIVATE_COLOR
+	if (amdgpu_dm_create_color_properties(adev))
+		return -ENOMEM;
+#endif
 
 	r = amdgpu_dm_audio_init(adev);
 	if (r) {
@@ -8912,7 +8917,7 @@ static void dm_set_writeback(struct amdgpu_display_manager *dm,
 	}
 
 	wb_info->mcif_buf_params.p_vmid = 1;
-	if (adev->ip_versions[DCE_HWIP][0] >= IP_VERSION(3, 0, 0)) {
+	if (amdgpu_ip_version(adev, DCE_HWIP, 0) >= IP_VERSION(3, 0, 0)) {
 		wb_info->mcif_warmup_params.start_address.quad_part = afb->address;
 		wb_info->mcif_warmup_params.region_size =
 			wb_info->mcif_buf_params.luma_pitch * wb_info->dwb_params.dest_height;
@@ -9864,7 +9869,8 @@ static bool should_reset_plane(struct drm_atomic_state *state,
 	 * TODO: Remove this hack for all asics once it proves that the
 	 * fast updates works fine on DCN3.2+.
 	 */
-	if (adev->ip_versions[DCE_HWIP][0] < IP_VERSION(3, 2, 0) && state->allow_modeset)
+	if (amdgpu_ip_version(adev, DCE_HWIP, 0) < IP_VERSION(3, 2, 0) &&
+	    state->allow_modeset)
 		return true;
 
 	/* Exit early if we know that we're adding or removing the plane. */

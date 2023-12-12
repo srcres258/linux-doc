@@ -556,16 +556,13 @@ static int btree_update_nodes_written_trans(struct btree_trans *trans,
 					    struct btree_update *as)
 {
 	struct bkey_i *k;
-	int ret;
 
-	ret = darray_make_room(&trans->extra_journal_entries, as->journal_u64s);
+	struct jset_entry *e = bch2_trans_jset_entry_alloc(trans, as->journal_u64s);
+	int ret = PTR_ERR_OR_ZERO(e);
 	if (ret)
 		return ret;
 
-	memcpy(&darray_top(trans->extra_journal_entries),
-	       as->journal_entries,
-	       as->journal_u64s * sizeof(u64));
-	trans->extra_journal_entries.nr += as->journal_u64s;
+	memcpy(e, as->journal_entries, as->journal_u64s * sizeof(u64));
 
 	trans->journal_pin = &as->journal;
 
@@ -1591,10 +1588,10 @@ static int btree_split(struct btree_update *as, struct btree_trans *trans,
 	bch2_btree_node_free_inmem(trans, path, b);
 
 	if (n3)
-		bch2_trans_node_add(trans, n3);
+		bch2_trans_node_add(trans, path, n3);
 	if (n2)
-		bch2_trans_node_add(trans, n2);
-	bch2_trans_node_add(trans, n1);
+		bch2_trans_node_add(trans, path2, n2);
+	bch2_trans_node_add(trans, path1, n1);
 
 	if (n3)
 		six_unlock_intent(&n3->c.lock);
@@ -1903,7 +1900,7 @@ int __bch2_foreground_maybe_merge(struct btree_trans *trans,
 	bch2_btree_node_free_inmem(trans, path, b);
 	bch2_btree_node_free_inmem(trans, sib_path, m);
 
-	bch2_trans_node_add(trans, n);
+	bch2_trans_node_add(trans, path, n);
 
 	bch2_trans_verify_paths(trans);
 
@@ -1975,7 +1972,7 @@ int bch2_btree_node_rewrite(struct btree_trans *trans,
 
 	bch2_btree_node_free_inmem(trans, iter->path, b);
 
-	bch2_trans_node_add(trans, n);
+	bch2_trans_node_add(trans, iter->path, n);
 	six_unlock_intent(&n->c.lock);
 
 	bch2_btree_update_done(as, trans);
@@ -2175,16 +2172,16 @@ static int __bch2_btree_node_update_key(struct btree_trans *trans,
 	} else {
 		BUG_ON(btree_node_root(c, b) != b);
 
-		ret = darray_make_room(&trans->extra_journal_entries,
+		struct jset_entry *e = bch2_trans_jset_entry_alloc(trans,
 				       jset_u64s(new_key->k.u64s));
+		ret = PTR_ERR_OR_ZERO(e);
 		if (ret)
 			return ret;
 
-		journal_entry_set((void *) &darray_top(trans->extra_journal_entries),
+		journal_entry_set(e,
 				  BCH_JSET_ENTRY_btree_root,
 				  b->c.btree_id, b->c.level,
 				  new_key, new_key->k.u64s);
-		trans->extra_journal_entries.nr += jset_u64s(new_key->k.u64s);
 	}
 
 	ret = bch2_trans_commit(trans, NULL, NULL, commit_flags);

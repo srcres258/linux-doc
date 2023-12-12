@@ -277,6 +277,7 @@ struct journal {
 	u64			low_on_space_start;
 	u64			low_on_pin_start;
 	u64			max_in_flight_start;
+	u64			write_buffer_full_start;
 
 	struct bch2_time_stats	*flush_write_time;
 	struct bch2_time_stats	*noflush_write_time;

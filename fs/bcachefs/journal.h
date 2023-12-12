@@ -265,6 +265,7 @@ static inline union journal_res_state journal_state_buf_put(struct journal *j, u
 	return s;
 }
 
+bool bch2_journal_entry_close(struct journal *);
 void bch2_journal_buf_put_final(struct journal *, u64, bool);
 
 static inline void __bch2_journal_buf_put(struct journal *j, unsigned idx, u64 seq)
@@ -424,7 +425,6 @@ static inline void bch2_journal_set_replay_done(struct journal *j)
 
 void bch2_journal_unblock(struct journal *);
 void bch2_journal_block(struct journal *);
-void bch2_journal_block_reservations(struct journal *);
 struct journal_buf *bch2_next_write_buffer_flush_journal_buf(struct journal *j, u64 max_seq);
 
 void __bch2_journal_debug_to_text(struct printbuf *, struct journal *);

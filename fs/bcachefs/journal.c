@@ -253,7 +253,7 @@ static bool journal_entry_want_write(struct journal *j)
 	return ret;
 }
 
-static bool journal_entry_close(struct journal *j)
+bool bch2_journal_entry_close(struct journal *j)
 {
 	bool ret;
 
@@ -383,7 +383,7 @@ static bool journal_quiesced(struct journal *j)
 	bool ret = atomic64_read(&j->seq) == j->seq_ondisk;
 
 	if (!ret)
-		journal_entry_close(j);
+		bch2_journal_entry_close(j);
 	return ret;
 }
 
@@ -436,7 +436,7 @@ retry:
 
 	/*
 	 * Recheck after taking the lock, so we don't race with another thread
-	 * that just did journal_entry_open() and call journal_entry_close()
+	 * that just did journal_entry_open() and call bch2_journal_entry_close()
 	 * unnecessarily
 	 */
 	if (journal_res_get_fast(j, res, flags)) {
@@ -771,36 +771,11 @@ void bch2_journal_block(struct journal *j)
 	journal_quiesce(j);
 }
 
-/*
- * XXX: ideally this would not be closing the current journal entry, but
- * otherwise we do not have a way to avoid racing with res_get() - j->blocked
- * will race.
- */
-static bool journal_reservations_stopped(struct journal *j)
-{
-	union journal_res_state s;
-
-	journal_entry_close(j);
-
-	s.v = atomic64_read_acquire(&j->reservations.counter);
-
-	return  s.buf0_count == 0 &&
-		s.buf1_count == 0 &&
-		s.buf2_count == 0 &&
-		s.buf3_count == 0;
-}
-
-void bch2_journal_block_reservations(struct journal *j)
-{
-	spin_lock(&j->lock);
-	j->blocked++;
-	spin_unlock(&j->lock);
-
-	wait_event(j->wait, journal_reservations_stopped(j));
-}
-
 static struct journal_buf *__bch2_next_write_buffer_flush_journal_buf(struct journal *j, u64 max_seq)
 {
+	struct journal_buf *ret = NULL;
+
+	mutex_lock(&j->buf_lock);
 	spin_lock(&j->lock);
 	max_seq = min(max_seq, journal_cur_seq(j));
 
@@ -809,27 +784,25 @@ static struct journal_buf *__bch2_next_write_buffer_flush_journal_buf(struct jou
 	     seq++) {
 		unsigned idx = seq & JOURNAL_BUF_MASK;
 		struct journal_buf *buf = j->buf + idx;
-		union journal_res_state s;
 
-		if (!buf->need_flush_to_write_buffer)
-			continue;
+		if (buf->need_flush_to_write_buffer) {
+			if (seq == journal_cur_seq(j))
+				__journal_entry_close(j, JOURNAL_ENTRY_CLOSED_VAL);
 
-		if (seq == journal_cur_seq(j))
-			__journal_entry_close(j, JOURNAL_ENTRY_CLOSED_VAL);
+			union journal_res_state s;
+			s.v = atomic64_read_acquire(&j->reservations.counter);
 
-		s.v = atomic64_read_acquire(&j->reservations.counter);
-
-		if (journal_state_count(s, idx)) {
-			spin_unlock(&j->lock);
-			return ERR_PTR(-EAGAIN);
+			ret = journal_state_count(s, idx)
+				? ERR_PTR(-EAGAIN)
+				: buf;
+			break;
 		}
-
-		spin_unlock(&j->lock);
-		return buf;
 	}
 
 	spin_unlock(&j->lock);
-	return NULL;
+	if (IS_ERR_OR_NULL(ret))
+		mutex_unlock(&j->buf_lock);
+	return ret;
 }
 
 struct journal_buf *bch2_next_write_buffer_flush_journal_buf(struct journal *j, u64 max_seq)
@@ -1107,7 +1080,7 @@ void bch2_fs_journal_stop(struct journal *j)
 	bch2_journal_reclaim_stop(j);
 	bch2_journal_flush_all_pins(j);
 
-	wait_event(j->wait, journal_entry_close(j));
+	wait_event(j->wait, bch2_journal_entry_close(j));
 
 	/*
 	 * Always write a new journal entry, to make sure the clock hands are up

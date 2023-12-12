@@ -137,17 +137,6 @@ static inline int next_order(unsigned long *orders, int prev)
 	return highest_order(*orders);
 }
 
-static inline int first_order(unsigned int orders)
-{
-	return fls(orders) - 1;
-}
-
-static inline int next_order(unsigned int *orders, int prev)
-{
-	*orders &= ~BIT(prev);
-	return first_order(*orders);
-}
-
 /*
  * Do the below checks:
  *   - For file vma, check if the linear page offset of vma is

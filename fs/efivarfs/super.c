@@ -20,22 +20,17 @@
 
 #include "internal.h"
 
-struct efivarfs_info {
-	struct super_block *sb;
-	struct notifier_block nb;
-};
-
-static struct efivarfs_info info;
-
 static int efivarfs_ops_notifier(struct notifier_block *nb, unsigned long event,
 				 void *data)
 {
+	struct efivarfs_fs_info *sfi = container_of(nb, struct efivarfs_fs_info, nb);
+
 	switch (event) {
 	case EFIVAR_OPS_RDONLY:
-		info.sb->s_flags |= SB_RDONLY;
+		sfi->sb->s_flags |= SB_RDONLY;
 		break;
 	case EFIVAR_OPS_RDWR:
-		info.sb->s_flags &= ~SB_RDONLY;
+		sfi->sb->s_flags &= ~SB_RDONLY;
 		break;
 	default:
 		return NOTIFY_DONE;
@@ -316,7 +311,7 @@ static int efivarfs_parse_param(struct fs_context *fc, struct fs_parameter *para
 
 static int efivarfs_fill_super(struct super_block *sb, struct fs_context *fc)
 {
-	struct efivarfs_fs_info *einfo = sb->s_fs_info;
+	struct efivarfs_fs_info *sfi = sb->s_fs_info;
 	struct inode *inode = NULL;
 	struct dentry *root;
 	int err;
@@ -342,16 +337,16 @@ static int efivarfs_fill_super(struct super_block *sb, struct fs_context *fc)
 	if (!root)
 		return -ENOMEM;
 
-	info.sb = sb;
-	info.nb.notifier_call = efivarfs_ops_notifier;
-	err = blocking_notifier_chain_register(&efivar_ops_nh, &info.nb);
+	sfi->sb = sb;
+	sfi->nb.notifier_call = efivarfs_ops_notifier;
+	err = blocking_notifier_chain_register(&efivar_ops_nh, &sfi->nb);
 	if (err)
 		return err;
 
 	err = efivar_init(efivarfs_callback, (void *)sb, true,
-			  &einfo->efivarfs_list);
+			  &sfi->efivarfs_list);
 	if (err)
-		efivar_entry_iter(efivarfs_destroy, &einfo->efivarfs_list, NULL);
+		efivar_entry_iter(efivarfs_destroy, &sfi->efivarfs_list, NULL);
 
 	return err;
 }
@@ -402,8 +397,7 @@ static void efivarfs_kill_sb(struct super_block *sb)
 {
 	struct efivarfs_fs_info *sfi = sb->s_fs_info;
 
-	blocking_notifier_chain_unregister(&efivar_ops_nh, &info.nb);
-	info.sb = NULL;
+	blocking_notifier_chain_unregister(&efivar_ops_nh, &sfi->nb);
 	kill_litter_super(sb);
 
 	/* Remove all entries and destroy */

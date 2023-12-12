@@ -150,7 +150,7 @@ static int bch2_journal_replay(struct bch_fs *c)
 	u64 start_seq	= c->journal_replay_seq_start;
 	u64 end_seq	= c->journal_replay_seq_start;
 	struct btree_trans *trans = bch2_trans_get(c);
-	int ret;
+	int ret = 0;
 
 	if (keys->nr) {
 		ret = bch2_journal_log_msg(c, "Starting journal replay (%zu keys in entries %llu-%llu)",
@@ -682,6 +682,7 @@ static int bch2_run_recovery_passes(struct bch_fs *c)
 			c->recovery_passes_complete |= BIT_ULL(c->curr_recovery_pass);
 		}
 		c->curr_recovery_pass++;
+		c->recovery_pass_done = max(c->recovery_pass_done, c->curr_recovery_pass);
 	}
 
 	return ret;

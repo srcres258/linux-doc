@@ -4907,8 +4907,8 @@ static int do_statmount(struct kstatmount *s)
 	 * Don't trigger audit denials. We just want to determine what
 	 * mounts to show users.
 	 */
-	if (!ns_capable_noaudit(&init_user_ns, CAP_SYS_ADMIN) &&
-	    !is_path_reachable(m, m->mnt.mnt_root, &s->root))
+	if (!is_path_reachable(m, m->mnt.mnt_root, &s->root) &&
+	    !ns_capable_noaudit(&init_user_ns, CAP_SYS_ADMIN))
 		return -EPERM;
 
 	err = security_sb_statfs(s->mnt->mnt_root);
@@ -5054,8 +5054,8 @@ static ssize_t do_listmount(struct mount *first, struct path *orig, u64 mnt_id,
 	 * Don't trigger audit denials. We just want to determine what
 	 * mounts to show users.
 	 */
-	if (!ns_capable_noaudit(&init_user_ns, CAP_SYS_ADMIN) &&
-	    !is_path_reachable(real_mount(orig->mnt), orig->dentry, root))
+	if (!is_path_reachable(real_mount(orig->mnt), orig->dentry, root) &&
+	    !ns_capable_noaudit(&init_user_ns, CAP_SYS_ADMIN))
 		return -EPERM;
 
 	err = security_sb_statfs(orig->dentry);

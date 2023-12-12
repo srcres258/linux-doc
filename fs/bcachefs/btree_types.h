@@ -227,8 +227,6 @@ struct btree_path {
 	u8			sorted_idx;
 	u8			ref;
 	u8			intent_ref;
-	u32			alloc_seq;
-	u32			downgrade_seq;
 
 	/* btree_iter_copy starts here: */
 	struct bpos		pos;
@@ -390,8 +388,6 @@ struct btree_trans {
 	u8			fn_idx;
 	u8			nr_sorted;
 	u8			nr_updates;
-	u8			nr_wb_updates;
-	u8			wb_updates_size;
 	bool			srcu_held:1;
 	bool			used_mempool:1;
 	bool			in_traverse_all:1;
@@ -412,7 +408,9 @@ struct btree_trans {
 	 * extent:
 	 */
 	unsigned		extra_journal_res;
-	unsigned		nr_max_paths;
+	u8			nr_max_paths;
+	u16			journal_entries_u64s;
+	u16			journal_entries_size;
 
 	unsigned long		paths_allocated[BITS_TO_LONGS(BTREE_ITER_MAX)];
 
@@ -424,11 +422,10 @@ struct btree_trans {
 	u8			sorted[BTREE_ITER_MAX + 8];
 	struct btree_path	paths[BTREE_ITER_MAX];
 	struct btree_insert_entry updates[BTREE_ITER_MAX];
-	struct btree_write_buffered_key *wb_updates;
 
 	/* update path: */
 	struct btree_trans_commit_hook *hooks;
-	darray_u64		extra_journal_entries;
+	struct jset_entry	*journal_entries;
 	struct journal_entry_pin *journal_pin;
 
 	struct journal_res	journal_res;
