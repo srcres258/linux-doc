@@ -1210,7 +1210,7 @@ static int overlapping_extents_found(struct btree_trans *trans,
 			swap(k1, k2);
 		}
 
-		trans->extra_journal_res += bch2_bkey_sectors_compressed(k2);
+		trans->extra_disk_res += bch2_bkey_sectors_compressed(k2);
 
 		ret =   bch2_trans_update_extent_overwrite(trans, old_iter,
 				BTREE_UPDATE_INTERNAL_SNAPSHOT_NODE,
@@ -1703,7 +1703,7 @@ static int check_dirent(struct btree_trans *trans, struct btree_iter *iter,
 			goto err;
 	}
 
-	BUG_ON(!iter->path->should_be_locked);
+	BUG_ON(!btree_iter_path(trans, iter)->should_be_locked);
 
 	i = walk_inode(trans, dir, equiv, k.k->type == KEY_TYPE_whiteout);
 	ret = PTR_ERR_OR_ZERO(i);

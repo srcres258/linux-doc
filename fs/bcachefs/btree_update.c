@@ -24,7 +24,7 @@ static inline int btree_insert_entry_cmp(const struct btree_insert_entry *l,
 }
 
 static int __must_check
-bch2_trans_update_by_path(struct btree_trans *, struct btree_path *,
+bch2_trans_update_by_path(struct btree_trans *, btree_path_idx_t,
 			  struct bkey_i *, enum btree_update_flags,
 			  unsigned long ip);
 
@@ -198,7 +198,7 @@ int bch2_trans_update_extent_overwrite(struct btree_trans *trans,
 	if (((front_split && back_split) ||
 	     ((front_split || back_split) && old.k->p.snapshot != new.k->p.snapshot)) &&
 	    (compressed_sectors = bch2_bkey_sectors_compressed(old)))
-		trans->extra_journal_res += compressed_sectors;
+		trans->extra_disk_res += compressed_sectors;
 
 	if (front_split) {
 		update = bch2_bkey_make_mut_noupdate(trans, old);
@@ -338,20 +338,21 @@ err:
 }
 
 static noinline int flush_new_cached_update(struct btree_trans *trans,
-					    struct btree_path *path,
 					    struct btree_insert_entry *i,
 					    enum btree_update_flags flags,
 					    unsigned long ip)
 {
-	struct btree_path *btree_path;
 	struct bkey k;
 	int ret;
 
-	btree_path = bch2_path_get(trans, path->btree_id, path->pos, 1, 0,
-				   BTREE_ITER_INTENT, _THIS_IP_);
-	ret = bch2_btree_path_traverse(trans, btree_path, 0);
+	btree_path_idx_t path_idx =
+		bch2_path_get(trans, i->btree_id, i->old_k.p, 1, 0,
+			      BTREE_ITER_INTENT, _THIS_IP_);
+	ret = bch2_btree_path_traverse(trans, path_idx, 0);
 	if (ret)
 		goto out;
+
+	struct btree_path *btree_path = trans->paths + path_idx;
 
 	/*
 	 * The old key in the insert entry might actually refer to an existing
@@ -367,14 +368,14 @@ static noinline int flush_new_cached_update(struct btree_trans *trans,
 	i->flags |= BTREE_TRIGGER_NORUN;
 
 	btree_path_set_should_be_locked(btree_path);
-	ret = bch2_trans_update_by_path(trans, btree_path, i->k, flags, ip);
+	ret = bch2_trans_update_by_path(trans, path_idx, i->k, flags, ip);
 out:
-	bch2_path_put(trans, btree_path, true);
+	bch2_path_put(trans, path_idx, true);
 	return ret;
 }
 
 static int __must_check
-bch2_trans_update_by_path(struct btree_trans *trans, struct btree_path *path,
+bch2_trans_update_by_path(struct btree_trans *trans, btree_path_idx_t path_idx,
 			  struct bkey_i *k, enum btree_update_flags flags,
 			  unsigned long ip)
 {
@@ -382,8 +383,9 @@ bch2_trans_update_by_path(struct btree_trans *trans, struct btree_path *path,
 	struct btree_insert_entry *i, n;
 	int cmp;
 
+	struct btree_path *path = trans->paths + path_idx;
 	EBUG_ON(!path->should_be_locked);
-	EBUG_ON(trans->nr_updates >= BTREE_ITER_MAX);
+	EBUG_ON(trans->nr_updates >= ARRAY_SIZE(trans->updates));
 	EBUG_ON(!bpos_eq(k->k.p, path->pos));
 
 	n = (struct btree_insert_entry) {
@@ -392,7 +394,7 @@ bch2_trans_update_by_path(struct btree_trans *trans, struct btree_path *path,
 		.btree_id	= path->btree_id,
 		.level		= path->level,
 		.cached		= path->cached,
-		.path		= path,
+		.path		= path_idx,
 		.k		= k,
 		.ip_allocated	= ip,
 	};
@@ -440,7 +442,7 @@ bch2_trans_update_by_path(struct btree_trans *trans, struct btree_path *path,
 		}
 	}
 
-	__btree_path_get(i->path, true);
+	__btree_path_get(trans->paths + i->path, true);
 
 	/*
 	 * If a key is present in the key cache, it must also exist in the
@@ -450,7 +452,7 @@ bch2_trans_update_by_path(struct btree_trans *trans, struct btree_path *path,
 	 * work:
 	 */
 	if (path->cached && bkey_deleted(&i->old_k))
-		return flush_new_cached_update(trans, path, i, flags, ip);
+		return flush_new_cached_update(trans, i, flags, ip);
 
 	return 0;
 }
@@ -459,9 +461,11 @@ static noinline int bch2_trans_update_get_key_cache(struct btree_trans *trans,
 						    struct btree_iter *iter,
 						    struct btree_path *path)
 {
-	if (!iter->key_cache_path ||
-	    !iter->key_cache_path->should_be_locked ||
-	    !bpos_eq(iter->key_cache_path->pos, iter->pos)) {
+	struct btree_path *key_cache_path = btree_iter_key_cache_path(trans, iter);
+
+	if (!key_cache_path ||
+	    !key_cache_path->should_be_locked ||
+	    !bpos_eq(key_cache_path->pos, iter->pos)) {
 		struct bkey_cached *ck;
 		int ret;
 
@@ -476,19 +480,18 @@ static noinline int bch2_trans_update_get_key_cache(struct btree_trans *trans,
 						iter->flags & BTREE_ITER_INTENT,
 						_THIS_IP_);
 
-		ret = bch2_btree_path_traverse(trans, iter->key_cache_path,
-					       BTREE_ITER_CACHED);
+		ret = bch2_btree_path_traverse(trans, iter->key_cache_path, BTREE_ITER_CACHED);
 		if (unlikely(ret))
 			return ret;
 
-		ck = (void *) iter->key_cache_path->l[0].b;
+		ck = (void *) trans->paths[iter->key_cache_path].l[0].b;
 
 		if (test_bit(BKEY_CACHED_DIRTY, &ck->flags)) {
 			trace_and_count(trans->c, trans_restart_key_cache_raced, trans, _RET_IP_);
 			return btree_trans_restart(trans, BCH_ERR_transaction_restart_key_cache_raced);
 		}
 
-		btree_path_set_should_be_locked(iter->key_cache_path);
+		btree_path_set_should_be_locked(trans->paths + iter->key_cache_path);
 	}
 
 	return 0;
@@ -497,7 +500,7 @@ static noinline int bch2_trans_update_get_key_cache(struct btree_trans *trans,
 int __must_check bch2_trans_update(struct btree_trans *trans, struct btree_iter *iter,
 				   struct bkey_i *k, enum btree_update_flags flags)
 {
-	struct btree_path *path = iter->update_path ?: iter->path;
+	btree_path_idx_t path_idx = iter->update_path ?: iter->path;
 	int ret;
 
 	if (iter->flags & BTREE_ITER_IS_EXTENTS)
@@ -517,6 +520,7 @@ int __must_check bch2_trans_update(struct btree_trans *trans, struct btree_iter 
 	/*
 	 * Ensure that updates to cached btrees go to the key cache:
 	 */
+	struct btree_path *path = trans->paths + path_idx;
 	if (!(flags & BTREE_UPDATE_KEY_CACHE_RECLAIM) &&
 	    !path->cached &&
 	    !path->level &&
@@ -525,10 +529,10 @@ int __must_check bch2_trans_update(struct btree_trans *trans, struct btree_iter 
 		if (ret)
 			return ret;
 
-		path = iter->key_cache_path;
+		path_idx = iter->key_cache_path;
 	}
 
-	return bch2_trans_update_by_path(trans, path, k, flags, _RET_IP_);
+	return bch2_trans_update_by_path(trans, path_idx, k, flags, _RET_IP_);
 }
 
 int bch2_btree_insert_clone_trans(struct btree_trans *trans,

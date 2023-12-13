@@ -334,6 +334,8 @@ static struct dev_iommu *dev_iommu_get(struct device *dev)
 {
 	struct dev_iommu *param = dev->iommu;
 
+	lockdep_assert_held(&iommu_probe_device_lock);
+
 	if (param)
 		return param;
 
@@ -384,6 +386,15 @@ static u32 dev_iommu_get_max_pasids(struct device *dev)
 
 	return min_t(u32, max_pasids, dev->iommu->iommu_dev->max_pasids);
 }
+
+void dev_iommu_priv_set(struct device *dev, void *priv)
+{
+	/* FSL_PAMU does something weird */
+	if (!IS_ENABLED(CONFIG_FSL_PAMU))
+		lockdep_assert_held(&iommu_probe_device_lock);
+	dev->iommu->priv = priv;
+}
+EXPORT_SYMBOL_GPL(dev_iommu_priv_set);
 
 /*
  * Init the dev->iommu and dev->iommu_group in the struct device and get the
@@ -3617,6 +3628,7 @@ struct iommu_domain *iommu_sva_domain_alloc(struct device *dev,
 	domain->type = IOMMU_DOMAIN_SVA;
 	mmgrab(mm);
 	domain->mm = mm;
+	domain->owner = ops;
 	domain->iopf_handler = iommu_sva_handle_iopf;
 	domain->fault_data = mm;
 

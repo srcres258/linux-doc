@@ -222,9 +222,10 @@ enum btree_path_uptodate {
 #define TRACK_PATH_ALLOCATED
 #endif
 
+typedef u16 btree_path_idx_t;
+
 struct btree_path {
-	u8			idx;
-	u8			sorted_idx;
+	btree_path_idx_t	sorted_idx;
 	u8			ref;
 	u8			intent_ref;
 
@@ -280,9 +281,9 @@ static inline unsigned long btree_path_ip_allocated(struct btree_path *path)
  */
 struct btree_iter {
 	struct btree_trans	*trans;
-	struct btree_path	*path;
-	struct btree_path	*update_path;
-	struct btree_path	*key_cache_path;
+	btree_path_idx_t	path;
+	btree_path_idx_t	update_path;
+	btree_path_idx_t	key_cache_path;
 
 	enum btree_id		btree_id:8;
 	u8			min_depth;
@@ -349,8 +350,8 @@ struct btree_insert_entry {
 	 * to the size of the key being overwritten in the btree:
 	 */
 	u8			old_btree_u64s;
+	btree_path_idx_t	path;
 	struct bkey_i		*k;
-	struct btree_path	*path;
 	/* key being overwritten: */
 	struct bkey		old_k;
 	const struct bch_val	*old_v;
@@ -373,21 +374,22 @@ struct btree_trans_commit_hook {
 
 struct btree_trans {
 	struct bch_fs		*c;
-	const char		*fn;
-	struct closure		ref;
-	struct list_head	list;
-	u64			last_begin_time;
 
-	u8			lock_may_not_fail;
-	u8			lock_must_abort;
-	struct btree_bkey_cached_common *locking;
-	struct six_lock_waiter	locking_wait;
+	unsigned long		*paths_allocated;
+	u8			*sorted;
+	struct btree_path	*paths;
 
-	int			srcu_idx;
+	void			*mem;
+	unsigned		mem_top;
+	unsigned		mem_max;
+	unsigned		mem_bytes;
 
+	btree_path_idx_t	nr_sorted;
+	btree_path_idx_t	nr_paths_max;
 	u8			fn_idx;
-	u8			nr_sorted;
 	u8			nr_updates;
+	u8			lock_must_abort;
+	bool			lock_may_not_fail:1;
 	bool			srcu_held:1;
 	bool			used_mempool:1;
 	bool			in_traverse_all:1;
@@ -399,41 +401,51 @@ struct btree_trans {
 	bool			write_locked:1;
 	enum bch_errcode	restarted:16;
 	u32			restart_count;
+
+	u64			last_begin_time;
 	unsigned long		last_begin_ip;
 	unsigned long		last_restarted_ip;
 	unsigned long		srcu_lock_time;
 
-	/*
-	 * For when bch2_trans_update notices we'll be splitting a compressed
-	 * extent:
-	 */
-	unsigned		extra_journal_res;
-	u8			nr_max_paths;
-	u16			journal_entries_u64s;
-	u16			journal_entries_size;
-
-	unsigned long		paths_allocated[BITS_TO_LONGS(BTREE_ITER_MAX)];
-
-	unsigned		mem_top;
-	unsigned		mem_max;
-	unsigned		mem_bytes;
-	void			*mem;
-
-	u8			sorted[BTREE_ITER_MAX + 8];
-	struct btree_path	paths[BTREE_ITER_MAX];
-	struct btree_insert_entry updates[BTREE_ITER_MAX];
+	const char		*fn;
+	struct closure		ref;
+	struct list_head	list;
+	struct btree_bkey_cached_common *locking;
+	struct six_lock_waiter	locking_wait;
+	int			srcu_idx;
 
 	/* update path: */
-	struct btree_trans_commit_hook *hooks;
+	u16			journal_entries_u64s;
+	u16			journal_entries_size;
 	struct jset_entry	*journal_entries;
+
+	struct btree_insert_entry updates[BTREE_ITER_MAX];
+	struct btree_trans_commit_hook *hooks;
 	struct journal_entry_pin *journal_pin;
 
 	struct journal_res	journal_res;
 	u64			*journal_seq;
 	struct disk_reservation *disk_res;
 	unsigned		journal_u64s;
+	unsigned		extra_disk_res; /* XXX kill */
 	struct replicas_delta_list *fs_usage_deltas;
+
+	unsigned long		_paths_allocated[BITS_TO_LONGS(BTREE_ITER_MAX)];
+	u8			_sorted[BTREE_ITER_MAX + 8];
+	struct btree_path	_paths[BTREE_ITER_MAX];
 };
+
+static inline struct btree_path *btree_iter_path(struct btree_trans *trans, struct btree_iter *iter)
+{
+	return trans->paths + iter->path;
+}
+
+static inline struct btree_path *btree_iter_key_cache_path(struct btree_trans *trans, struct btree_iter *iter)
+{
+	return iter->key_cache_path
+		? trans->paths + iter->key_cache_path
+		: NULL;
+}
 
 #define BCH_BTREE_WRITE_TYPES()						\
 	x(initial,		0)					\

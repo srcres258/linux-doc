@@ -101,7 +101,7 @@ bool list_lru_add(struct list_lru *lru, struct list_head *item, int nid,
  * memcg of the sublist is determined by @item list_head. This assumption is
  * valid for slab objects LRU such as dentries, inodes, etc.
  *
- * Return value: true if the list was updated, false otherwise.
+ * Return value: true if the list was updated, false otherwise
  */
 bool list_lru_add_obj(struct list_lru *lru, struct list_head *item);
 

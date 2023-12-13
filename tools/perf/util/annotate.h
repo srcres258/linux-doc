@@ -105,6 +105,8 @@ struct annotation_options {
 	unsigned int percent_type;
 };
 
+extern struct annotation_options annotate_opts;
+
 enum {
 	ANNOTATION__OFFSET_JUMP_TARGETS = 1,
 	ANNOTATION__OFFSET_CALL,
@@ -222,8 +224,7 @@ struct annotation_write_ops {
 };
 
 void annotation_line__write(struct annotation_line *al, struct annotation *notes,
-			    struct annotation_write_ops *ops,
-			    struct annotation_options *opts);
+			    struct annotation_write_ops *ops);
 
 int __annotation__scnprintf_samples_period(struct annotation *notes,
 					   char *bf, size_t size,
@@ -293,7 +294,6 @@ struct annotated_branch {
 
 struct LOCKABLE annotation {
 	u64			start;
-	struct annotation_options *options;
 	int			nr_events;
 	int			max_jump_sources;
 	struct {
@@ -319,7 +319,7 @@ bool annotation__trylock(struct annotation *notes) EXCLUSIVE_TRYLOCK_FUNCTION(tr
 
 static inline int annotation__cycles_width(struct annotation *notes)
 {
-	if (notes->branch && notes->options->show_minmax_cycle)
+	if (notes->branch && annotate_opts.show_minmax_cycle)
 		return ANNOTATION__IPC_WIDTH + ANNOTATION__MINMAX_CYCLES_WIDTH;
 
 	return notes->branch ? ANNOTATION__IPC_WIDTH + ANNOTATION__CYCLES_WIDTH : 0;
@@ -330,9 +330,9 @@ static inline int annotation__pcnt_width(struct annotation *notes)
 	return (symbol_conf.show_total_period ? 12 : 7) * notes->nr_events;
 }
 
-static inline bool annotation_line__filter(struct annotation_line *al, struct annotation *notes)
+static inline bool annotation_line__filter(struct annotation_line *al)
 {
-	return notes->options->hide_src_code && al->offset == -1;
+	return annotate_opts.hide_src_code && al->offset == -1;
 }
 
 void annotation__set_offsets(struct annotation *notes, s64 size);
@@ -373,11 +373,9 @@ void symbol__annotate_zero_histograms(struct symbol *sym);
 
 int symbol__annotate(struct map_symbol *ms,
 		     struct evsel *evsel,
-		     struct annotation_options *options,
 		     struct arch **parch);
 int symbol__annotate2(struct map_symbol *ms,
 		      struct evsel *evsel,
-		      struct annotation_options *options,
 		      struct arch **parch);
 
 enum symbol_disassemble_errno {
@@ -404,43 +402,39 @@ enum symbol_disassemble_errno {
 
 int symbol__strerror_disassemble(struct map_symbol *ms, int errnum, char *buf, size_t buflen);
 
-int symbol__annotate_printf(struct map_symbol *ms, struct evsel *evsel,
-			    struct annotation_options *options);
+int symbol__annotate_printf(struct map_symbol *ms, struct evsel *evsel);
 void symbol__annotate_zero_histogram(struct symbol *sym, int evidx);
 void symbol__annotate_decay_histogram(struct symbol *sym, int evidx);
 void annotated_source__purge(struct annotated_source *as);
 
-int map_symbol__annotation_dump(struct map_symbol *ms, struct evsel *evsel,
-				struct annotation_options *opts);
+int map_symbol__annotation_dump(struct map_symbol *ms, struct evsel *evsel);
 
 bool ui__has_annotation(void);
 
-int symbol__tty_annotate(struct map_symbol *ms, struct evsel *evsel, struct annotation_options *opts);
+int symbol__tty_annotate(struct map_symbol *ms, struct evsel *evsel);
 
-int symbol__tty_annotate2(struct map_symbol *ms, struct evsel *evsel, struct annotation_options *opts);
+int symbol__tty_annotate2(struct map_symbol *ms, struct evsel *evsel);
 
 #ifdef HAVE_SLANG_SUPPORT
 int symbol__tui_annotate(struct map_symbol *ms, struct evsel *evsel,
-			 struct hist_browser_timer *hbt,
-			 struct annotation_options *opts);
+			 struct hist_browser_timer *hbt);
 #else
 static inline int symbol__tui_annotate(struct map_symbol *ms __maybe_unused,
 				struct evsel *evsel  __maybe_unused,
-				struct hist_browser_timer *hbt __maybe_unused,
-				struct annotation_options *opts __maybe_unused)
+				struct hist_browser_timer *hbt __maybe_unused)
 {
 	return 0;
 }
 #endif
 
-void annotation_options__init(struct annotation_options *opt);
-void annotation_options__exit(struct annotation_options *opt);
+void annotation_options__init(void);
+void annotation_options__exit(void);
 
-void annotation_config__init(struct annotation_options *opt);
+void annotation_config__init(void);
 
 int annotate_parse_percent_type(const struct option *opt, const char *_str,
 				int unset);
 
-int annotate_check_args(struct annotation_options *args);
+int annotate_check_args(void);
 
 #endif	/* __PERF_ANNOTATE_H */
