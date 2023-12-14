@@ -23,20 +23,25 @@
 
 static u64 __boot_status __initdata;
 
+// temporary __prel64 related definitions
+// to be removed when this code is moved under pi/
+
+#define __prel64_initconst	__initconst
+
+#define PREL64(type, name)	union { type *name; }
+
+#define prel64_pointer(__d)	(__d)
+
+typedef bool filter_t(u64 val);
+
 struct ftr_set_desc {
 	char 				name[FTR_DESC_NAME_LEN];
-	union {
-		struct arm64_ftr_override *override;
-		prel64_t		override_prel;
-	};
+	PREL64(struct arm64_ftr_override, override);
 	struct {
 		char			name[FTR_DESC_FIELD_LEN];
 		u8			shift;
 		u8			width;
-		union {
-			bool		(*filter)(u64 val);
-			prel64_t	filter_prel;
-		};
+		PREL64(filter_t,	filter);
 	} 				fields[];
 };
 
@@ -198,18 +203,15 @@ static const struct ftr_set_desc sw_features __prel64_initconst = {
 	},
 };
 
-static const union {
-	const struct ftr_set_desc	*reg;
-	prel64_t			reg_prel;
-} regs[] __prel64_initconst = {
-	{ .reg = &mmfr1		},
-	{ .reg = &mmfr2		},
-	{ .reg = &pfr0 		},
-	{ .reg = &pfr1 		},
-	{ .reg = &isar1		},
-	{ .reg = &isar2		},
-	{ .reg = &smfr0		},
-	{ .reg = &sw_features	},
+static const
+PREL64(const struct ftr_set_desc, reg) regs[] __prel64_initconst = {
+	{ &mmfr1	},
+	{ &pfr0 	},
+	{ &pfr1 	},
+	{ &isar1	},
+	{ &isar2	},
+	{ &smfr0	},
+	{ &sw_features	},
 };
 
 static const struct {
@@ -269,12 +271,12 @@ static void __init match_options(const char *cmdline)
 	int i;
 
 	for (i = 0; i < ARRAY_SIZE(regs); i++) {
-		const struct ftr_set_desc *reg = prel64_to_pointer(&regs[i].reg_prel);
+		const struct ftr_set_desc *reg = prel64_pointer(regs[i].reg);
 		struct arm64_ftr_override *override;
 		int len = strlen(reg->name);
 		int f;
 
-		override = prel64_to_pointer(&reg->override_prel);
+		override = prel64_pointer(reg->override);
 
 		// set opt[] to '<name>.'
 		memcpy(opt, reg->name, len);
@@ -295,7 +297,7 @@ static void __init match_options(const char *cmdline)
 			 * it by setting the value to the all-ones while
 			 * clearing the mask... Yes, this is fragile.
 			 */
-			filter = prel64_to_pointer(&reg->fields[f].filter_prel);
+			filter = prel64_pointer(reg->fields[f].filter);
 			if (filter && !filter(v)) {
 				override->val  |= mask;
 				override->mask &= ~mask;
@@ -382,8 +384,8 @@ void __init init_feature_override(u64 boot_status, const void *fdt,
 	int i;
 
 	for (i = 0; i < ARRAY_SIZE(regs); i++) {
-		reg = prel64_to_pointer(&regs[i].reg_prel);
-		override = prel64_to_pointer(&reg->override_prel);
+		reg = prel64_pointer(regs[i].reg);
+		override = prel64_pointer(reg->override);
 
 		override->val  = 0;
 		override->mask = 0;
@@ -394,8 +396,8 @@ void __init init_feature_override(u64 boot_status, const void *fdt,
 	parse_cmdline(fdt, chosen);
 
 	for (i = 0; i < ARRAY_SIZE(regs); i++) {
-		reg = prel64_to_pointer(&regs[i].reg_prel);
-		override = prel64_to_pointer(&reg->override_prel);
+		reg = prel64_pointer(regs[i].reg);
+		override = prel64_pointer(reg->override);
 		dcache_clean_inval_poc((unsigned long)override,
 				       (unsigned long)(override + 1));
 	}

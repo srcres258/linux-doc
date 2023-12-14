@@ -135,7 +135,7 @@ again:
 	/* Cached in the inode and can be accessed. */
 	refcount_set(&node->refs, 2);
 
-	/* Allocate and reserve the slot, from now it can return a NULL on xa_load(). */
+	/* Allocate and reserve the slot, from now it can return a NULL from xa_load(). */
 	ret = xa_reserve(&root->delayed_nodes, ino, GFP_NOFS);
 	if (ret == -ENOMEM) {
 		kmem_cache_free(delayed_node_cache, node);

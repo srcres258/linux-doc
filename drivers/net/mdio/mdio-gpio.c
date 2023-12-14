@@ -123,7 +123,7 @@ static struct mii_bus *mdio_gpio_bus_init(struct device *dev,
 	new_bus->parent = dev;
 
 	if (bus_id != -1)
-		snprintf(new_bus->id, MII_BUS_ID_SIZE, "gpio-%x", bus_id);
+		snprintf(new_bus->id, sizeof(new_bus->id), "gpio-%x", bus_id);
 	else
 		strscpy(new_bus->id, "gpio", sizeof(new_bus->id));
 

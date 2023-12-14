@@ -118,7 +118,7 @@ Where both upper and lower objects are directories, a merged directory
 is formed.
 
 At mount time, the two directories given as mount options "lowerdir" and
-"upperdir" are combined into a merged directory:
+"upperdir" are combined into a merged directory::
 
   mount -t overlay overlay -olowerdir=/lower,upperdir=/upper,\
   workdir=/work /merged
@@ -311,11 +311,11 @@ to create setups where the consistency rule (1) does not hold; normally,
 however, the mounting task will have sufficient privileges to perform all
 operations.
 
-Another way to demonstrate this model is drawing parallels between:
+Another way to demonstrate this model is drawing parallels between::
 
  mount -t overlay overlay -olowerdir=/lower,upperdir=/upper,... /merged
 
-and:
+and::
 
  |  cp -a /lower /upper
  |  mount --bind /upper /merged
@@ -328,7 +328,7 @@ Multiple lower layers
 ---------------------
 
 Multiple lower layers can now be given using the colon (":") as a
-separator character between the directory names.  For example:
+separator character between the directory names.  For example::
 
   mount -t overlay overlay -olowerdir=/lower1:/lower2:/lower3 /merged
 
@@ -340,13 +340,13 @@ rightmost one and going left.  In the above example lower1 will be the
 top, lower2 the middle and lower3 the bottom layer.
 
 Note: directory names containing colons can be provided as lower layer by
-escaping the colons with a single backslash.  For example:
+escaping the colons with a single backslash.  For example::
 
   mount -t overlay overlay -olowerdir=/a\:lower\:\:dir /merged
 
 Since kernel version v6.8, directory names containing colons can also
 be configured as lower layer using the "lowerdir+" mount options and the
-fsconfig syscall from new mount api.  For example:
+fsconfig syscall from new mount api.  For example::
 
   fsconfig(fs_fd, FSCONFIG_SET_STRING, "lowerdir+", "/a:lower::dir", 0);
 
@@ -405,7 +405,7 @@ A normal lower layer is not allowed to be below a data-only layer, so single
 colon separators are not allowed to the right of double colon ("::") separators.
 
 
-For example:
+For example::
 
   mount -t overlay overlay -olowerdir=/l1:/l2:/l3::/do1::/do2 /merged
 
@@ -419,7 +419,7 @@ to the absolute path of the "lower data" file in the "data-only" lower layer.
 
 Since kernel version v6.8, "data-only" lower layers can also be added using
 the "datadir+" mount options and the fsconfig syscall from new mount api.
-For example:
+For example::
 
  |  fsconfig(fs_fd, FSCONFIG_SET_STRING, "lowerdir+", "/l1", 0);
  |  fsconfig(fs_fd, FSCONFIG_SET_STRING, "lowerdir+", "/l2", 0);
@@ -776,7 +776,7 @@ maintained by Amir Goldstein at:
 
 https://github.com/amir73il/unionmount-testsuite.git
 
-Run as root:
+Run as root::
 
  |  # cd unionmount-testsuite
  |  # ./run --ov --verify

@@ -41,6 +41,17 @@
 					 BTRFS_BLOCK_GROUP_RAID10 | \
 					 BTRFS_BLOCK_GROUP_RAID56_MASK)
 
+struct btrfs_io_geometry {
+	u32 stripe_index;
+	u32 stripe_nr;
+	int mirror_num;
+	int num_stripes;
+	u64 stripe_offset;
+	u64 raid56_full_stripe_start;
+	int max_errors;
+	enum btrfs_map_op op;
+};
+
 const struct btrfs_raid_attr btrfs_raid_array[BTRFS_NR_RAID_TYPES] = {
 	[BTRFS_RAID_RAID10] = {
 		.sub_stripes	= 2,
@@ -6272,17 +6283,16 @@ static void handle_ops_on_dev_replace(enum btrfs_map_op op,
 	bioc->replace_nr_stripes = nr_extra_stripes;
 }
 
-static u64 btrfs_max_io_len(struct btrfs_chunk_map *map, enum btrfs_map_op op,
-			    u64 offset, u32 *stripe_nr, u64 *stripe_offset,
-			    u64 *full_stripe_start)
+static u64 btrfs_max_io_len(struct btrfs_chunk_map *map, u64 offset,
+			    struct btrfs_io_geometry *io_geom)
 {
 	/*
 	 * Stripe_nr is the stripe where this block falls.  stripe_offset is
 	 * the offset of this block in its stripe.
 	 */
-	*stripe_offset = offset & BTRFS_STRIPE_LEN_MASK;
-	*stripe_nr = offset >> BTRFS_STRIPE_LEN_SHIFT;
-	ASSERT(*stripe_offset < U32_MAX);
+	io_geom->stripe_offset = offset & BTRFS_STRIPE_LEN_MASK;
+	io_geom->stripe_nr = offset >> BTRFS_STRIPE_LEN_SHIFT;
+	ASSERT(io_geom->stripe_offset < U32_MAX);
 
 	if (map->type & BTRFS_BLOCK_GROUP_RAID56_MASK) {
 		unsigned long full_stripe_len =
@@ -6297,18 +6307,17 @@ static u64 btrfs_max_io_len(struct btrfs_chunk_map *map, enum btrfs_map_op op,
 		 * to go rounddown(), not round_down(), as nr_data_stripes is
 		 * not ensured to be power of 2.
 		 */
-		*full_stripe_start =
-			btrfs_stripe_nr_to_offset(
-				rounddown(*stripe_nr, nr_data_stripes(map)));
+		io_geom->raid56_full_stripe_start = btrfs_stripe_nr_to_offset(
+			rounddown(io_geom->stripe_nr, nr_data_stripes(map)));
 
-		ASSERT(*full_stripe_start + full_stripe_len > offset);
-		ASSERT(*full_stripe_start <= offset);
+		ASSERT(io_geom->raid56_full_stripe_start + full_stripe_len > offset);
+		ASSERT(io_geom->raid56_full_stripe_start <= offset);
 		/*
 		 * For writes to RAID56, allow to write a full stripe set, but
 		 * no straddling of stripe sets.
 		 */
-		if (op == BTRFS_MAP_WRITE)
-			return full_stripe_len - (offset - *full_stripe_start);
+		if (io_geom->op == BTRFS_MAP_WRITE)
+			return full_stripe_len - (offset - io_geom->raid56_full_stripe_start);
 	}
 
 	/*
@@ -6316,24 +6325,178 @@ static u64 btrfs_max_io_len(struct btrfs_chunk_map *map, enum btrfs_map_op op,
 	 * a single disk).
 	 */
 	if (map->type & BTRFS_BLOCK_GROUP_STRIPE_MASK)
-		return BTRFS_STRIPE_LEN - *stripe_offset;
+		return BTRFS_STRIPE_LEN - io_geom->stripe_offset;
 	return U64_MAX;
 }
 
-static int set_io_stripe(struct btrfs_fs_info *fs_info, enum btrfs_map_op op,
-			 u64 logical, u64 *length, struct btrfs_io_stripe *dst,
-			 struct btrfs_chunk_map *map, u32 stripe_index,
-			 u64 stripe_offset, u64 stripe_nr)
+static int set_io_stripe(struct btrfs_fs_info *fs_info, u64 logical,
+			 u64 *length, struct btrfs_io_stripe *dst,
+			 struct btrfs_chunk_map *map,
+			 struct btrfs_io_geometry *io_geom)
 {
-	dst->dev = map->stripes[stripe_index].dev;
+	dst->dev = map->stripes[io_geom->stripe_index].dev;
 
-	if (op == BTRFS_MAP_READ && btrfs_need_stripe_tree_update(fs_info, map->type))
+	if (io_geom->op == BTRFS_MAP_READ &&
+	    btrfs_need_stripe_tree_update(fs_info, map->type))
 		return btrfs_get_raid_extent_offset(fs_info, logical, length,
-						    map->type, stripe_index, dst);
+						    map->type,
+						    io_geom->stripe_index, dst);
 
-	dst->physical = map->stripes[stripe_index].physical +
-			stripe_offset + btrfs_stripe_nr_to_offset(stripe_nr);
+	dst->physical = map->stripes[io_geom->stripe_index].physical +
+			io_geom->stripe_offset +
+			btrfs_stripe_nr_to_offset(io_geom->stripe_nr);
 	return 0;
+}
+
+static bool is_single_device_io(struct btrfs_fs_info *fs_info,
+				const struct btrfs_io_stripe *smap,
+				const struct btrfs_chunk_map *map,
+				int num_alloc_stripes,
+				enum btrfs_map_op op, int mirror_num)
+{
+	if (!smap)
+		return false;
+
+	if (num_alloc_stripes != 1)
+		return false;
+
+	if (btrfs_need_stripe_tree_update(fs_info, map->type) && op != BTRFS_MAP_READ)
+		return false;
+
+	if ((map->type & BTRFS_BLOCK_GROUP_RAID56_MASK) && mirror_num > 1)
+		return false;
+
+	return true;
+}
+
+static void map_blocks_raid0(const struct btrfs_chunk_map *map,
+			     struct btrfs_io_geometry *io_geom)
+{
+	io_geom->stripe_index = io_geom->stripe_nr % map->num_stripes;
+	io_geom->stripe_nr /= map->num_stripes;
+	if (io_geom->op == BTRFS_MAP_READ)
+		io_geom->mirror_num = 1;
+}
+
+static void map_blocks_raid1(struct btrfs_fs_info *fs_info,
+			     struct btrfs_chunk_map *map,
+			     struct btrfs_io_geometry *io_geom,
+			     bool dev_replace_is_ongoing)
+{
+	if (io_geom->op != BTRFS_MAP_READ) {
+		io_geom->num_stripes = map->num_stripes;
+		return;
+	}
+
+	if (io_geom->mirror_num) {
+		io_geom->stripe_index = io_geom->mirror_num - 1;
+		return;
+	}
+
+	io_geom->stripe_index = find_live_mirror(fs_info, map, 0,
+						 dev_replace_is_ongoing);
+	io_geom->mirror_num = io_geom->stripe_index + 1;
+}
+
+static void map_blocks_dup(const struct btrfs_chunk_map *map,
+			   struct btrfs_io_geometry *io_geom)
+{
+	if (io_geom->op != BTRFS_MAP_READ) {
+		io_geom->num_stripes = map->num_stripes;
+		return;
+	}
+
+	if (io_geom->mirror_num) {
+		io_geom->stripe_index = io_geom->mirror_num - 1;
+		return;
+	}
+
+	io_geom->mirror_num = 1;
+}
+
+static void map_blocks_raid10(struct btrfs_fs_info *fs_info,
+			      struct btrfs_chunk_map *map,
+			      struct btrfs_io_geometry *io_geom,
+			      bool dev_replace_is_ongoing)
+{
+	u32 factor = map->num_stripes / map->sub_stripes;
+	int old_stripe_index;
+
+	io_geom->stripe_index = (io_geom->stripe_nr % factor) * map->sub_stripes;
+	io_geom->stripe_nr /= factor;
+
+	if (io_geom->op != BTRFS_MAP_READ) {
+		io_geom->num_stripes = map->sub_stripes;
+		return;
+	}
+
+	if (io_geom->mirror_num) {
+		io_geom->stripe_index += io_geom->mirror_num - 1;
+		return;
+	}
+
+	old_stripe_index = io_geom->stripe_index;
+	io_geom->stripe_index = find_live_mirror(fs_info, map,
+						 io_geom->stripe_index,
+						 dev_replace_is_ongoing);
+	io_geom->mirror_num = io_geom->stripe_index - old_stripe_index + 1;
+}
+
+static void map_blocks_raid56_write(struct btrfs_chunk_map *map,
+				    struct btrfs_io_geometry *io_geom,
+				    u64 logical, u64 *length)
+{
+	int data_stripes = nr_data_stripes(map);
+
+	/*
+	 * Needs full stripe mapping.
+	 *
+	 * Push stripe_nr back to the start of the full stripe For those cases
+	 * needing a full stripe, @stripe_nr is the full stripe number.
+	 *
+	 * Originally we go raid56_full_stripe_start / full_stripe_len, but
+	 * that can be expensive.  Here we just divide @stripe_nr with
+	 * @data_stripes.
+	 */
+	io_geom->stripe_nr /= data_stripes;
+
+	/* RAID[56] write or recovery. Return all stripes */
+	io_geom->num_stripes = map->num_stripes;
+	io_geom->max_errors = btrfs_chunk_max_errors(map);
+
+	/* Return the length to the full stripe end. */
+	*length = min(logical + *length,
+		      io_geom->raid56_full_stripe_start + map->start +
+		      btrfs_stripe_nr_to_offset(data_stripes)) -
+		logical;
+	io_geom->stripe_index = 0;
+	io_geom->stripe_offset = 0;
+}
+
+static void map_blocks_raid56_read(struct btrfs_chunk_map *map,
+				   struct btrfs_io_geometry *io_geom)
+{
+	int data_stripes = nr_data_stripes(map);
+
+	ASSERT(io_geom->mirror_num <= 1);
+	/* Just grab the data stripe directly. */
+	io_geom->stripe_index = io_geom->stripe_nr % data_stripes;
+	io_geom->stripe_nr /= data_stripes;
+
+	/* We distribute the parity blocks across stripes. */
+	io_geom->stripe_index =
+		(io_geom->stripe_nr + io_geom->stripe_index) % map->num_stripes;
+
+	if (io_geom->op == BTRFS_MAP_READ && io_geom->mirror_num < 1)
+		io_geom->mirror_num = 1;
+}
+
+static void map_blocks_single(const struct btrfs_chunk_map *map,
+			      struct btrfs_io_geometry *io_geom)
+{
+	io_geom->stripe_index = io_geom->stripe_nr % map->num_stripes;
+	io_geom->stripe_nr /= map->num_stripes;
+	io_geom->mirror_num = io_geom->stripe_index + 1;
 }
 
 /*
@@ -6377,39 +6540,35 @@ int btrfs_map_block(struct btrfs_fs_info *fs_info, enum btrfs_map_op op,
 		    struct btrfs_io_stripe *smap, int *mirror_num_ret)
 {
 	struct btrfs_chunk_map *map;
+	struct btrfs_io_geometry io_geom = { 0 };
 	u64 map_offset;
-	u64 stripe_offset;
-	u32 stripe_nr;
-	u32 stripe_index;
-	int data_stripes;
 	int i;
 	int ret = 0;
-	int mirror_num = (mirror_num_ret ? *mirror_num_ret : 0);
-	int num_stripes;
 	int num_copies;
-	int max_errors = 0;
 	struct btrfs_io_context *bioc = NULL;
 	struct btrfs_dev_replace *dev_replace = &fs_info->dev_replace;
 	int dev_replace_is_ongoing = 0;
 	u16 num_alloc_stripes;
-	u64 raid56_full_stripe_start = (u64)-1;
 	u64 max_len;
 
 	ASSERT(bioc_ret);
 
+	io_geom.mirror_num = (mirror_num_ret ? *mirror_num_ret : 0);
+	io_geom.num_stripes = 1;
+	io_geom.stripe_index = 0;
+	io_geom.op = op;
+
 	num_copies = btrfs_num_copies(fs_info, logical, fs_info->sectorsize);
-	if (mirror_num > num_copies)
+	if (io_geom.mirror_num > num_copies)
 		return -EINVAL;
 
 	map = btrfs_get_chunk_map(fs_info, logical, *length);
 	if (IS_ERR(map))
 		return PTR_ERR(map);
 
-	data_stripes = nr_data_stripes(map);
-
 	map_offset = logical - map->start;
-	max_len = btrfs_max_io_len(map, op, map_offset, &stripe_nr,
-				   &stripe_offset, &raid56_full_stripe_start);
+	io_geom.raid56_full_stripe_start = (u64)-1;
+	max_len = btrfs_max_io_len(map, map_offset, &io_geom);
 	*length = min_t(u64, map->chunk_len - map_offset, max_len);
 
 	down_read(&dev_replace->rwsem);
@@ -6421,107 +6580,46 @@ int btrfs_map_block(struct btrfs_fs_info *fs_info, enum btrfs_map_op op,
 	if (!dev_replace_is_ongoing)
 		up_read(&dev_replace->rwsem);
 
-	num_stripes = 1;
-	stripe_index = 0;
-	if (map->type & BTRFS_BLOCK_GROUP_RAID0) {
-		stripe_index = stripe_nr % map->num_stripes;
-		stripe_nr /= map->num_stripes;
-		if (op == BTRFS_MAP_READ)
-			mirror_num = 1;
-	} else if (map->type & BTRFS_BLOCK_GROUP_RAID1_MASK) {
-		if (op != BTRFS_MAP_READ) {
-			num_stripes = map->num_stripes;
-		} else if (mirror_num) {
-			stripe_index = mirror_num - 1;
-		} else {
-			stripe_index = find_live_mirror(fs_info, map, 0,
-					    dev_replace_is_ongoing);
-			mirror_num = stripe_index + 1;
-		}
-
-	} else if (map->type & BTRFS_BLOCK_GROUP_DUP) {
-		if (op != BTRFS_MAP_READ) {
-			num_stripes = map->num_stripes;
-		} else if (mirror_num) {
-			stripe_index = mirror_num - 1;
-		} else {
-			mirror_num = 1;
-		}
-
-	} else if (map->type & BTRFS_BLOCK_GROUP_RAID10) {
-		u32 factor = map->num_stripes / map->sub_stripes;
-
-		stripe_index = (stripe_nr % factor) * map->sub_stripes;
-		stripe_nr /= factor;
-
-		if (op != BTRFS_MAP_READ)
-			num_stripes = map->sub_stripes;
-		else if (mirror_num)
-			stripe_index += mirror_num - 1;
-		else {
-			int old_stripe_index = stripe_index;
-			stripe_index = find_live_mirror(fs_info, map,
-					      stripe_index,
-					      dev_replace_is_ongoing);
-			mirror_num = stripe_index - old_stripe_index + 1;
-		}
-
-	} else if (map->type & BTRFS_BLOCK_GROUP_RAID56_MASK) {
-		if (op != BTRFS_MAP_READ || mirror_num > 1) {
-			/*
-			 * Needs full stripe mapping.
-			 *
-			 * Push stripe_nr back to the start of the full stripe
-			 * For those cases needing a full stripe, @stripe_nr
-			 * is the full stripe number.
-			 *
-			 * Originally we go raid56_full_stripe_start / full_stripe_len,
-			 * but that can be expensive.  Here we just divide
-			 * @stripe_nr with @data_stripes.
-			 */
-			stripe_nr /= data_stripes;
-
-			/* RAID[56] write or recovery. Return all stripes */
-			num_stripes = map->num_stripes;
-			max_errors = btrfs_chunk_max_errors(map);
-
-			/* Return the length to the full stripe end */
-			*length = min(logical + *length,
-				      raid56_full_stripe_start + map->start +
-				      btrfs_stripe_nr_to_offset(data_stripes)) -
-				  logical;
-			stripe_index = 0;
-			stripe_offset = 0;
-		} else {
-			ASSERT(mirror_num <= 1);
-			/* Just grab the data stripe directly. */
-			stripe_index = stripe_nr % data_stripes;
-			stripe_nr /= data_stripes;
-
-			/* We distribute the parity blocks across stripes */
-			stripe_index = (stripe_nr + stripe_index) % map->num_stripes;
-			if (op == BTRFS_MAP_READ && mirror_num < 1)
-				mirror_num = 1;
-		}
-	} else {
+	switch (map->type & BTRFS_BLOCK_GROUP_PROFILE_MASK) {
+	case BTRFS_BLOCK_GROUP_RAID0:
+		map_blocks_raid0(map, &io_geom);
+		break;
+	case BTRFS_BLOCK_GROUP_RAID1:
+	case BTRFS_BLOCK_GROUP_RAID1C3:
+	case BTRFS_BLOCK_GROUP_RAID1C4:
+		map_blocks_raid1(fs_info, map, &io_geom, dev_replace_is_ongoing);
+		break;
+	case BTRFS_BLOCK_GROUP_DUP:
+		map_blocks_dup(map, &io_geom);
+		break;
+	case BTRFS_BLOCK_GROUP_RAID10:
+		map_blocks_raid10(fs_info, map, &io_geom, dev_replace_is_ongoing);
+		break;
+	case BTRFS_BLOCK_GROUP_RAID5:
+	case BTRFS_BLOCK_GROUP_RAID6:
+		if (op != BTRFS_MAP_READ || io_geom.mirror_num > 1)
+			map_blocks_raid56_write(map, &io_geom, logical, length);
+		else
+			map_blocks_raid56_read(map, &io_geom);
+		break;
+	default:
 		/*
 		 * After this, stripe_nr is the number of stripes on this
 		 * device we have to walk to find the data, and stripe_index is
 		 * the number of our device in the stripe array
 		 */
-		stripe_index = stripe_nr % map->num_stripes;
-		stripe_nr /= map->num_stripes;
-		mirror_num = stripe_index + 1;
+		map_blocks_single(map, &io_geom);
+		break;
 	}
-	if (stripe_index >= map->num_stripes) {
+	if (io_geom.stripe_index >= map->num_stripes) {
 		btrfs_crit(fs_info,
 			   "stripe index math went horribly wrong, got stripe_index=%u, num_stripes=%u",
-			   stripe_index, map->num_stripes);
+			   io_geom.stripe_index, map->num_stripes);
 		ret = -EINVAL;
 		goto out;
 	}
 
-	num_alloc_stripes = num_stripes;
+	num_alloc_stripes = io_geom.num_stripes;
 	if (dev_replace_is_ongoing && dev_replace->tgtdev != NULL &&
 	    op != BTRFS_MAP_READ)
 		/*
@@ -6538,14 +6636,11 @@ int btrfs_map_block(struct btrfs_fs_info *fs_info, enum btrfs_map_op op,
 	 * physical block information on the stack instead of allocating an
 	 * I/O context structure.
 	 */
-	if (smap && num_alloc_stripes == 1 &&
-	    !(btrfs_need_stripe_tree_update(fs_info, map->type) &&
-	      op != BTRFS_MAP_READ) &&
-	    !((map->type & BTRFS_BLOCK_GROUP_RAID56_MASK) && mirror_num > 1)) {
-		ret = set_io_stripe(fs_info, op, logical, length, smap, map,
-				    stripe_index, stripe_offset, stripe_nr);
+	if (is_single_device_io(fs_info, smap, map, num_alloc_stripes, op,
+				io_geom.mirror_num)) {
+		ret = set_io_stripe(fs_info, logical, length, smap, map, &io_geom);
 		if (mirror_num_ret)
-			*mirror_num_ret = mirror_num;
+			*mirror_num_ret = io_geom.mirror_num;
 		*bioc_ret = NULL;
 		goto out;
 	}
@@ -6565,7 +6660,7 @@ int btrfs_map_block(struct btrfs_fs_info *fs_info, enum btrfs_map_op op,
 	 * It's still mostly the same as other profiles, just with extra rotation.
 	 */
 	if (map->type & BTRFS_BLOCK_GROUP_RAID56_MASK &&
-	    (op != BTRFS_MAP_READ || mirror_num > 1)) {
+	    (op != BTRFS_MAP_READ || io_geom.mirror_num > 1)) {
 		/*
 		 * For RAID56 @stripe_nr is already the number of full stripes
 		 * before us, which is also the rotation value (needs to modulo
@@ -6575,27 +6670,30 @@ int btrfs_map_block(struct btrfs_fs_info *fs_info, enum btrfs_map_op op,
 		 * modulo, to reduce one modulo call.
 		 */
 		bioc->full_stripe_logical = map->start +
-			btrfs_stripe_nr_to_offset(stripe_nr * data_stripes);
-		for (int i = 0; i < num_stripes; i++) {
-			ret = set_io_stripe(fs_info, op, logical, length,
-					    &bioc->stripes[i], map,
-					    (i + stripe_nr) % num_stripes,
-					    stripe_offset, stripe_nr);
-			if (ret < 0)
-				break;
+			btrfs_stripe_nr_to_offset(io_geom.stripe_nr *
+						  nr_data_stripes(map));
+		for (int i = 0; i < io_geom.num_stripes; i++) {
+			struct btrfs_io_stripe *dst = &bioc->stripes[i];
+			u32 stripe_index;
+
+			stripe_index = (i + io_geom.stripe_nr) % io_geom.num_stripes;
+			dst->dev = map->stripes[stripe_index].dev;
+			dst->physical =
+				map->stripes[stripe_index].physical +
+				io_geom.stripe_offset +
+				btrfs_stripe_nr_to_offset(io_geom.stripe_nr);
 		}
 	} else {
 		/*
 		 * For all other non-RAID56 profiles, just copy the target
 		 * stripe into the bioc.
 		 */
-		for (i = 0; i < num_stripes; i++) {
-			ret = set_io_stripe(fs_info, op, logical, length,
-					    &bioc->stripes[i], map, stripe_index,
-					    stripe_offset, stripe_nr);
+		for (i = 0; i < io_geom.num_stripes; i++) {
+			ret = set_io_stripe(fs_info, logical, length,
+					    &bioc->stripes[i], map, &io_geom);
 			if (ret < 0)
 				break;
-			stripe_index++;
+			io_geom.stripe_index++;
 		}
 	}
 
@@ -6606,18 +6704,18 @@ int btrfs_map_block(struct btrfs_fs_info *fs_info, enum btrfs_map_op op,
 	}
 
 	if (op != BTRFS_MAP_READ)
-		max_errors = btrfs_chunk_max_errors(map);
+		io_geom.max_errors = btrfs_chunk_max_errors(map);
 
 	if (dev_replace_is_ongoing && dev_replace->tgtdev != NULL &&
 	    op != BTRFS_MAP_READ) {
 		handle_ops_on_dev_replace(op, bioc, dev_replace, logical,
-					  &num_stripes, &max_errors);
+					  &io_geom.num_stripes, &io_geom.max_errors);
 	}
 
 	*bioc_ret = bioc;
-	bioc->num_stripes = num_stripes;
-	bioc->max_errors = max_errors;
-	bioc->mirror_num = mirror_num;
+	bioc->num_stripes = io_geom.num_stripes;
+	bioc->max_errors = io_geom.max_errors;
+	bioc->mirror_num = io_geom.mirror_num;
 
 out:
 	if (dev_replace_is_ongoing) {

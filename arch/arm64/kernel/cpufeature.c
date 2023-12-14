@@ -1085,25 +1085,6 @@ void __init init_cpu_features(struct cpuinfo_arm64 *info)
 
 	if (id_aa64pfr1_mte(info->reg_id_aa64pfr1))
 		init_cpu_ftr_reg(SYS_GMID_EL1, info->reg_gmid);
-
-	/*
-	 * Initialize the indirect array of CPU capabilities pointers before we
-	 * handle the boot CPU below.
-	 */
-	init_cpucap_indirect_list();
-
-	/*
-	 * Detect broken pseudo-NMI. Must be called _before_ the call to
-	 * setup_boot_cpu_capabilities() since it interacts with
-	 * can_use_gic_priorities().
-	 */
-	detect_system_supports_pseudo_nmi();
-
-	/*
-	 * Detect and enable early CPU capabilities based on the boot CPU,
-	 * after we have initialised the CPU feature infrastructure.
-	 */
-	setup_boot_cpu_capabilities();
 }
 
 static void update_cpu_ftr_reg(struct arm64_ftr_reg *reg, u64 new)
@@ -1835,7 +1816,7 @@ static int __init __kpti_install_ng_mappings(void *__unused)
 static void __init kpti_install_ng_mappings(void)
 {
 	/* Check whether KPTI is going to be used */
-	if (!cpus_have_cap(ARM64_UNMAP_KERNEL_AT_EL0))
+	if (!arm64_kernel_unmapped_at_el0())
 		return;
 
 	/*
@@ -3270,14 +3251,6 @@ void check_local_cpu_capabilities(void)
 		verify_local_cpu_capabilities();
 }
 
-static void __init setup_boot_cpu_capabilities(void)
-{
-	/* Detect capabilities with either SCOPE_BOOT_CPU or SCOPE_LOCAL_CPU */
-	update_cpu_capabilities(SCOPE_BOOT_CPU | SCOPE_LOCAL_CPU);
-	/* Enable the SCOPE_BOOT_CPU capabilities alone right away */
-	enable_cpu_capabilities(SCOPE_BOOT_CPU);
-}
-
 bool this_cpu_has_cap(unsigned int n)
 {
 	if (!WARN_ON(preemptible()) && n < ARM64_NCAPS) {
@@ -3333,23 +3306,70 @@ unsigned long cpu_get_elf_hwcap2(void)
 	return elf_hwcap[1];
 }
 
-void __init setup_system_features(void)
+static void __init setup_boot_cpu_capabilities(void)
 {
-	int i;
 	/*
-	 * The system-wide safe feature feature register values have been
-	 * finalized. Finalize and log the available system capabilities.
+	 * The boot CPU's feature register values have been recorded. Detect
+	 * boot cpucaps and local cpucaps for the boot CPU, then enable and
+	 * patch alternatives for the available boot cpucaps.
 	 */
-	update_cpu_capabilities(SCOPE_SYSTEM);
-	if (IS_ENABLED(CONFIG_ARM64_SW_TTBR0_PAN) &&
-	    !cpus_have_cap(ARM64_HAS_PAN))
-		pr_info("emulated: Privileged Access Never (PAN) using TTBR0_EL1 switching\n");
+	update_cpu_capabilities(SCOPE_BOOT_CPU | SCOPE_LOCAL_CPU);
+	enable_cpu_capabilities(SCOPE_BOOT_CPU);
+	apply_boot_alternatives();
+}
+
+void __init setup_boot_cpu_features(void)
+{
+	/*
+	 * Initialize the indirect array of CPU capabilities pointers before we
+	 * handle the boot CPU.
+	 */
+	init_cpucap_indirect_list();
 
 	/*
-	 * Enable all the available capabilities which have not been enabled
-	 * already.
+	 * Detect broken pseudo-NMI. Must be called _before_ the call to
+	 * setup_boot_cpu_capabilities() since it interacts with
+	 * can_use_gic_priorities().
 	 */
+	detect_system_supports_pseudo_nmi();
+
+	setup_boot_cpu_capabilities();
+}
+
+static void __init setup_system_capabilities(void)
+{
+	/*
+	 * The system-wide safe feature register values have been finalized.
+	 * Detect, enable, and patch alternatives for the available system
+	 * cpucaps.
+	 */
+	update_cpu_capabilities(SCOPE_SYSTEM);
 	enable_cpu_capabilities(SCOPE_ALL & ~SCOPE_BOOT_CPU);
+	apply_alternatives_all();
+
+	/*
+	 * Log any cpucaps with a cpumask as these aren't logged by
+	 * update_cpu_capabilities().
+	 */
+	for (int i = 0; i < ARM64_NCAPS; i++) {
+		const struct arm64_cpu_capabilities *caps = cpucap_ptrs[i];
+
+		if (caps && caps->cpus && caps->desc &&
+			cpumask_any(caps->cpus) < nr_cpu_ids)
+			pr_info("detected: %s on CPU%*pbl\n",
+				caps->desc, cpumask_pr_args(caps->cpus));
+	}
+
+	/*
+	 * TTBR0 PAN doesn't have its own cpucap, so log it manually.
+	 */
+	if (system_uses_ttbr0_pan())
+		pr_info("emulated: Privileged Access Never (PAN) using TTBR0_EL1 switching\n");
+}
+
+void __init setup_system_features(void)
+{
+	setup_system_capabilities();
 
 	kpti_install_ng_mappings();
 
@@ -3362,15 +3382,6 @@ void __init setup_system_features(void)
 	if (!cache_type_cwg())
 		pr_warn("No Cache Writeback Granule information, assuming %d\n",
 			ARCH_DMA_MINALIGN);
-
-	for (i = 0; i < ARM64_NCAPS; i++) {
-		const struct arm64_cpu_capabilities *caps = cpucap_ptrs[i];
-
-		if (caps && caps->cpus && caps->desc &&
-			cpumask_any(caps->cpus) < nr_cpu_ids)
-			pr_info("detected: %s on CPU%*pbl\n",
-				caps->desc, cpumask_pr_args(caps->cpus));
-	}
 }
 
 void __init setup_user_features(void)

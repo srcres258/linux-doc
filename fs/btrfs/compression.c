@@ -264,7 +264,7 @@ void btrfs_free_compr_page(struct page *page)
 	put_page(page);
 }
 
-static void end_compressed_bio_read(struct btrfs_bio *bbio)
+static void end_bbio_comprssed_read(struct btrfs_bio *bbio)
 {
 	struct compressed_bio *cb = to_compressed_bio(bbio);
 	blk_status_t status = bbio->bio.bi_status;
@@ -306,8 +306,8 @@ static noinline void end_compressed_writeback(const struct compressed_bio *cb)
 		for (i = 0; i < ret; i++) {
 			struct folio *folio = fbatch.folios[i];
 
-			btrfs_page_clamp_clear_writeback(fs_info, &folio->page,
-							 cb->start, cb->len);
+			btrfs_folio_clamp_clear_writeback(fs_info, folio,
+							  cb->start, cb->len);
 		}
 		folio_batch_release(&fbatch);
 	}
@@ -337,7 +337,7 @@ static void btrfs_finish_compressed_write_work(struct work_struct *work)
  * This also calls the writeback end hooks for the file pages so that metadata
  * and checksums can be updated in the file.
  */
-static void end_compressed_bio_write(struct btrfs_bio *bbio)
+static void end_bbio_comprssed_write(struct btrfs_bio *bbio)
 {
 	struct compressed_bio *cb = to_compressed_bio(bbio);
 	struct btrfs_fs_info *fs_info = bbio->inode->root->fs_info;
@@ -384,7 +384,7 @@ void btrfs_submit_compressed_write(struct btrfs_ordered_extent *ordered,
 
 	cb = alloc_compressed_bio(inode, ordered->file_offset,
 				  REQ_OP_WRITE | write_flags,
-				  end_compressed_bio_write);
+				  end_bbio_comprssed_write);
 	cb->start = ordered->file_offset;
 	cb->len = ordered->num_bytes;
 	cb->compressed_pages = compressed_pages;
@@ -541,7 +541,8 @@ static noinline int add_ra_bio_pages(struct inode *inode,
 		 * subpage::readers and to unlock the page.
 		 */
 		if (fs_info->sectorsize < PAGE_SIZE)
-			btrfs_subpage_start_reader(fs_info, page, cur, add_size);
+			btrfs_subpage_start_reader(fs_info, page_folio(page),
+						   cur, add_size);
 		put_page(page);
 		cur += add_size;
 	}
@@ -588,7 +589,7 @@ void btrfs_submit_compressed_read(struct btrfs_bio *bbio)
 	compressed_len = em->block_len;
 
 	cb = alloc_compressed_bio(inode, file_offset, REQ_OP_READ,
-				  end_compressed_bio_read);
+				  end_bbio_comprssed_read);
 
 	cb->start = em->orig_start;
 	em_len = em->len;

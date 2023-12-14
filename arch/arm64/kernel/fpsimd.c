@@ -1145,7 +1145,7 @@ void __init sve_setup(void)
 	unsigned long b;
 	int max_bit;
 
-	if (!cpus_have_cap(ARM64_SVE))
+	if (!system_supports_sve())
 		return;
 
 	/*
@@ -1275,7 +1275,7 @@ void __init sme_setup(void)
 	struct vl_info *info = &vl_info[ARM64_VEC_SME];
 	int min_bit, max_bit;
 
-	if (!cpus_have_cap(ARM64_SME))
+	if (!system_supports_sme())
 		return;
 
 	/*
@@ -1835,13 +1835,15 @@ static void fpsimd_flush_cpu_state(void)
  */
 void fpsimd_save_and_flush_cpu_state(void)
 {
+	unsigned long flags;
+
 	if (!system_supports_fpsimd())
 		return;
 	WARN_ON(preemptible());
-	get_cpu_fpsimd_context();
+	local_irq_save(flags);
 	fpsimd_save_user_state();
 	fpsimd_flush_cpu_state();
-	put_cpu_fpsimd_context();
+	local_irq_restore(flags);
 }
 
 #ifdef CONFIG_KERNEL_MODE_NEON

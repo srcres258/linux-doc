@@ -45,6 +45,13 @@
 #define NO_CONT_MAPPINGS	BIT(1)
 #define NO_EXEC_MAPPINGS	BIT(2)	/* assumes FEAT_HPDS is not used */
 
+int idmap_t0sz __ro_after_init;
+
+#if VA_BITS > 48
+u64 vabits_actual __ro_after_init = VA_BITS_MIN;
+EXPORT_SYMBOL(vabits_actual);
+#endif
+
 u64 kimage_voffset __ro_after_init;
 EXPORT_SYMBOL(kimage_voffset);
 

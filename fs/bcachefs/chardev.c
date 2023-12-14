@@ -45,6 +45,7 @@ static void thread_with_file_exit(struct thread_with_file *thr)
 	}
 }
 
+__printf(4, 0)
 static int run_thread_with_file(struct thread_with_file *thr,
 				const struct file_operations *fops,
 				int (*fn)(void *), const char *fmt, ...)

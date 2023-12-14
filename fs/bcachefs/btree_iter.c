@@ -1441,12 +1441,11 @@ void __bch2_trans_paths_to_text(struct printbuf *out, struct btree_trans *trans,
 				bool nosort)
 {
 	struct trans_for_each_path_inorder_iter iter;
-	struct btree_path *path;
 
 	if (!nosort)
 		btree_trans_sort_paths(trans);
 
-	trans_for_each_path_inorder(trans, path, iter)
+	trans_for_each_path_idx_inorder(trans, iter)
 		bch2_btree_path_to_text(out, trans, iter.path_idx);
 }
 
