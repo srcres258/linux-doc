@@ -63,12 +63,44 @@ static inline void btree_trans_sort_paths(struct btree_trans *trans)
 	__bch2_btree_trans_sort_paths(trans);
 }
 
+static inline unsigned long *trans_paths_nr(struct btree_path *paths)
+{
+	return &container_of(paths, struct btree_trans_paths, paths[0])->nr_paths;
+}
+
+static inline unsigned long *trans_paths_allocated(struct btree_path *paths)
+{
+	unsigned long *v = trans_paths_nr(paths);
+	return v - BITS_TO_LONGS(*v);
+}
+
+#define trans_for_each_path_idx_from(_paths_allocated, _nr, _idx, _start)\
+	for (_idx = _start;						\
+	     (_idx = find_next_bit(_paths_allocated, _nr, _idx)) < _nr;	\
+	     _idx++)
+
 static inline struct btree_path *
 __trans_next_path(struct btree_trans *trans, unsigned *idx)
 {
-	*idx = find_next_bit(trans->paths_allocated, BTREE_ITER_MAX, *idx);
+	unsigned long *w = trans->paths_allocated + *idx / BITS_PER_LONG;
+	/*
+	 * Open coded find_next_bit(), because
+	 *  - this is fast path, we can't afford the function call
+	 *  - and we know that nr_paths is a multiple of BITS_PER_LONG,
+	 */
+	while (*idx < trans->nr_paths) {
+		unsigned long v = *w >> (*idx & (BITS_PER_LONG - 1));
+		if (v) {
+			*idx += __ffs(v);
+			return trans->paths + *idx;
+		}
 
-	return *idx < BTREE_ITER_MAX ? &trans->paths[*idx] : NULL;
+		*idx += BITS_PER_LONG;
+		*idx &= ~(BITS_PER_LONG - 1);
+		w++;
+	}
+
+	return NULL;
 }
 
 /*
@@ -610,7 +642,7 @@ int __bch2_btree_trans_too_many_iters(struct btree_trans *);
 
 static inline int btree_trans_too_many_iters(struct btree_trans *trans)
 {
-	if (bitmap_weight(trans->paths_allocated, BTREE_ITER_MAX) > BTREE_ITER_MAX - 8)
+	if (bitmap_weight(trans->paths_allocated, trans->nr_paths) > BTREE_ITER_MAX - 8)
 		return __bch2_btree_trans_too_many_iters(trans);
 
 	return 0;
@@ -876,6 +908,7 @@ unsigned bch2_trans_get_fn_idx(const char *);
 void bch2_btree_trans_to_text(struct printbuf *, struct btree_trans *);
 
 void bch2_fs_btree_iter_exit(struct bch_fs *);
+void bch2_fs_btree_iter_init_early(struct bch_fs *);
 int bch2_fs_btree_iter_init(struct bch_fs *);
 
 #endif /* _BCACHEFS_BTREE_ITER_H */

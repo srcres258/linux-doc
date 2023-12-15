@@ -372,19 +372,25 @@ struct btree_trans_commit_hook {
 
 #define BTREE_TRANS_MAX_LOCK_HOLD_TIME_NS	10000
 
+struct btree_trans_paths {
+	unsigned long		nr_paths;
+	struct btree_path	paths[];
+};
+
 struct btree_trans {
 	struct bch_fs		*c;
 
 	unsigned long		*paths_allocated;
-	u8			*sorted;
 	struct btree_path	*paths;
+	u8			*sorted;
+	struct btree_insert_entry *updates;
 
 	void			*mem;
 	unsigned		mem_top;
-	unsigned		mem_max;
 	unsigned		mem_bytes;
 
 	btree_path_idx_t	nr_sorted;
+	btree_path_idx_t	nr_paths;
 	btree_path_idx_t	nr_paths_max;
 	u8			fn_idx;
 	u8			nr_updates;
@@ -408,8 +414,6 @@ struct btree_trans {
 	unsigned long		srcu_lock_time;
 
 	const char		*fn;
-	struct closure		ref;
-	struct list_head	list;
 	struct btree_bkey_cached_common *locking;
 	struct six_lock_waiter	locking_wait;
 	int			srcu_idx;
@@ -419,7 +423,6 @@ struct btree_trans {
 	u16			journal_entries_size;
 	struct jset_entry	*journal_entries;
 
-	struct btree_insert_entry updates[BTREE_ITER_MAX];
 	struct btree_trans_commit_hook *hooks;
 	struct journal_entry_pin *journal_pin;
 
@@ -430,9 +433,16 @@ struct btree_trans {
 	unsigned		extra_disk_res; /* XXX kill */
 	struct replicas_delta_list *fs_usage_deltas;
 
+	/* Entries before this are zeroed out on every bch2_trans_get() call */
+
+	struct list_head	list;
+	struct closure		ref;
+
 	unsigned long		_paths_allocated[BITS_TO_LONGS(BTREE_ITER_MAX)];
-	u8			_sorted[BTREE_ITER_MAX + 8];
+	struct btree_trans_paths trans_paths;
 	struct btree_path	_paths[BTREE_ITER_MAX];
+	u8			_sorted[BTREE_ITER_MAX + 8];
+	struct btree_insert_entry _updates[BTREE_ITER_MAX];
 };
 
 static inline struct btree_path *btree_iter_path(struct btree_trans *trans, struct btree_iter *iter)
