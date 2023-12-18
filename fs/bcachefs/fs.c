@@ -998,15 +998,13 @@ static int bch2_vfs_readdir(struct file *file, struct dir_context *ctx)
 {
 	struct bch_inode_info *inode = file_bch_inode(file);
 	struct bch_fs *c = inode->v.i_sb->s_fs_info;
-	int ret;
 
 	if (!dir_emit_dots(file, ctx))
 		return 0;
 
-	ret = bch2_readdir(c, inode_inum(inode), ctx);
-	if (ret)
-		bch_err_fn(c, ret);
+	int ret = bch2_readdir(c, inode_inum(inode), ctx);
 
+	bch_err_fn(c, ret);
 	return bch2_err_class(ret);
 }
 
@@ -1472,7 +1470,7 @@ static void bch2_evict_inode(struct inode *vinode)
 
 void bch2_evict_subvolume_inodes(struct bch_fs *c, snapshot_id_list *s)
 {
-	struct bch_inode_info *inode, **i;
+	struct bch_inode_info *inode;
 	DARRAY(struct bch_inode_info *) grabbed;
 	bool clean_pass = false, this_pass_clean;
 
@@ -1668,11 +1666,9 @@ err:
 static int bch2_show_devname(struct seq_file *seq, struct dentry *root)
 {
 	struct bch_fs *c = root->d_sb->s_fs_info;
-	struct bch_dev *ca;
-	unsigned i;
 	bool first = true;
 
-	for_each_online_member(ca, c, i) {
+	for_each_online_member(c, ca) {
 		if (!first)
 			seq_putc(seq, ':');
 		first = false;
@@ -1796,13 +1792,12 @@ static struct dentry *bch2_mount(struct file_system_type *fs_type,
 				 int flags, const char *dev_name, void *data)
 {
 	struct bch_fs *c;
-	struct bch_dev *ca;
 	struct super_block *sb;
 	struct inode *vinode;
 	struct bch_opts opts = bch2_opts_empty();
 	char **devs;
 	struct bch_fs **devs_to_fs = NULL;
-	unsigned i, nr_devs;
+	unsigned nr_devs;
 	int ret;
 
 	opt_set(opts, read_only, (flags & SB_RDONLY) != 0);
@@ -1824,7 +1819,7 @@ static struct dentry *bch2_mount(struct file_system_type *fs_type,
 		goto got_sb;
 	}
 
-	for (i = 0; i < nr_devs; i++)
+	for (unsigned i = 0; i < nr_devs; i++)
 		devs_to_fs[i] = bch2_path_to_fs(devs[i]);
 
 	sb = sget(fs_type, bch2_test_super, bch2_noset_super,
@@ -1895,7 +1890,7 @@ got_sb:
 
 	sb->s_bdi->ra_pages		= VM_READAHEAD_PAGES;
 
-	for_each_online_member(ca, c, i) {
+	for_each_online_member(c, ca) {
 		struct block_device *bdev = ca->disk_sb.bdev;
 
 		/* XXX: create an anonymous device for multi device filesystems */
@@ -1916,10 +1911,9 @@ got_sb:
 
 	vinode = bch2_vfs_inode_get(c, BCACHEFS_ROOT_SUBVOL_INUM);
 	ret = PTR_ERR_OR_ZERO(vinode);
-	if (ret) {
-		bch_err_msg(c, ret, "mounting: error getting root inode");
+	bch_err_msg(c, ret, "mounting: error getting root inode");
+	if (ret)
 		goto err_put_super;
-	}
 
 	sb->s_root = d_make_root(vinode);
 	if (!sb->s_root) {

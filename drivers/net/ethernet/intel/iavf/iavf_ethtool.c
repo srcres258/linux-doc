@@ -1435,16 +1435,15 @@ static int iavf_add_fdir_ethtool(struct iavf_adapter *adapter, struct ethtool_rx
 	spin_lock_bh(&adapter->fdir_fltr_lock);
 	iavf_fdir_list_add_fltr(adapter, fltr);
 	adapter->fdir_active_fltr++;
-	if (adapter->link_up) {
+
+	if (adapter->link_up)
 		fltr->state = IAVF_FDIR_FLTR_ADD_REQUEST;
-	} else {
+	else
 		fltr->state = IAVF_FDIR_FLTR_INACTIVE;
-	}
 	spin_unlock_bh(&adapter->fdir_fltr_lock);
 
 	if (adapter->link_up)
 		iavf_schedule_aq_request(adapter, IAVF_FLAG_AQ_ADD_FDIR_FILTER);
-
 ret:
 	if (err && fltr)
 		kfree(fltr);

@@ -149,7 +149,6 @@ enum pm_api_id {
 	PM_SECURE_SHA = 26,
 	PM_PINCTRL_REQUEST = 28,
 	PM_PINCTRL_RELEASE = 29,
-	PM_PINCTRL_GET_FUNCTION = 30,
 	PM_PINCTRL_SET_FUNCTION = 31,
 	PM_PINCTRL_CONFIG_PARAM_GET = 32,
 	PM_PINCTRL_CONFIG_PARAM_SET = 33,
@@ -160,8 +159,6 @@ enum pm_api_id {
 	PM_CLOCK_GETSTATE = 38,
 	PM_CLOCK_SETDIVIDER = 39,
 	PM_CLOCK_GETDIVIDER = 40,
-	PM_CLOCK_SETRATE = 41,
-	PM_CLOCK_GETRATE = 42,
 	PM_CLOCK_SETPARENT = 43,
 	PM_CLOCK_GETPARENT = 44,
 	PM_FPGA_READ = 46,
@@ -533,8 +530,6 @@ int zynqmp_pm_clock_disable(u32 clock_id);
 int zynqmp_pm_clock_getstate(u32 clock_id, u32 *state);
 int zynqmp_pm_clock_setdivider(u32 clock_id, u32 divider);
 int zynqmp_pm_clock_getdivider(u32 clock_id, u32 *divider);
-int zynqmp_pm_clock_setrate(u32 clock_id, u64 rate);
-int zynqmp_pm_clock_getrate(u32 clock_id, u64 *rate);
 int zynqmp_pm_clock_setparent(u32 clock_id, u32 parent_id);
 int zynqmp_pm_clock_getparent(u32 clock_id, u32 *parent_id);
 int zynqmp_pm_set_pll_frac_mode(u32 clk_id, u32 mode);
@@ -571,7 +566,6 @@ int zynqmp_pm_system_shutdown(const u32 type, const u32 subtype);
 int zynqmp_pm_set_boot_health_status(u32 value);
 int zynqmp_pm_pinctrl_request(const u32 pin);
 int zynqmp_pm_pinctrl_release(const u32 pin);
-int zynqmp_pm_pinctrl_get_function(const u32 pin, u32 *id);
 int zynqmp_pm_pinctrl_set_function(const u32 pin, const u32 id);
 int zynqmp_pm_pinctrl_get_config(const u32 pin, const u32 param,
 				 u32 *value);
@@ -635,16 +629,6 @@ static inline int zynqmp_pm_clock_setdivider(u32 clock_id, u32 divider)
 }
 
 static inline int zynqmp_pm_clock_getdivider(u32 clock_id, u32 *divider)
-{
-	return -ENODEV;
-}
-
-static inline int zynqmp_pm_clock_setrate(u32 clock_id, u64 rate)
-{
-	return -ENODEV;
-}
-
-static inline int zynqmp_pm_clock_getrate(u32 clock_id, u64 *rate)
 {
 	return -ENODEV;
 }
@@ -814,11 +798,6 @@ static inline int zynqmp_pm_pinctrl_request(const u32 pin)
 }
 
 static inline int zynqmp_pm_pinctrl_release(const u32 pin)
-{
-	return -ENODEV;
-}
-
-static inline int zynqmp_pm_pinctrl_get_function(const u32 pin, u32 *id)
 {
 	return -ENODEV;
 }

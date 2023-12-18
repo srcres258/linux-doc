@@ -59,7 +59,6 @@ list_lru_from_memcg_idx(struct list_lru *lru, int nid, int idx)
 	}
 	return &lru->node[nid].lru;
 }
-
 #else
 static void list_lru_register(struct list_lru *lru)
 {

@@ -303,36 +303,19 @@ static void rtllib_tx_query_agg_cap(struct rtllib_device *ieee,
 			} else if (!ts->disable_add_ba) {
 				TsStartAddBaProcess(ieee, ts);
 			}
-			goto FORCED_AGG_SETTING;
+			return;
 		} else if (!ts->using_ba) {
 			if (SN_LESS(ts->tx_admitted_ba_record.ba_start_seq_ctrl.field.seq_num,
 				    (ts->tx_cur_seq + 1) % 4096))
 				ts->using_ba = true;
 			else
-				goto FORCED_AGG_SETTING;
+				return;
 		}
 		if (ieee->iw_mode == IW_MODE_INFRA) {
 			tcb_desc->ampdu_enable = true;
 			tcb_desc->ampdu_factor = ht_info->CurrentAMPDUFactor;
 			tcb_desc->ampdu_density = ht_info->current_mpdu_density;
 		}
-	}
-FORCED_AGG_SETTING:
-	switch (ht_info->ForcedAMPDUMode) {
-	case HT_AGG_AUTO:
-		break;
-
-	case HT_AGG_FORCE_ENABLE:
-		tcb_desc->ampdu_enable = true;
-		tcb_desc->ampdu_density = ht_info->forced_mpdu_density;
-		tcb_desc->ampdu_factor = ht_info->forced_ampdu_factor;
-		break;
-
-	case HT_AGG_FORCE_DISABLE:
-		tcb_desc->ampdu_enable = false;
-		tcb_desc->ampdu_density = 0;
-		tcb_desc->ampdu_factor = 0;
-		break;
 	}
 }
 
@@ -356,11 +339,6 @@ static void rtllib_query_HTCapShortGI(struct rtllib_device *ieee,
 
 	if (!ht_info->current_ht_support || !ht_info->enable_ht)
 		return;
-
-	if (ht_info->forced_short_gi) {
-		tcb_desc->bUseShortGI = true;
-		return;
-	}
 
 	if (ht_info->cur_bw_40mhz && ht_info->cur_short_gi_40mhz)
 		tcb_desc->bUseShortGI = true;

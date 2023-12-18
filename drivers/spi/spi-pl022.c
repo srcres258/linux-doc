@@ -338,7 +338,6 @@ struct vendor_data {
  * @clk: outgoing clock "SPICLK" for the SPI bus
  * @host: SPI framework hookup
  * @host_info: controller-specific data from machine setup
- * @cur_msg: Pointer to current spi_message being processed
  * @cur_transfer: Pointer to current spi_transfer
  * @cur_chip: pointer to current clients chip(assigned from controller_state)
  * @tx: current position in TX buffer to be read
@@ -420,7 +419,7 @@ struct chip_data {
 /**
  * internal_cs_control - Control chip select signals via SSP_CSR.
  * @pl022: SSP driver private data structure
- * @command: select/delect the chip
+ * @enable: select/delect the chip
  *
  * Used on controller with internal chip select control via SSP_CSR register
  * (vendor extension). Each of the 5 LSB in the register controls one chip

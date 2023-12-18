@@ -47,27 +47,23 @@ static inline void fs_usage_data_type_to_base(struct bch_fs_usage *fs_usage,
 
 void bch2_fs_usage_initialize(struct bch_fs *c)
 {
-	struct bch_fs_usage *usage;
-	struct bch_dev *ca;
-	unsigned i;
-
 	percpu_down_write(&c->mark_lock);
-	usage = c->usage_base;
+	struct bch_fs_usage *usage = c->usage_base;
 
-	for (i = 0; i < ARRAY_SIZE(c->usage); i++)
+	for (unsigned i = 0; i < ARRAY_SIZE(c->usage); i++)
 		bch2_fs_usage_acc_to_base(c, i);
 
-	for (i = 0; i < BCH_REPLICAS_MAX; i++)
+	for (unsigned i = 0; i < BCH_REPLICAS_MAX; i++)
 		usage->reserved += usage->persistent_reserved[i];
 
-	for (i = 0; i < c->replicas.nr; i++) {
+	for (unsigned i = 0; i < c->replicas.nr; i++) {
 		struct bch_replicas_entry_v1 *e =
 			cpu_replicas_entry(&c->replicas, i);
 
 		fs_usage_data_type_to_base(usage, e->data_type, usage->replicas[i]);
 	}
 
-	for_each_member_device(ca, c, i) {
+	for_each_member_device(c, ca) {
 		struct bch_dev_usage dev = bch2_dev_usage_read(ca);
 
 		usage->hidden += (dev.d[BCH_DATA_sb].buckets +
@@ -158,8 +154,7 @@ retry:
 
 void bch2_fs_usage_acc_to_base(struct bch_fs *c, unsigned idx)
 {
-	struct bch_dev *ca;
-	unsigned i, u64s = fs_usage_u64s(c);
+	unsigned u64s = fs_usage_u64s(c);
 
 	BUG_ON(idx >= ARRAY_SIZE(c->usage));
 
@@ -171,7 +166,7 @@ void bch2_fs_usage_acc_to_base(struct bch_fs *c, unsigned idx)
 	percpu_memset(c->usage[idx], 0, u64s * sizeof(u64));
 
 	rcu_read_lock();
-	for_each_member_device_rcu(ca, c, i, NULL) {
+	for_each_member_device_rcu(c, ca, NULL) {
 		u64s = dev_usage_u64s();
 
 		acc_u64s_percpu((u64 *) ca->usage_base,
@@ -1760,17 +1755,13 @@ int bch2_trans_mark_dev_sb(struct bch_fs *c, struct bch_dev *ca)
 {
 	int ret = bch2_trans_run(c, __bch2_trans_mark_dev_sb(trans, ca));
 
-	if (ret)
-		bch_err_fn(c, ret);
+	bch_err_fn(c, ret);
 	return ret;
 }
 
 int bch2_trans_mark_dev_sbs(struct bch_fs *c)
 {
-	struct bch_dev *ca;
-	unsigned i;
-
-	for_each_online_member(ca, c, i) {
+	for_each_online_member(c, ca) {
 		int ret = bch2_trans_mark_dev_sb(c, ca);
 		if (ret) {
 			percpu_ref_put(&ca->ref);

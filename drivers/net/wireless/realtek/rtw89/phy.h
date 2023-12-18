@@ -136,6 +136,21 @@ enum rtw89_phy_c2h_ra_func {
 	RTW89_PHY_C2H_FUNC_RA_MAX,
 };
 
+enum rtw89_phy_c2h_rfk_log_func {
+	RTW89_PHY_C2H_RFK_LOG_FUNC_IQK = 0,
+	RTW89_PHY_C2H_RFK_LOG_FUNC_DPK = 1,
+	RTW89_PHY_C2H_RFK_LOG_FUNC_DACK = 2,
+	RTW89_PHY_C2H_RFK_LOG_FUNC_RXDCK = 3,
+	RTW89_PHY_C2H_RFK_LOG_FUNC_TSSI = 4,
+	RTW89_PHY_C2H_RFK_LOG_FUNC_TXGAPK = 5,
+
+	RTW89_PHY_C2H_RFK_LOG_FUNC_NUM,
+};
+
+enum rtw89_phy_c2h_rfk_report_func {
+	RTW89_PHY_C2H_RFK_REPORT_FUNC_STATE = 0,
+};
+
 enum rtw89_phy_c2h_dm_func {
 	RTW89_PHY_C2H_DM_FUNC_FW_TEST,
 	RTW89_PHY_C2H_DM_FUNC_FW_TRIG_TX_RPT,
@@ -149,6 +164,8 @@ enum rtw89_phy_c2h_class {
 	RTW89_PHY_C2H_CLASS_RUA,
 	RTW89_PHY_C2H_CLASS_RA,
 	RTW89_PHY_C2H_CLASS_DM,
+	RTW89_PHY_C2H_RFK_LOG = 0x8,
+	RTW89_PHY_C2H_RFK_REPORT = 0x9,
 	RTW89_PHY_C2H_CLASS_BTC_MIN = 0x10,
 	RTW89_PHY_C2H_CLASS_BTC_MAX = 0x17,
 	RTW89_PHY_C2H_CLASS_MAX,
@@ -290,8 +307,6 @@ struct rtw89_txpwr_byrate_cfg {
 	u8 len;
 	u32 data;
 };
-
-#define DELTA_SWINGIDX_SIZE 30
 
 struct rtw89_txpwr_track_cfg {
 	const s8 (*delta_swingidx_6gb_n)[DELTA_SWINGIDX_SIZE];
@@ -483,6 +498,10 @@ struct rtw89_txpwr_limit_ru_be {
 	s8 ru106[RTW89_RU_SEC_NUM_BE];
 	s8 ru52_26[RTW89_RU_SEC_NUM_BE];
 	s8 ru106_26[RTW89_RU_SEC_NUM_BE];
+};
+
+struct rtw89_phy_rfk_log_fmt {
+	const struct rtw89_fw_element_hdr *elm[RTW89_PHY_C2H_RFK_LOG_FUNC_NUM];
 };
 
 struct rtw89_phy_gen_def {
@@ -787,6 +806,7 @@ void rtw89_phy_ra_updata_sta(struct rtw89_dev *rtwdev, struct ieee80211_sta *sta
 void rtw89_phy_rate_pattern_vif(struct rtw89_dev *rtwdev,
 				struct ieee80211_vif *vif,
 				const struct cfg80211_bitrate_mask *mask);
+bool rtw89_phy_c2h_chk_atomic(struct rtw89_dev *rtwdev, u8 class, u8 func);
 void rtw89_phy_c2h_handle(struct rtw89_dev *rtwdev, struct sk_buff *skb,
 			  u32 len, u8 class, u8 func);
 void rtw89_phy_cfo_track(struct rtw89_dev *rtwdev);

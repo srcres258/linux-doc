@@ -2445,6 +2445,298 @@ void (* const rtw89_phy_c2h_ra_handler[])(struct rtw89_dev *rtwdev,
 	[RTW89_PHY_C2H_FUNC_TXSTS] = NULL,
 };
 
+static void rtw89_phy_c2h_rfk_rpt_log(struct rtw89_dev *rtwdev,
+				      enum rtw89_phy_c2h_rfk_log_func func,
+				      void *content, u16 len)
+{
+	struct rtw89_c2h_rf_txgapk_rpt_log *txgapk;
+	struct rtw89_c2h_rf_rxdck_rpt_log *rxdck;
+	struct rtw89_c2h_rf_dack_rpt_log *dack;
+	struct rtw89_c2h_rf_dpk_rpt_log *dpk;
+
+	switch (func) {
+	case RTW89_PHY_C2H_RFK_LOG_FUNC_DPK:
+		if (len != sizeof(*dpk))
+			goto out;
+
+		dpk = content;
+		rtw89_debug(rtwdev, RTW89_DBG_RFK,
+			    "DPK ver:%d idx:%2ph band:%2ph bw:%2ph ch:%2ph path:%2ph\n",
+			    dpk->ver, dpk->idx, dpk->band, dpk->bw, dpk->ch, dpk->path_ok);
+		rtw89_debug(rtwdev, RTW89_DBG_RFK,
+			    "DPK txagc:%2ph ther:%2ph gs:%2ph dc_i:%4ph dc_q:%4ph\n",
+			    dpk->txagc, dpk->ther, dpk->gs, dpk->dc_i, dpk->dc_q);
+		rtw89_debug(rtwdev, RTW89_DBG_RFK,
+			    "DPK corr_v:%2ph corr_i:%2ph to:%2ph ov:%2ph\n",
+			    dpk->corr_val, dpk->corr_idx, dpk->is_timeout, dpk->rxbb_ov);
+		return;
+	case RTW89_PHY_C2H_RFK_LOG_FUNC_DACK:
+		if (len != sizeof(*dack))
+			goto out;
+
+		dack = content;
+
+		rtw89_debug(rtwdev, RTW89_DBG_RFK, "[DACK]ver=0x%x 0x%x\n",
+			    dack->fwdack_ver, dack->fwdack_rpt_ver);
+		rtw89_debug(rtwdev, RTW89_DBG_RFK, "[DACK]S0 CDACK ic = [0x%x, 0x%x]\n",
+			    dack->cdack_d[0][0][0], dack->cdack_d[0][0][1]);
+		rtw89_debug(rtwdev, RTW89_DBG_RFK, "[DACK]S0 CDACK qc = [0x%x, 0x%x]\n",
+			    dack->cdack_d[0][1][0], dack->cdack_d[0][1][1]);
+		rtw89_debug(rtwdev, RTW89_DBG_RFK, "[DACK]S1 CDACK ic = [0x%x, 0x%x]\n",
+			    dack->cdack_d[1][0][0], dack->cdack_d[1][0][1]);
+		rtw89_debug(rtwdev, RTW89_DBG_RFK, "[DACK]S1 CDACK qc = [0x%x, 0x%x]\n",
+			    dack->cdack_d[1][1][0], dack->cdack_d[1][1][1]);
+
+		rtw89_debug(rtwdev, RTW89_DBG_RFK, "[DACK]S0 ADC_DCK ic = [0x%x, 0x%x]\n",
+			    dack->addck2_d[0][0][0], dack->addck2_d[0][0][1]);
+		rtw89_debug(rtwdev, RTW89_DBG_RFK, "[DACK]S0 ADC_DCK qc = [0x%x, 0x%x]\n",
+			    dack->addck2_d[0][1][0], dack->addck2_d[0][1][1]);
+		rtw89_debug(rtwdev, RTW89_DBG_RFK, "[DACK]S1 ADC_DCK ic = [0x%x, 0x%x]\n",
+			    dack->addck2_d[1][0][0], dack->addck2_d[1][0][1]);
+		rtw89_debug(rtwdev, RTW89_DBG_RFK, "[DACK]S1 ADC_DCK qc = [0x%x, 0x%x]\n",
+			    dack->addck2_d[1][1][0], dack->addck2_d[1][1][1]);
+
+		rtw89_debug(rtwdev, RTW89_DBG_RFK, "[DACK]S0 ADC_GAINK ic = 0x%x, qc = 0x%x\n",
+			    dack->adgaink_d[0][0], dack->adgaink_d[0][1]);
+		rtw89_debug(rtwdev, RTW89_DBG_RFK, "[DACK]S1 ADC_GAINK ic = 0x%x, qc = 0x%x\n",
+			    dack->adgaink_d[1][0], dack->adgaink_d[1][1]);
+
+		rtw89_debug(rtwdev, RTW89_DBG_RFK, "[DACK]S0 DAC_DCK ic = 0x%x, qc = 0x%x\n",
+			    dack->dadck_d[0][0], dack->dadck_d[0][1]);
+		rtw89_debug(rtwdev, RTW89_DBG_RFK, "[DACK]S1 DAC_DCK ic = 0x%x, qc = 0x%x\n",
+			    dack->dadck_d[1][0], dack->dadck_d[1][1]);
+
+		rtw89_debug(rtwdev, RTW89_DBG_RFK, "[DACK]S0 biask iqc = 0x%x\n",
+			    dack->biask_d[0][0]);
+		rtw89_debug(rtwdev, RTW89_DBG_RFK, "[DACK]S1 biask iqc = 0x%x\n",
+			    dack->biask_d[1][0]);
+
+		rtw89_debug(rtwdev, RTW89_DBG_RFK, "[DACK]S0 MSBK ic: %*ph\n",
+			    (int)sizeof(dack->msbk_d[0][0]), dack->msbk_d[0][0]);
+		rtw89_debug(rtwdev, RTW89_DBG_RFK, "[DACK]S0 MSBK qc: %*ph\n",
+			    (int)sizeof(dack->msbk_d[0][1]), dack->msbk_d[0][1]);
+		rtw89_debug(rtwdev, RTW89_DBG_RFK, "[DACK]S1 MSBK ic: %*ph\n",
+			    (int)sizeof(dack->msbk_d[1][0]), dack->msbk_d[1][0]);
+		rtw89_debug(rtwdev, RTW89_DBG_RFK, "[DACK]S1 MSBK qc: %*ph\n",
+			    (int)sizeof(dack->msbk_d[1][1]), dack->msbk_d[1][1]);
+		return;
+	case RTW89_PHY_C2H_RFK_LOG_FUNC_RXDCK:
+		if (len != sizeof(*rxdck))
+			goto out;
+
+		rxdck = content;
+		rtw89_debug(rtwdev, RTW89_DBG_RFK,
+			    "RXDCK ver:%d band:%2ph bw:%2ph ch:%2ph to:%2ph\n",
+			    rxdck->ver, rxdck->band, rxdck->bw, rxdck->ch,
+			    rxdck->timeout);
+		return;
+	case RTW89_PHY_C2H_RFK_LOG_FUNC_TXGAPK:
+		if (len != sizeof(*txgapk))
+			goto out;
+
+		txgapk = content;
+		rtw89_debug(rtwdev, RTW89_DBG_RFK,
+			    "[TXGAPK]rpt r0x8010[0]=0x%x, r0x8010[1]=0x%x\n",
+			    le32_to_cpu(txgapk->r0x8010[0]),
+			    le32_to_cpu(txgapk->r0x8010[1]));
+		rtw89_debug(rtwdev, RTW89_DBG_RFK, "[TXGAPK]rpt chk_id = %d\n",
+			    txgapk->chk_id);
+		rtw89_debug(rtwdev, RTW89_DBG_RFK, "[TXGAPK]rpt chk_cnt = %d\n",
+			    le32_to_cpu(txgapk->chk_cnt));
+		rtw89_debug(rtwdev, RTW89_DBG_RFK, "[TXGAPK]rpt ver = 0x%x\n",
+			    txgapk->ver);
+		rtw89_debug(rtwdev, RTW89_DBG_RFK, "[TXGAPK]rpt rsv1 = %d\n",
+			    txgapk->rsv1);
+
+		rtw89_debug(rtwdev, RTW89_DBG_RFK, "[TXGAPK]rpt track_d[0] = %*ph\n",
+			    (int)sizeof(txgapk->track_d[0]), txgapk->track_d[0]);
+		rtw89_debug(rtwdev, RTW89_DBG_RFK, "[TXGAPK]rpt power_d[0] = %*ph\n",
+			    (int)sizeof(txgapk->power_d[0]), txgapk->power_d[0]);
+		rtw89_debug(rtwdev, RTW89_DBG_RFK, "[TXGAPK]rpt track_d[1] = %*ph\n",
+			    (int)sizeof(txgapk->track_d[1]), txgapk->track_d[1]);
+		rtw89_debug(rtwdev, RTW89_DBG_RFK, "[TXGAPK]rpt power_d[1] = %*ph\n",
+			    (int)sizeof(txgapk->power_d[1]), txgapk->power_d[1]);
+		return;
+	default:
+		break;
+	}
+
+out:
+	rtw89_debug(rtwdev, RTW89_DBG_RFK,
+		    "unexpected RFK func %d report log with length %d\n", func, len);
+}
+
+static bool rtw89_phy_c2h_rfk_run_log(struct rtw89_dev *rtwdev,
+				      enum rtw89_phy_c2h_rfk_log_func func,
+				      void *content, u16 len)
+{
+	struct rtw89_fw_elm_info *elm_info = &rtwdev->fw.elm_info;
+	const struct rtw89_c2h_rf_run_log *log = content;
+	const struct rtw89_fw_element_hdr *elm;
+	u32 fmt_idx;
+	u16 offset;
+
+	if (sizeof(*log) != len)
+		return false;
+
+	if (!elm_info->rfk_log_fmt)
+		return false;
+
+	elm = elm_info->rfk_log_fmt->elm[func];
+	fmt_idx = le32_to_cpu(log->fmt_idx);
+	if (!elm || fmt_idx >= elm->u.rfk_log_fmt.nr)
+		return false;
+
+	offset = le16_to_cpu(elm->u.rfk_log_fmt.offset[fmt_idx]);
+	if (offset == 0)
+		return false;
+
+	rtw89_debug(rtwdev, RTW89_DBG_RFK, &elm->u.common.contents[offset],
+		    le32_to_cpu(log->arg[0]), le32_to_cpu(log->arg[1]),
+		    le32_to_cpu(log->arg[2]), le32_to_cpu(log->arg[3]));
+
+	return true;
+}
+
+static void rtw89_phy_c2h_rfk_log(struct rtw89_dev *rtwdev, struct sk_buff *c2h,
+				  u32 len, enum rtw89_phy_c2h_rfk_log_func func,
+				  const char *rfk_name)
+{
+	struct rtw89_c2h_hdr *c2h_hdr = (struct rtw89_c2h_hdr *)c2h->data;
+	struct rtw89_c2h_rf_log_hdr *log_hdr;
+	void *log_ptr = c2h_hdr;
+	u16 content_len;
+	u16 chunk_len;
+	bool handled;
+
+	if (!rtw89_debug_is_enabled(rtwdev, RTW89_DBG_RFK))
+		return;
+
+	log_ptr += sizeof(*c2h_hdr);
+	len -= sizeof(*c2h_hdr);
+
+	while (len > sizeof(*log_hdr)) {
+		log_hdr = log_ptr;
+		content_len = le16_to_cpu(log_hdr->len);
+		chunk_len = content_len + sizeof(*log_hdr);
+
+		if (chunk_len > len)
+			break;
+
+		switch (log_hdr->type) {
+		case RTW89_RF_RUN_LOG:
+			handled = rtw89_phy_c2h_rfk_run_log(rtwdev, func,
+							    log_hdr->content, content_len);
+			if (handled)
+				break;
+
+			rtw89_debug(rtwdev, RTW89_DBG_RFK, "%s run: %*ph\n",
+				    rfk_name, content_len, log_hdr->content);
+			break;
+		case RTW89_RF_RPT_LOG:
+			rtw89_phy_c2h_rfk_rpt_log(rtwdev, func,
+						  log_hdr->content, content_len);
+			break;
+		default:
+			return;
+		}
+
+		log_ptr += chunk_len;
+		len -= chunk_len;
+	}
+}
+
+static void
+rtw89_phy_c2h_rfk_log_iqk(struct rtw89_dev *rtwdev, struct sk_buff *c2h, u32 len)
+{
+	rtw89_phy_c2h_rfk_log(rtwdev, c2h, len,
+			      RTW89_PHY_C2H_RFK_LOG_FUNC_IQK, "IQK");
+}
+
+static void
+rtw89_phy_c2h_rfk_log_dpk(struct rtw89_dev *rtwdev, struct sk_buff *c2h, u32 len)
+{
+	rtw89_phy_c2h_rfk_log(rtwdev, c2h, len,
+			      RTW89_PHY_C2H_RFK_LOG_FUNC_DPK, "DPK");
+}
+
+static void
+rtw89_phy_c2h_rfk_log_dack(struct rtw89_dev *rtwdev, struct sk_buff *c2h, u32 len)
+{
+	rtw89_phy_c2h_rfk_log(rtwdev, c2h, len,
+			      RTW89_PHY_C2H_RFK_LOG_FUNC_DACK, "DACK");
+}
+
+static void
+rtw89_phy_c2h_rfk_log_rxdck(struct rtw89_dev *rtwdev, struct sk_buff *c2h, u32 len)
+{
+	rtw89_phy_c2h_rfk_log(rtwdev, c2h, len,
+			      RTW89_PHY_C2H_RFK_LOG_FUNC_RXDCK, "RX_DCK");
+}
+
+static void
+rtw89_phy_c2h_rfk_log_tssi(struct rtw89_dev *rtwdev, struct sk_buff *c2h, u32 len)
+{
+	rtw89_phy_c2h_rfk_log(rtwdev, c2h, len,
+			      RTW89_PHY_C2H_RFK_LOG_FUNC_TSSI, "TSSI");
+}
+
+static void
+rtw89_phy_c2h_rfk_log_txgapk(struct rtw89_dev *rtwdev, struct sk_buff *c2h, u32 len)
+{
+	rtw89_phy_c2h_rfk_log(rtwdev, c2h, len,
+			      RTW89_PHY_C2H_RFK_LOG_FUNC_TXGAPK, "TXGAPK");
+}
+
+static
+void (* const rtw89_phy_c2h_rfk_log_handler[])(struct rtw89_dev *rtwdev,
+					       struct sk_buff *c2h, u32 len) = {
+	[RTW89_PHY_C2H_RFK_LOG_FUNC_IQK] = rtw89_phy_c2h_rfk_log_iqk,
+	[RTW89_PHY_C2H_RFK_LOG_FUNC_DPK] = rtw89_phy_c2h_rfk_log_dpk,
+	[RTW89_PHY_C2H_RFK_LOG_FUNC_DACK] = rtw89_phy_c2h_rfk_log_dack,
+	[RTW89_PHY_C2H_RFK_LOG_FUNC_RXDCK] = rtw89_phy_c2h_rfk_log_rxdck,
+	[RTW89_PHY_C2H_RFK_LOG_FUNC_TSSI] = rtw89_phy_c2h_rfk_log_tssi,
+	[RTW89_PHY_C2H_RFK_LOG_FUNC_TXGAPK] = rtw89_phy_c2h_rfk_log_txgapk,
+};
+
+static void
+rtw89_phy_c2h_rfk_report_state(struct rtw89_dev *rtwdev, struct sk_buff *c2h, u32 len)
+{
+}
+
+static
+void (* const rtw89_phy_c2h_rfk_report_handler[])(struct rtw89_dev *rtwdev,
+						  struct sk_buff *c2h, u32 len) = {
+	[RTW89_PHY_C2H_RFK_REPORT_FUNC_STATE] = rtw89_phy_c2h_rfk_report_state,
+};
+
+bool rtw89_phy_c2h_chk_atomic(struct rtw89_dev *rtwdev, u8 class, u8 func)
+{
+	switch (class) {
+	case RTW89_PHY_C2H_RFK_LOG:
+		switch (func) {
+		case RTW89_PHY_C2H_RFK_LOG_FUNC_IQK:
+		case RTW89_PHY_C2H_RFK_LOG_FUNC_DPK:
+		case RTW89_PHY_C2H_RFK_LOG_FUNC_DACK:
+		case RTW89_PHY_C2H_RFK_LOG_FUNC_RXDCK:
+		case RTW89_PHY_C2H_RFK_LOG_FUNC_TSSI:
+		case RTW89_PHY_C2H_RFK_LOG_FUNC_TXGAPK:
+			return true;
+		default:
+			return false;
+		}
+	case RTW89_PHY_C2H_RFK_REPORT:
+		switch (func) {
+		case RTW89_PHY_C2H_RFK_REPORT_FUNC_STATE:
+			return true;
+		default:
+			return false;
+		}
+	default:
+		return false;
+	}
+}
+
 void rtw89_phy_c2h_handle(struct rtw89_dev *rtwdev, struct sk_buff *skb,
 			  u32 len, u8 class, u8 func)
 {
@@ -2455,6 +2747,14 @@ void rtw89_phy_c2h_handle(struct rtw89_dev *rtwdev, struct sk_buff *skb,
 	case RTW89_PHY_C2H_CLASS_RA:
 		if (func < RTW89_PHY_C2H_FUNC_RA_MAX)
 			handler = rtw89_phy_c2h_ra_handler[func];
+		break;
+	case RTW89_PHY_C2H_RFK_LOG:
+		if (func < ARRAY_SIZE(rtw89_phy_c2h_rfk_log_handler))
+			handler = rtw89_phy_c2h_rfk_log_handler[func];
+		break;
+	case RTW89_PHY_C2H_RFK_REPORT:
+		if (func < ARRAY_SIZE(rtw89_phy_c2h_rfk_report_handler))
+			handler = rtw89_phy_c2h_rfk_report_handler[func];
 		break;
 	case RTW89_PHY_C2H_CLASS_DM:
 		if (func == RTW89_PHY_C2H_DM_FUNC_LOWRT_RTY)

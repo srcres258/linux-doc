@@ -709,8 +709,10 @@ static ssize_t __write_ports_addfd(char *buf, struct net *net, const struct cred
 
 	err = svc_addsock(nn->nfsd_serv, net, fd, buf, SIMPLE_TRANSACTION_LIMIT, cred);
 
-	if (err >= 0 &&
-	    !nn->nfsd_serv->sv_nrthreads && !xchg(&nn->keep_active, 1))
+	if (err < 0 && !nn->nfsd_serv->sv_nrthreads && !nn->keep_active)
+		nfsd_last_thread(net);
+	else if (err >= 0 &&
+		 !nn->nfsd_serv->sv_nrthreads && !xchg(&nn->keep_active, 1))
 		svc_get(nn->nfsd_serv);
 
 	nfsd_put(net);
@@ -761,6 +763,9 @@ out_close:
 		svc_xprt_put(xprt);
 	}
 out_err:
+	if (!nn->nfsd_serv->sv_nrthreads && !nn->keep_active)
+		nfsd_last_thread(net);
+
 	nfsd_put(net);
 	return err;
 }
@@ -1516,11 +1521,10 @@ int nfsd_nl_rpc_status_get_start(struct netlink_callback *cb)
 	int ret = -ENODEV;
 
 	mutex_lock(&nfsd_mutex);
-	if (nn->nfsd_serv) {
-		svc_get(nn->nfsd_serv);
+	if (nn->nfsd_serv)
 		ret = 0;
-	}
-	mutex_unlock(&nfsd_mutex);
+	else
+		mutex_unlock(&nfsd_mutex);
 
 	return ret;
 }
@@ -1692,8 +1696,6 @@ out:
  */
 int nfsd_nl_rpc_status_get_done(struct netlink_callback *cb)
 {
-	mutex_lock(&nfsd_mutex);
-	nfsd_put(sock_net(cb->skb->sk));
 	mutex_unlock(&nfsd_mutex);
 
 	return 0;

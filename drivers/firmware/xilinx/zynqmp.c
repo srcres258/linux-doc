@@ -658,44 +658,6 @@ int zynqmp_pm_clock_getdivider(u32 clock_id, u32 *divider)
 EXPORT_SYMBOL_GPL(zynqmp_pm_clock_getdivider);
 
 /**
- * zynqmp_pm_clock_setrate() - Set the clock rate for given id
- * @clock_id:	ID of the clock
- * @rate:	rate value in hz
- *
- * This function is used by master to set rate for any clock.
- *
- * Return: Returns status, either success or error+reason
- */
-int zynqmp_pm_clock_setrate(u32 clock_id, u64 rate)
-{
-	return zynqmp_pm_invoke_fn(PM_CLOCK_SETRATE, NULL, 3, clock_id, lower_32_bits(rate),
-				   upper_32_bits(rate));
-}
-EXPORT_SYMBOL_GPL(zynqmp_pm_clock_setrate);
-
-/**
- * zynqmp_pm_clock_getrate() - Get the clock rate for given id
- * @clock_id:	ID of the clock
- * @rate:	rate value in hz
- *
- * This function is used by master to get rate
- * for any clock.
- *
- * Return: Returns status, either success or error+reason
- */
-int zynqmp_pm_clock_getrate(u32 clock_id, u64 *rate)
-{
-	u32 ret_payload[PAYLOAD_ARG_CNT];
-	int ret;
-
-	ret = zynqmp_pm_invoke_fn(PM_CLOCK_GETRATE, ret_payload, 1, clock_id);
-	*rate = ((u64)ret_payload[2] << 32) | ret_payload[1];
-
-	return ret;
-}
-EXPORT_SYMBOL_GPL(zynqmp_pm_clock_getrate);
-
-/**
  * zynqmp_pm_clock_setparent() - Set the clock parent for given id
  * @clock_id:	ID of the clock
  * @parent_id:	parent id
@@ -1097,30 +1059,6 @@ int zynqmp_pm_pinctrl_release(const u32 pin)
 	return zynqmp_pm_invoke_fn(PM_PINCTRL_RELEASE, NULL, 1, pin);
 }
 EXPORT_SYMBOL_GPL(zynqmp_pm_pinctrl_release);
-
-/**
- * zynqmp_pm_pinctrl_get_function - Read function id set for the given pin
- * @pin: Pin number
- * @id: Buffer to store function ID
- *
- * This function provides the function currently set for the given pin.
- *
- * Return: Returns status, either success or error+reason
- */
-int zynqmp_pm_pinctrl_get_function(const u32 pin, u32 *id)
-{
-	u32 ret_payload[PAYLOAD_ARG_CNT];
-	int ret;
-
-	if (!id)
-		return -EINVAL;
-
-	ret = zynqmp_pm_invoke_fn(PM_PINCTRL_GET_FUNCTION, ret_payload, 1, pin);
-	*id = ret_payload[1];
-
-	return ret;
-}
-EXPORT_SYMBOL_GPL(zynqmp_pm_pinctrl_get_function);
 
 /**
  * zynqmp_pm_pinctrl_set_function - Set requested function for the pin

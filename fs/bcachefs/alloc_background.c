@@ -534,14 +534,8 @@ void bch2_bucket_gens_to_text(struct printbuf *out, struct bch_fs *c, struct bke
 int bch2_bucket_gens_init(struct bch_fs *c)
 {
 	struct btree_trans *trans = bch2_trans_get(c);
-	struct btree_iter iter;
-	struct bkey_s_c k;
-	struct bch_alloc_v4 a;
 	struct bkey_i_bucket_gens g;
 	bool have_bucket_gens_key = false;
-	unsigned offset;
-	struct bpos pos;
-	u8 gen;
 	int ret;
 
 	ret = for_each_btree_key(trans, iter, BTREE_ID_alloc, POS_MIN,
@@ -553,8 +547,10 @@ int bch2_bucket_gens_init(struct bch_fs *c)
 		if (!bch2_dev_bucket_exists(c, k.k->p))
 			continue;
 
-		gen = bch2_alloc_to_v4(k, &a)->gen;
-		pos = alloc_gens_pos(iter.pos, &offset);
+		struct bch_alloc_v4 a;
+		u8 gen = bch2_alloc_to_v4(k, &a)->gen;
+		unsigned offset;
+		struct bpos pos = alloc_gens_pos(iter.pos, &offset);
 
 		if (have_bucket_gens_key && bkey_cmp(iter.pos, pos)) {
 			ret = commit_do(trans, NULL, NULL,
@@ -589,17 +585,11 @@ int bch2_bucket_gens_init(struct bch_fs *c)
 int bch2_alloc_read(struct bch_fs *c)
 {
 	struct btree_trans *trans = bch2_trans_get(c);
-	struct btree_iter iter;
-	struct bkey_s_c k;
-	struct bch_dev *ca;
 	int ret;
 
 	down_read(&c->gc_lock);
 
 	if (c->sb.version_upgrade_complete >= bcachefs_metadata_version_bucket_gens) {
-		const struct bch_bucket_gens *g;
-		u64 b;
-
 		ret = for_each_btree_key(trans, iter, BTREE_ID_bucket_gens, POS_MIN,
 					 BTREE_ITER_PREFETCH, k, ({
 			u64 start = bucket_gens_pos_to_alloc(k.k->p, 0).offset;
@@ -608,7 +598,7 @@ int bch2_alloc_read(struct bch_fs *c)
 			if (k.k->type != KEY_TYPE_bucket_gens)
 				continue;
 
-			g = bkey_s_c_to_bucket_gens(k).v;
+			const struct bch_bucket_gens *g = bkey_s_c_to_bucket_gens(k).v;
 
 			/*
 			 * Not a fsck error because this is checked/repaired by
@@ -617,17 +607,15 @@ int bch2_alloc_read(struct bch_fs *c)
 			if (!bch2_dev_exists2(c, k.k->p.inode))
 				continue;
 
-			ca = bch_dev_bkey_exists(c, k.k->p.inode);
+			struct bch_dev *ca = bch_dev_bkey_exists(c, k.k->p.inode);
 
-			for (b = max_t(u64, ca->mi.first_bucket, start);
+			for (u64 b = max_t(u64, ca->mi.first_bucket, start);
 			     b < min_t(u64, ca->mi.nbuckets, end);
 			     b++)
 				*bucket_gen(ca, b) = g->gens[b & KEY_TYPE_BUCKET_GENS_MASK];
 			0;
 		}));
 	} else {
-		struct bch_alloc_v4 a;
-
 		ret = for_each_btree_key(trans, iter, BTREE_ID_alloc, POS_MIN,
 					 BTREE_ITER_PREFETCH, k, ({
 			/*
@@ -637,8 +625,9 @@ int bch2_alloc_read(struct bch_fs *c)
 			if (!bch2_dev_bucket_exists(c, k.k->p))
 				continue;
 
-			ca = bch_dev_bkey_exists(c, k.k->p.inode);
+			struct bch_dev *ca = bch_dev_bkey_exists(c, k.k->p.inode);
 
+			struct bch_alloc_v4 a;
 			*bucket_gen(ca, k.k->p.offset) = bch2_alloc_to_v4(k, &a)->gen;
 			0;
 		}));
@@ -903,7 +892,6 @@ static struct bkey_s_c bch2_get_key_or_hole(struct btree_iter *iter, struct bpos
 static bool next_bucket(struct bch_fs *c, struct bpos *bucket)
 {
 	struct bch_dev *ca;
-	unsigned iter;
 
 	if (bch2_dev_bucket_exists(c, *bucket))
 		return true;
@@ -921,8 +909,7 @@ static bool next_bucket(struct bch_fs *c, struct bpos *bucket)
 	}
 
 	rcu_read_lock();
-	iter = bucket->inode;
-	ca = __bch2_next_dev(c, &iter, NULL);
+	ca = __bch2_next_dev_idx(c, bucket->inode, NULL);
 	if (ca)
 		*bucket = POS(ca->dev_idx, ca->mi.first_bucket);
 	rcu_read_unlock();
@@ -1471,8 +1458,7 @@ bkey_err:
 		bch2_check_bucket_gens_key(trans, &iter, k));
 err:
 	bch2_trans_put(trans);
-	if (ret)
-		bch_err_fn(c, ret);
+	bch_err_fn(c, ret);
 	return ret;
 }
 
@@ -1551,9 +1537,6 @@ fsck_err:
 
 int bch2_check_alloc_to_lru_refs(struct bch_fs *c)
 {
-	struct btree_iter iter;
-	struct bkey_s_c k;
-
 	int ret = bch2_trans_run(c,
 		for_each_btree_key_commit(trans, iter, BTREE_ID_alloc,
 				POS_MIN, BTREE_ITER_PREFETCH, k,
@@ -1682,8 +1665,6 @@ out:
 static void bch2_do_discards_work(struct work_struct *work)
 {
 	struct bch_fs *c = container_of(work, struct bch_fs, discard_work);
-	struct btree_iter iter;
-	struct bkey_s_c k;
 	u64 seen = 0, open = 0, need_journal_commit = 0, discarded = 0;
 	struct bpos discard_pos_done = POS_MAX;
 	int ret;
@@ -1805,22 +1786,18 @@ err:
 static void bch2_do_invalidates_work(struct work_struct *work)
 {
 	struct bch_fs *c = container_of(work, struct bch_fs, invalidate_work);
-	struct bch_dev *ca;
 	struct btree_trans *trans = bch2_trans_get(c);
-	struct btree_iter iter;
-	struct bkey_s_c k;
-	unsigned i;
 	int ret = 0;
 
 	ret = bch2_btree_write_buffer_tryflush(trans);
 	if (ret)
 		goto err;
 
-	for_each_member_device(ca, c, i) {
+	for_each_member_device(c, ca) {
 		s64 nr_to_invalidate =
 			should_invalidate_buckets(ca, bch2_dev_usage_read(ca));
 
-		ret = for_each_btree_key2_upto(trans, iter, BTREE_ID_lru,
+		ret = for_each_btree_key_upto(trans, iter, BTREE_ID_lru,
 				lru_pos(ca->dev_idx, 0, 0),
 				lru_pos(ca->dev_idx, U64_MAX, LRU_TIME_MAX),
 				BTREE_ITER_INTENT, k,
@@ -1945,8 +1922,6 @@ bkey_err:
 
 int bch2_fs_freespace_init(struct bch_fs *c)
 {
-	struct bch_dev *ca;
-	unsigned i;
 	int ret = 0;
 	bool doing_init = false;
 
@@ -1955,7 +1930,7 @@ int bch2_fs_freespace_init(struct bch_fs *c)
 	 * every mount:
 	 */
 
-	for_each_member_device(ca, c, i) {
+	for_each_member_device(c, ca) {
 		if (ca->mi.freespace_initialized)
 			continue;
 
@@ -2015,15 +1990,13 @@ out:
 
 void bch2_recalc_capacity(struct bch_fs *c)
 {
-	struct bch_dev *ca;
 	u64 capacity = 0, reserved_sectors = 0, gc_reserve;
 	unsigned bucket_size_max = 0;
 	unsigned long ra_pages = 0;
-	unsigned i;
 
 	lockdep_assert_held(&c->state_lock);
 
-	for_each_online_member(ca, c, i) {
+	for_each_online_member(c, ca) {
 		struct backing_dev_info *bdi = ca->disk_sb.bdev->bd_disk->bdi;
 
 		ra_pages += bdi->ra_pages;
@@ -2031,7 +2004,7 @@ void bch2_recalc_capacity(struct bch_fs *c)
 
 	bch2_set_ra_pages(c, ra_pages);
 
-	for_each_rw_member(ca, c, i) {
+	for_each_rw_member(c, ca) {
 		u64 dev_reserve = 0;
 
 		/*
@@ -2087,11 +2060,9 @@ void bch2_recalc_capacity(struct bch_fs *c)
 
 u64 bch2_min_rw_member_capacity(struct bch_fs *c)
 {
-	struct bch_dev *ca;
-	unsigned i;
 	u64 ret = U64_MAX;
 
-	for_each_rw_member(ca, c, i)
+	for_each_rw_member(c, ca)
 		ret = min(ret, ca->mi.nbuckets * ca->mi.bucket_size);
 	return ret;
 }

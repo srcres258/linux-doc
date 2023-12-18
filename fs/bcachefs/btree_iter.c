@@ -652,7 +652,6 @@ void bch2_btree_path_level_init(struct btree_trans *trans,
 static void bch2_trans_revalidate_updates_in_node(struct btree_trans *trans, struct btree *b)
 {
 	struct bch_fs *c = trans->c;
-	struct btree_insert_entry *i;
 
 	trans_for_each_update(trans, i)
 		if (!i->cached &&
@@ -1374,8 +1373,6 @@ void __noreturn bch2_trans_in_restart_error(struct btree_trans *trans)
 noinline __cold
 void bch2_trans_updates_to_text(struct printbuf *buf, struct btree_trans *trans)
 {
-	struct btree_insert_entry *i;
-
 	prt_printf(buf, "transaction updates for %s journal seq %llu",
 	       trans->fn, trans->journal_res.seq);
 	prt_newline(buf);
@@ -1515,10 +1512,42 @@ int __bch2_btree_trans_too_many_iters(struct btree_trans *trans)
 	return btree_trans_restart(trans, BCH_ERR_transaction_restart_too_many_iters);
 }
 
-static noinline void btree_path_overflow(struct btree_trans *trans)
+static noinline void btree_paths_realloc(struct btree_trans *trans)
 {
-	bch2_dump_trans_paths_updates(trans);
-	panic("trans path overflow\n");
+	unsigned nr = trans->nr_paths * 2;
+
+	void *p = kzalloc(BITS_TO_LONGS(nr) * sizeof(unsigned long) +
+			  nr + 8 +
+			  sizeof(struct btree_trans_paths) +
+			  nr * sizeof(struct btree_path) +
+			  nr * sizeof(struct btree_insert_entry), GFP_KERNEL|__GFP_NOFAIL);
+
+	unsigned long *paths_allocated = p;
+	p += BITS_TO_LONGS(nr) * sizeof(unsigned long);
+	struct btree_path *paths = p;
+	p += nr * sizeof(struct btree_path);
+	u8 *sorted = p;
+	p += nr + 8;
+	struct btree_insert_entry *updates = p;
+
+	*trans_paths_nr(paths) = nr;
+
+	memcpy(paths_allocated, trans->paths_allocated, BITS_TO_LONGS(trans->nr_paths) * sizeof(unsigned long));
+	memcpy(sorted, trans->sorted, trans->nr_sorted);
+	memcpy(paths, trans->paths, trans->nr_paths * sizeof(struct btree_path));
+	memcpy(updates, trans->updates, trans->nr_paths * sizeof(struct btree_path));
+
+	unsigned long *old = trans->paths_allocated;
+
+	rcu_assign_pointer(trans->paths_allocated,	paths_allocated);
+	rcu_assign_pointer(trans->sorted,		sorted);
+	rcu_assign_pointer(trans->paths,		paths);
+	rcu_assign_pointer(trans->updates,		updates);
+
+	trans->nr_paths		= nr;
+
+	if (old != trans->_paths_allocated)
+		kfree_rcu_mightsleep(trans->paths_allocated);
 }
 
 static inline btree_path_idx_t btree_path_alloc(struct btree_trans *trans,
@@ -1527,7 +1556,7 @@ static inline btree_path_idx_t btree_path_alloc(struct btree_trans *trans,
 	btree_path_idx_t idx = find_first_zero_bit(trans->paths_allocated, trans->nr_paths);
 
 	if (unlikely(idx == trans->nr_paths))
-		btree_path_overflow(trans);
+		btree_paths_realloc(trans);
 
 	/*
 	 * Do this before marking the new path as allocated, since it won't be
@@ -1849,7 +1878,6 @@ static noinline
 struct bkey_i *__bch2_btree_trans_peek_updates(struct btree_iter *iter)
 {
 	struct btree_trans *trans = iter->trans;
-	struct btree_insert_entry *i;
 	struct bkey_i *ret = NULL;
 
 	trans_for_each_update(trans, i) {
@@ -2707,8 +2735,8 @@ void *__bch2_trans_kmalloc(struct btree_trans *trans, size_t size)
 {
 	struct bch_fs *c = trans->c;
 	unsigned new_top = trans->mem_top + size;
-	size_t old_bytes = trans->mem_bytes;
-	size_t new_bytes = roundup_pow_of_two(new_top);
+	unsigned old_bytes = trans->mem_bytes;
+	unsigned new_bytes = roundup_pow_of_two(new_top);
 	int ret;
 	void *new_mem;
 	void *p;
@@ -2983,7 +3011,6 @@ leaked:
 void bch2_trans_put(struct btree_trans *trans)
 	__releases(&c->btree_trans_barrier)
 {
-	struct btree_insert_entry *i;
 	struct bch_fs *c = trans->c;
 
 	bch2_trans_unlock(trans);
@@ -3011,6 +3038,13 @@ void bch2_trans_put(struct btree_trans *trans)
 
 	if (unlikely(trans->journal_replay_not_finished))
 		bch2_journal_keys_put(c);
+
+	unsigned long *paths_allocated = trans->paths_allocated;
+	trans->paths_allocated	= NULL;
+	trans->paths		= NULL;
+
+	if (paths_allocated != trans->_paths_allocated)
+		kfree_rcu_mightsleep(paths_allocated);
 
 	if (trans->mem_bytes == BTREE_TRANS_MEM_MAX)
 		mempool_free(trans->mem, &c->btree_trans_mem_pool);

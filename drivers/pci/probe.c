@@ -1831,14 +1831,14 @@ static void early_dump_pci_device(struct pci_dev *pdev)
 
 static const char *pci_type_str(struct pci_dev *dev)
 {
-	static const char *str[] = {
+	static const char * const str[] = {
 		"PCIe Endpoint",
 		"PCIe Legacy Endpoint",
 		"PCIe unknown",
 		"PCIe unknown",
 		"PCIe Root Port",
-		"PCIe Upstream Switch Port",
-		"PCIe Downstream Switch Port",
+		"PCIe Switch Upstream Port",
+		"PCIe Switch Downstream Port",
 		"PCIe to PCI/PCI-X bridge",
 		"PCI/PCI-X to PCIe bridge",
 		"PCIe Root Complex Integrated Endpoint",

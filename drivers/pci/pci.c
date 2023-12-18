@@ -860,7 +860,7 @@ EXPORT_SYMBOL(pci_find_resource);
  */
 const char *pci_resource_name(struct pci_dev *dev, unsigned int i)
 {
-	static const char *bar_name[] = {
+	static const char * const bar_name[] = {
 		"BAR 0",
 		"BAR 1",
 		"BAR 2",
@@ -880,7 +880,7 @@ const char *pci_resource_name(struct pci_dev *dev, unsigned int i)
 		"bridge window",	/* "mem" included in %pR */
 		"bridge window",	/* "mem pref" included in %pR */
 	};
-	static const char *cardbus_name[] = {
+	static const char * const cardbus_name[] = {
 		"BAR 1",
 		"unknown",
 		"unknown",

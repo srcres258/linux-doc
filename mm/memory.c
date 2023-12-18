@@ -3948,9 +3948,11 @@ vm_fault_t do_swap_page(struct vm_fault *vmf)
 		folio = ksm_might_need_to_copy(folio, vma, vmf->address);
 		if (unlikely(!folio)) {
 			ret = VM_FAULT_OOM;
+			folio = swapcache;
 			goto out_page;
 		} else if (unlikely(folio == ERR_PTR(-EHWPOISON))) {
 			ret = VM_FAULT_HWPOISON;
+			folio = swapcache;
 			goto out_page;
 		}
 		page = folio_page(folio, 0);
@@ -4140,9 +4142,9 @@ static bool pte_range_none(pte_t *pte, int nr_pages)
 	return true;
 }
 
-#ifdef CONFIG_TRANSPARENT_HUGEPAGE
 static struct folio *alloc_anon_folio(struct vm_fault *vmf)
 {
+#ifdef CONFIG_TRANSPARENT_HUGEPAGE
 	struct vm_area_struct *vma = vmf->vma;
 	unsigned long orders;
 	struct folio *folio;
@@ -4202,12 +4204,9 @@ static struct folio *alloc_anon_folio(struct vm_fault *vmf)
 	}
 
 fallback:
-	return vma_alloc_zeroed_movable_folio(vma, vmf->address);
-}
-#else
-#define alloc_anon_folio(vmf) \
-		vma_alloc_zeroed_movable_folio((vmf)->vma, (vmf)->address)
 #endif
+	return vma_alloc_zeroed_movable_folio(vmf->vma, vmf->address);
+}
 
 /*
  * We enter with non-exclusive mmap_lock (to exclude vma changes,
@@ -4266,6 +4265,7 @@ static vm_fault_t do_anonymous_page(struct vm_fault *vmf)
 	/* Allocate our own private page. */
 	if (unlikely(anon_vma_prepare(vma)))
 		goto oom;
+	/* Returns NULL on OOM or ERR_PTR(-EAGAIN) if we must retry the fault */
 	folio = alloc_anon_folio(vmf);
 	if (IS_ERR(folio))
 		return 0;
@@ -5952,7 +5952,7 @@ static int __access_remote_vm(struct mm_struct *mm, unsigned long addr,
 			if (bytes > PAGE_SIZE-offset)
 				bytes = PAGE_SIZE-offset;
 
-			maddr = kmap(page);
+			maddr = kmap_local_page(page);
 			if (write) {
 				copy_to_user_page(vma, page, addr,
 						  maddr + offset, buf, bytes);
@@ -5961,8 +5961,7 @@ static int __access_remote_vm(struct mm_struct *mm, unsigned long addr,
 				copy_from_user_page(vma, page, addr,
 						    buf, maddr + offset, bytes);
 			}
-			kunmap(page);
-			put_page(page);
+			unmap_and_put_page(page, maddr);
 		}
 		len -= bytes;
 		buf += bytes;

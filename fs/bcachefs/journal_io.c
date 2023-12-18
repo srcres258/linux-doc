@@ -781,7 +781,6 @@ void bch2_journal_entry_to_text(struct printbuf *out, struct bch_fs *c,
 static int jset_validate_entries(struct bch_fs *c, struct jset *jset,
 				 enum bkey_invalid_flags flags)
 {
-	struct jset_entry *entry;
 	unsigned version = le32_to_cpu(jset->version);
 	int ret = 0;
 
@@ -1169,8 +1168,6 @@ int bch2_journal_read(struct bch_fs *c,
 	struct journal_list jlist;
 	struct journal_replay *i, **_i, *prev = NULL;
 	struct genradix_iter radix_iter;
-	struct bch_dev *ca;
-	unsigned iter;
 	struct printbuf buf = PRINTBUF;
 	bool degraded = false, last_write_torn = false;
 	u64 seq;
@@ -1181,7 +1178,7 @@ int bch2_journal_read(struct bch_fs *c,
 	jlist.last_seq = 0;
 	jlist.ret = 0;
 
-	for_each_member_device(ca, c, iter) {
+	for_each_member_device(c, ca) {
 		if (!c->opts.fsck &&
 		    !(bch2_dev_has_data(c, ca) & (1 << BCH_DATA_journal)))
 			continue;
@@ -1347,7 +1344,7 @@ int bch2_journal_read(struct bch_fs *c,
 			continue;
 
 		for (ptr = 0; ptr < i->nr_ptrs; ptr++) {
-			ca = bch_dev_bkey_exists(c, i->ptrs[ptr].dev);
+			struct bch_dev *ca = bch_dev_bkey_exists(c, i->ptrs[ptr].dev);
 
 			if (!i->ptrs[ptr].csum_good)
 				bch_err_dev_offset(ca, i->ptrs[ptr].sector,
@@ -1723,7 +1720,7 @@ static CLOSURE_CALLBACK(do_journal_write)
 static int bch2_journal_write_prep(struct journal *j, struct journal_buf *w)
 {
 	struct bch_fs *c = container_of(j, struct bch_fs, journal);
-	struct jset_entry *start, *end, *i;
+	struct jset_entry *start, *end;
 	struct jset *jset = w->data;
 	struct journal_keys_to_wb wb = { NULL };
 	unsigned sectors, bytes, u64s;
@@ -1891,12 +1888,11 @@ CLOSURE_CALLBACK(bch2_journal_write)
 {
 	closure_type(j, struct journal, io);
 	struct bch_fs *c = container_of(j, struct bch_fs, journal);
-	struct bch_dev *ca;
 	struct journal_buf *w = journal_last_unwritten_buf(j);
 	struct bch_replicas_padded replicas;
 	struct bio *bio;
 	struct printbuf journal_debug_buf = PRINTBUF;
-	unsigned i, nr_rw_members = 0;
+	unsigned nr_rw_members = 0;
 	int ret;
 
 	BUG_ON(BCH_SB_CLEAN(c->disk_sb.sb));
@@ -1956,7 +1952,7 @@ CLOSURE_CALLBACK(bch2_journal_write)
 	if (c->opts.nochanges)
 		goto no_io;
 
-	for_each_rw_member(ca, c, i)
+	for_each_rw_member(c, ca)
 		nr_rw_members++;
 
 	if (nr_rw_members > 1)
@@ -1973,7 +1969,7 @@ CLOSURE_CALLBACK(bch2_journal_write)
 		goto err;
 
 	if (!JSET_NO_FLUSH(w->data) && w->separate_flush) {
-		for_each_rw_member(ca, c, i) {
+		for_each_rw_member(c, ca) {
 			percpu_ref_get(&ca->io_ref);
 
 			bio = ca->journal.bio;

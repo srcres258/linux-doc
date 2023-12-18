@@ -1158,8 +1158,6 @@ delete:
 int bch2_delete_dead_inodes(struct bch_fs *c)
 {
 	struct btree_trans *trans = bch2_trans_get(c);
-	struct btree_iter iter;
-	struct bkey_s_c k;
 	bool need_another_pass;
 	int ret;
 again:
@@ -1203,6 +1201,5 @@ again:
 	}
 err:
 	bch2_trans_put(trans);
-
 	return ret;
 }

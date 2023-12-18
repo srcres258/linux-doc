@@ -536,8 +536,6 @@ static void mhi_ep_skb_completion(struct mhi_ep_buf_info *buf_info)
 		mhi_chan->xfer_cb(mhi_dev, &result);
 	}
 
-	dev_dbg(dev, "Sending completion for ring (%d) rd_offset: %ld\n",
-ring->er_index, ring->rd_offset);
 	ret = mhi_ep_send_completion_event(mhi_cntrl, ring, el, buf_info->size,
 					   buf_info->code);
 	if (ret) {
@@ -595,10 +593,8 @@ int mhi_ep_queue_skb(struct mhi_ep_device *mhi_dev, struct sk_buff *skb)
 		buf_info.mhi_dev = mhi_dev;
 
 		/*
-		 * For all TREs queued by the host for DL channel, only the EOT flag will be set.
-		 * If the packet doesn't fit into a single TRE, send the OVERFLOW event to
-		 * the host so that the host can adjust the packet boundary to next TREs. Else send
-		 * the EOT event to the host indicating the packet boundary.
+		 * Update the read offset cached in mhi_chan. Actual read offset
+		 * will be updated by the completion handler.
 		 */
 		if (buf_left - tr_len)
 			buf_info.code = MHI_EV_CC_OVERFLOW;
@@ -613,12 +609,11 @@ int mhi_ep_queue_skb(struct mhi_ep_device *mhi_dev, struct sk_buff *skb)
 		}
 
 		buf_left -= tr_len;
+
 		/*
 		 * Update the read offset cached in mhi_chan. Actual read offset
 		 * will be updated by the completion handler.
 		 */
-		dev_dbg(dev, "rd_offset at the end of queue_skb: %ld\n",
-mhi_chan->rd_offset);
 		mhi_chan->rd_offset = (mhi_chan->rd_offset + 1) % ring->ring_size;
 	} while (buf_left);
 

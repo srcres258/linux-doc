@@ -54,17 +54,12 @@ static int resume_logged_op(struct btree_trans *trans, struct btree_iter *iter,
 
 int bch2_resume_logged_ops(struct bch_fs *c)
 {
-	struct btree_iter iter;
-	struct bkey_s_c k;
-	int ret;
-
-	ret = bch2_trans_run(c,
+	int ret = bch2_trans_run(c,
 		for_each_btree_key(trans, iter,
 				   BTREE_ID_logged_ops, POS_MIN,
 				   BTREE_ITER_PREFETCH, k,
 			resume_logged_op(trans, &iter, k)));
-	if (ret)
-		bch_err_fn(c, ret);
+	bch_err_fn(c, ret);
 	return ret;
 }
 

@@ -372,9 +372,6 @@ struct bch_io_opts *bch2_move_get_io_opts(struct btree_trans *trans,
 	int ret = 0;
 
 	if (io_opts->cur_inum != extent_k.k->p.inode) {
-		struct btree_iter iter;
-		struct bkey_s_c k;
-
 		io_opts->d.nr = 0;
 
 		ret = for_each_btree_key(trans, iter, BTREE_ID_inodes, POS(0, extent_k.k->p.inode),
@@ -400,12 +397,10 @@ struct bch_io_opts *bch2_move_get_io_opts(struct btree_trans *trans,
 	if (ret)
 		return ERR_PTR(ret);
 
-	if (extent_k.k->p.snapshot) {
-		struct snapshot_io_opts_entry *i;
+	if (extent_k.k->p.snapshot)
 		darray_for_each(io_opts->d, i)
 			if (bch2_snapshot_is_ancestor(c, extent_k.k->p.snapshot, i->snapshot))
 				return &i->io_opts;
-	}
 
 	return &io_opts->fs_io_opts;
 }
@@ -667,10 +662,9 @@ int bch2_evacuate_bucket(struct moving_context *ctxt,
 			bkey_err(k = bch2_btree_iter_peek_slot(&iter)));
 	bch2_trans_iter_exit(trans, &iter);
 
-	if (ret) {
-		bch_err_msg(c, ret, "looking up alloc key");
+	bch_err_msg(c, ret, "looking up alloc key");
+	if (ret)
 		goto err;
-	}
 
 	a = bch2_alloc_to_v4(k, &a_convert);
 	dirty_sectors = bch2_bucket_sectors_dirty(*a);

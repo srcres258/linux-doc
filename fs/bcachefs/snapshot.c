@@ -459,7 +459,6 @@ static int bch2_snapshot_tree_master_subvol(struct btree_trans *trans,
 	struct bch_fs *c = trans->c;
 	struct btree_iter iter;
 	struct bkey_s_c k;
-	struct bkey_s_c_subvolume s;
 	bool found = false;
 	int ret;
 
@@ -468,7 +467,7 @@ static int bch2_snapshot_tree_master_subvol(struct btree_trans *trans,
 		if (k.k->type != KEY_TYPE_subvolume)
 			continue;
 
-		s = bkey_s_c_to_subvolume(k);
+		struct bkey_s_c_subvolume s = bkey_s_c_to_subvolume(k);
 		if (!bch2_snapshot_is_ancestor(c, le32_to_cpu(s.v->snapshot), snapshot_root))
 			continue;
 		if (!BCH_SUBVOLUME_SNAP(s.v)) {
@@ -582,19 +581,13 @@ fsck_err:
  */
 int bch2_check_snapshot_trees(struct bch_fs *c)
 {
-	struct btree_iter iter;
-	struct bkey_s_c k;
-	int ret;
-
-	ret = bch2_trans_run(c,
+	int ret = bch2_trans_run(c,
 		for_each_btree_key_commit(trans, iter,
 			BTREE_ID_snapshot_trees, POS_MIN,
 			BTREE_ITER_PREFETCH, k,
 			NULL, NULL, BCH_TRANS_COMMIT_no_enospc,
 		check_snapshot_tree(trans, &iter, k)));
-
-	if (ret)
-		bch_err(c, "error %i checking snapshot trees", ret);
+	bch_err_fn(c, ret);
 	return ret;
 }
 
@@ -856,22 +849,17 @@ fsck_err:
 
 int bch2_check_snapshots(struct bch_fs *c)
 {
-	struct btree_iter iter;
-	struct bkey_s_c k;
-	int ret;
-
 	/*
 	 * We iterate backwards as checking/fixing the depth field requires that
 	 * the parent's depth already be correct:
 	 */
-	ret = bch2_trans_run(c,
+	int ret = bch2_trans_run(c,
 		for_each_btree_key_reverse_commit(trans, iter,
-			BTREE_ID_snapshots, POS_MAX,
-			BTREE_ITER_PREFETCH, k,
-			NULL, NULL, BCH_TRANS_COMMIT_no_enospc,
-		check_snapshot(trans, &iter, k)));
-	if (ret)
-		bch_err_fn(c, ret);
+				BTREE_ID_snapshots, POS_MAX,
+				BTREE_ITER_PREFETCH, k,
+				NULL, NULL, BCH_TRANS_COMMIT_no_enospc,
+			check_snapshot(trans, &iter, k)));
+	bch_err_fn(c, ret);
 	return ret;
 }
 
@@ -1315,7 +1303,6 @@ static int bch2_fix_child_of_deleted_snapshot(struct btree_trans *trans,
 	struct bch_fs *c = trans->c;
 	u32 nr_deleted_ancestors = 0;
 	struct bkey_i_snapshot *s;
-	u32 *i;
 	int ret;
 
 	if (k.k->type != KEY_TYPE_snapshot)
@@ -1368,12 +1355,9 @@ static int bch2_fix_child_of_deleted_snapshot(struct btree_trans *trans,
 int bch2_delete_dead_snapshots(struct bch_fs *c)
 {
 	struct btree_trans *trans;
-	struct btree_iter iter;
-	struct bkey_s_c k;
-	struct bkey_s_c_snapshot snap;
 	snapshot_id_list deleted = { 0 };
 	snapshot_id_list deleted_interior = { 0 };
-	u32 *i, id;
+	u32 id;
 	int ret = 0;
 
 	if (!test_and_clear_bit(BCH_FS_need_delete_dead_snapshots, &c->flags))
@@ -1381,10 +1365,9 @@ int bch2_delete_dead_snapshots(struct bch_fs *c)
 
 	if (!test_bit(BCH_FS_started, &c->flags)) {
 		ret = bch2_fs_read_write_early(c);
-		if (ret) {
-			bch_err_msg(c, ret, "deleting dead snapshots: error going rw");
+		bch_err_msg(c, ret, "deleting dead snapshots: error going rw");
+		if (ret)
 			return ret;
-		}
 	}
 
 	trans = bch2_trans_get(c);
@@ -1397,34 +1380,29 @@ int bch2_delete_dead_snapshots(struct bch_fs *c)
 			POS_MIN, 0, k,
 			NULL, NULL, 0,
 		bch2_delete_redundant_snapshot(trans, k));
-	if (ret) {
-		bch_err_msg(c, ret, "deleting redundant snapshots");
+	bch_err_msg(c, ret, "deleting redundant snapshots");
+	if (ret)
 		goto err;
-	}
 
 	ret = for_each_btree_key(trans, iter, BTREE_ID_snapshots,
 				 POS_MIN, 0, k,
 		bch2_snapshot_set_equiv(trans, k));
-	if (ret) {
-		bch_err_msg(c, ret, "in bch2_snapshots_set_equiv");
+	bch_err_msg(c, ret, "in bch2_snapshots_set_equiv");
+	if (ret)
 		goto err;
-	}
 
 	ret = for_each_btree_key(trans, iter, BTREE_ID_snapshots,
 				 POS_MIN, 0, k, ({
 		if (k.k->type != KEY_TYPE_snapshot)
 			continue;
 
-		snap = bkey_s_c_to_snapshot(k);
-		BCH_SNAPSHOT_DELETED(snap.v)
+		BCH_SNAPSHOT_DELETED(bkey_s_c_to_snapshot(k).v)
 			? snapshot_list_add(c, &deleted, k.k->p.offset)
 			: 0;
 	}));
-
-	if (ret) {
-		bch_err_msg(c, ret, "walking snapshots");
+	bch_err_msg(c, ret, "walking snapshots");
+	if (ret)
 		goto err;
-	}
 
 	for (id = 0; id < BTREE_ID_NR; id++) {
 		struct bpos last_pos = POS_MIN;
@@ -1457,10 +1435,9 @@ int bch2_delete_dead_snapshots(struct bch_fs *c)
 		bch2_disk_reservation_put(c, &res);
 		darray_exit(&equiv_seen);
 
-		if (ret) {
-			bch_err_msg(c, ret, "deleting keys from dying snapshots");
+		bch_err_msg(c, ret, "deleting keys from dying snapshots");
+		if (ret)
 			goto err;
-		}
 	}
 
 	bch2_trans_unlock(trans);
@@ -1476,8 +1453,8 @@ int bch2_delete_dead_snapshots(struct bch_fs *c)
 			: 0;
 	}));
 
-	if (ret) {
-		bch_err_msg(c, ret, "walking snapshots");
+	bch_err_msg(c, ret, "walking snapshots");
+	if (ret)
 		goto err_create_lock;
 	}
 
@@ -1496,19 +1473,17 @@ int bch2_delete_dead_snapshots(struct bch_fs *c)
 	darray_for_each(deleted, i) {
 		ret = commit_do(trans, NULL, NULL, 0,
 			bch2_snapshot_node_delete(trans, *i));
-		if (ret) {
-			bch_err_msg(c, ret, "deleting snapshot %u", *i);
+		bch_err_msg(c, ret, "deleting snapshot %u", *i);
+		if (ret)
 			goto err_create_lock;
-		}
 	}
 
 	darray_for_each(deleted_interior, i) {
 		ret = commit_do(trans, NULL, NULL, 0,
 			bch2_snapshot_node_delete(trans, *i));
-		if (ret) {
-			bch_err_msg(c, ret, "deleting snapshot %u", *i);
+		bch_err_msg(c, ret, "deleting snapshot %u", *i);
+		if (ret)
 			goto err_create_lock;
-		}
 	}
 err_create_lock:
 	up_write(&c->snapshot_create_lock);
@@ -1516,8 +1491,7 @@ err:
 	darray_exit(&deleted_interior);
 	darray_exit(&deleted);
 	bch2_trans_put(trans);
-	if (ret)
-		bch_err_fn(c, ret);
+	bch_err_fn(c, ret);
 	return ret;
 }
 
@@ -1688,11 +1662,7 @@ static int bch2_check_snapshot_needs_deletion(struct btree_trans *trans, struct 
 
 int bch2_snapshots_read(struct bch_fs *c)
 {
-	struct btree_iter iter;
-	struct bkey_s_c k;
-	int ret = 0;
-
-	ret = bch2_trans_run(c,
+	int ret = bch2_trans_run(c,
 		for_each_btree_key(trans, iter, BTREE_ID_snapshots,
 				   POS_MIN, 0, k,
 			bch2_mark_snapshot(trans, BTREE_ID_snapshots, 0, bkey_s_c_null, k, 0) ?:
@@ -1701,8 +1671,7 @@ int bch2_snapshots_read(struct bch_fs *c)
 		for_each_btree_key(trans, iter, BTREE_ID_snapshots,
 				   POS_MIN, 0, k,
 			   (set_is_ancestor_bitmap(c, k.k->p.offset), 0)));
-	if (ret)
-		bch_err_fn(c, ret);
+	bch_err_fn(c, ret);
 	return ret;
 }
 

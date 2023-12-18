@@ -38,8 +38,7 @@ static int check_subvol(struct btree_trans *trans,
 
 	if (BCH_SUBVOLUME_UNLINKED(subvol.v)) {
 		ret = bch2_subvolume_delete(trans, iter->pos.offset);
-		if (ret)
-			bch_err_msg(c, ret, "deleting subvolume %llu", iter->pos.offset);
+		bch_err_msg(c, ret, "deleting subvolume %llu", iter->pos.offset);
 		return ret ?: -BCH_ERR_transaction_restart_nested;
 	}
 
@@ -80,17 +79,12 @@ fsck_err:
 
 int bch2_check_subvols(struct bch_fs *c)
 {
-	struct btree_iter iter;
-	struct bkey_s_c k;
-	int ret;
-
-	ret = bch2_trans_run(c,
+	int ret = bch2_trans_run(c,
 		for_each_btree_key_commit(trans, iter,
-			BTREE_ID_subvolumes, POS_MIN, BTREE_ITER_PREFETCH, k,
-			NULL, NULL, BCH_TRANS_COMMIT_no_enospc,
-		check_subvol(trans, &iter, k)));
-	if (ret)
-		bch_err_fn(c, ret);
+				BTREE_ID_subvolumes, POS_MIN, BTREE_ITER_PREFETCH, k,
+				NULL, NULL, BCH_TRANS_COMMIT_no_enospc,
+			check_subvol(trans, &iter, k)));
+	bch_err_fn(c, ret);
 	return ret;
 }
 
@@ -208,8 +202,6 @@ static int bch2_subvolume_reparent(struct btree_trans *trans,
  */
 static int bch2_subvolumes_reparent(struct btree_trans *trans, u32 subvolid_to_delete)
 {
-	struct btree_iter iter;
-	struct bkey_s_c k;
 	struct bch_subvolume s;
 
 	return lockrestart_do(trans,
@@ -279,10 +271,9 @@ static void bch2_subvolume_wait_for_pagecache_and_delete(struct work_struct *wor
 
 		for (id = s.data; id < s.data + s.nr; id++) {
 			ret = bch2_trans_run(c, bch2_subvolume_delete(trans, *id));
-			if (ret) {
-				bch_err_msg(c, ret, "deleting subvolume %u", *id);
+			bch_err_msg(c, ret, "deleting subvolume %u", *id);
+			if (ret)
 				break;
-			}
 		}
 
 		darray_exit(&s);

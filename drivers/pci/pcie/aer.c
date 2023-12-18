@@ -435,7 +435,7 @@ void pci_aer_exit(struct pci_dev *dev)
 /*
  * AER error strings
  */
-static const char *aer_error_severity_string[] = {
+static const char * const aer_error_severity_string[] = {
 	"Uncorrectable (Non-Fatal)",
 	"Uncorrectable (Fatal)",
 	"Correctable"
