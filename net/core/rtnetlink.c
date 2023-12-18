@@ -342,8 +342,7 @@ int rtnl_unregister(int protocol, int msgtype)
 		return -ENOENT;
 	}
 
-	link = rtnl_dereference(tab[msgindex]);
-	RCU_INIT_POINTER(tab[msgindex], NULL);
+	link = rcu_replace_pointer_rtnl(tab[msgindex], NULL);
 	rtnl_unlock();
 
 	kfree_rcu(link, rcu);
@@ -368,18 +367,13 @@ void rtnl_unregister_all(int protocol)
 	BUG_ON(protocol < 0 || protocol > RTNL_FAMILY_MAX);
 
 	rtnl_lock();
-	tab = rtnl_dereference(rtnl_msg_handlers[protocol]);
+	tab = rcu_replace_pointer_rtnl(rtnl_msg_handlers[protocol], NULL);
 	if (!tab) {
 		rtnl_unlock();
 		return;
 	}
-	RCU_INIT_POINTER(rtnl_msg_handlers[protocol], NULL);
 	for (msgindex = 0; msgindex < RTM_NR_MSGTYPES; msgindex++) {
-		link = rtnl_dereference(tab[msgindex]);
-		if (!link)
-			continue;
-
-		RCU_INIT_POINTER(tab[msgindex], NULL);
+		link = rcu_replace_pointer_rtnl(tab[msgindex], NULL);
 		kfree_rcu(link, rcu);
 	}
 	rtnl_unlock();
@@ -3849,9 +3843,17 @@ static int rtnl_getlink(struct sk_buff *skb, struct nlmsghdr *nlh,
 		goto out;
 
 	err = -ENOBUFS;
-	nskb = nlmsg_new(if_nlmsg_size(dev, ext_filter_mask), GFP_KERNEL);
+	nskb = nlmsg_new_large(if_nlmsg_size(dev, ext_filter_mask));
 	if (nskb == NULL)
 		goto out;
+
+	/* Synchronize the carrier state so we don't report a state
+	 * that we're not actually going to honour immediately; if
+	 * the driver just did a carrier off->on transition, we can
+	 * only TX if link watch work has run, but without this we'd
+	 * already report carrier on, even if it doesn't work yet.
+	 */
+	linkwatch_sync_dev(dev);
 
 	err = rtnl_fill_ifinfo(nskb, dev, net,
 			       RTM_NEWLINK, NETLINK_CB(skb).portid,
