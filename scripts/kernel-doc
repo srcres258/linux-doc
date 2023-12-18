@@ -1601,7 +1601,7 @@ sub push_parameter($$$$$) {
 		$parameterdescs{$param} = $undescribed;
 
 	        if (show_warnings($type, $declaration_name) && $param !~ /\./) {
-			emit_warning("${file}:$.", "Function parameter or member '$param' not described in '$declaration_name'\n");
+			emit_warning("${file}:$.", "Function parameter or struct member '$param' not described in '$declaration_name'\n");
 		}
 	}
 
@@ -1651,6 +1651,13 @@ sub check_sections($$$$$) {
 			if ($decl_type eq "function") {
 				emit_warning("${file}:$.",
 					"Excess function parameter " .
+					"'$sects[$sx]' " .
+					"description in '$decl_name'\n");
+			}
+			elsif (($decl_type eq "struct") or
+		       	       ($decl_type eq "union")) {
+				emit_warning("${file}:$.",
+					"Excess $decl_type member " .
 					"'$sects[$sx]' " .
 					"description in '$decl_name'\n");
 			}
