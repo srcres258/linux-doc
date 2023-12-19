@@ -654,6 +654,40 @@ xfs_attr_relog_intent(
 	return &new_attrip->attri_item;
 }
 
+/* Get an ATTRD so we can process all the attrs. */
+static struct xfs_log_item *
+xfs_attr_create_done(
+	struct xfs_trans		*tp,
+	struct xfs_log_item		*intent,
+	unsigned int			count)
+{
+	struct xfs_attri_log_item	*attrip;
+	struct xfs_attrd_log_item	*attrdp;
+
+	attrip = ATTRI_ITEM(intent);
+
+	attrdp = kmem_cache_zalloc(xfs_attrd_cache, GFP_NOFS | __GFP_NOFAIL);
+
+	xfs_log_item_init(tp->t_mountp, &attrdp->attrd_item, XFS_LI_ATTRD,
+			  &xfs_attrd_item_ops);
+	attrdp->attrd_attrip = attrip;
+	attrdp->attrd_format.alfd_alf_id = attrip->attri_format.alfi_id;
+
+	return &attrdp->attrd_item;
+}
+
+const struct xfs_defer_op_type xfs_attr_defer_type = {
+	.name		= "attr",
+	.max_items	= 1,
+	.create_intent	= xfs_attr_create_intent,
+	.abort_intent	= xfs_attr_abort_intent,
+	.create_done	= xfs_attr_create_done,
+	.finish_item	= xfs_attr_finish_item,
+	.cancel_item	= xfs_attr_cancel_item,
+	.recover_work	= xfs_attr_recover_work,
+	.relog_intent	= xfs_attr_relog_intent,
+};
+
 STATIC int
 xlog_recover_attri_commit_pass2(
 	struct xlog                     *log,
@@ -725,43 +759,10 @@ xlog_recover_attri_commit_pass2(
 	memcpy(&attrip->attri_format, attri_formatp, len);
 
 	xlog_recover_intent_item(log, &attrip->attri_item, lsn,
-			XFS_DEFER_OPS_TYPE_ATTR);
+			&xfs_attr_defer_type);
 	xfs_attri_log_nameval_put(nv);
 	return 0;
 }
-
-/* Get an ATTRD so we can process all the attrs. */
-static struct xfs_log_item *
-xfs_attr_create_done(
-	struct xfs_trans		*tp,
-	struct xfs_log_item		*intent,
-	unsigned int			count)
-{
-	struct xfs_attri_log_item	*attrip;
-	struct xfs_attrd_log_item	*attrdp;
-
-	attrip = ATTRI_ITEM(intent);
-
-	attrdp = kmem_cache_zalloc(xfs_attrd_cache, GFP_NOFS | __GFP_NOFAIL);
-
-	xfs_log_item_init(tp->t_mountp, &attrdp->attrd_item, XFS_LI_ATTRD,
-			  &xfs_attrd_item_ops);
-	attrdp->attrd_attrip = attrip;
-	attrdp->attrd_format.alfd_alf_id = attrip->attri_format.alfi_id;
-
-	return &attrdp->attrd_item;
-}
-
-const struct xfs_defer_op_type xfs_attr_defer_type = {
-	.max_items	= 1,
-	.create_intent	= xfs_attr_create_intent,
-	.abort_intent	= xfs_attr_abort_intent,
-	.create_done	= xfs_attr_create_done,
-	.finish_item	= xfs_attr_finish_item,
-	.cancel_item	= xfs_attr_cancel_item,
-	.recover_work	= xfs_attr_recover_work,
-	.relog_intent	= xfs_attr_relog_intent,
-};
 
 /*
  * This routine is called when an ATTRD format structure is found in a committed

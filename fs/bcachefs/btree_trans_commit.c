@@ -972,6 +972,7 @@ do_bch2_trans_commit_to_journal_replay(struct btree_trans *trans)
 
 int __bch2_trans_commit(struct btree_trans *trans, unsigned flags)
 {
+	struct btree_insert_entry *errored_at = NULL;
 	struct bch_fs *c = trans->c;
 	int ret = 0;
 
@@ -1053,11 +1054,11 @@ int __bch2_trans_commit(struct btree_trans *trans, unsigned flags)
 			goto err;
 	}
 retry:
+	errored_at = NULL;
 	bch2_trans_verify_not_in_restart(trans);
 	if (likely(!(flags & BCH_TRANS_COMMIT_no_journal_res)))
 		memset(&trans->journal_res, 0, sizeof(trans->journal_res));
 
-	struct btree_insert_entry *errored_at = NULL;
 	ret = do_bch2_trans_commit(trans, flags, &errored_at, _RET_IP_);
 
 	/* make sure we didn't drop or screw up locks: */

@@ -32,6 +32,7 @@
  * btree bulk loading code calculates for us.  However, there are some
  * exceptions to this rule:
  *
+ * (0) If someone turned one of the debug knobs.
  * (1) If this is a per-AG btree and the AG has less than 10% space free.
  * (2) If this is an inode btree and the FS has less than 10% space free.
 
@@ -47,9 +48,13 @@ xrep_newbt_estimate_slack(
 	uint64_t		free;
 	uint64_t		sz;
 
-	/* Let the btree code compute the default slack values. */
-	bload->leaf_slack = -1;
-	bload->node_slack = -1;
+	/*
+	 * The xfs_globals values are set to -1 (i.e. take the bload defaults)
+	 * unless someone has set them otherwise, so we just pull the values
+	 * here.
+	 */
+	bload->leaf_slack = xfs_globals.bload_leaf_slack;
+	bload->node_slack = xfs_globals.bload_node_slack;
 
 	if (sc->ops->type == ST_PERAG) {
 		free = sc->sa.pag->pagf_freeblks;
@@ -89,6 +94,7 @@ xrep_newbt_init_ag(
 	xnr->alloc_hint = alloc_hint;
 	xnr->resv = resv;
 	INIT_LIST_HEAD(&xnr->resv_list);
+	xnr->bload.max_dirty = XFS_B_TO_FSBT(sc->mp, 256U << 10); /* 256K */
 	xrep_newbt_estimate_slack(xnr);
 }
 
@@ -151,11 +157,13 @@ xrep_newbt_add_blocks(
 	resv->used = 0;
 	resv->pag = xfs_perag_hold(pag);
 
-	ASSERT(xnr->oinfo.oi_offset == 0);
+	if (args->tp) {
+		ASSERT(xnr->oinfo.oi_offset == 0);
 
-	error = xfs_alloc_schedule_autoreap(args, true, &resv->autoreap);
-	if (error)
-		goto out_pag;
+		error = xfs_alloc_schedule_autoreap(args, true, &resv->autoreap);
+		if (error)
+			goto out_pag;
+	}
 
 	list_add_tail(&resv->list, &xnr->resv_list);
 	return 0;
@@ -163,6 +171,30 @@ out_pag:
 	xfs_perag_put(resv->pag);
 	kfree(resv);
 	return error;
+}
+
+/*
+ * Add an extent to the new btree reservation pool.  Callers are required to
+ * reap this reservation manually if the repair is cancelled.  @pag must be a
+ * passive reference.
+ */
+int
+xrep_newbt_add_extent(
+	struct xrep_newbt	*xnr,
+	struct xfs_perag	*pag,
+	xfs_agblock_t		agbno,
+	xfs_extlen_t		len)
+{
+	struct xfs_mount	*mp = xnr->sc->mp;
+	struct xfs_alloc_arg	args = {
+		.tp		= NULL, /* no autoreap */
+		.oinfo		= xnr->oinfo,
+		.fsbno		= XFS_AGB_TO_FSB(mp, pag->pag_agno, agbno),
+		.len		= len,
+		.resv		= xnr->resv,
+	};
+
+	return xrep_newbt_add_blocks(xnr, pag, &args);
 }
 
 /* Don't let our allocation hint take us beyond this AG */
@@ -366,6 +398,7 @@ xrep_newbt_free_extent(
 			free_aglen, xnr->oinfo.oi_owner);
 
 	ASSERT(xnr->resv != XFS_AG_RESV_AGFL);
+	ASSERT(xnr->resv != XFS_AG_RESV_IGNORE);
 
 	/*
 	 * Use EFIs to free the reservations.  This reduces the chance
@@ -510,4 +543,17 @@ xrep_newbt_claim_block(
 
 	/* Relog all the EFIs. */
 	return xrep_defer_finish(xnr->sc);
+}
+
+/* How many reserved blocks are unused? */
+unsigned int
+xrep_newbt_unused_blocks(
+	struct xrep_newbt	*xnr)
+{
+	struct xrep_newbt_resv	*resv;
+	unsigned int		unused = 0;
+
+	list_for_each_entry(resv, &xnr->resv_list, list)
+		unused += resv->len - resv->used;
+	return unused;
 }

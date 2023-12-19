@@ -563,6 +563,7 @@ xfs_bmap_relog_intent(
 }
 
 const struct xfs_defer_op_type xfs_bmap_update_defer_type = {
+	.name		= "bmap",
 	.max_items	= XFS_BUI_MAX_FAST_EXTENTS,
 	.create_intent	= xfs_bmap_update_create_intent,
 	.abort_intent	= xfs_bmap_update_abort_intent,
@@ -649,7 +650,7 @@ xlog_recover_bui_commit_pass2(
 	atomic_set(&buip->bui_next_extent, bui_formatp->bui_nextents);
 
 	xlog_recover_intent_item(log, &buip->bui_item, lsn,
-			XFS_DEFER_OPS_TYPE_BMAP);
+			&xfs_bmap_update_defer_type);
 	return 0;
 }
 

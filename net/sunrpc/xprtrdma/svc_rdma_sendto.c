@@ -113,13 +113,6 @@
 
 static void svc_rdma_wc_send(struct ib_cq *cq, struct ib_wc *wc);
 
-static void svc_rdma_send_cid_init(struct svcxprt_rdma *rdma,
-				   struct rpc_rdma_cid *cid)
-{
-	cid->ci_queue_id = rdma->sc_sq_cq->res.id;
-	cid->ci_completion_id = atomic_inc_return(&rdma->sc_completion_ids);
-}
-
 static struct svc_rdma_send_ctxt *
 svc_rdma_send_ctxt_alloc(struct svcxprt_rdma *rdma)
 {
@@ -129,7 +122,7 @@ svc_rdma_send_ctxt_alloc(struct svcxprt_rdma *rdma)
 	void *buffer;
 	int i;
 
-	ctxt = kmalloc_node(struct_size(ctxt, sc_sges, rdma->sc_max_send_sges),
+	ctxt = kzalloc_node(struct_size(ctxt, sc_sges, rdma->sc_max_send_sges),
 			    GFP_KERNEL, node);
 	if (!ctxt)
 		goto fail0;

@@ -523,6 +523,7 @@ xfs_refcount_relog_intent(
 }
 
 const struct xfs_defer_op_type xfs_refcount_update_defer_type = {
+	.name		= "refcount",
 	.max_items	= XFS_CUI_MAX_FAST_EXTENTS,
 	.create_intent	= xfs_refcount_update_create_intent,
 	.abort_intent	= xfs_refcount_update_abort_intent,
@@ -604,7 +605,7 @@ xlog_recover_cui_commit_pass2(
 	atomic_set(&cuip->cui_next_extent, cui_formatp->cui_nextents);
 
 	xlog_recover_intent_item(log, &cuip->cui_item, lsn,
-			XFS_DEFER_OPS_TYPE_REFCOUNT);
+			&xfs_refcount_update_defer_type);
 	return 0;
 }
 

@@ -576,6 +576,7 @@ xfs_rmap_relog_intent(
 }
 
 const struct xfs_defer_op_type xfs_rmap_update_defer_type = {
+	.name		= "rmap",
 	.max_items	= XFS_RUI_MAX_FAST_EXTENTS,
 	.create_intent	= xfs_rmap_update_create_intent,
 	.abort_intent	= xfs_rmap_update_abort_intent,
@@ -657,7 +658,7 @@ xlog_recover_rui_commit_pass2(
 	atomic_set(&ruip->rui_next_extent, rui_formatp->rui_nextents);
 
 	xlog_recover_intent_item(log, &ruip->rui_item, lsn,
-			XFS_DEFER_OPS_TYPE_RMAP);
+			&xfs_rmap_update_defer_type);
 	return 0;
 }
 
