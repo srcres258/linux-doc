@@ -12,6 +12,7 @@ int memory_add_physaddr_to_nid(u64 start)
 			start);
 	return 0;
 }
+EXPORT_SYMBOL_GPL(memory_add_physaddr_to_nid);
 #endif
 
 #ifndef phys_to_target_node
@@ -21,4 +22,5 @@ int phys_to_target_node(u64 start)
 			start);
 	return 0;
 }
+EXPORT_SYMBOL_GPL(phys_to_target_node);
 #endif
