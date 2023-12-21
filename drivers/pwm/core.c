@@ -27,10 +27,10 @@
 static DEFINE_MUTEX(pwm_lookup_lock);
 static LIST_HEAD(pwm_lookup_list);
 
-/* protects access to pwmchip_idr */
+/* protects access to pwm_chips */
 static DEFINE_MUTEX(pwm_lock);
 
-static DEFINE_IDR(pwmchip_idr);
+static DEFINE_IDR(pwm_chips);
 
 static struct pwm_chip *pwmchip_find_by_name(const char *name)
 {
@@ -42,7 +42,7 @@ static struct pwm_chip *pwmchip_find_by_name(const char *name)
 
 	mutex_lock(&pwm_lock);
 
-	idr_for_each_entry_ul(&pwmchip_idr, chip, tmp, id) {
+	idr_for_each_entry_ul(&pwm_chips, chip, tmp, id) {
 		const char *chip_name = dev_name(chip->dev);
 
 		if (chip_name && strcmp(chip_name, name) == 0) {
@@ -59,22 +59,24 @@ static struct pwm_chip *pwmchip_find_by_name(const char *name)
 static int pwm_device_request(struct pwm_device *pwm, const char *label)
 {
 	int err;
+	struct pwm_chip *chip = pwm->chip;
+	const struct pwm_ops *ops = chip->ops;
 
 	if (test_bit(PWMF_REQUESTED, &pwm->flags))
 		return -EBUSY;
 
-	if (!try_module_get(pwm->chip->owner))
+	if (!try_module_get(chip->owner))
 		return -ENODEV;
 
-	if (pwm->chip->ops->request) {
-		err = pwm->chip->ops->request(pwm->chip, pwm);
+	if (ops->request) {
+		err = ops->request(chip, pwm);
 		if (err) {
-			module_put(pwm->chip->owner);
+			module_put(chip->owner);
 			return err;
 		}
 	}
 
-	if (pwm->chip->ops->get_state) {
+	if (ops->get_state) {
 		/*
 		 * Zero-initialize state because most drivers are unaware of
 		 * .usage_power. The other members of state are supposed to be
@@ -84,7 +86,7 @@ static int pwm_device_request(struct pwm_device *pwm, const char *label)
 		 */
 		struct pwm_state state = { 0, };
 
-		err = pwm->chip->ops->get_state(pwm->chip, pwm, &state);
+		err = ops->get_state(chip, pwm, &state);
 		trace_pwm_get(pwm, &state, err);
 
 		if (!err)
@@ -225,7 +227,7 @@ int __pwmchip_add(struct pwm_chip *chip, struct module *owner)
 
 	mutex_lock(&pwm_lock);
 
-	ret = idr_alloc(&pwmchip_idr, chip, 0, 0, GFP_KERNEL);
+	ret = idr_alloc(&pwm_chips, chip, 0, 0, GFP_KERNEL);
 	if (ret < 0) {
 		mutex_unlock(&pwm_lock);
 		kfree(chip->pwms);
@@ -267,7 +269,7 @@ void pwmchip_remove(struct pwm_chip *chip)
 
 	mutex_lock(&pwm_lock);
 
-	idr_remove(&pwmchip_idr, chip->id);
+	idr_remove(&pwm_chips, chip->id);
 
 	mutex_unlock(&pwm_lock);
 
@@ -326,8 +328,8 @@ struct pwm_device *pwm_request_from_chip(struct pwm_chip *chip,
 }
 EXPORT_SYMBOL_GPL(pwm_request_from_chip);
 
-static void pwm_apply_state_debug(struct pwm_device *pwm,
-				  const struct pwm_state *state)
+static void pwm_apply_debug(struct pwm_device *pwm,
+			    const struct pwm_state *state)
 {
 	struct pwm_state *last = &pwm->last;
 	struct pwm_chip *chip = pwm->chip;
@@ -433,23 +435,14 @@ static void pwm_apply_state_debug(struct pwm_device *pwm,
 }
 
 /**
- * pwm_apply_state() - atomically apply a new state to a PWM device
+ * __pwm_apply() - atomically apply a new state to a PWM device
  * @pwm: PWM device
  * @state: new state to apply
  */
-int pwm_apply_state(struct pwm_device *pwm, const struct pwm_state *state)
+static int __pwm_apply(struct pwm_device *pwm, const struct pwm_state *state)
 {
 	struct pwm_chip *chip;
 	int err;
-
-	/*
-	 * Some lowlevel driver's implementations of .apply() make use of
-	 * mutexes, also with some drivers only returning when the new
-	 * configuration is active calling pwm_apply_state() from atomic context
-	 * is a bad idea. So make it explicit that calling this function might
-	 * sleep.
-	 */
-	might_sleep();
 
 	if (!pwm || !state || !state->period ||
 	    state->duty_cycle > state->period)
@@ -475,11 +468,60 @@ int pwm_apply_state(struct pwm_device *pwm, const struct pwm_state *state)
 	 * only do this after pwm->state was applied as some
 	 * implementations of .get_state depend on this
 	 */
-	pwm_apply_state_debug(pwm, state);
+	pwm_apply_debug(pwm, state);
 
 	return 0;
 }
-EXPORT_SYMBOL_GPL(pwm_apply_state);
+
+/**
+ * pwm_apply_might_sleep() - atomically apply a new state to a PWM device
+ * Cannot be used in atomic context.
+ * @pwm: PWM device
+ * @state: new state to apply
+ */
+int pwm_apply_might_sleep(struct pwm_device *pwm, const struct pwm_state *state)
+{
+	int err;
+
+	/*
+	 * Some lowlevel driver's implementations of .apply() make use of
+	 * mutexes, also with some drivers only returning when the new
+	 * configuration is active calling pwm_apply_might_sleep() from atomic context
+	 * is a bad idea. So make it explicit that calling this function might
+	 * sleep.
+	 */
+	might_sleep();
+
+	if (IS_ENABLED(CONFIG_PWM_DEBUG) && pwm->chip->atomic) {
+		/*
+		 * Catch any drivers that have been marked as atomic but
+		 * that will sleep anyway.
+		 */
+		non_block_start();
+		err = __pwm_apply(pwm, state);
+		non_block_end();
+	} else {
+		err = __pwm_apply(pwm, state);
+	}
+
+	return err;
+}
+EXPORT_SYMBOL_GPL(pwm_apply_might_sleep);
+
+/**
+ * pwm_apply_atomic() - apply a new state to a PWM device from atomic context
+ * Not all PWM devices support this function, check with pwm_might_sleep().
+ * @pwm: PWM device
+ * @state: new state to apply
+ */
+int pwm_apply_atomic(struct pwm_device *pwm, const struct pwm_state *state)
+{
+	WARN_ONCE(!pwm->chip->atomic,
+		  "sleeping PWM driver used in atomic context\n");
+
+	return __pwm_apply(pwm, state);
+}
+EXPORT_SYMBOL_GPL(pwm_apply_atomic);
 
 /**
  * pwm_capture() - capture and report a PWM signal
@@ -537,7 +579,7 @@ int pwm_adjust_config(struct pwm_device *pwm)
 		state.period = pargs.period;
 		state.polarity = pargs.polarity;
 
-		return pwm_apply_state(pwm, &state);
+		return pwm_apply_might_sleep(pwm, &state);
 	}
 
 	/*
@@ -560,7 +602,7 @@ int pwm_adjust_config(struct pwm_device *pwm)
 		state.duty_cycle = state.period - state.duty_cycle;
 	}
 
-	return pwm_apply_state(pwm, &state);
+	return pwm_apply_might_sleep(pwm, &state);
 }
 EXPORT_SYMBOL_GPL(pwm_adjust_config);
 
@@ -571,7 +613,7 @@ static struct pwm_chip *fwnode_to_pwmchip(struct fwnode_handle *fwnode)
 
 	mutex_lock(&pwm_lock);
 
-	idr_for_each_entry_ul(&pwmchip_idr, chip, tmp, id)
+	idr_for_each_entry_ul(&pwm_chips, chip, tmp, id)
 		if (chip->dev && device_match_fwnode(chip->dev, fwnode)) {
 			mutex_unlock(&pwm_lock);
 			return chip;
@@ -1035,7 +1077,7 @@ static void *pwm_seq_start(struct seq_file *s, loff_t *pos)
 	mutex_lock(&pwm_lock);
 	s->private = "";
 
-	ret = idr_get_next_ul(&pwmchip_idr, &id);
+	ret = idr_get_next_ul(&pwm_chips, &id);
 	*pos = id;
 	return ret;
 }
@@ -1047,7 +1089,7 @@ static void *pwm_seq_next(struct seq_file *s, void *v, loff_t *pos)
 
 	s->private = "\n";
 
-	ret = idr_get_next_ul(&pwmchip_idr, &id);
+	ret = idr_get_next_ul(&pwm_chips, &id);
 	*pos = id;
 	return ret;
 }

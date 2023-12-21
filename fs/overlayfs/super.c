@@ -443,8 +443,10 @@ static bool ovl_workdir_ok(struct dentry *workdir, struct dentry *upperdir)
 	bool ok = false;
 
 	if (workdir != upperdir) {
-		ok = (lock_rename(workdir, upperdir) == NULL);
-		unlock_rename(workdir, upperdir);
+		struct dentry *trap = lock_rename(workdir, upperdir);
+		if (!IS_ERR(trap))
+			unlock_rename(workdir, upperdir);
+		ok = (trap == NULL);
 	}
 	return ok;
 }
@@ -1455,6 +1457,7 @@ int ovl_fill_super(struct super_block *sb, struct fs_context *fc)
 	 * lead to unexpected results.
 	 */
 	sb->s_iflags |= SB_I_NOUMASK;
+	sb->s_iflags |= SB_I_EVM_UNSUPPORTED;
 
 	err = -ENOMEM;
 	root_dentry = ovl_get_root(sb, ctx->upper.dentry, oe);

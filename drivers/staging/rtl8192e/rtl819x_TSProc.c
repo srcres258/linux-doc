@@ -12,7 +12,7 @@ static void RxPktPendingTimeout(struct timer_list *t)
 {
 	struct rx_ts_record *ts = from_timer(ts, t, rx_pkt_pending_timer);
 	struct rtllib_device *ieee = container_of(ts, struct rtllib_device,
-						  RxTsRecord[ts->num]);
+						  rx_ts_records[ts->num]);
 
 	struct rx_reorder_entry *pReorderEntry = NULL;
 
@@ -25,7 +25,7 @@ static void RxPktPendingTimeout(struct timer_list *t)
 		while (!list_empty(&ts->rx_pending_pkt_list)) {
 			pReorderEntry = (struct rx_reorder_entry *)
 					list_entry(ts->rx_pending_pkt_list.prev,
-					struct rx_reorder_entry, List);
+					struct rx_reorder_entry, list);
 			if (index == 0)
 				ts->rx_indicate_seq = pReorderEntry->SeqNum;
 
@@ -33,7 +33,7 @@ static void RxPktPendingTimeout(struct timer_list *t)
 				    ts->rx_indicate_seq) ||
 			    SN_EQUAL(pReorderEntry->SeqNum,
 				     ts->rx_indicate_seq)) {
-				list_del_init(&pReorderEntry->List);
+				list_del_init(&pReorderEntry->list);
 
 				if (SN_EQUAL(pReorderEntry->SeqNum,
 				    ts->rx_indicate_seq))
@@ -47,7 +47,7 @@ static void RxPktPendingTimeout(struct timer_list *t)
 							 pReorderEntry->prxb;
 				index++;
 
-				list_add_tail(&pReorderEntry->List,
+				list_add_tail(&pReorderEntry->list,
 					      &ieee->RxReorder_Unused_List);
 			} else {
 				bPktInBuf = true;
@@ -85,7 +85,7 @@ static void TsAddBaProcess(struct timer_list *t)
 	struct tx_ts_record *ts = from_timer(ts, t, ts_add_ba_timer);
 	u8 num = ts->num;
 	struct rtllib_device *ieee = container_of(ts, struct rtllib_device,
-				     TxTsRecord[num]);
+				     tx_ts_records[num]);
 
 	rtllib_ts_init_add_ba(ieee, ts, BA_POLICY_IMMEDIATE, false);
 	netdev_dbg(ieee->dev, "%s(): ADDBA Req is started\n", __func__);
@@ -119,8 +119,8 @@ static void ResetRxTsEntry(struct rx_ts_record *ts)
 
 void rtllib_ts_init(struct rtllib_device *ieee)
 {
-	struct tx_ts_record *pTxTS  = ieee->TxTsRecord;
-	struct rx_ts_record *rxts  = ieee->RxTsRecord;
+	struct tx_ts_record *pTxTS  = ieee->tx_ts_records;
+	struct rx_ts_record *rxts  = ieee->rx_ts_records;
 	struct rx_reorder_entry *pRxReorderEntry = ieee->RxReorderEntry;
 	u8				count = 0;
 
@@ -138,7 +138,7 @@ void rtllib_ts_init(struct rtllib_device *ieee)
 			    rtllib_tx_ba_inact_timeout, 0);
 
 		ResetTxTsEntry(pTxTS);
-		list_add_tail(&pTxTS->ts_common_info.List,
+		list_add_tail(&pTxTS->ts_common_info.list,
 				&ieee->Tx_TS_Unused_List);
 		pTxTS++;
 	}
@@ -155,13 +155,13 @@ void rtllib_ts_init(struct rtllib_device *ieee)
 		timer_setup(&rxts->rx_pkt_pending_timer, RxPktPendingTimeout, 0);
 
 		ResetRxTsEntry(rxts);
-		list_add_tail(&rxts->ts_common_info.List,
+		list_add_tail(&rxts->ts_common_info.list,
 			      &ieee->Rx_TS_Unused_List);
 		rxts++;
 	}
 	INIT_LIST_HEAD(&ieee->RxReorder_Unused_List);
 	for (count = 0; count < REORDER_ENTRY_NUM; count++) {
-		list_add_tail(&pRxReorderEntry->List,
+		list_add_tail(&pRxReorderEntry->list,
 			      &ieee->RxReorder_Unused_List);
 		if (count == (REORDER_ENTRY_NUM - 1))
 			break;
@@ -196,17 +196,17 @@ static struct ts_common_info *SearchAdmitTRStream(struct rtllib_device *ieee,
 	for (dir = 0; dir <= DIR_BI_DIR; dir++) {
 		if (!search_dir[dir])
 			continue;
-		list_for_each_entry(pRet, psearch_list, List) {
+		list_for_each_entry(pRet, psearch_list, list) {
 			if (memcmp(pRet->addr, addr, 6) == 0 &&
-			    pRet->tspec.ucTSID == TID &&
+			    pRet->tspec.ts_id == TID &&
 			    pRet->tspec.ucDirection == dir)
 				break;
 		}
-		if (&pRet->List  != psearch_list)
+		if (&pRet->list  != psearch_list)
 			break;
 	}
 
-	if (pRet && &pRet->List  != psearch_list)
+	if (pRet && &pRet->list  != psearch_list)
 		return pRet;
 	return NULL;
 }
@@ -286,8 +286,8 @@ bool rtllib_get_ts(struct rtllib_device *ieee, struct ts_common_info **ppTS,
 
 	if (!list_empty(pUnusedList)) {
 		(*ppTS) = list_entry(pUnusedList->next,
-			  struct ts_common_info, List);
-		list_del_init(&(*ppTS)->List);
+			  struct ts_common_info, list);
+		list_del_init(&(*ppTS)->list);
 		if (TxRxSelect == TX_DIR) {
 			struct tx_ts_record *tmp =
 				container_of(*ppTS,
@@ -305,11 +305,11 @@ bool rtllib_get_ts(struct rtllib_device *ieee, struct ts_common_info **ppTS,
 		netdev_dbg(ieee->dev,
 			   "to init current TS, UP:%d, Dir:%d, addr: %pM ppTs=%p\n",
 			   UP, Dir, addr, *ppTS);
-		ts_info->ucTSID = UP;
+		ts_info->ts_id = UP;
 		ts_info->ucDirection = Dir;
 
 		MakeTSEntry(*ppTS, addr, &tspec);
-		list_add_tail(&((*ppTS)->List), pAddmitList);
+		list_add_tail(&((*ppTS)->list), pAddmitList);
 
 		return true;
 	}
@@ -335,10 +335,10 @@ static void RemoveTsEntry(struct rtllib_device *ieee,
 		while (!list_empty(&ts->rx_pending_pkt_list)) {
 			pRxReorderEntry = (struct rx_reorder_entry *)
 					list_entry(ts->rx_pending_pkt_list.prev,
-					struct rx_reorder_entry, List);
+					struct rx_reorder_entry, list);
 			netdev_dbg(ieee->dev,  "%s(): Delete SeqNum %d!\n",
 				   __func__, pRxReorderEntry->SeqNum);
-			list_del_init(&pRxReorderEntry->List);
+			list_del_init(&pRxReorderEntry->list);
 			{
 				int i = 0;
 				struct rtllib_rxb *prxb = pRxReorderEntry->prxb;
@@ -350,7 +350,7 @@ static void RemoveTsEntry(struct rtllib_device *ieee,
 				kfree(prxb);
 				prxb = NULL;
 			}
-			list_add_tail(&pRxReorderEntry->List,
+			list_add_tail(&pRxReorderEntry->list,
 				      &ieee->RxReorder_Unused_List);
 		}
 	} else {
@@ -366,37 +366,37 @@ void RemovePeerTS(struct rtllib_device *ieee, u8 *addr)
 
 	netdev_info(ieee->dev, "===========>%s, %pM\n", __func__, addr);
 
-	list_for_each_entry_safe(ts, pTmpTS, &ieee->Tx_TS_Pending_List, List) {
+	list_for_each_entry_safe(ts, pTmpTS, &ieee->Tx_TS_Pending_List, list) {
 		if (memcmp(ts->addr, addr, 6) == 0) {
 			RemoveTsEntry(ieee, ts, TX_DIR);
-			list_del_init(&ts->List);
-			list_add_tail(&ts->List, &ieee->Tx_TS_Unused_List);
+			list_del_init(&ts->list);
+			list_add_tail(&ts->list, &ieee->Tx_TS_Unused_List);
 		}
 	}
 
-	list_for_each_entry_safe(ts, pTmpTS, &ieee->Tx_TS_Admit_List, List) {
+	list_for_each_entry_safe(ts, pTmpTS, &ieee->Tx_TS_Admit_List, list) {
 		if (memcmp(ts->addr, addr, 6) == 0) {
 			netdev_info(ieee->dev,
 				    "====>remove Tx_TS_admin_list\n");
 			RemoveTsEntry(ieee, ts, TX_DIR);
-			list_del_init(&ts->List);
-			list_add_tail(&ts->List, &ieee->Tx_TS_Unused_List);
+			list_del_init(&ts->list);
+			list_add_tail(&ts->list, &ieee->Tx_TS_Unused_List);
 		}
 	}
 
-	list_for_each_entry_safe(ts, pTmpTS, &ieee->Rx_TS_Pending_List, List) {
+	list_for_each_entry_safe(ts, pTmpTS, &ieee->Rx_TS_Pending_List, list) {
 		if (memcmp(ts->addr, addr, 6) == 0) {
 			RemoveTsEntry(ieee, ts, RX_DIR);
-			list_del_init(&ts->List);
-			list_add_tail(&ts->List, &ieee->Rx_TS_Unused_List);
+			list_del_init(&ts->list);
+			list_add_tail(&ts->list, &ieee->Rx_TS_Unused_List);
 		}
 	}
 
-	list_for_each_entry_safe(ts, pTmpTS, &ieee->Rx_TS_Admit_List, List) {
+	list_for_each_entry_safe(ts, pTmpTS, &ieee->Rx_TS_Admit_List, list) {
 		if (memcmp(ts->addr, addr, 6) == 0) {
 			RemoveTsEntry(ieee, ts, RX_DIR);
-			list_del_init(&ts->List);
-			list_add_tail(&ts->List, &ieee->Rx_TS_Unused_List);
+			list_del_init(&ts->list);
+			list_add_tail(&ts->list, &ieee->Rx_TS_Unused_List);
 		}
 	}
 }
@@ -406,28 +406,28 @@ void RemoveAllTS(struct rtllib_device *ieee)
 {
 	struct ts_common_info *ts, *pTmpTS;
 
-	list_for_each_entry_safe(ts, pTmpTS, &ieee->Tx_TS_Pending_List, List) {
+	list_for_each_entry_safe(ts, pTmpTS, &ieee->Tx_TS_Pending_List, list) {
 		RemoveTsEntry(ieee, ts, TX_DIR);
-		list_del_init(&ts->List);
-		list_add_tail(&ts->List, &ieee->Tx_TS_Unused_List);
+		list_del_init(&ts->list);
+		list_add_tail(&ts->list, &ieee->Tx_TS_Unused_List);
 	}
 
-	list_for_each_entry_safe(ts, pTmpTS, &ieee->Tx_TS_Admit_List, List) {
+	list_for_each_entry_safe(ts, pTmpTS, &ieee->Tx_TS_Admit_List, list) {
 		RemoveTsEntry(ieee, ts, TX_DIR);
-		list_del_init(&ts->List);
-		list_add_tail(&ts->List, &ieee->Tx_TS_Unused_List);
+		list_del_init(&ts->list);
+		list_add_tail(&ts->list, &ieee->Tx_TS_Unused_List);
 	}
 
-	list_for_each_entry_safe(ts, pTmpTS, &ieee->Rx_TS_Pending_List, List) {
+	list_for_each_entry_safe(ts, pTmpTS, &ieee->Rx_TS_Pending_List, list) {
 		RemoveTsEntry(ieee, ts, RX_DIR);
-		list_del_init(&ts->List);
-		list_add_tail(&ts->List, &ieee->Rx_TS_Unused_List);
+		list_del_init(&ts->list);
+		list_add_tail(&ts->list, &ieee->Rx_TS_Unused_List);
 	}
 
-	list_for_each_entry_safe(ts, pTmpTS, &ieee->Rx_TS_Admit_List, List) {
+	list_for_each_entry_safe(ts, pTmpTS, &ieee->Rx_TS_Admit_List, list) {
 		RemoveTsEntry(ieee, ts, RX_DIR);
-		list_del_init(&ts->List);
-		list_add_tail(&ts->List, &ieee->Rx_TS_Unused_List);
+		list_del_init(&ts->list);
+		list_add_tail(&ts->list, &ieee->Rx_TS_Unused_List);
 	}
 }
 

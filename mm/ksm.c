@@ -304,11 +304,8 @@ static unsigned long ksm_pages_skipped;
 /* Don't scan more than max pages per batch. */
 static unsigned long ksm_advisor_max_pages_to_scan = 30000;
 
-/* At least scan this many pages per batch. */
-static unsigned long ksm_advisor_min_pages_to_scan = 500;
-
 /* Min CPU for scanning pages per scan */
-static unsigned int ksm_advisor_min_cpu =  10;
+#define KSM_ADVISOR_MIN_CPU 10
 
 /* Max CPU for scanning pages per scan */
 static unsigned int ksm_advisor_max_cpu =  70;
@@ -341,6 +338,14 @@ enum ksm_advisor_type {
 };
 static enum ksm_advisor_type ksm_advisor;
 
+#ifdef CONFIG_SYSFS
+/*
+ * Only called through the sysfs control interface:
+ */
+
+/* At least scan this many pages per batch. */
+static unsigned long ksm_advisor_min_pages_to_scan = 500;
+
 static void set_advisor_defaults(void)
 {
 	if (ksm_advisor == KSM_ADVISOR_NONE) {
@@ -350,6 +355,7 @@ static void set_advisor_defaults(void)
 		ksm_thread_pages_to_scan = ksm_advisor_min_pages_to_scan;
 	}
 }
+#endif /* CONFIG_SYSFS */
 
 static inline void advisor_start_scan(void)
 {
@@ -443,7 +449,7 @@ static void scan_time_advisor(void)
 	per_page_cost = per_page_cost ? per_page_cost : 1;
 
 	pages = min(pages, per_page_cost * ksm_advisor_max_cpu);
-	pages = max(pages, per_page_cost * ksm_advisor_min_cpu);
+	pages = max(pages, per_page_cost * KSM_ADVISOR_MIN_CPU);
 	pages = min(pages, ksm_advisor_max_pages_to_scan);
 
 	/* Update advisor context */
@@ -3752,6 +3758,8 @@ static ssize_t advisor_mode_store(struct kobject *kobj,
 				  struct kobj_attribute *attr, const char *buf,
 				  size_t count)
 {
+	enum ksm_advisor_type curr_advisor = ksm_advisor;
+
 	if (sysfs_streq("scan-time", buf))
 		ksm_advisor = KSM_ADVISOR_SCAN_TIME;
 	else if (sysfs_streq("none", buf))
@@ -3760,7 +3768,8 @@ static ssize_t advisor_mode_store(struct kobject *kobj,
 		return -EINVAL;
 
 	/* Set advisor default values */
-	set_advisor_defaults();
+	if (curr_advisor != ksm_advisor)
+		set_advisor_defaults();
 
 	return count;
 }

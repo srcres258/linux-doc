@@ -219,7 +219,7 @@ int rtllib_rx_ADDBAReq(struct rtllib_device *ieee, struct sk_buff *skb)
 	struct ba_record *ba = NULL;
 	union ba_param_set *ba_param_set = NULL;
 	u16 *ba_timeout_value = NULL;
-	union sequence_control *pBaStartSeqCtrl = NULL;
+	union sequence_control *ba_start_seq_ctrl = NULL;
 	struct rx_ts_record *ts = NULL;
 
 	if (skb->len < sizeof(struct ieee80211_hdr_3addr) + 9) {
@@ -241,7 +241,7 @@ int rtllib_rx_ADDBAReq(struct rtllib_device *ieee, struct sk_buff *skb)
 	dialog_token = tag + 2;
 	ba_param_set = (union ba_param_set *)(tag + 3);
 	ba_timeout_value = (u16 *)(tag + 5);
-	pBaStartSeqCtrl = (union sequence_control *)(req + 7);
+	ba_start_seq_ctrl = (union sequence_control *)(req + 7);
 
 	if (!ieee->current_network.qos_data.active ||
 	    !ieee->ht_info->current_ht_support ||
@@ -274,7 +274,7 @@ int rtllib_rx_ADDBAReq(struct rtllib_device *ieee, struct sk_buff *skb)
 	ba->dialog_token = *dialog_token;
 	ba->ba_param_set = *ba_param_set;
 	ba->ba_timeout_value = *ba_timeout_value;
-	ba->ba_start_seq_ctrl = *pBaStartSeqCtrl;
+	ba->ba_start_seq_ctrl = *ba_start_seq_ctrl;
 
 	if (ieee->GetHalfNmodeSupportByAPsHandler(ieee->dev) ||
 	   (ieee->ht_info->iot_action & HT_IOT_ACT_ALLOW_PEER_AGG_ONE_PKT))
@@ -402,7 +402,7 @@ OnADDBARsp_Reject:
 int rtllib_rx_DELBA(struct rtllib_device *ieee, struct sk_buff *skb)
 {
 	struct ieee80211_hdr_3addr *delba = NULL;
-	union delba_param_set *pDelBaParamSet = NULL;
+	union delba_param_set *del_ba_param_set = NULL;
 	u8 *dst = NULL;
 
 	if (skb->len < sizeof(struct ieee80211_hdr_3addr) + 6) {
@@ -427,17 +427,17 @@ int rtllib_rx_DELBA(struct rtllib_device *ieee, struct sk_buff *skb)
 #endif
 	delba = (struct ieee80211_hdr_3addr *)skb->data;
 	dst = (u8 *)(&delba->addr2[0]);
-	pDelBaParamSet = (union delba_param_set *)&delba->seq_ctrl + 2;
+	del_ba_param_set = (union delba_param_set *)&delba->seq_ctrl + 2;
 
-	if (pDelBaParamSet->field.initiator == 1) {
+	if (del_ba_param_set->field.initiator == 1) {
 		struct rx_ts_record *ts;
 
 		if (!rtllib_get_ts(ieee, (struct ts_common_info **)&ts, dst,
-			   (u8)pDelBaParamSet->field.tid, RX_DIR, false)) {
+			   (u8)del_ba_param_set->field.tid, RX_DIR, false)) {
 			netdev_warn(ieee->dev,
 				    "%s(): can't get TS for RXTS. dst:%pM TID:%d\n",
 				    __func__, dst,
-				    (u8)pDelBaParamSet->field.tid);
+				    (u8)del_ba_param_set->field.tid);
 			return -1;
 		}
 
@@ -446,7 +446,7 @@ int rtllib_rx_DELBA(struct rtllib_device *ieee, struct sk_buff *skb)
 		struct tx_ts_record *ts;
 
 		if (!rtllib_get_ts(ieee, (struct ts_common_info **)&ts, dst,
-			   (u8)pDelBaParamSet->field.tid, TX_DIR, false)) {
+			   (u8)del_ba_param_set->field.tid, TX_DIR, false)) {
 			netdev_warn(ieee->dev, "%s(): can't get TS for TXTS\n",
 				    __func__);
 			return -1;
@@ -474,7 +474,7 @@ void rtllib_ts_init_add_ba(struct rtllib_device *ieee, struct tx_ts_record *ts,
 	ba->dialog_token++;
 	ba->ba_param_set.field.amsdu_support = 0;
 	ba->ba_param_set.field.ba_policy = policy;
-	ba->ba_param_set.field.tid = ts->ts_common_info.tspec.ucTSID;
+	ba->ba_param_set.field.tid = ts->ts_common_info.tspec.ts_id;
 	ba->ba_param_set.field.buffer_size = 32;
 	ba->ba_timeout_value = 0;
 	ba->ba_start_seq_ctrl.field.seq_num = (ts->tx_cur_seq + 3) % 4096;
@@ -523,7 +523,7 @@ void rtllib_tx_ba_inact_timeout(struct timer_list *t)
 	struct tx_ts_record *ts = from_timer(ts, t,
 					      tx_admitted_ba_record.timer);
 	struct rtllib_device *ieee = container_of(ts, struct rtllib_device,
-				     TxTsRecord[ts->num]);
+				     tx_ts_records[ts->num]);
 	tx_ts_delete_ba(ieee, ts);
 	rtllib_send_DELBA(ieee, ts->ts_common_info.addr,
 			  &ts->tx_admitted_ba_record, TX_DIR,
@@ -535,7 +535,7 @@ void rtllib_rx_ba_inact_timeout(struct timer_list *t)
 	struct rx_ts_record *ts = from_timer(ts, t,
 					      rx_admitted_ba_record.timer);
 	struct rtllib_device *ieee = container_of(ts, struct rtllib_device,
-				     RxTsRecord[ts->num]);
+				     rx_ts_records[ts->num]);
 
 	rx_ts_delete_ba(ieee, ts);
 	rtllib_send_DELBA(ieee, ts->ts_common_info.addr,

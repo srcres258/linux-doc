@@ -34,8 +34,7 @@ int bch2_extent_fallocate(struct btree_trans *trans,
 	struct open_buckets open_buckets = { 0 };
 	struct bkey_s_c k;
 	struct bkey_buf old, new;
-	unsigned sectors_allocated = 0;
-	bool have_reservation = false;
+	unsigned sectors_allocated = 0, new_replicas;
 	bool unwritten = opts.nocow &&
 	    c->sb.version >= bcachefs_metadata_version_unwritten_extents;
 	int ret;
@@ -50,28 +49,20 @@ int bch2_extent_fallocate(struct btree_trans *trans,
 		return ret;
 
 	sectors = min_t(u64, sectors, k.k->p.offset - iter->pos.offset);
+	new_replicas = max(0, (int) opts.data_replicas -
+			   (int) bch2_bkey_nr_ptrs_fully_allocated(k));
 
-	if (!have_reservation) {
-		unsigned new_replicas =
-			max(0, (int) opts.data_replicas -
-			    (int) bch2_bkey_nr_ptrs_fully_allocated(k));
-		/*
-		 * Get a disk reservation before (in the nocow case) calling
-		 * into the allocator:
-		 */
-		ret = bch2_disk_reservation_get(c, &disk_res, sectors, new_replicas, 0);
-		if (unlikely(ret))
-			goto err;
+	/*
+	 * Get a disk reservation before (in the nocow case) calling
+	 * into the allocator:
+	 */
+	ret = bch2_disk_reservation_get(c, &disk_res, sectors, new_replicas, 0);
+	if (unlikely(ret))
+		goto err;
 
-		bch2_bkey_buf_reassemble(&old, c, k);
-	}
+	bch2_bkey_buf_reassemble(&old, c, k);
 
-	if (have_reservation) {
-		if (!bch2_extents_match(k, bkey_i_to_s_c(old.k)))
-			goto err;
-
-		bch2_key_resize(&new.k->k, sectors);
-	} else if (!unwritten) {
+	if (!unwritten) {
 		struct bkey_i_reservation *reservation;
 
 		bch2_bkey_buf_realloc(&new, c, sizeof(*reservation) / sizeof(u64));
@@ -118,13 +109,16 @@ int bch2_extent_fallocate(struct btree_trans *trans,
 			ptr->unwritten = true;
 	}
 
-	have_reservation = true;
-
 	ret = bch2_extent_update(trans, inum, iter, new.k, &disk_res,
 				 0, i_sectors_delta, true);
 err:
 	if (!ret && sectors_allocated)
 		bch2_increment_clock(c, sectors_allocated, WRITE);
+	if (should_print_err(ret))
+		bch_err_inum_offset_ratelimited(c,
+			inum.inum,
+			iter->pos.offset << 9,
+			"%s(): error: %s", __func__, bch2_err_str(ret));
 
 	bch2_open_buckets_put(c, &open_buckets);
 	bch2_disk_reservation_put(c, &disk_res);

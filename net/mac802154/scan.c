@@ -466,6 +466,7 @@ int mac802154_send_beacons_locked(struct ieee802154_sub_if_data *sdata,
 				  struct cfg802154_beacon_request *request)
 {
 	struct ieee802154_local *local = sdata->local;
+	struct wpan_dev *wpan_dev = &sdata->wpan_dev;
 
 	ASSERT_RTNL();
 
@@ -495,8 +496,7 @@ int mac802154_send_beacons_locked(struct ieee802154_sub_if_data *sdata,
 		local->beacon.mac_pl.superframe_order = request->interval;
 	local->beacon.mac_pl.final_cap_slot = 0xf;
 	local->beacon.mac_pl.battery_life_ext = 0;
-	/* TODO: Fill this field with the coordinator situation in the network */
-	local->beacon.mac_pl.pan_coordinator = 1;
+	local->beacon.mac_pl.pan_coordinator = !wpan_dev->parent;
 	local->beacon.mac_pl.assoc_permit = 1;
 
 	if (request->interval == IEEE802154_ACTIVE_SCAN_DURATION)
@@ -780,6 +780,12 @@ int mac802154_process_association_req(struct ieee802154_sub_if_data *sdata,
 	else if (dest->mode == IEEE802154_SHORT_ADDRESSING &&
 		 unlikely(dest->short_addr != wpan_dev->short_addr))
 		return -ENODEV;
+
+	if (wpan_dev->parent) {
+		dev_dbg(&sdata->dev->dev,
+			"Ignoring ASSOC REQ, not the PAN coordinator\n");
+		return -ENODEV;
+	}
 
 	mutex_lock(&wpan_dev->association_lock);
 

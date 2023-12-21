@@ -146,6 +146,7 @@ static size_t btree_node_u64s_with_format(struct btree_nr_keys nr,
  *
  * @c:		filesystem handle
  * @b:		btree node to rewrite
+ * @nr:		number of keys for new node (i.e. b->nr)
  * @new_f:	bkey format to translate keys to
  *
  * Returns: true if all re-packed keys will be able to fit in a new node.
@@ -1190,6 +1191,9 @@ bch2_btree_update_start(struct btree_trans *trans, struct btree_path *path,
 	return as;
 err:
 	bch2_btree_update_free(as, trans);
+	if (!bch2_err_matches(ret, ENOSPC) &&
+	    !bch2_err_matches(ret, EROFS))
+		bch_err_fn_ratelimited(c, ret);
 	return ERR_PTR(ret);
 }
 
@@ -1665,7 +1669,7 @@ bch2_btree_insert_keys_interior(struct btree_update *as,
  *
  * @as:			btree_update object
  * @trans:		btree_trans object
- * @path:		path that points to current node
+ * @path_idx:		path that points to current node
  * @b:			node to insert keys into
  * @keys:		list of keys to insert
  * @flags:		transaction commit flags

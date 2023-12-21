@@ -120,8 +120,8 @@ static void print_usage(void)
 		"  evt_capture                (COUNTER_EVENT_CAPTURE)\n"
 		"\n"
 		"  chan=<n>                   channel <n> for this watch [default: 0]\n"
-		"  id=<n>                     componend id <n> for this watch [default: 0]\n"
-		"  parent=<n>                 componend parent <n> for this watch [default: 0]\n"
+		"  id=<n>                     component id <n> for this watch [default: 0]\n"
+		"  parent=<n>                 component parent <n> for this watch [default: 0]\n"
 		"\n"
 		"Example with two watched events:\n\n"
 		"counter_watch_events -d \\\n"
@@ -230,8 +230,8 @@ int main(int argc, char **argv)
 			break;
 		default:
 			return EXIT_FAILURE;
-		};
-	};
+		}
+	}
 
 	if (nwatch) {
 		watches = calloc(nwatch, sizeof(*watches));
@@ -330,7 +330,7 @@ int main(int argc, char **argv)
 			i++;
 			break;
 		}
-	};
+	}
 
 	if (debug)
 		print_watch(watches, nwatch);

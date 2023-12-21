@@ -1987,7 +1987,6 @@ static int bch2_gc_thread(void *arg)
 	struct io_clock *clock = &c->io_clock[WRITE];
 	unsigned long last = atomic64_read(&clock->now);
 	unsigned last_kick = atomic_read(&c->kick_gc);
-	int ret;
 
 	set_freezable();
 
@@ -2027,7 +2026,7 @@ static int bch2_gc_thread(void *arg)
 #if 0
 		ret = bch2_gc(c, false, false);
 #else
-		ret = bch2_gc_gens(c);
+		bch2_gc_gens(c);
 #endif
 		debug_check_no_locks_held();
 	}
