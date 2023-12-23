@@ -166,7 +166,7 @@ void netfs_clear_inode_writeback(struct inode *inode, const void *aux)
 }
 EXPORT_SYMBOL(netfs_clear_inode_writeback);
 
-/*
+/**
  * netfs_invalidate_folio - Invalidate or partially invalidate a folio
  * @folio: Folio proposed for release
  * @offset: Offset of the invalidated region

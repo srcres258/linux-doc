@@ -649,6 +649,7 @@ struct afs_volume {
 #define AFS_VOLUME_WAIT		2	/* - T if users must wait for update */
 #define AFS_VOLUME_DELETED	3	/* - T if volume appears deleted */
 #define AFS_VOLUME_MAYBE_NO_IBULK 4	/* - T if some servers don't have InlineBulkStatus */
+#define AFS_VOLUME_RM_TREE	5	/* - Set if volume removed from cell->volumes */
 #ifdef CONFIG_AFS_FSCACHE
 	struct fscache_volume	*cache;		/* Caching cookie */
 #endif
@@ -740,7 +741,7 @@ struct afs_vnode {
 	unsigned int		cb_v_check;	/* Break check counter on ->volume */
 	seqlock_t		cb_lock;	/* Lock for ->cb_server, ->status, ->cb_*break */
 
-	time64_t		cb_expires_at;	/* time at which callback expires */
+	atomic64_t		cb_expires_at;	/* time at which callback expires */
 #define AFS_NO_CB_PROMISE TIME64_MIN
 };
 
@@ -1592,6 +1593,7 @@ extern struct afs_vlserver_list *afs_extract_vlserver_list(struct afs_cell *,
 extern struct afs_volume *afs_create_volume(struct afs_fs_context *);
 extern int afs_activate_volume(struct afs_volume *);
 extern void afs_deactivate_volume(struct afs_volume *);
+bool afs_try_get_volume(struct afs_volume *volume, enum afs_volume_trace reason);
 extern struct afs_volume *afs_get_volume(struct afs_volume *, enum afs_volume_trace);
 void afs_put_volume(struct afs_volume *volume, enum afs_volume_trace reason);
 extern int afs_check_volume_status(struct afs_volume *, struct afs_operation *);

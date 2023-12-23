@@ -208,6 +208,20 @@ static int pmc_core_dev_state_get(void *data, u64 *val)
 
 DEFINE_DEBUGFS_ATTRIBUTE(pmc_core_dev_state, pmc_core_dev_state_get, NULL, "%llu\n");
 
+static int pmc_core_pson_residency_get(void *data, u64 *val)
+{
+	struct pmc *pmc = data;
+	const struct pmc_reg_map *map = pmc->map;
+	u32 value;
+
+	value = pmc_core_reg_read(pmc, map->pson_residency_offset);
+	*val = (u64)value * map->pson_residency_counter_step;
+
+	return 0;
+}
+
+DEFINE_DEBUGFS_ATTRIBUTE(pmc_core_pson_residency, pmc_core_pson_residency_get, NULL, "%llu\n");
+
 static int pmc_core_check_read_lock_bit(struct pmc *pmc)
 {
 	u32 value;
@@ -1092,6 +1106,69 @@ int get_primary_reg_base(struct pmc *pmc)
 	return 0;
 }
 
+void pmc_core_punit_pmt_init(struct pmc_dev *pmcdev, u32 guid)
+{
+	struct telem_endpoint *ep;
+	struct pci_dev *pcidev;
+
+	pcidev = pci_get_domain_bus_and_slot(0, 0, PCI_DEVFN(10, 0));
+	if (!pcidev) {
+		dev_err(&pmcdev->pdev->dev, "PUNIT PMT device not found.");
+		return;
+	}
+
+	ep = pmt_telem_find_and_register_endpoint(pcidev, guid, 0);
+	pci_dev_put(pcidev);
+	if (IS_ERR(ep)) {
+		dev_err(&pmcdev->pdev->dev,
+			"pmc_core: couldn't get DMU telem endpoint %ld",
+			PTR_ERR(ep));
+		return;
+	}
+
+	pmcdev->punit_ep = ep;
+
+	pmcdev->has_die_c6 = true;
+	pmcdev->die_c6_offset = MTL_PMT_DMU_DIE_C6_OFFSET;
+}
+
+void pmc_core_set_device_d3(unsigned int device)
+{
+	struct pci_dev *pcidev;
+
+	pcidev = pci_get_device(PCI_VENDOR_ID_INTEL, device, NULL);
+	if (pcidev) {
+		if (!device_trylock(&pcidev->dev)) {
+			pci_dev_put(pcidev);
+			return;
+		}
+		if (!pcidev->dev.driver) {
+			dev_info(&pcidev->dev, "Setting to D3hot\n");
+			pci_set_power_state(pcidev, PCI_D3hot);
+		}
+		device_unlock(&pcidev->dev);
+		pci_dev_put(pcidev);
+	}
+}
+
+static bool pmc_core_is_pson_residency_enabled(struct pmc_dev *pmcdev)
+{
+	struct platform_device *pdev = pmcdev->pdev;
+	struct acpi_device *adev = ACPI_COMPANION(&pdev->dev);
+	u8 val;
+
+	if (!adev)
+		return false;
+
+	if (fwnode_property_read_u8(acpi_fwnode_handle(adev),
+				    "intel-cec-pson-switching-enabled-in-s0",
+				    &val))
+		return false;
+
+	return val == 1;
+}
+
+
 static void pmc_core_dbgfs_unregister(struct pmc_dev *pmcdev)
 {
 	debugfs_remove_recursive(pmcdev->dbgfs_dir);
@@ -1162,6 +1239,11 @@ static void pmc_core_dbgfs_register(struct pmc_dev *pmcdev)
 				    &pmc_core_substate_req_regs_fops);
 	}
 
+	if (primary_pmc->map->pson_residency_offset && pmc_core_is_pson_residency_enabled(pmcdev)) {
+		debugfs_create_file("pson_residency_usec", 0444,
+				    pmcdev->dbgfs_dir, primary_pmc, &pmc_core_pson_residency);
+	}
+
 	if (pmcdev->has_die_c6) {
 		debugfs_create_file("die_c6_us_show", 0444,
 				    pmcdev->dbgfs_dir, pmcdev,
@@ -1179,18 +1261,20 @@ static const struct x86_cpu_id intel_pmc_core_ids[] = {
 	X86_MATCH_INTEL_FAM6_MODEL(ICELAKE_NNPI,	icl_core_init),
 	X86_MATCH_INTEL_FAM6_MODEL(COMETLAKE,		cnp_core_init),
 	X86_MATCH_INTEL_FAM6_MODEL(COMETLAKE_L,		cnp_core_init),
-	X86_MATCH_INTEL_FAM6_MODEL(TIGERLAKE_L,		tgl_core_init),
+	X86_MATCH_INTEL_FAM6_MODEL(TIGERLAKE_L,		tgl_l_core_init),
 	X86_MATCH_INTEL_FAM6_MODEL(TIGERLAKE,		tgl_core_init),
-	X86_MATCH_INTEL_FAM6_MODEL(ATOM_TREMONT,	tgl_core_init),
+	X86_MATCH_INTEL_FAM6_MODEL(ATOM_TREMONT,	tgl_l_core_init),
 	X86_MATCH_INTEL_FAM6_MODEL(ATOM_TREMONT_L,	icl_core_init),
 	X86_MATCH_INTEL_FAM6_MODEL(ROCKETLAKE,		tgl_core_init),
-	X86_MATCH_INTEL_FAM6_MODEL(ALDERLAKE_L,		tgl_core_init),
-	X86_MATCH_INTEL_FAM6_MODEL(ATOM_GRACEMONT,	tgl_core_init),
+	X86_MATCH_INTEL_FAM6_MODEL(ALDERLAKE_L,		tgl_l_core_init),
+	X86_MATCH_INTEL_FAM6_MODEL(ATOM_GRACEMONT,	tgl_l_core_init),
 	X86_MATCH_INTEL_FAM6_MODEL(ALDERLAKE,		adl_core_init),
-	X86_MATCH_INTEL_FAM6_MODEL(RAPTORLAKE_P,        tgl_core_init),
+	X86_MATCH_INTEL_FAM6_MODEL(RAPTORLAKE_P,        tgl_l_core_init),
 	X86_MATCH_INTEL_FAM6_MODEL(RAPTORLAKE,		adl_core_init),
 	X86_MATCH_INTEL_FAM6_MODEL(RAPTORLAKE_S,	adl_core_init),
 	X86_MATCH_INTEL_FAM6_MODEL(METEORLAKE_L,	mtl_core_init),
+	X86_MATCH_INTEL_FAM6_MODEL(ARROWLAKE,		arl_core_init),
+	X86_MATCH_INTEL_FAM6_MODEL(LUNARLAKE_M,         lnl_core_init),
 	{}
 };
 

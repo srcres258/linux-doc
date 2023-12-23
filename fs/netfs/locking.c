@@ -7,6 +7,7 @@
 
 #include <linux/kernel.h>
 #include <linux/netfs.h>
+#include "internal.h"
 
 /*
  * inode_dio_wait_interruptible - wait for outstanding DIO requests to finish

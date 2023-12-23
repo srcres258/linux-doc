@@ -123,7 +123,7 @@ bool afs_check_validity(const struct afs_vnode *vnode)
 	time64_t deadline = ktime_get_real_seconds() + 10;
 
 	if (atomic_read(&volume->cb_v_check) != atomic_read(&volume->cb_v_break) ||
-	    vnode->cb_expires_at  <= deadline ||
+	    atomic64_read(&vnode->cb_expires_at)  <= deadline ||
 	    volume->cb_expires_at <= deadline ||
 	    vnode->cb_ro_snapshot != atomic_read(&volume->cb_ro_snapshot) ||
 	    vnode->cb_scrub	  != atomic_read(&volume->cb_scrub) ||
@@ -412,7 +412,7 @@ int afs_validate(struct afs_vnode *vnode, struct key *key)
 	    vnode->cb_scrub	  != cb_scrub ||
 	    volume->cb_expires_at <= deadline ||
 	    atomic_read(&volume->cb_v_check) != atomic_read(&volume->cb_v_break) ||
-	    vnode->cb_expires_at <= deadline
+	    atomic64_read(&vnode->cb_expires_at) <= deadline
 	    ) {
 		ret = afs_fetch_status(vnode, key, false, NULL);
 		if (ret < 0) {

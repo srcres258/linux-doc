@@ -783,19 +783,6 @@ static void netfs_extend_writeback(struct address_space *mapping,
 				break;
 			}
 
-			priv = rcu_dereference(*(__force void __rcu **)&folio->private);
-			if ((const struct netfs_group *)priv != group) {
-				finfo = (void *)((unsigned long)priv & ~NETFS_FOLIO_INFO);
-				if (finfo->netfs_group != group) {
-					xas_reset(xas);
-					break;
-				}
-				if (finfo->dirty_offset > 0) {
-					xas_reset(xas);
-					break;
-				}
-			}
-
 			if (!folio_try_get_rcu(folio)) {
 				xas_reset(xas);
 				continue;
@@ -824,10 +811,10 @@ static void netfs_extend_writeback(struct address_space *mapping,
 
 			stop = false;
 			len = folio_size(folio);
-			priv = folio->private;
+			priv = folio_get_private(folio);
 			if ((const struct netfs_group *)priv != group) {
 				stop = true;
-				finfo = (void *)((unsigned long)priv & ~NETFS_FOLIO_INFO);
+				finfo = netfs_folio_info(folio);
 				if (finfo->netfs_group != group ||
 				    finfo->dirty_offset > 0) {
 					folio_unlock(folio);
@@ -1013,14 +1000,6 @@ search_again:
 		if (!folio)
 			break;
 
-		/* Skip any dirty folio that's not in the group of interest. */
-		priv = rcu_dereference(*(__force void __rcu **)&folio->private);
-		if ((const struct netfs_group *)priv != group) {
-			finfo = (void *)((unsigned long)priv & ~NETFS_FOLIO_INFO);
-			if (finfo->netfs_group != group)
-				continue;
-		}
-
 		if (!folio_try_get_rcu(folio)) {
 			xas_reset(xas);
 			continue;
@@ -1030,6 +1009,16 @@ search_again:
 			folio_put(folio);
 			xas_reset(xas);
 			continue;
+		}
+
+		/* Skip any dirty folio that's not in the group of interest. */
+		priv = folio_get_private(folio);
+		if ((const struct netfs_group *)priv != group) {
+			finfo = netfs_folio_info(folio);
+			if (finfo->netfs_group != group) {
+				folio_put(folio);
+				continue;
+			}
 		}
 
 		xas_pause(xas);

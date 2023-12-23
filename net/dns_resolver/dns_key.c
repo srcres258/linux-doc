@@ -127,7 +127,7 @@ dns_resolver_preparse(struct key_preparsed_payload *prep)
 		if ((v1->status != DNS_LOOKUP_GOOD &&
 		     v1->status != DNS_LOOKUP_GOOD_WITH_BAD)) {
 			if (prep->expiry == TIME64_MAX)
-				prep->expiry = ktime_get_real_seconds() + 10;
+				prep->expiry = ktime_get_real_seconds() + 1;
 		}
 
 		result_len = datalen;
