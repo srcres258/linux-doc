@@ -215,7 +215,7 @@ static void kmalloc_node_oob_right(struct kunit *test)
 
 /*
  * Check that KASAN detects an out-of-bounds access for a big object allocated
- * via kmalloc(). But not as big as to trigger the page_alloc fallback for SLUB.
+ * via kmalloc(). But not as big as to trigger the page_alloc fallback.
  */
 static void kmalloc_big_oob_right(struct kunit *test)
 {
@@ -233,16 +233,13 @@ static void kmalloc_big_oob_right(struct kunit *test)
 /*
  * The kmalloc_large_* tests below use kmalloc() to allocate a memory chunk
  * that does not fit into the largest slab cache and therefore is allocated via
- * the page_alloc fallback for SLUB. SLAB has no such fallback, and thus these
- * tests are not supported for it.
+ * the page_alloc fallback.
  */
 
 static void kmalloc_large_oob_right(struct kunit *test)
 {
 	char *ptr;
 	size_t size = KMALLOC_MAX_CACHE_SIZE + 10;
-
-	KASAN_TEST_NEEDS_CONFIG_ON(test, CONFIG_SLUB);
 
 	ptr = kmalloc(size, GFP_KERNEL);
 	KUNIT_ASSERT_NOT_ERR_OR_NULL(test, ptr);
@@ -258,8 +255,6 @@ static void kmalloc_large_uaf(struct kunit *test)
 	char *ptr;
 	size_t size = KMALLOC_MAX_CACHE_SIZE + 10;
 
-	KASAN_TEST_NEEDS_CONFIG_ON(test, CONFIG_SLUB);
-
 	ptr = kmalloc(size, GFP_KERNEL);
 	KUNIT_ASSERT_NOT_ERR_OR_NULL(test, ptr);
 	kfree(ptr);
@@ -271,8 +266,6 @@ static void kmalloc_large_invalid_free(struct kunit *test)
 {
 	char *ptr;
 	size_t size = KMALLOC_MAX_CACHE_SIZE + 10;
-
-	KASAN_TEST_NEEDS_CONFIG_ON(test, CONFIG_SLUB);
 
 	ptr = kmalloc(size, GFP_KERNEL);
 	KUNIT_ASSERT_NOT_ERR_OR_NULL(test, ptr);
@@ -407,18 +400,12 @@ static void krealloc_less_oob(struct kunit *test)
 
 static void krealloc_large_more_oob(struct kunit *test)
 {
-	/* page_alloc fallback is only implemented for SLUB. */
-	KASAN_TEST_NEEDS_CONFIG_ON(test, CONFIG_SLUB);
-
 	krealloc_more_oob_helper(test, KMALLOC_MAX_CACHE_SIZE + 201,
 					KMALLOC_MAX_CACHE_SIZE + 235);
 }
 
 static void krealloc_large_less_oob(struct kunit *test)
 {
-	/* page_alloc fallback is only implemented for SLUB. */
-	KASAN_TEST_NEEDS_CONFIG_ON(test, CONFIG_SLUB);
-
 	krealloc_less_oob_helper(test, KMALLOC_MAX_CACHE_SIZE + 235,
 					KMALLOC_MAX_CACHE_SIZE + 201);
 }
@@ -1156,9 +1143,6 @@ static void mempool_kmalloc_large_uaf(struct kunit *test)
 	size_t size = KMALLOC_MAX_CACHE_SIZE + 1;
 	void *extra_elem;
 
-	/* page_alloc fallback is only implemented for SLUB. */
-	KASAN_TEST_NEEDS_CONFIG_ON(test, CONFIG_SLUB);
-
 	extra_elem = mempool_prepare_kmalloc(test, &pool, size);
 
 	mempool_uaf_helper(test, &pool, false);
@@ -1227,9 +1211,6 @@ static void mempool_kmalloc_large_double_free(struct kunit *test)
 	size_t size = KMALLOC_MAX_CACHE_SIZE + 1;
 	char *extra_elem;
 
-	/* page_alloc fallback is only implemented for SLUB. */
-	KASAN_TEST_NEEDS_CONFIG_ON(test, CONFIG_SLUB);
-
 	extra_elem = mempool_prepare_kmalloc(test, &pool, size);
 
 	mempool_double_free_helper(test, &pool);
@@ -1283,9 +1264,6 @@ static void mempool_kmalloc_large_invalid_free(struct kunit *test)
 	mempool_t pool;
 	size_t size = KMALLOC_MAX_CACHE_SIZE + 1;
 	char *extra_elem;
-
-	/* page_alloc fallback is only implemented for SLUB. */
-	KASAN_TEST_NEEDS_CONFIG_ON(test, CONFIG_SLUB);
 
 	extra_elem = mempool_prepare_kmalloc(test, &pool, size);
 
@@ -1552,6 +1530,9 @@ static void vmalloc_helpers_tags(struct kunit *test)
 
 	KASAN_TEST_NEEDS_CONFIG_ON(test, CONFIG_KASAN_VMALLOC);
 
+	if (!kasan_vmalloc_enabled())
+		kunit_skip(test, "Test requires kasan.vmalloc=on");
+
 	ptr = vmalloc(PAGE_SIZE);
 	KUNIT_ASSERT_NOT_ERR_OR_NULL(test, ptr);
 
@@ -1585,6 +1566,9 @@ static void vmalloc_oob(struct kunit *test)
 	size_t size = PAGE_SIZE / 2 - KASAN_GRANULE_SIZE - 5;
 
 	KASAN_TEST_NEEDS_CONFIG_ON(test, CONFIG_KASAN_VMALLOC);
+
+	if (!kasan_vmalloc_enabled())
+		kunit_skip(test, "Test requires kasan.vmalloc=on");
 
 	v_ptr = vmalloc(size);
 	KUNIT_ASSERT_NOT_ERR_OR_NULL(test, v_ptr);
@@ -1638,6 +1622,9 @@ static void vmap_tags(struct kunit *test)
 	KASAN_TEST_NEEDS_CONFIG_ON(test, CONFIG_KASAN_SW_TAGS);
 
 	KASAN_TEST_NEEDS_CONFIG_ON(test, CONFIG_KASAN_VMALLOC);
+
+	if (!kasan_vmalloc_enabled())
+		kunit_skip(test, "Test requires kasan.vmalloc=on");
 
 	p_page = alloc_pages(GFP_KERNEL, 1);
 	KUNIT_ASSERT_NOT_ERR_OR_NULL(test, p_page);
@@ -1757,7 +1744,7 @@ static void match_all_not_assigned(struct kunit *test)
 		free_pages((unsigned long)ptr, order);
 	}
 
-	if (!IS_ENABLED(CONFIG_KASAN_VMALLOC))
+	if (!kasan_vmalloc_enabled())
 		return;
 
 	for (i = 0; i < 256; i++) {
@@ -1810,6 +1797,14 @@ static void match_all_mem_tag(struct kunit *test)
 
 	/* For each possible tag value not matching the pointer tag. */
 	for (tag = KASAN_TAG_MIN; tag <= KASAN_TAG_KERNEL; tag++) {
+		/*
+		 * For Software Tag-Based KASAN, skip the majority of tag
+		 * values to avoid the test printing too many reports.
+		 */
+		if (IS_ENABLED(CONFIG_KASAN_SW_TAGS) &&
+		    tag >= KASAN_TAG_MIN + 8 && tag <= KASAN_TAG_KERNEL - 8)
+			continue;
+
 		if (tag == get_tag(ptr))
 			continue;
 

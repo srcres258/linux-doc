@@ -1704,7 +1704,10 @@ PAGE_SIZE multiple when read back.
 
 	When this is set to 0, all swapping attempts to swapping devices
 	are disabled. This included both zswap writebacks, and swapping due
-	to zswap store failure.
+	to zswap store failures. If the zswap store failures are recurring
+	(for e.g if the pages are incompressible), users can observe
+	reclaim inefficiency after disabling writeback (because the same
+	pages might be rejected again and again).
 
 	Note that this is subtly different from setting memory.swap.max to
 	0, as it still allows for pages to be written to the zswap pool.

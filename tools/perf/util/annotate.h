@@ -23,6 +23,7 @@ struct option;
 struct perf_sample;
 struct evsel;
 struct symbol;
+struct annotated_data_type;
 
 struct ins {
 	const char     *name;
@@ -60,6 +61,8 @@ struct ins_operands {
 };
 
 struct arch;
+
+bool arch__is(struct arch *arch, const char *name);
 
 struct ins_ops {
 	void (*free)(struct ins_operands *ops);
@@ -436,5 +439,52 @@ int annotate_parse_percent_type(const struct option *opt, const char *_str,
 				int unset);
 
 int annotate_check_args(void);
+
+/**
+ * struct annotated_op_loc - Location info of instruction operand
+ * @reg: Register in the operand
+ * @offset: Memory access offset in the operand
+ * @mem_ref: Whether the operand accesses memory
+ */
+struct annotated_op_loc {
+	int reg;
+	int offset;
+	bool mem_ref;
+};
+
+enum annotated_insn_ops {
+	INSN_OP_SOURCE = 0,
+	INSN_OP_TARGET = 1,
+
+	INSN_OP_MAX,
+};
+
+/**
+ * struct annotated_insn_loc - Location info of instruction
+ * @ops: Array of location info for source and target operands
+ */
+struct annotated_insn_loc {
+	struct annotated_op_loc ops[INSN_OP_MAX];
+};
+
+#define for_each_insn_op_loc(insn_loc, i, op_loc)			\
+	for (i = INSN_OP_SOURCE, op_loc = &(insn_loc)->ops[i];		\
+	     i < INSN_OP_MAX;						\
+	     i++, op_loc++)
+
+/* Get detailed location info in the instruction */
+int annotate_get_insn_location(struct arch *arch, struct disasm_line *dl,
+			       struct annotated_insn_loc *loc);
+
+/* Returns a data type from the sample instruction (if any) */
+struct annotated_data_type *hist_entry__get_data_type(struct hist_entry *he);
+
+struct annotated_item_stat {
+	struct list_head list;
+	char *name;
+	int good;
+	int bad;
+};
+extern struct list_head ann_insn_stat;
 
 #endif	/* __PERF_ANNOTATE_H */

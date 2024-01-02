@@ -48,10 +48,6 @@ enum {
 	NFSD_MaxBlkSize,
 	NFSD_MaxConnections,
 	NFSD_Filecache,
-	/*
-	 * The below MUST come last.  Otherwise we leave a hole in nfsd_files[]
-	 * with !CONFIG_NFSD_V4 and simple_fill_super() goes oops
-	 */
 #ifdef CONFIG_NFSD_V4
 	NFSD_Leasetime,
 	NFSD_Gracetime,
@@ -183,7 +179,7 @@ static const struct file_operations pool_stats_operations = {
 	.open		= nfsd_pool_stats_open,
 	.read		= seq_read,
 	.llseek		= seq_lseek,
-	.release	= nfsd_pool_stats_release,
+	.release	= seq_release,
 };
 
 DEFINE_SHOW_ATTRIBUTE(nfsd_reply_cache_stats);
@@ -709,13 +705,10 @@ static ssize_t __write_ports_addfd(char *buf, struct net *net, const struct cred
 
 	err = svc_addsock(nn->nfsd_serv, net, fd, buf, SIMPLE_TRANSACTION_LIMIT, cred);
 
-	if (err < 0 && !nn->nfsd_serv->sv_nrthreads && !nn->keep_active)
-		nfsd_last_thread(net);
-	else if (err >= 0 &&
-		 !nn->nfsd_serv->sv_nrthreads && !xchg(&nn->keep_active, 1))
-		svc_get(nn->nfsd_serv);
+	if (!nn->nfsd_serv->sv_nrthreads &&
+	    list_empty(&nn->nfsd_serv->sv_permsocks))
+		nfsd_destroy_serv(net);
 
-	nfsd_put(net);
 	return err;
 }
 
@@ -751,10 +744,6 @@ static ssize_t __write_ports_addxprt(char *buf, struct net *net, const struct cr
 	if (err < 0 && err != -EAFNOSUPPORT)
 		goto out_close;
 
-	if (!nn->nfsd_serv->sv_nrthreads && !xchg(&nn->keep_active, 1))
-		svc_get(nn->nfsd_serv);
-
-	nfsd_put(net);
 	return 0;
 out_close:
 	xprt = svc_find_xprt(nn->nfsd_serv, transport, net, PF_INET, port);
@@ -763,10 +752,10 @@ out_close:
 		svc_xprt_put(xprt);
 	}
 out_err:
-	if (!nn->nfsd_serv->sv_nrthreads && !nn->keep_active)
-		nfsd_last_thread(net);
+	if (!nn->nfsd_serv->sv_nrthreads &&
+	    list_empty(&nn->nfsd_serv->sv_permsocks))
+		nfsd_destroy_serv(net);
 
-	nfsd_put(net);
 	return err;
 }
 

@@ -934,7 +934,6 @@ int bch2_btree_node_read_done(struct bch_fs *c, struct bch_dev *ca,
 	struct sort_iter *iter;
 	struct btree_node *sorted;
 	struct bkey_packed *k;
-	struct bch_extent_ptr *ptr;
 	struct bset *i;
 	bool used_mempool, blacklisted;
 	bool updated_range = b->key.k.type == KEY_TYPE_btree_ptr_v2 &&
@@ -1798,8 +1797,10 @@ static void btree_node_write_work(struct work_struct *work)
 	bch2_bkey_drop_ptrs(bkey_i_to_s(&wbio->key), ptr,
 		bch2_dev_list_has_dev(wbio->wbio.failed, ptr->dev));
 
-	if (!bch2_bkey_nr_ptrs(bkey_i_to_s_c(&wbio->key)))
+	if (!bch2_bkey_nr_ptrs(bkey_i_to_s_c(&wbio->key))) {
+		ret = -BCH_ERR_btree_write_all_failed;
 		goto err;
+	}
 
 	if (wbio->wbio.first_btree_write) {
 		if (wbio->wbio.failed.nr) {
@@ -1894,7 +1895,6 @@ static int validate_bset_for_write(struct bch_fs *c, struct btree *b,
 static void btree_write_submit(struct work_struct *work)
 {
 	struct btree_write_bio *wbio = container_of(work, struct btree_write_bio, work);
-	struct bch_extent_ptr *ptr;
 	BKEY_PADDED_ONSTACK(k, BKEY_BTREE_PTR_VAL_U64s_MAX) tmp;
 
 	bkey_copy(&tmp.k, &wbio->key);

@@ -50,6 +50,7 @@
 #include <rdma/ib_mad.h>
 #include <rdma/ib_cache.h>
 #include <rdma/uverbs_ioctl.h>
+#include <linux/hashtable.h>
 
 #include "bnxt_ulp.h"
 
@@ -567,6 +568,7 @@ bnxt_re_mmap_entry_insert(struct bnxt_re_ucontext *uctx, u64 mem_offset,
 	case BNXT_RE_MMAP_WC_DB:
 	case BNXT_RE_MMAP_DBR_BAR:
 	case BNXT_RE_MMAP_DBR_PAGE:
+	case BNXT_RE_MMAP_TOGGLE_PAGE:
 		ret = rdma_user_mmap_entry_insert(&uctx->ib_uctx,
 						  &entry->rdma_entry, PAGE_SIZE);
 		break;
@@ -2909,14 +2911,20 @@ int bnxt_re_post_recv(struct ib_qp *ib_qp, const struct ib_recv_wr *wr,
 /* Completion Queues */
 int bnxt_re_destroy_cq(struct ib_cq *ib_cq, struct ib_udata *udata)
 {
-	struct bnxt_re_cq *cq;
+	struct bnxt_qplib_chip_ctx *cctx;
 	struct bnxt_qplib_nq *nq;
 	struct bnxt_re_dev *rdev;
+	struct bnxt_re_cq *cq;
 
 	cq = container_of(ib_cq, struct bnxt_re_cq, ib_cq);
 	rdev = cq->rdev;
 	nq = cq->qplib_cq.nq;
+	cctx = rdev->chip_ctx;
 
+	if (cctx->modes.toggle_bits & BNXT_QPLIB_CQ_TOGGLE_BIT) {
+		free_page((unsigned long)cq->uctx_cq_page);
+		hash_del(&cq->hash_entry);
+	}
 	bnxt_qplib_destroy_cq(&rdev->qplib_res, &cq->qplib_cq);
 	ib_umem_release(cq->umem);
 
@@ -2934,10 +2942,11 @@ int bnxt_re_create_cq(struct ib_cq *ibcq, const struct ib_cq_init_attr *attr,
 	struct bnxt_re_ucontext *uctx =
 		rdma_udata_to_drv_context(udata, struct bnxt_re_ucontext, ib_uctx);
 	struct bnxt_qplib_dev_attr *dev_attr = &rdev->dev_attr;
-	int rc, entries;
-	int cqe = attr->cqe;
+	struct bnxt_qplib_chip_ctx *cctx;
 	struct bnxt_qplib_nq *nq = NULL;
+	int rc = -ENOMEM, entries;
 	unsigned int nq_alloc_cnt;
+	int cqe = attr->cqe;
 	u32 active_cqs;
 
 	if (attr->flags)
@@ -2950,6 +2959,7 @@ int bnxt_re_create_cq(struct ib_cq *ibcq, const struct ib_cq_init_attr *attr,
 	}
 
 	cq->rdev = rdev;
+	cctx = rdev->chip_ctx;
 	cq->qplib_cq.cq_handle = (u64)(unsigned long)(&cq->qplib_cq);
 
 	entries = bnxt_re_init_depth(cqe + 1, uctx);
@@ -3011,22 +3021,32 @@ int bnxt_re_create_cq(struct ib_cq *ibcq, const struct ib_cq_init_attr *attr,
 	spin_lock_init(&cq->cq_lock);
 
 	if (udata) {
-		struct bnxt_re_cq_resp resp;
+		struct bnxt_re_cq_resp resp = {};
 
+		if (cctx->modes.toggle_bits & BNXT_QPLIB_CQ_TOGGLE_BIT) {
+			hash_add(rdev->cq_hash, &cq->hash_entry, cq->qplib_cq.id);
+			/* Allocate a page */
+			cq->uctx_cq_page = (void *)get_zeroed_page(GFP_KERNEL);
+			if (!cq->uctx_cq_page)
+				goto c2fail;
+			resp.comp_mask |= BNXT_RE_CQ_TOGGLE_PAGE_SUPPORT;
+		}
 		resp.cqid = cq->qplib_cq.id;
 		resp.tail = cq->qplib_cq.hwq.cons;
 		resp.phase = cq->qplib_cq.period;
 		resp.rsvd = 0;
-		rc = ib_copy_to_udata(udata, &resp, sizeof(resp));
+		rc = ib_copy_to_udata(udata, &resp, min(sizeof(resp), udata->outlen));
 		if (rc) {
 			ibdev_err(&rdev->ibdev, "Failed to copy CQ udata");
 			bnxt_qplib_destroy_cq(&rdev->qplib_res, &cq->qplib_cq);
-			goto c2fail;
+			goto free_mem;
 		}
 	}
 
 	return 0;
 
+free_mem:
+	free_page((unsigned long)cq->uctx_cq_page);
 c2fail:
 	ib_umem_release(cq->umem);
 fail:
@@ -4213,6 +4233,19 @@ void bnxt_re_dealloc_ucontext(struct ib_ucontext *ib_uctx)
 	}
 }
 
+static struct bnxt_re_cq *bnxt_re_search_for_cq(struct bnxt_re_dev *rdev, u32 cq_id)
+{
+	struct bnxt_re_cq *cq = NULL, *tmp_cq;
+
+	hash_for_each_possible(rdev->cq_hash, tmp_cq, hash_entry, cq_id) {
+		if (tmp_cq->qplib_cq.id == cq_id) {
+			cq = tmp_cq;
+			break;
+		}
+	}
+	return cq;
+}
+
 /* Helper function to mmap the virtual memory from user app */
 int bnxt_re_mmap(struct ib_ucontext *ib_uctx, struct vm_area_struct *vma)
 {
@@ -4254,6 +4287,7 @@ int bnxt_re_mmap(struct ib_ucontext *ib_uctx, struct vm_area_struct *vma)
 					rdma_entry);
 		break;
 	case BNXT_RE_MMAP_DBR_PAGE:
+	case BNXT_RE_MMAP_TOGGLE_PAGE:
 		/* Driver doesn't expect write access for user space */
 		if (vma->vm_flags & VM_WRITE)
 			return -EFAULT;
@@ -4430,8 +4464,126 @@ DECLARE_UVERBS_NAMED_METHOD(BNXT_RE_METHOD_NOTIFY_DRV);
 DECLARE_UVERBS_GLOBAL_METHODS(BNXT_RE_OBJECT_NOTIFY_DRV,
 			      &UVERBS_METHOD(BNXT_RE_METHOD_NOTIFY_DRV));
 
+/* Toggle MEM */
+static int UVERBS_HANDLER(BNXT_RE_METHOD_GET_TOGGLE_MEM)(struct uverbs_attr_bundle *attrs)
+{
+	struct ib_uobject *uobj = uverbs_attr_get_uobject(attrs, BNXT_RE_TOGGLE_MEM_HANDLE);
+	enum bnxt_re_mmap_flag mmap_flag = BNXT_RE_MMAP_TOGGLE_PAGE;
+	enum bnxt_re_get_toggle_mem_type res_type;
+	struct bnxt_re_user_mmap_entry *entry;
+	struct bnxt_re_ucontext *uctx;
+	struct ib_ucontext *ib_uctx;
+	struct bnxt_re_dev *rdev;
+	struct bnxt_re_cq *cq;
+	u64 mem_offset;
+	u64 addr = 0;
+	u32 length;
+	u32 offset;
+	u32 cq_id;
+	int err;
+
+	ib_uctx = ib_uverbs_get_ucontext(attrs);
+	if (IS_ERR(ib_uctx))
+		return PTR_ERR(ib_uctx);
+
+	err = uverbs_get_const(&res_type, attrs, BNXT_RE_TOGGLE_MEM_TYPE);
+	if (err)
+		return err;
+
+	uctx = container_of(ib_uctx, struct bnxt_re_ucontext, ib_uctx);
+	rdev = uctx->rdev;
+
+	switch (res_type) {
+	case BNXT_RE_CQ_TOGGLE_MEM:
+		err = uverbs_copy_from(&cq_id, attrs, BNXT_RE_TOGGLE_MEM_RES_ID);
+		if (err)
+			return err;
+
+		cq = bnxt_re_search_for_cq(rdev, cq_id);
+		if (!cq)
+			return -EINVAL;
+
+		length = PAGE_SIZE;
+		addr = (u64)cq->uctx_cq_page;
+		mmap_flag = BNXT_RE_MMAP_TOGGLE_PAGE;
+		offset = 0;
+		break;
+	case BNXT_RE_SRQ_TOGGLE_MEM:
+		break;
+
+	default:
+		return -EOPNOTSUPP;
+	}
+
+	entry = bnxt_re_mmap_entry_insert(uctx, addr, mmap_flag, &mem_offset);
+	if (!entry)
+		return -ENOMEM;
+
+	uobj->object = entry;
+	uverbs_finalize_uobj_create(attrs, BNXT_RE_TOGGLE_MEM_HANDLE);
+	err = uverbs_copy_to(attrs, BNXT_RE_TOGGLE_MEM_MMAP_PAGE,
+			     &mem_offset, sizeof(mem_offset));
+	if (err)
+		return err;
+
+	err = uverbs_copy_to(attrs, BNXT_RE_TOGGLE_MEM_MMAP_LENGTH,
+			     &length, sizeof(length));
+	if (err)
+		return err;
+
+	err = uverbs_copy_to(attrs, BNXT_RE_TOGGLE_MEM_MMAP_OFFSET,
+			     &offset, sizeof(length));
+	if (err)
+		return err;
+
+	return 0;
+}
+
+static int get_toggle_mem_obj_cleanup(struct ib_uobject *uobject,
+				      enum rdma_remove_reason why,
+				      struct uverbs_attr_bundle *attrs)
+{
+	struct  bnxt_re_user_mmap_entry *entry = uobject->object;
+
+	rdma_user_mmap_entry_remove(&entry->rdma_entry);
+	return 0;
+}
+
+DECLARE_UVERBS_NAMED_METHOD(BNXT_RE_METHOD_GET_TOGGLE_MEM,
+			    UVERBS_ATTR_IDR(BNXT_RE_TOGGLE_MEM_HANDLE,
+					    BNXT_RE_OBJECT_GET_TOGGLE_MEM,
+					    UVERBS_ACCESS_NEW,
+					    UA_MANDATORY),
+			    UVERBS_ATTR_CONST_IN(BNXT_RE_TOGGLE_MEM_TYPE,
+						 enum bnxt_re_get_toggle_mem_type,
+						 UA_MANDATORY),
+			    UVERBS_ATTR_PTR_IN(BNXT_RE_TOGGLE_MEM_RES_ID,
+					       UVERBS_ATTR_TYPE(u32),
+					       UA_MANDATORY),
+			    UVERBS_ATTR_PTR_OUT(BNXT_RE_TOGGLE_MEM_MMAP_PAGE,
+						UVERBS_ATTR_TYPE(u64),
+						UA_MANDATORY),
+			    UVERBS_ATTR_PTR_OUT(BNXT_RE_TOGGLE_MEM_MMAP_OFFSET,
+						UVERBS_ATTR_TYPE(u32),
+						UA_MANDATORY),
+			    UVERBS_ATTR_PTR_OUT(BNXT_RE_TOGGLE_MEM_MMAP_LENGTH,
+						UVERBS_ATTR_TYPE(u32),
+						UA_MANDATORY));
+
+DECLARE_UVERBS_NAMED_METHOD_DESTROY(BNXT_RE_METHOD_RELEASE_TOGGLE_MEM,
+				    UVERBS_ATTR_IDR(BNXT_RE_RELEASE_TOGGLE_MEM_HANDLE,
+						    BNXT_RE_OBJECT_GET_TOGGLE_MEM,
+						    UVERBS_ACCESS_DESTROY,
+						    UA_MANDATORY));
+
+DECLARE_UVERBS_NAMED_OBJECT(BNXT_RE_OBJECT_GET_TOGGLE_MEM,
+			    UVERBS_TYPE_ALLOC_IDR(get_toggle_mem_obj_cleanup),
+			    &UVERBS_METHOD(BNXT_RE_METHOD_GET_TOGGLE_MEM),
+			    &UVERBS_METHOD(BNXT_RE_METHOD_RELEASE_TOGGLE_MEM));
+
 const struct uapi_definition bnxt_re_uapi_defs[] = {
 	UAPI_DEF_CHAIN_OBJ_TREE_NAMED(BNXT_RE_OBJECT_ALLOC_PAGE),
 	UAPI_DEF_CHAIN_OBJ_TREE_NAMED(BNXT_RE_OBJECT_NOTIFY_DRV),
+	UAPI_DEF_CHAIN_OBJ_TREE_NAMED(BNXT_RE_OBJECT_GET_TOGGLE_MEM),
 	{}
 };

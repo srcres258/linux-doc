@@ -409,8 +409,10 @@ static int journal_entry_btree_root_validate(struct bch_fs *c,
 		return 0;
 	}
 
-	return journal_validate_key(c, jset, entry, 1, entry->btree_id, k,
-				    version, big_endian, flags);
+	ret = journal_validate_key(c, jset, entry, 1, entry->btree_id, k,
+				   version, big_endian, flags);
+	if (ret == FSCK_DELETED_KEY)
+		ret = 0;
 fsck_err:
 	return ret;
 }
@@ -1676,7 +1678,6 @@ static CLOSURE_CALLBACK(do_journal_write)
 	struct bch_fs *c = container_of(j, struct bch_fs, journal);
 	struct bch_dev *ca;
 	struct journal_buf *w = journal_last_unwritten_buf(j);
-	struct bch_extent_ptr *ptr;
 	struct bio *bio;
 	unsigned sectors = vstruct_sectors(w->data, c->block_bits);
 

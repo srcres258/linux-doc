@@ -44,7 +44,7 @@ static unsigned int rtllib_MFIE_rate_len(struct rtllib_device *ieee)
  * Then it updates the pointer so that
  * it points after the new MFIE tag added.
  */
-static void rtllib_MFIE_Brate(struct rtllib_device *ieee, u8 **tag_p)
+static void rtllib_mfie_brate(struct rtllib_device *ieee, u8 **tag_p)
 {
 	u8 *tag = *tag_p;
 
@@ -61,7 +61,7 @@ static void rtllib_MFIE_Brate(struct rtllib_device *ieee, u8 **tag_p)
 	*tag_p = tag;
 }
 
-static void rtllib_MFIE_Grate(struct rtllib_device *ieee, u8 **tag_p)
+static void rtllib_mfie_grate(struct rtllib_device *ieee, u8 **tag_p)
 {
 	u8 *tag = *tag_p;
 
@@ -82,7 +82,7 @@ static void rtllib_MFIE_Grate(struct rtllib_device *ieee, u8 **tag_p)
 	*tag_p = tag;
 }
 
-static void rtllib_WMM_Info(struct rtllib_device *ieee, u8 **tag_p)
+static void rtllib_wmm_info(struct rtllib_device *ieee, u8 **tag_p)
 {
 	u8 *tag = *tag_p;
 
@@ -98,7 +98,7 @@ static void rtllib_WMM_Info(struct rtllib_device *ieee, u8 **tag_p)
 	*tag_p = tag;
 }
 
-static void rtllib_TURBO_Info(struct rtllib_device *ieee, u8 **tag_p)
+static void rtllib_turbo_info(struct rtllib_device *ieee, u8 **tag_p)
 {
 	u8 *tag = *tag_p;
 
@@ -134,32 +134,33 @@ static void enqueue_mgmt(struct rtllib_device *ieee, struct sk_buff *skb)
 
 static void init_mgmt_queue(struct rtllib_device *ieee)
 {
-	ieee->mgmt_queue_tail = ieee->mgmt_queue_head = 0;
+	ieee->mgmt_queue_tail = 0;
+	ieee->mgmt_queue_head = 0;
 }
 
 u8 MgntQuery_TxRateExcludeCCKRates(struct rtllib_device *ieee)
 {
 	u16	i;
-	u8	QueryRate = 0;
-	u8	BasicRate;
+	u8	query_rate = 0;
+	u8	basic_rate;
 
 	for (i = 0; i < ieee->current_network.rates_len; i++) {
-		BasicRate = ieee->current_network.rates[i] & 0x7F;
-		if (!rtllib_is_cck_rate(BasicRate)) {
-			if (QueryRate == 0) {
-				QueryRate = BasicRate;
+		basic_rate = ieee->current_network.rates[i] & 0x7F;
+		if (!rtllib_is_cck_rate(basic_rate)) {
+			if (query_rate == 0) {
+				query_rate = basic_rate;
 			} else {
-				if (BasicRate < QueryRate)
-					QueryRate = BasicRate;
+				if (basic_rate < query_rate)
+					query_rate = basic_rate;
 			}
 		}
 	}
 
-	if (QueryRate == 0) {
-		QueryRate = 12;
-		netdev_info(ieee->dev, "No BasicRate found!!\n");
+	if (query_rate == 0) {
+		query_rate = 12;
+		netdev_info(ieee->dev, "No basic_rate found!!\n");
 	}
-	return QueryRate;
+	return query_rate;
 }
 
 static u8 MgntQuery_MgntFrameTxRate(struct rtllib_device *ieee)
@@ -172,9 +173,8 @@ static u8 MgntQuery_MgntFrameTxRate(struct rtllib_device *ieee)
 	else
 		rate = ieee->basic_rate & 0x7f;
 
-	if (rate == 0) {
+	if (rate == 0)
 		rate = 0x02;
-	}
 
 	return rate;
 }
@@ -236,7 +236,7 @@ inline void softmac_mgmt_xmit(struct sk_buff *skb, struct rtllib_device *ieee)
 		/* check whether the managed packet queued greater than 5 */
 		if (!ieee->check_nic_enough_desc(ieee->dev,
 						 tcb_desc->queue_index) ||
-		    skb_queue_len(&ieee->skb_waitQ[tcb_desc->queue_index]) ||
+		    skb_queue_len(&ieee->skb_waitq[tcb_desc->queue_index]) ||
 		    ieee->queue_stop) {
 			/* insert the skb packet to the management queue
 			 *
@@ -246,7 +246,7 @@ inline void softmac_mgmt_xmit(struct sk_buff *skb, struct rtllib_device *ieee)
 			netdev_info(ieee->dev,
 			       "%s():insert to waitqueue, queue_index:%d!\n",
 			       __func__, tcb_desc->queue_index);
-			skb_queue_tail(&ieee->skb_waitQ[tcb_desc->queue_index],
+			skb_queue_tail(&ieee->skb_waitq[tcb_desc->queue_index],
 				       skb);
 		} else {
 			ieee->softmac_hard_start_xmit(skb, ieee->dev);
@@ -341,34 +341,34 @@ static inline struct sk_buff *rtllib_probe_req(struct rtllib_device *ieee)
 	memcpy(tag, ieee->current_network.ssid, len);
 	tag += len;
 
-	rtllib_MFIE_Brate(ieee, &tag);
-	rtllib_MFIE_Grate(ieee, &tag);
+	rtllib_mfie_brate(ieee, &tag);
+	rtllib_mfie_grate(ieee, &tag);
 
 	return skb;
 }
 
 /* Enables network monitor mode, all rx packets will be received. */
 void rtllib_EnableNetMonitorMode(struct net_device *dev,
-		bool bInitState)
+		bool init_state)
 {
 	struct rtllib_device *ieee = netdev_priv_rsl(dev);
 
 	netdev_info(dev, "========>Enter Monitor Mode\n");
 
-	ieee->AllowAllDestAddrHandler(dev, true, !bInitState);
+	ieee->AllowAllDestAddrHandler(dev, true, !init_state);
 }
 
 /* Disables network monitor mode. Only packets destinated to
  * us will be received.
  */
-void rtllib_DisableNetMonitorMode(struct net_device *dev,
-		bool bInitState)
+void rtllib_disable_net_monitor_mode(struct net_device *dev,
+		bool init_state)
 {
 	struct rtllib_device *ieee = netdev_priv_rsl(dev);
 
 	netdev_info(dev, "========>Exit Monitor Mode\n");
 
-	ieee->AllowAllDestAddrHandler(dev, false, !bInitState);
+	ieee->AllowAllDestAddrHandler(dev, false, !init_state);
 }
 
 static void rtllib_send_probe(struct rtllib_device *ieee)
@@ -728,7 +728,7 @@ rtllib_association_req(struct rtllib_network *beacon,
 	}
 
 	if (ieee->ht_info->current_ht_support && ieee->ht_info->enable_ht) {
-		ht_cap_buf = (u8 *)&(ieee->ht_info->SelfHTCap);
+		ht_cap_buf = (u8 *)&ieee->ht_info->SelfHTCap;
 		ht_cap_len = sizeof(ieee->ht_info->SelfHTCap);
 		ht_construct_capability_element(ieee, ht_cap_buf, &ht_cap_len,
 					     encrypt, true);
@@ -866,7 +866,7 @@ rtllib_association_req(struct rtllib_network *beacon,
 		tag += osCcxVerNum.Length;
 	}
 	if (ieee->ht_info->current_ht_support && ieee->ht_info->enable_ht) {
-		if (ieee->ht_info->ePeerHTSpecVer != HT_SPEC_VER_EWC) {
+		if (ieee->ht_info->peer_ht_spec_ver != HT_SPEC_VER_EWC) {
 			tag = skb_put(skb, ht_cap_len);
 			*tag++ = MFIE_TYPE_HT_CAP;
 			*tag++ = ht_cap_len - 2;
@@ -888,7 +888,7 @@ rtllib_association_req(struct rtllib_network *beacon,
 	}
 	if (wmm_info_len) {
 		tag = skb_put(skb, wmm_info_len);
-		rtllib_WMM_Info(ieee, &tag);
+		rtllib_wmm_info(ieee, &tag);
 	}
 
 	if (wps_ie_len && ieee->wps_ie)
@@ -896,11 +896,11 @@ rtllib_association_req(struct rtllib_network *beacon,
 
 	if (turbo_info_len) {
 		tag = skb_put(skb, turbo_info_len);
-		rtllib_TURBO_Info(ieee, &tag);
+		rtllib_turbo_info(ieee, &tag);
 	}
 
 	if (ieee->ht_info->current_ht_support && ieee->ht_info->enable_ht) {
-		if (ieee->ht_info->ePeerHTSpecVer == HT_SPEC_VER_EWC) {
+		if (ieee->ht_info->peer_ht_spec_ver == HT_SPEC_VER_EWC) {
 			tag = skb_put(skb, ht_cap_len);
 			*tag++ = MFIE_TYPE_GENERIC;
 			*tag++ = ht_cap_len - 2;
@@ -918,7 +918,7 @@ rtllib_association_req(struct rtllib_network *beacon,
 
 	kfree(ieee->assocreq_ies);
 	ieee->assocreq_ies = NULL;
-	ies = &(hdr->info_element[0].id);
+	ies = &hdr->info_element[0].id;
 	ieee->assocreq_ies_len = (skb->data + skb->len) - ies;
 	ieee->assocreq_ies = kmemdup(ies, ieee->assocreq_ies_len, GFP_ATOMIC);
 	if (!ieee->assocreq_ies)
@@ -1219,14 +1219,13 @@ inline void rtllib_softmac_new_net(struct rtllib_device *ieee,
 				ieee->AsocRetryCount = 0;
 				if ((ieee->current_network.qos_data.supported == 1) &&
 				    ieee->current_network.bssht.bd_support_ht)
-					HTResetSelfAndSavePeerSetting(ieee,
+					ht_reset_self_and_save_peer_setting(ieee,
 						 &(ieee->current_network));
 				else
 					ieee->ht_info->current_ht_support = false;
 
 				ieee->link_state = RTLLIB_ASSOCIATING;
-				schedule_delayed_work(
-					   &ieee->associate_procedure_wq, 0);
+				schedule_delayed_work(&ieee->associate_procedure_wq, 0);
 			} else {
 				if (rtllib_is_54g(&ieee->current_network)) {
 					ieee->rate = 108;
@@ -1620,7 +1619,7 @@ rtllib_rx_assoc_resp(struct rtllib_device *ieee, struct sk_buff *skb,
 
 			kfree(ieee->assocresp_ies);
 			ieee->assocresp_ies = NULL;
-			ies = &(assoc_resp->info_element[0].id);
+			ies = &assoc_resp->info_element[0].id;
 			ieee->assocresp_ies_len = (skb->data + skb->len) - ies;
 			ieee->assocresp_ies = kmemdup(ies,
 						      ieee->assocresp_ies_len,
@@ -1636,8 +1635,7 @@ rtllib_rx_assoc_resp(struct rtllib_device *ieee, struct sk_buff *skb,
 				    "Association response status code 0x%x\n",
 				    errcode);
 			if (ieee->AsocRetryCount < RT_ASOC_RETRY_LIMIT)
-				schedule_delayed_work(
-					 &ieee->associate_procedure_wq, 0);
+				schedule_delayed_work(&ieee->associate_procedure_wq, 0);
 			else
 				rtllib_associate_abort(ieee);
 		}
@@ -1825,7 +1823,7 @@ void rtllib_softmac_xmit(struct rtllib_txb *txb, struct rtllib_device *ieee)
 	 * the wait queue
 	 */
 	for (i = 0; i < txb->nr_frags; i++) {
-		queue_len = skb_queue_len(&ieee->skb_waitQ[queue_index]);
+		queue_len = skb_queue_len(&ieee->skb_waitq[queue_index]);
 		if ((queue_len  != 0) ||
 		    (!ieee->check_nic_enough_desc(ieee->dev, queue_index)) ||
 		    (ieee->queue_stop)) {
@@ -1834,13 +1832,12 @@ void rtllib_softmac_xmit(struct rtllib_txb *txb, struct rtllib_device *ieee)
 			 * to check it any more.
 			 */
 			if (queue_len < 200)
-				skb_queue_tail(&ieee->skb_waitQ[queue_index],
+				skb_queue_tail(&ieee->skb_waitq[queue_index],
 					       txb->fragments[i]);
 			else
 				kfree_skb(txb->fragments[i]);
 		} else {
-			ieee->softmac_data_hard_start_xmit(
-					txb->fragments[i],
+			ieee->softmac_data_hard_start_xmit(txb->fragments[i],
 					ieee->dev, ieee->rate);
 		}
 	}
@@ -1912,6 +1909,7 @@ static void rtllib_link_change_wq(void *data)
 				     struct rtllib_device, link_change_wq);
 	ieee->link_change(ieee->dev);
 }
+
 /* called only in userspace context */
 void rtllib_disassociate(struct rtllib_device *ieee)
 {
@@ -2232,7 +2230,7 @@ u8 rtllib_ap_sec_type(struct rtllib_device *ieee)
 		return SEC_ALG_WEP;
 	} else if ((wpa_ie_len != 0)) {
 		if (((ieee->wpa_ie[0] == 0xdd) &&
-		    (!memcmp(&(ieee->wpa_ie[14]), ccmp_ie, 4))) ||
+		    (!memcmp(&ieee->wpa_ie[14], ccmp_ie, 4))) ||
 		    ((ieee->wpa_ie[0] == 0x30) &&
 		    (!memcmp(&ieee->wpa_ie[10], ccmp_rsn_ie, 4))))
 			return SEC_ALG_CCMP;
@@ -2267,11 +2265,7 @@ static void rtllib_MlmeDisassociateRequest(struct rtllib_device *rtllib,
 	}
 }
 
-static void
-rtllib_MgntDisconnectAP(
-	struct rtllib_device *rtllib,
-	u8 asRsn
-)
+static void rtllib_MgntDisconnectAP(struct rtllib_device *rtllib, u8 asRsn)
 {
 	bool bFilterOutNonAssociatedBSSID = false;
 

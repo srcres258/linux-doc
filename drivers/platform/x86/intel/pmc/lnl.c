@@ -500,13 +500,13 @@ const struct pmc_reg_map lnl_socm_reg_map = {
  * Set power state of select devices that do not have drivers to D3
  * so that they do not block Package C entry.
  */
-void lnl_d3_fixup(void)
+static void lnl_d3_fixup(void)
 {
 	pmc_core_set_device_d3(LNL_IPU_PCI_DEV);
 	pmc_core_set_device_d3(LNL_NPU_PCI_DEV);
 }
 
-int lnl_resume(struct pmc_dev *pmcdev)
+static int lnl_resume(struct pmc_dev *pmcdev)
 {
 	lnl_d3_fixup();
 	return pmc_core_resume_common(pmcdev);
@@ -535,12 +535,6 @@ int lnl_core_init(struct pmc_dev *pmcdev)
 	}
 
 	pmc_core_get_low_power_modes(pmcdev);
-
-	/* Due to a hardware limitation, the GBE LTR blocks PC10
-	 * when a cable is attached. Tell the PMC to ignore it.
-	 */
-	dev_dbg(&pmcdev->pdev->dev, "ignoring GBE LTR\n");
-	pmc_core_send_ltr_ignore(pmcdev, 3);
 
 	if (ssram_init) {
 		ret = pmc_core_ssram_get_lpm_reqs(pmcdev);

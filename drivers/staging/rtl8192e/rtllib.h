@@ -1382,7 +1382,7 @@ struct rtllib_device {
 	int mgmt_queue_head;
 	int mgmt_queue_tail;
 	u8 AsocRetryCount;
-	struct sk_buff_head skb_waitQ[MAX_QUEUE_SIZE];
+	struct sk_buff_head skb_waitq[MAX_QUEUE_SIZE];
 
 	bool	bdynamic_txpower_enable;
 
@@ -1677,8 +1677,8 @@ void rtllib_sta_ps_send_pspoll_frame(struct rtllib_device *ieee);
 void rtllib_start_protocol(struct rtllib_device *ieee);
 void rtllib_stop_protocol(struct rtllib_device *ieee);
 
-void rtllib_EnableNetMonitorMode(struct net_device *dev, bool bInitState);
-void rtllib_DisableNetMonitorMode(struct net_device *dev, bool bInitState);
+void rtllib_EnableNetMonitorMode(struct net_device *dev, bool init_state);
+void rtllib_disable_net_monitor_mode(struct net_device *dev, bool init_state);
 
 void rtllib_softmac_stop_protocol(struct rtllib_device *ieee);
 void rtllib_softmac_start_protocol(struct rtllib_device *ieee);
@@ -1758,8 +1758,8 @@ void ht_construct_rt2rt_agg_element(struct rtllib_device *ieee,
 				u8 *posRT2RTAgg, u8 *len);
 void ht_on_assoc_rsp(struct rtllib_device *ieee);
 void ht_initialize_ht_info(struct rtllib_device *ieee);
-void HTInitializeBssDesc(struct bss_ht *pBssHT);
-void HTResetSelfAndSavePeerSetting(struct rtllib_device *ieee,
+void ht_initialize_bss_desc(struct bss_ht *pBssHT);
+void ht_reset_self_and_save_peer_setting(struct rtllib_device *ieee,
 				   struct rtllib_network *pNetwork);
 void HT_update_self_and_peer_setting(struct rtllib_device *ieee,
 				     struct rtllib_network *pNetwork);
@@ -1767,7 +1767,7 @@ u8 ht_get_highest_mcs_rate(struct rtllib_device *ieee, u8 *pMCSRateSet,
 		       u8 *pMCSFilter);
 extern u8 MCS_FILTER_ALL[];
 extern u16 MCS_DATA_RATE[2][2][77];
-u8 HTCCheck(struct rtllib_device *ieee, u8 *pFrame);
+u8 ht_c_check(struct rtllib_device *ieee, u8 *pFrame);
 void ht_reset_iot_setting(struct rt_hi_throughput *ht_info);
 bool is_ht_half_nmode_aps(struct rtllib_device *ieee);
 u16  tx_count_to_data_rate(struct rtllib_device *ieee, u8 nDataRate);

@@ -399,8 +399,11 @@ struct smb_version_operations {
 	int (*rename_pending_delete)(const char *, struct dentry *,
 				     const unsigned int);
 	/* send rename request */
-	int (*rename)(const unsigned int, struct cifs_tcon *, const char *,
-		      const char *, struct cifs_sb_info *, struct dentry *);
+	int (*rename)(const unsigned int xid,
+		      struct cifs_tcon *tcon,
+		      struct dentry *source_dentry,
+		      const char *from_name, const char *to_name,
+		      struct cifs_sb_info *cifs_sb);
 	/* send create hardlink request */
 	int (*create_hardlink)(const unsigned int xid,
 			       struct cifs_tcon *tcon,
@@ -1011,7 +1014,6 @@ release_iface(struct kref *ref)
 	struct cifs_server_iface *iface = container_of(ref,
 						       struct cifs_server_iface,
 						       refcount);
-	list_del_init(&iface->iface_head);
 	kfree(iface);
 }
 

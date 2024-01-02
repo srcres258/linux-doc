@@ -61,6 +61,7 @@ static inline bool is_zswap_enabled(void)
 {
 	return false;
 }
+
 #endif
 
 #endif /* _LINUX_ZSWAP_H */

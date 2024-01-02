@@ -25,12 +25,14 @@
 #include "units.h"
 #include "debug.h"
 #include "annotate.h"
+#include "annotate-data.h"
 #include "evsel.h"
 #include "evlist.h"
 #include "bpf-event.h"
 #include "bpf-utils.h"
 #include "block-range.h"
 #include "string2.h"
+#include "dwarf-regs.h"
 #include "util/event.h"
 #include "util/sharded_mutex.h"
 #include "arch/common.h"
@@ -100,6 +102,10 @@ static struct ins_ops mov_ops;
 static struct ins_ops nop_ops;
 static struct ins_ops lock_ops;
 static struct ins_ops ret_ops;
+
+/* Data type collection debug statistics */
+struct annotated_data_stat ann_data_stat;
+LIST_HEAD(ann_insn_stat);
 
 static int arch__grow_instructions(struct arch *arch)
 {
@@ -841,6 +847,11 @@ static struct arch *arch__find(const char *name)
 	}
 
 	return bsearch(name, architectures, nmemb, sizeof(struct arch), arch__key_cmp);
+}
+
+bool arch__is(struct arch *arch, const char *name)
+{
+	return !strcmp(arch->name, name);
 }
 
 static struct annotated_source *annotated_source__new(void)
@@ -2378,6 +2389,33 @@ void symbol__calc_percent(struct symbol *sym, struct evsel *evsel)
 	annotation__calc_percent(notes, evsel, symbol__size(sym));
 }
 
+static int evsel__get_arch(struct evsel *evsel, struct arch **parch)
+{
+	struct perf_env *env = evsel__env(evsel);
+	const char *arch_name = perf_env__arch(env);
+	struct arch *arch;
+	int err;
+
+	if (!arch_name)
+		return errno;
+
+	*parch = arch = arch__find(arch_name);
+	if (arch == NULL) {
+		pr_err("%s: unsupported arch %s\n", __func__, arch_name);
+		return ENOTSUP;
+	}
+
+	if (arch->init) {
+		err = arch->init(arch, env ? env->cpuid : NULL);
+		if (err) {
+			pr_err("%s: failed to initialize %s arch priv area\n",
+			       __func__, arch->name);
+			return err;
+		}
+	}
+	return 0;
+}
+
 int symbol__annotate(struct map_symbol *ms, struct evsel *evsel,
 		     struct arch **parch)
 {
@@ -2387,31 +2425,17 @@ int symbol__annotate(struct map_symbol *ms, struct evsel *evsel,
 		.evsel		= evsel,
 		.options	= &annotate_opts,
 	};
-	struct perf_env *env = evsel__env(evsel);
-	const char *arch_name = perf_env__arch(env);
-	struct arch *arch;
+	struct arch *arch = NULL;
 	int err;
 
-	if (!arch_name)
-		return errno;
-
-	args.arch = arch = arch__find(arch_name);
-	if (arch == NULL) {
-		pr_err("%s: unsupported arch %s\n", __func__, arch_name);
-		return ENOTSUP;
-	}
+	err = evsel__get_arch(evsel, &arch);
+	if (err < 0)
+		return err;
 
 	if (parch)
 		*parch = arch;
 
-	if (arch->init) {
-		err = arch->init(arch, env ? env->cpuid : NULL);
-		if (err) {
-			pr_err("%s: failed to initialize %s arch priv area\n", __func__, arch->name);
-			return err;
-		}
-	}
-
+	args.arch = arch;
 	args.ms = *ms;
 	if (annotate_opts.full_addr)
 		notes->start = map__objdump_2mem(ms->map, ms->sym->start);
@@ -3499,4 +3523,258 @@ int annotate_check_args(void)
 		return -1;
 	}
 	return 0;
+}
+
+/*
+ * Get register number and access offset from the given instruction.
+ * It assumes AT&T x86 asm format like OFFSET(REG).  Maybe it needs
+ * to revisit the format when it handles different architecture.
+ * Fills @reg and @offset when return 0.
+ */
+static int extract_reg_offset(struct arch *arch, const char *str,
+			      struct annotated_op_loc *op_loc)
+{
+	char *p;
+	char *regname;
+
+	if (arch->objdump.register_char == 0)
+		return -1;
+
+	/*
+	 * It should start from offset, but it's possible to skip 0
+	 * in the asm.  So 0(%rax) should be same as (%rax).
+	 *
+	 * However, it also start with a segment select register like
+	 * %gs:0x18(%rbx).  In that case it should skip the part.
+	 */
+	if (*str == arch->objdump.register_char) {
+		while (*str && !isdigit(*str) &&
+		       *str != arch->objdump.memory_ref_char)
+			str++;
+	}
+
+	op_loc->offset = strtol(str, &p, 0);
+
+	p = strchr(p, arch->objdump.register_char);
+	if (p == NULL)
+		return -1;
+
+	regname = strdup(p);
+	if (regname == NULL)
+		return -1;
+
+	op_loc->reg = get_dwarf_regnum(regname, 0);
+	free(regname);
+	return 0;
+}
+
+/**
+ * annotate_get_insn_location - Get location of instruction
+ * @arch: the architecture info
+ * @dl: the target instruction
+ * @loc: a buffer to save the data
+ *
+ * Get detailed location info (register and offset) in the instruction.
+ * It needs both source and target operand and whether it accesses a
+ * memory location.  The offset field is meaningful only when the
+ * corresponding mem flag is set.
+ *
+ * Some examples on x86:
+ *
+ *   mov  (%rax), %rcx   # src_reg = rax, src_mem = 1, src_offset = 0
+ *                       # dst_reg = rcx, dst_mem = 0
+ *
+ *   mov  0x18, %r8      # src_reg = -1, dst_reg = r8
+ */
+int annotate_get_insn_location(struct arch *arch, struct disasm_line *dl,
+			       struct annotated_insn_loc *loc)
+{
+	struct ins_operands *ops;
+	struct annotated_op_loc *op_loc;
+	int i;
+
+	if (!strcmp(dl->ins.name, "lock"))
+		ops = dl->ops.locked.ops;
+	else
+		ops = &dl->ops;
+
+	if (ops == NULL)
+		return -1;
+
+	memset(loc, 0, sizeof(*loc));
+
+	for_each_insn_op_loc(loc, i, op_loc) {
+		const char *insn_str = ops->source.raw;
+
+		if (i == INSN_OP_TARGET)
+			insn_str = ops->target.raw;
+
+		/* Invalidate the register by default */
+		op_loc->reg = -1;
+
+		if (insn_str == NULL)
+			continue;
+
+		if (strchr(insn_str, arch->objdump.memory_ref_char)) {
+			op_loc->mem_ref = true;
+			extract_reg_offset(arch, insn_str, op_loc);
+		} else {
+			char *s = strdup(insn_str);
+
+			if (s) {
+				op_loc->reg = get_dwarf_regnum(s, 0);
+				free(s);
+			}
+		}
+	}
+
+	return 0;
+}
+
+static void symbol__ensure_annotate(struct map_symbol *ms, struct evsel *evsel)
+{
+	struct disasm_line *dl, *tmp_dl;
+	struct annotation *notes;
+
+	notes = symbol__annotation(ms->sym);
+	if (!list_empty(&notes->src->source))
+		return;
+
+	if (symbol__annotate(ms, evsel, NULL) < 0)
+		return;
+
+	/* remove non-insn disasm lines for simplicity */
+	list_for_each_entry_safe(dl, tmp_dl, &notes->src->source, al.node) {
+		if (dl->al.offset == -1) {
+			list_del(&dl->al.node);
+			free(dl);
+		}
+	}
+}
+
+static struct disasm_line *find_disasm_line(struct symbol *sym, u64 ip)
+{
+	struct disasm_line *dl;
+	struct annotation *notes;
+
+	notes = symbol__annotation(sym);
+
+	list_for_each_entry(dl, &notes->src->source, al.node) {
+		if (sym->start + dl->al.offset == ip)
+			return dl;
+	}
+	return NULL;
+}
+
+static struct annotated_item_stat *annotate_data_stat(struct list_head *head,
+						      const char *name)
+{
+	struct annotated_item_stat *istat;
+
+	list_for_each_entry(istat, head, list) {
+		if (!strcmp(istat->name, name))
+			return istat;
+	}
+
+	istat = zalloc(sizeof(*istat));
+	if (istat == NULL)
+		return NULL;
+
+	istat->name = strdup(name);
+	if (istat->name == NULL) {
+		free(istat);
+		return NULL;
+	}
+
+	list_add_tail(&istat->list, head);
+	return istat;
+}
+
+/**
+ * hist_entry__get_data_type - find data type for given hist entry
+ * @he: hist entry
+ *
+ * This function first annotates the instruction at @he->ip and extracts
+ * register and offset info from it.  Then it searches the DWARF debug
+ * info to get a variable and type information using the address, register,
+ * and offset.
+ */
+struct annotated_data_type *hist_entry__get_data_type(struct hist_entry *he)
+{
+	struct map_symbol *ms = &he->ms;
+	struct evsel *evsel = hists_to_evsel(he->hists);
+	struct arch *arch;
+	struct disasm_line *dl;
+	struct annotated_insn_loc loc;
+	struct annotated_op_loc *op_loc;
+	struct annotated_data_type *mem_type;
+	struct annotated_item_stat *istat;
+	u64 ip = he->ip;
+	int i;
+
+	ann_data_stat.total++;
+
+	if (ms->map == NULL || ms->sym == NULL) {
+		ann_data_stat.no_sym++;
+		return NULL;
+	}
+
+	if (!symbol_conf.init_annotation) {
+		ann_data_stat.no_sym++;
+		return NULL;
+	}
+
+	if (evsel__get_arch(evsel, &arch) < 0) {
+		ann_data_stat.no_insn++;
+		return NULL;
+	}
+
+	/* Make sure it runs objdump to get disasm of the function */
+	symbol__ensure_annotate(ms, evsel);
+
+	/*
+	 * Get a disasm to extract the location from the insn.
+	 * This is too slow...
+	 */
+	dl = find_disasm_line(ms->sym, ip);
+	if (dl == NULL) {
+		ann_data_stat.no_insn++;
+		return NULL;
+	}
+
+	istat = annotate_data_stat(&ann_insn_stat, dl->ins.name);
+	if (istat == NULL) {
+		ann_data_stat.no_insn++;
+		return NULL;
+	}
+
+	if (annotate_get_insn_location(arch, dl, &loc) < 0) {
+		ann_data_stat.no_insn_ops++;
+		istat->bad++;
+		return NULL;
+	}
+
+	for_each_insn_op_loc(&loc, i, op_loc) {
+		if (!op_loc->mem_ref)
+			continue;
+
+		mem_type = find_data_type(ms, ip, op_loc->reg, op_loc->offset);
+		if (mem_type)
+			istat->good++;
+		else
+			istat->bad++;
+
+		if (symbol_conf.annotate_data_sample) {
+			annotated_data_type__update_samples(mem_type, evsel,
+							    op_loc->offset,
+							    he->stat.nr_events,
+							    he->stat.period);
+		}
+		he->mem_type_off = op_loc->offset;
+		return mem_type;
+	}
+
+	ann_data_stat.no_mem_ops++;
+	istat->bad++;
+	return NULL;
 }

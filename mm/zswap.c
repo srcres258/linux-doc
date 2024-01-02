@@ -167,6 +167,8 @@ struct crypto_acomp_ctx {
 	struct crypto_acomp *acomp;
 	struct acomp_req *req;
 	struct crypto_wait wait;
+	u8 *buffer;
+	struct mutex mutex;
 };
 
 /*
@@ -694,63 +696,26 @@ static void zswap_alloc_shrinker(struct zswap_pool *pool)
 /*********************************
 * per-cpu code
 **********************************/
-static DEFINE_PER_CPU(u8 *, zswap_buffer);
-/*
- * If users dynamically change the zpool type and compressor at runtime, i.e.
- * zswap is running, zswap can have more than one zpool on one cpu, but they
- * are sharing dtsmem. So we need this mutex to be per-cpu.
- */
-static DEFINE_PER_CPU(struct mutex *, zswap_mutex);
-
-static int zswap_buffer_prepare(unsigned int cpu)
-{
-	struct mutex *mutex;
-	u8 *buf;
-
-	buf = kmalloc_node(PAGE_SIZE, GFP_KERNEL, cpu_to_node(cpu));
-	if (!buf)
-		return -ENOMEM;
-
-	mutex = kmalloc_node(sizeof(*mutex), GFP_KERNEL, cpu_to_node(cpu));
-	if (!mutex) {
-		kfree(buf);
-		return -ENOMEM;
-	}
-
-	mutex_init(mutex);
-	per_cpu(zswap_buffer, cpu) = buf;
-	per_cpu(zswap_mutex, cpu) = mutex;
-	return 0;
-}
-
-static int zswap_buffer_dead(unsigned int cpu)
-{
-	struct mutex *mutex;
-	u8 *buf;
-
-	mutex = per_cpu(zswap_mutex, cpu);
-	kfree(mutex);
-	per_cpu(zswap_mutex, cpu) = NULL;
-
-	buf = per_cpu(zswap_buffer, cpu);
-	kfree(buf);
-	per_cpu(zswap_buffer, cpu) = NULL;
-
-	return 0;
-}
-
 static int zswap_cpu_comp_prepare(unsigned int cpu, struct hlist_node *node)
 {
 	struct zswap_pool *pool = hlist_entry(node, struct zswap_pool, node);
 	struct crypto_acomp_ctx *acomp_ctx = per_cpu_ptr(pool->acomp_ctx, cpu);
 	struct crypto_acomp *acomp;
 	struct acomp_req *req;
+	int ret;
+
+	mutex_init(&acomp_ctx->mutex);
+
+	acomp_ctx->buffer = kmalloc_node(PAGE_SIZE * 2, GFP_KERNEL, cpu_to_node(cpu));
+	if (!acomp_ctx->buffer)
+		return -ENOMEM;
 
 	acomp = crypto_alloc_acomp_node(pool->tfm_name, 0, 0, cpu_to_node(cpu));
 	if (IS_ERR(acomp)) {
 		pr_err("could not alloc crypto acomp %s : %ld\n",
 				pool->tfm_name, PTR_ERR(acomp));
-		return PTR_ERR(acomp);
+		ret = PTR_ERR(acomp);
+		goto acomp_fail;
 	}
 	acomp_ctx->acomp = acomp;
 
@@ -758,8 +723,8 @@ static int zswap_cpu_comp_prepare(unsigned int cpu, struct hlist_node *node)
 	if (!req) {
 		pr_err("could not alloc crypto acomp_request %s\n",
 		       pool->tfm_name);
-		crypto_free_acomp(acomp_ctx->acomp);
-		return -ENOMEM;
+		ret = -ENOMEM;
+		goto req_fail;
 	}
 	acomp_ctx->req = req;
 
@@ -773,6 +738,12 @@ static int zswap_cpu_comp_prepare(unsigned int cpu, struct hlist_node *node)
 				   crypto_req_done, &acomp_ctx->wait);
 
 	return 0;
+
+req_fail:
+	crypto_free_acomp(acomp_ctx->acomp);
+acomp_fail:
+	kfree(acomp_ctx->buffer);
+	return ret;
 }
 
 static int zswap_cpu_comp_dead(unsigned int cpu, struct hlist_node *node)
@@ -785,6 +756,7 @@ static int zswap_cpu_comp_dead(unsigned int cpu, struct hlist_node *node)
 			acomp_request_free(acomp_ctx->req);
 		if (!IS_ERR_OR_NULL(acomp_ctx->acomp))
 			crypto_free_acomp(acomp_ctx->acomp);
+		kfree(acomp_ctx->buffer);
 	}
 
 	return 0;
@@ -1394,21 +1366,15 @@ static void __zswap_load(struct zswap_entry *entry, struct page *page)
 	struct zpool *zpool = zswap_find_zpool(entry);
 	struct scatterlist input, output;
 	struct crypto_acomp_ctx *acomp_ctx;
-	u8 *src, *buf;
-	int cpu;
-	struct mutex *mutex;
+	u8 *src;
 
-	cpu = raw_smp_processor_id();
-	mutex = per_cpu(zswap_mutex, cpu);
-	mutex_lock(mutex);
-
-	acomp_ctx = per_cpu_ptr(entry->pool->acomp_ctx, cpu);
+	acomp_ctx = raw_cpu_ptr(entry->pool->acomp_ctx);
+	mutex_lock(&acomp_ctx->mutex);
 
 	src = zpool_map_handle(zpool, entry->handle, ZPOOL_MM_RO);
 	if (!zpool_can_sleep_mapped(zpool)) {
-		buf = per_cpu(zswap_buffer, cpu);
-		memcpy(buf, src, entry->length);
-		src = buf;
+		memcpy(acomp_ctx->buffer, src, entry->length);
+		src = acomp_ctx->buffer;
 		zpool_unmap_handle(zpool, entry->handle);
 	}
 
@@ -1418,7 +1384,7 @@ static void __zswap_load(struct zswap_entry *entry, struct page *page)
 	acomp_request_set_params(acomp_ctx->req, &input, &output, entry->length, PAGE_SIZE);
 	BUG_ON(crypto_wait_req(crypto_acomp_decompress(acomp_ctx->req), &acomp_ctx->wait));
 	BUG_ON(acomp_ctx->req->dlen != PAGE_SIZE);
-	mutex_unlock(mutex);
+	mutex_unlock(&acomp_ctx->mutex);
 
 	if (zpool_can_sleep_mapped(zpool))
 		zpool_unmap_handle(zpool, entry->handle);
@@ -1445,7 +1411,7 @@ static int zswap_writeback_entry(struct zswap_entry *entry,
 	swp_entry_t swpentry = entry->swpentry;
 	struct folio *folio;
 	struct mempolicy *mpol;
-	bool page_was_allocated;
+	bool folio_was_allocated;
 	struct writeback_control wbc = {
 		.sync_mode = WB_SYNC_NONE,
 	};
@@ -1453,24 +1419,22 @@ static int zswap_writeback_entry(struct zswap_entry *entry,
 	/* try to allocate swap cache folio */
 	mpol = get_task_policy(current);
 	folio = __read_swap_cache_async(swpentry, GFP_KERNEL, mpol,
-				NO_INTERLEAVE_INDEX, &page_was_allocated, true);
-	if (!folio) {
-		/*
-		 * If we get here because the folio is already in swapcache, a
-		 * load may be happening concurrently. It is safe and okay to
-		 * not free the entry. It is also okay to return !0.
-		 */
+				NO_INTERLEAVE_INDEX, &folio_was_allocated, true);
+	if (!folio)
 		return -ENOMEM;
-	}
 
-	/* Found an existing folio, we raced with load/swapin */
-	if (!page_was_allocated) {
+	/*
+	 * Found an existing folio, we raced with load/swapin. We generally
+	 * writeback cold folios from zswap, and swapin means the folio just
+	 * became hot. Skip this folio and let the caller find another one.
+	 */
+	if (!folio_was_allocated) {
 		folio_put(folio);
 		return -EEXIST;
 	}
 
 	/*
-	 * Page is locked, and the swapcache is now secured against
+	 * folio is locked, and the swapcache is now secured against
 	 * concurrent swapping to and from the slot. Verify that the
 	 * swap entry hasn't been invalidated and recycled behind our
 	 * backs (our zswap_entry reference doesn't prevent that), to
@@ -1660,13 +1624,18 @@ bool zswap_store(struct folio *folio)
 	mutex = per_cpu(zswap_mutex, cpu);
 	mutex_lock(mutex);
 
-	acomp_ctx = per_cpu_ptr(entry->pool->acomp_ctx, cpu);
-	dst = per_cpu(zswap_buffer, cpu);
+	mutex_lock(&acomp_ctx->mutex);
 
+	dst = acomp_ctx->buffer;
 	sg_init_table(&input, 1);
 	sg_set_page(&input, &folio->page, PAGE_SIZE, 0);
 
-	sg_init_one(&output, dst, PAGE_SIZE);
+	/*
+	 * We need PAGE_SIZE * 2 here since there maybe over-compression case,
+	 * and hardware-accelerators may won't check the dst buffer size, so
+	 * giving the dst buffer with enough length to avoid buffer overflow.
+	 */
+	sg_init_one(&output, dst, PAGE_SIZE * 2);
 	acomp_request_set_params(acomp_ctx->req, &input, &output, PAGE_SIZE, dlen);
 	/*
 	 * it maybe looks a little bit silly that we send an asynchronous request,
@@ -1705,7 +1674,7 @@ bool zswap_store(struct folio *folio)
 	buf = zpool_map_handle(zpool, handle, ZPOOL_MM_WO);
 	memcpy(buf, dst, dlen);
 	zpool_unmap_handle(zpool, handle);
-	mutex_unlock(mutex);
+	mutex_unlock(&acomp_ctx->mutex);
 
 	/* populate entry */
 	entry->swpentry = swp_entry(type, offset);
@@ -1749,7 +1718,7 @@ insert_entry:
 	return true;
 
 put_dstmem:
-	mutex_unlock(mutex);
+	mutex_unlock(&acomp_ctx->mutex);
 put_pool:
 	zswap_pool_put(entry->pool);
 freepage:
@@ -1791,12 +1760,12 @@ bool zswap_load(struct folio *folio)
 	}
 	spin_unlock(&tree->lock);
 
-	if (!entry->length) {
+	if (entry->length)
+		__zswap_load(entry, page);
+	else {
 		dst = kmap_local_page(page);
 		zswap_fill_page(dst, entry->value);
 		kunmap_local(dst);
-	} else {
-		__zswap_load(entry, page);
 	}
 
 	count_vm_event(ZSWPIN);
@@ -1970,13 +1939,6 @@ static int zswap_setup(void)
 		goto cache_fail;
 	}
 
-	ret = cpuhp_setup_state(CPUHP_MM_ZSWP_MEM_PREPARE, "mm/zswap:prepare",
-				zswap_buffer_prepare, zswap_buffer_dead);
-	if (ret) {
-		pr_err("buffer alloc failed\n");
-		goto buffer_fail;
-	}
-
 	ret = cpuhp_setup_state_multi(CPUHP_MM_ZSWP_POOL_PREPARE,
 				      "mm/zswap_pool:prepare",
 				      zswap_cpu_comp_prepare,
@@ -2008,8 +1970,6 @@ fallback_fail:
 	if (pool)
 		zswap_pool_destroy(pool);
 hp_fail:
-	cpuhp_remove_state(CPUHP_MM_ZSWP_MEM_PREPARE);
-buffer_fail:
 	kmem_cache_destroy(zswap_entry_cache);
 cache_fail:
 	/* if built-in, we aren't unloaded on failure; don't allow use */

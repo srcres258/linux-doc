@@ -54,6 +54,7 @@
 #include <rdma/ib_user_verbs.h>
 #include <rdma/ib_umem.h>
 #include <rdma/ib_addr.h>
+#include <linux/hashtable.h>
 
 #include "bnxt_ulp.h"
 #include "roce_hsi.h"
@@ -107,12 +108,14 @@ static void bnxt_re_set_db_offset(struct bnxt_re_dev *rdev)
 		dev_info(rdev_to_dev(rdev),
 			 "Couldn't get DB bar size, Low latency framework is disabled\n");
 	/* set register offsets for both UC and WC */
-	if (bnxt_qplib_is_chip_gen_p7(cctx))
+	if (bnxt_qplib_is_chip_gen_p7(cctx)) {
 		res->dpi_tbl.ucreg.offset = offset;
-	else
+		res->dpi_tbl.wcreg.offset = en_dev->l2_db_size;
+	} else {
 		res->dpi_tbl.ucreg.offset = res->is_vf ? BNXT_QPLIB_DBR_VF_DB_OFFSET :
 							 BNXT_QPLIB_DBR_PF_DB_OFFSET;
-	res->dpi_tbl.wcreg.offset = res->dpi_tbl.ucreg.offset;
+		res->dpi_tbl.wcreg.offset = res->dpi_tbl.ucreg.offset;
+	}
 
 	/* If WC mapping is disabled by L2 driver then en_dev->l2_db_size
 	 * is equal to the DB-Bar actual size. This indicates that L2
@@ -136,6 +139,8 @@ static void bnxt_re_set_drv_mode(struct bnxt_re_dev *rdev, u8 mode)
 	if (bnxt_re_hwrm_qcaps(rdev))
 		dev_err(rdev_to_dev(rdev),
 			"Failed to query hwrm qcaps\n");
+	if (bnxt_qplib_is_chip_gen_p7(rdev->chip_ctx))
+		cctx->modes.toggle_bits |= BNXT_QPLIB_CQ_TOGGLE_BIT;
 }
 
 static void bnxt_re_destroy_chip_ctx(struct bnxt_re_dev *rdev)
@@ -1206,9 +1211,13 @@ static int bnxt_re_cqn_handler(struct bnxt_qplib_nq *nq,
 {
 	struct bnxt_re_cq *cq = container_of(handle, struct bnxt_re_cq,
 					     qplib_cq);
+	u32 *cq_ptr;
 
 	if (cq->ib_cq.comp_handler) {
-		/* Lock comp_handler? */
+		if (cq->uctx_cq_page) {
+			cq_ptr = (u32 *)cq->uctx_cq_page;
+			*cq_ptr = cq->qplib_cq.toggle;
+		}
 		(*cq->ib_cq.comp_handler)(&cq->ib_cq, cq->ib_cq.cq_context);
 	}
 
@@ -1730,6 +1739,7 @@ static int bnxt_re_dev_init(struct bnxt_re_dev *rdev, u8 wqe_mode)
 		 */
 		bnxt_re_vf_res_config(rdev);
 	}
+	hash_init(rdev->cq_hash);
 
 	return 0;
 free_sctx:

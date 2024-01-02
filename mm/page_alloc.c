@@ -730,7 +730,7 @@ buddy_merge_likely(unsigned long pfn, unsigned long buddy_pfn,
 	unsigned long higher_page_pfn;
 	struct page *higher_page;
 
-	if (order >= MAX_ORDER - 1)
+	if (order >= MAX_PAGE_ORDER - 1)
 		return false;
 
 	higher_page_pfn = buddy_pfn & pfn;
@@ -785,7 +785,7 @@ static inline void __free_one_page(struct page *page,
 	VM_BUG_ON_PAGE(pfn & ((1 << order) - 1), page);
 	VM_BUG_ON_PAGE(bad_range(zone, page), page);
 
-	while (order < MAX_ORDER) {
+	while (order < MAX_PAGE_ORDER) {
 		if (compaction_capture(capc, page, order, migratetype)) {
 			__mod_zone_freepage_state(zone, -(1 << order),
 								migratetype);
@@ -1063,7 +1063,7 @@ static inline bool should_skip_kasan_poison(struct page *page, fpi_t fpi_flags)
 	if (IS_ENABLED(CONFIG_KASAN_GENERIC))
 		return deferred_pages_enabled();
 
-	return page_kasan_tag(page) == 0xff;
+	return page_kasan_tag(page) == KASAN_TAG_KERNEL;
 }
 
 static void kernel_init_pages(struct page *page, int numpages)
@@ -1301,7 +1301,7 @@ void __free_pages_core(struct page *page, unsigned int order)
 	atomic_long_add(nr_pages, &page_zone(page)->managed_pages);
 
 	if (page_contains_unaccepted(page, order)) {
-		if (order == MAX_ORDER && __free_unaccepted(page))
+		if (order == MAX_PAGE_ORDER && __free_unaccepted(page))
 			return;
 
 		accept_page(page, order);
@@ -1331,7 +1331,7 @@ void __free_pages_core(struct page *page, unsigned int order)
  *
  * Note: the function may return non-NULL struct page even for a page block
  * which contains a memory hole (i.e. there is no physical memory for a subset
- * of the pfn range). For example, if the pageblock order is MAX_ORDER, which
+ * of the pfn range). For example, if the pageblock order is MAX_PAGE_ORDER, which
  * will fall into 2 sub-sections, and the end pfn of the pageblock may be hole
  * even though the start pfn is online and valid. This should be safe most of
  * the time because struct pages are still initialized via init_unavailable_range()
@@ -1564,7 +1564,7 @@ struct page *__rmqueue_smallest(struct zone *zone, unsigned int order,
 	struct page *page;
 
 	/* Find a page of the appropriate size in the preferred list */
-	for (current_order = order; current_order <= MAX_ORDER; ++current_order) {
+	for (current_order = order; current_order < NR_PAGE_ORDERS; ++current_order) {
 		area = &(zone->free_area[current_order]);
 		page = get_page_from_free_area(area, migratetype);
 		if (!page)
@@ -1938,7 +1938,7 @@ static bool unreserve_highatomic_pageblock(const struct alloc_context *ac,
 			continue;
 
 		spin_lock_irqsave(&zone->lock, flags);
-		for (order = 0; order <= MAX_ORDER; order++) {
+		for (order = 0; order < NR_PAGE_ORDERS; order++) {
 			struct free_area *area = &(zone->free_area[order]);
 
 			page = get_page_from_free_area(area, MIGRATE_HIGHATOMIC);
@@ -2022,7 +2022,7 @@ __rmqueue_fallback(struct zone *zone, int order, int start_migratetype,
 	 * approximates finding the pageblock with the most free pages, which
 	 * would be too costly to do exactly.
 	 */
-	for (current_order = MAX_ORDER; current_order >= min_order;
+	for (current_order = MAX_PAGE_ORDER; current_order >= min_order;
 				--current_order) {
 		area = &(zone->free_area[current_order]);
 		fallback_mt = find_suitable_fallback(area, current_order,
@@ -2048,8 +2048,7 @@ __rmqueue_fallback(struct zone *zone, int order, int start_migratetype,
 	return false;
 
 find_smallest:
-	for (current_order = order; current_order <= MAX_ORDER;
-							current_order++) {
+	for (current_order = order; current_order < NR_PAGE_ORDERS; current_order++) {
 		area = &(zone->free_area[current_order]);
 		fallback_mt = find_suitable_fallback(area, current_order,
 				start_migratetype, false, &can_steal);
@@ -2061,7 +2060,7 @@ find_smallest:
 	 * This should not happen - we already found a suitable fallback
 	 * when looking for the largest page.
 	 */
-	VM_BUG_ON(current_order > MAX_ORDER);
+	VM_BUG_ON(current_order > MAX_PAGE_ORDER);
 
 do_steal:
 	page = get_page_from_free_area(area, fallback_mt);
@@ -3042,7 +3041,7 @@ bool __zone_watermark_ok(struct zone *z, unsigned int order, unsigned long mark,
 		return true;
 
 	/* For a high-order request, check at least one suitable page is free */
-	for (o = order; o <= MAX_ORDER; o++) {
+	for (o = order; o < NR_PAGE_ORDERS; o++) {
 		struct free_area *area = &z->free_area[o];
 		int mt;
 
@@ -4576,7 +4575,7 @@ struct page *__alloc_pages(gfp_t gfp, unsigned int order, int preferred_nid,
 	 * There are several places where we assume that the order value is sane
 	 * so bail out early if the request is out of bound.
 	 */
-	if (WARN_ON_ONCE_GFP(order > MAX_ORDER, gfp))
+	if (WARN_ON_ONCE_GFP(order > MAX_PAGE_ORDER, gfp))
 		return NULL;
 
 	gfp &= gfp_allowed_mask;
@@ -4858,7 +4857,7 @@ static void *make_alloc_exact(unsigned long addr, unsigned int order,
  * minimum number of pages to satisfy the request.  alloc_pages() can only
  * allocate memory in power-of-two pages.
  *
- * This function is also limited by MAX_ORDER.
+ * This function is also limited by MAX_PAGE_ORDER.
  *
  * Memory allocated by this function must be released by free_pages_exact().
  *
@@ -6416,7 +6415,7 @@ int alloc_contig_range(unsigned long start, unsigned long end,
 	order = 0;
 	outer_start = start;
 	while (!PageBuddy(pfn_to_page(outer_start))) {
-		if (++order > MAX_ORDER) {
+		if (++order > MAX_PAGE_ORDER) {
 			outer_start = start;
 			break;
 		}
@@ -6670,7 +6669,7 @@ bool is_free_buddy_page(struct page *page)
 	unsigned long pfn = page_to_pfn(page);
 	unsigned int order;
 
-	for (order = 0; order <= MAX_ORDER; order++) {
+	for (order = 0; order < NR_PAGE_ORDERS; order++) {
 		struct page *page_head = page - (pfn & ((1 << order) - 1));
 
 		if (PageBuddy(page_head) &&
@@ -6678,7 +6677,7 @@ bool is_free_buddy_page(struct page *page)
 			break;
 	}
 
-	return order <= MAX_ORDER;
+	return order <= MAX_PAGE_ORDER;
 }
 EXPORT_SYMBOL(is_free_buddy_page);
 
@@ -6725,7 +6724,7 @@ bool take_page_off_buddy(struct page *page)
 	bool ret = false;
 
 	spin_lock_irqsave(&zone->lock, flags);
-	for (order = 0; order <= MAX_ORDER; order++) {
+	for (order = 0; order < NR_PAGE_ORDERS; order++) {
 		struct page *page_head = page - (pfn & ((1 << order) - 1));
 		int page_order = buddy_order(page_head);
 
@@ -6850,9 +6849,9 @@ static bool try_to_accept_memory_one(struct zone *zone)
 	__mod_zone_page_state(zone, NR_UNACCEPTED, -MAX_ORDER_NR_PAGES);
 	spin_unlock_irqrestore(&zone->lock, flags);
 
-	accept_page(page, MAX_ORDER);
+	accept_page(page, MAX_PAGE_ORDER);
 
-	__free_pages_ok(page, MAX_ORDER, FPI_TO_TAIL);
+	__free_pages_ok(page, MAX_PAGE_ORDER, FPI_TO_TAIL);
 
 	if (last)
 		static_branch_dec(&zones_with_unaccepted_pages);

@@ -243,6 +243,7 @@ do {									\
 #define prt_units_s64(...)		bch2_prt_units_s64(__VA_ARGS__)
 #define prt_string_option(...)		bch2_prt_string_option(__VA_ARGS__)
 #define prt_bitflags(...)		bch2_prt_bitflags(__VA_ARGS__)
+#define prt_bitflags_vector(...)	bch2_prt_bitflags_vector(__VA_ARGS__)
 
 void bch2_pr_time_units(struct printbuf *, u64);
 void bch2_prt_datetime(struct printbuf *, time64_t);
@@ -861,5 +862,8 @@ static inline bool qstr_eq(const struct qstr l, const struct qstr r)
 {
 	return l.len == r.len && !memcmp(l.name, r.name, l.len);
 }
+
+void bch2_darray_str_exit(darray_str *);
+int bch2_split_devs(const char *, darray_str *);
 
 #endif /* _BCACHEFS_UTIL_H */

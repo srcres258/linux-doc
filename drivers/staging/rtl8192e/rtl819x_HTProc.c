@@ -240,7 +240,7 @@ void ht_construct_capability_element(struct rtllib_device *ieee, u8 *pos_ht_cap,
 	}
 	memset(pos_ht_cap, 0, *len);
 
-	if ((assoc) && (ht->ePeerHTSpecVer == HT_SPEC_VER_EWC)) {
+	if ((assoc) && (ht->peer_ht_spec_ver == HT_SPEC_VER_EWC)) {
 		static const u8	EWC11NHTCap[] = { 0x00, 0x90, 0x4c, 0x33 };
 
 		memcpy(pos_ht_cap, EWC11NHTCap, sizeof(EWC11NHTCap));
@@ -525,7 +525,7 @@ void ht_initialize_ht_info(struct rtllib_device *ieee)
 
 	ht_info->sw_bw_in_progress = false;
 
-	ht_info->ePeerHTSpecVer = HT_SPEC_VER_IEEE;
+	ht_info->peer_ht_spec_ver = HT_SPEC_VER_IEEE;
 
 	ht_info->current_rt2rt_aggregation = false;
 	ht_info->current_rt2rt_long_slot_time = false;
@@ -543,7 +543,7 @@ void ht_initialize_ht_info(struct rtllib_device *ieee)
 	}
 }
 
-void HTInitializeBssDesc(struct bss_ht *pBssHT)
+void ht_initialize_bss_desc(struct bss_ht *pBssHT)
 {
 	pBssHT->bd_support_ht = false;
 	memset(pBssHT->bd_ht_cap_buf, 0, sizeof(pBssHT->bd_ht_cap_buf));
@@ -558,7 +558,7 @@ void HTInitializeBssDesc(struct bss_ht *pBssHT)
 	pBssHT->rt2rt_ht_mode = (enum rt_ht_capability)0;
 }
 
-void HTResetSelfAndSavePeerSetting(struct rtllib_device *ieee,
+void ht_reset_self_and_save_peer_setting(struct rtllib_device *ieee,
 				   struct rtllib_network *pNetwork)
 {
 	struct rt_hi_throughput *ht_info = ieee->ht_info;
@@ -569,7 +569,7 @@ void HTResetSelfAndSavePeerSetting(struct rtllib_device *ieee,
 	 */
 	if (pNetwork->bssht.bd_support_ht) {
 		ht_info->current_ht_support = true;
-		ht_info->ePeerHTSpecVer = pNetwork->bssht.bd_ht_spec_ver;
+		ht_info->peer_ht_spec_ver = pNetwork->bssht.bd_ht_spec_ver;
 
 		if (pNetwork->bssht.bd_ht_cap_len > 0 &&
 		    pNetwork->bssht.bd_ht_cap_len <= sizeof(ht_info->PeerHTCapBuf))
@@ -622,7 +622,7 @@ void HT_update_self_and_peer_setting(struct rtllib_device *ieee,
 }
 EXPORT_SYMBOL(HT_update_self_and_peer_setting);
 
-u8 HTCCheck(struct rtllib_device *ieee, u8 *pFrame)
+u8 ht_c_check(struct rtllib_device *ieee, u8 *pFrame)
 {
 	if (ieee->ht_info->current_ht_support) {
 		if ((IsQoSDataFrame(pFrame) && Frame_Order(pFrame)) == 1) {
@@ -633,7 +633,7 @@ u8 HTCCheck(struct rtllib_device *ieee, u8 *pFrame)
 	return false;
 }
 
-static void HTSetConnectBwModeCallback(struct rtllib_device *ieee)
+static void ht_set_connect_bw_mode_callback(struct rtllib_device *ieee)
 {
 	struct rt_hi_throughput *ht_info = ieee->ht_info;
 
@@ -695,5 +695,5 @@ void ht_set_connect_bw_mode(struct rtllib_device *ieee,
 
 	ht_info->sw_bw_in_progress = true;
 
-	HTSetConnectBwModeCallback(ieee);
+	ht_set_connect_bw_mode_callback(ieee);
 }

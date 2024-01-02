@@ -1120,7 +1120,12 @@ static int afs_d_revalidate(struct dentry *dentry, const struct qstr *name,
 	dir = AFS_FS_I(d_inode(parent));
 
 	/* validate the parent directory */
-	afs_validate(dir, key);
+	ret = afs_validate(dir, key);
+	if (ret == -ERESTARTSYS) {
+		dput(parent);
+		key_put(key);
+		return ret;
+	}
 
 	if (test_bit(AFS_VNODE_DELETED, &dir->flags)) {
 		_debug("%pd: parent dir deleted", dentry);

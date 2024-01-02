@@ -333,9 +333,15 @@ int afs_update_volume_state(struct afs_operation *op)
 		}
 	}
 
-	if (op->cb_v_break == cb_v_break) {
-		se->cb_expires_at = cb->expires_at;
-		volume->cb_expires_at = cb->expires_at;
+	if (op->cb_v_break == cb_v_break &&
+	    (op->file[0].scb.have_cb || op->file[1].scb.have_cb)) {
+		time64_t expires_at = cb->expires_at;
+
+		if (!op->file[0].scb.have_cb)
+			expires_at = op->file[1].scb.callback.expires_at;
+
+		se->cb_expires_at = expires_at;
+		volume->cb_expires_at = expires_at;
 	}
 	if (cb_v_check < op->cb_v_break)
 		atomic_cmpxchg(&volume->cb_v_check, cb_v_check, op->cb_v_break);

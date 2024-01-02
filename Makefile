@@ -2,7 +2,7 @@
 VERSION = 6
 PATCHLEVEL = 7
 SUBLEVEL = 0
-EXTRAVERSION = -rc6
+EXTRAVERSION = -rc8
 NAME = Hurr durr I'ma ninja sloth
 
 # *DOCUMENTATION*
@@ -190,14 +190,11 @@ ifeq ("$(origin O)", "command line")
 endif
 
 ifneq ($(KBUILD_OUTPUT),)
-# Make's built-in functions such as $(abspath ...), $(realpath ...) cannot
-# expand a shell special character '~'. We use a somewhat tedious way here.
-abs_objtree := $(shell mkdir -p $(KBUILD_OUTPUT) && cd $(KBUILD_OUTPUT) && pwd)
-$(if $(abs_objtree),, \
-     $(error failed to create output directory "$(KBUILD_OUTPUT)"))
-
+# $(realpath ...) gets empty if the path does not exist. Run 'mkdir -p' first.
+$(shell mkdir -p "$(KBUILD_OUTPUT)")
 # $(realpath ...) resolves symlinks
-abs_objtree := $(realpath $(abs_objtree))
+abs_objtree := $(realpath $(KBUILD_OUTPUT))
+$(if $(abs_objtree),,$(error failed to create output directory "$(KBUILD_OUTPUT)"))
 endif # ifneq ($(KBUILD_OUTPUT),)
 
 ifneq ($(words $(subst :, ,$(abs_srctree))), 1)

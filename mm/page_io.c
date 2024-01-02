@@ -201,7 +201,6 @@ int swap_writepage(struct page *page, struct writeback_control *wbc)
 		folio_end_writeback(folio);
 		return 0;
 	}
-
 	if (!mem_cgroup_zswap_writeback_enabled(folio_memcg(folio))) {
 		folio_mark_dirty(folio);
 		return AOP_WRITEPAGE_ACTIVATE;

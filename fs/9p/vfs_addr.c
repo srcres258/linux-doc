@@ -112,7 +112,7 @@ static int v9fs_init_request(struct netfs_io_request *rreq, struct file *file)
 	/* we might need to read from a fid that was opened write-only
 	 * for read-modify-write of page cache, use the writeback fid
 	 * for that */
-	WARN_ON(writing && !(fid->mode & P9_ORDWR));
+	WARN_ON(rreq->origin == NETFS_READ_FOR_WRITE && !(fid->mode & P9_ORDWR));
 	rreq->netfs_priv = fid;
 	return 0;
 }

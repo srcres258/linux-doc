@@ -30,10 +30,8 @@
  * struct mlxreg_wdt - wd private data:
  *
  * @wdd:	watchdog device;
- * @device:	basic device;
  * @pdata:	data received from platform driver;
  * @regmap:	register map of parent device;
- * @timeout:	defined timeout in sec.;
  * @action_idx:	index for direct access to action register;
  * @timeout_idx:index for direct access to TO register;
  * @tleft_idx:	index for direct access to time left register;

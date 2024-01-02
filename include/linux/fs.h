@@ -1660,9 +1660,9 @@ static inline bool __sb_start_write_trylock(struct super_block *sb, int level)
  * @sb: the super we write to
  * @level: the freeze level
  *
- * > 0 sb freeze level is held
- *   0 sb freeze level is not held
- * < 0 !CONFIG_LOCKDEP/LOCK_STATE_UNKNOWN
+ * * > 0 - sb freeze level is held
+ * *   0 - sb freeze level is not held
+ * * < 0 - !CONFIG_LOCKDEP/LOCK_STATE_UNKNOWN
  */
 static inline int __sb_write_started(const struct super_block *sb, int level)
 {
@@ -2600,9 +2600,6 @@ struct file *dentry_open(const struct path *path, int flags,
 			 const struct cred *creds);
 struct file *dentry_create(const struct path *path, int flags, umode_t mode,
 			   const struct cred *cred);
-struct file *backing_file_open(const struct path *user_path, int flags,
-			       const struct path *real_path,
-			       const struct cred *cred);
 struct path *backing_file_user_path(struct file *f);
 
 /*

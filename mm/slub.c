@@ -2097,7 +2097,7 @@ bool slab_free_hook(struct kmem_cache *s, void *x, bool init)
 		__kcsan_check_access(x, s->object_size,
 				     KCSAN_ACCESS_WRITE | KCSAN_ACCESS_ASSERT);
 
-	if (kfence_free(kasan_reset_tag(x)))
+	if (kfence_free(x))
 		return false;
 
 	/*
@@ -2187,11 +2187,7 @@ static inline struct slab *alloc_slab_page(gfp_t flags, int node,
 	struct slab *slab;
 	unsigned int order = oo_order(oo);
 
-	if (node == NUMA_NO_NODE)
-		folio = (struct folio *)alloc_pages(flags, order);
-	else
-		folio = (struct folio *)__alloc_pages_node(node, flags, order);
-
+	folio = (struct folio *)alloc_pages_node(node, flags, order);
 	if (!folio)
 		return NULL;
 
@@ -3919,7 +3915,7 @@ EXPORT_SYMBOL(kmem_cache_alloc_node);
  */
 static void *__kmalloc_large_node(size_t size, gfp_t flags, int node)
 {
-	struct page *page;
+	struct folio *folio;
 	void *ptr = NULL;
 	unsigned int order = get_order(size);
 
@@ -3927,10 +3923,10 @@ static void *__kmalloc_large_node(size_t size, gfp_t flags, int node)
 		flags = kmalloc_fix_flags(flags);
 
 	flags |= __GFP_COMP;
-	page = alloc_pages_node(node, flags, order);
-	if (page) {
-		ptr = page_address(page);
-		mod_lruvec_page_state(page, NR_SLAB_UNRECLAIMABLE_B,
+	folio = (struct folio *)alloc_pages_node(node, flags, order);
+	if (folio) {
+		ptr = folio_address(folio);
+		lruvec_stat_mod_folio(folio, NR_SLAB_UNRECLAIMABLE_B,
 				      PAGE_SIZE << order);
 	}
 
@@ -4379,9 +4375,9 @@ static void free_large_kmalloc(struct folio *folio, void *object)
 	kasan_kfree_large(object);
 	kmsan_kfree_large(object);
 
-	mod_lruvec_page_state(folio_page(folio, 0), NR_SLAB_UNRECLAIMABLE_B,
+	lruvec_stat_mod_folio(folio, NR_SLAB_UNRECLAIMABLE_B,
 			      -(PAGE_SIZE << order));
-	__free_pages(folio_page(folio, 0), order);
+	folio_put(folio);
 }
 
 /**
@@ -4794,7 +4790,7 @@ static inline int calculate_order(unsigned int size)
 	 * Doh this slab cannot be placed using slub_max_order.
 	 */
 	order = get_order(size);
-	if (order <= MAX_ORDER)
+	if (order <= MAX_PAGE_ORDER)
 		return order;
 	return -ENOSYS;
 }
@@ -5322,7 +5318,7 @@ __setup("slub_min_order=", setup_slub_min_order);
 static int __init setup_slub_max_order(char *str)
 {
 	get_option(&str, (int *)&slub_max_order);
-	slub_max_order = min_t(unsigned int, slub_max_order, MAX_ORDER);
+	slub_max_order = min_t(unsigned int, slub_max_order, MAX_PAGE_ORDER);
 
 	if (slub_min_order > slub_max_order)
 		slub_min_order = slub_max_order;

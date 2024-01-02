@@ -595,16 +595,12 @@ parse_server_interfaces(struct network_interface_info_ioctl_rsp *buf,
 	}
 
 	/*
-	 * Go through iface_list and do kref_put to remove
-	 * any unused ifaces. ifaces in use will be removed
-	 * when the last user calls a kref_put on it
+	 * Go through iface_list and mark them as inactive
 	 */
 	list_for_each_entry_safe(iface, niface, &ses->iface_list,
-				 iface_head) {
+				 iface_head)
 		iface->is_active = 0;
-		kref_put(&iface->refcount, release_iface);
-		ses->iface_count--;
-	}
+
 	spin_unlock(&ses->iface_lock);
 
 	/*
@@ -678,10 +674,7 @@ parse_server_interfaces(struct network_interface_info_ioctl_rsp *buf,
 					 iface_head) {
 			ret = iface_cmp(iface, &tmp_iface);
 			if (!ret) {
-				/* just get a ref so that it doesn't get picked/freed */
 				iface->is_active = 1;
-				kref_get(&iface->refcount);
-				ses->iface_count++;
 				spin_unlock(&ses->iface_lock);
 				goto next_iface;
 			} else if (ret < 0) {
@@ -748,6 +741,20 @@ next_iface:
 	}
 
 out:
+	/*
+	 * Go through the list again and put the inactive entries
+	 */
+	spin_lock(&ses->iface_lock);
+	list_for_each_entry_safe(iface, niface, &ses->iface_list,
+				 iface_head) {
+		if (!iface->is_active) {
+			list_del(&iface->iface_head);
+			kref_put(&iface->refcount, release_iface);
+			ses->iface_count--;
+		}
+	}
+	spin_unlock(&ses->iface_lock);
+
 	return rc;
 }
 
@@ -784,9 +791,14 @@ SMB3_request_interfaces(const unsigned int xid, struct cifs_tcon *tcon, bool in_
 		goto out;
 
 	/* check if iface is still active */
+	spin_lock(&ses->chan_lock);
 	pserver = ses->chans[0].server;
-	if (pserver && !cifs_chan_is_iface_active(ses, pserver))
+	if (pserver && !cifs_chan_is_iface_active(ses, pserver)) {
+		spin_unlock(&ses->chan_lock);
 		cifs_chan_update_iface(ses, pserver);
+		spin_lock(&ses->chan_lock);
+	}
+	spin_unlock(&ses->chan_lock);
 
 out:
 	kfree(out_buf);
@@ -2985,145 +2997,6 @@ static int smb2_parse_reparse_point(struct cifs_sb_info *cifs_sb,
 	return parse_reparse_point(buf, plen, cifs_sb, true, data);
 }
 
-static int smb2_query_reparse_point(const unsigned int xid,
-				    struct cifs_tcon *tcon,
-				    struct cifs_sb_info *cifs_sb,
-				    const char *full_path,
-				    u32 *tag, struct kvec *rsp,
-				    int *rsp_buftype)
-{
-	struct smb2_compound_vars *vars;
-	int rc;
-	__le16 *utf16_path = NULL;
-	__u8 oplock = SMB2_OPLOCK_LEVEL_NONE;
-	struct cifs_open_parms oparms;
-	struct cifs_fid fid;
-	struct TCP_Server_Info *server = cifs_pick_channel(tcon->ses);
-	int flags = CIFS_CP_CREATE_CLOSE_OP;
-	struct smb_rqst *rqst;
-	int resp_buftype[3];
-	struct kvec *rsp_iov;
-	struct smb2_ioctl_rsp *ioctl_rsp;
-	struct reparse_data_buffer *reparse_buf;
-	u32 off, count, len;
-
-	cifs_dbg(FYI, "%s: path: %s\n", __func__, full_path);
-
-	if (smb3_encryption_required(tcon))
-		flags |= CIFS_TRANSFORM_REQ;
-
-	utf16_path = cifs_convert_path_to_utf16(full_path, cifs_sb);
-	if (!utf16_path)
-		return -ENOMEM;
-
-	resp_buftype[0] = resp_buftype[1] = resp_buftype[2] = CIFS_NO_BUFFER;
-	vars = kzalloc(sizeof(*vars), GFP_KERNEL);
-	if (!vars) {
-		rc = -ENOMEM;
-		goto out_free_path;
-	}
-	rqst = vars->rqst;
-	rsp_iov = vars->rsp_iov;
-
-	/*
-	 * setup smb2open - TODO add optimization to call cifs_get_readable_path
-	 * to see if there is a handle already open that we can use
-	 */
-	rqst[0].rq_iov = vars->open_iov;
-	rqst[0].rq_nvec = SMB2_CREATE_IOV_SIZE;
-
-	oparms = (struct cifs_open_parms) {
-		.tcon = tcon,
-		.path = full_path,
-		.desired_access = FILE_READ_ATTRIBUTES,
-		.disposition = FILE_OPEN,
-		.create_options = cifs_create_options(cifs_sb, OPEN_REPARSE_POINT),
-		.fid = &fid,
-	};
-
-	rc = SMB2_open_init(tcon, server,
-			    &rqst[0], &oplock, &oparms, utf16_path);
-	if (rc)
-		goto query_rp_exit;
-	smb2_set_next_command(tcon, &rqst[0]);
-
-
-	/* IOCTL */
-	rqst[1].rq_iov = vars->io_iov;
-	rqst[1].rq_nvec = SMB2_IOCTL_IOV_SIZE;
-
-	rc = SMB2_ioctl_init(tcon, server,
-			     &rqst[1], COMPOUND_FID,
-			     COMPOUND_FID, FSCTL_GET_REPARSE_POINT, NULL, 0,
-			     CIFSMaxBufSize -
-			     MAX_SMB2_CREATE_RESPONSE_SIZE -
-			     MAX_SMB2_CLOSE_RESPONSE_SIZE);
-	if (rc)
-		goto query_rp_exit;
-
-	smb2_set_next_command(tcon, &rqst[1]);
-	smb2_set_related(&rqst[1]);
-
-	/* Close */
-	rqst[2].rq_iov = &vars->close_iov;
-	rqst[2].rq_nvec = 1;
-
-	rc = SMB2_close_init(tcon, server,
-			     &rqst[2], COMPOUND_FID, COMPOUND_FID, false);
-	if (rc)
-		goto query_rp_exit;
-
-	smb2_set_related(&rqst[2]);
-
-	rc = compound_send_recv(xid, tcon->ses, server,
-				flags, 3, rqst,
-				resp_buftype, rsp_iov);
-
-	ioctl_rsp = rsp_iov[1].iov_base;
-
-	/*
-	 * Open was successful and we got an ioctl response.
-	 */
-	if (rc == 0) {
-		/* See MS-FSCC 2.3.23 */
-		off = le32_to_cpu(ioctl_rsp->OutputOffset);
-		count = le32_to_cpu(ioctl_rsp->OutputCount);
-		if (check_add_overflow(off, count, &len) ||
-		    len > rsp_iov[1].iov_len) {
-			cifs_tcon_dbg(VFS, "%s: invalid ioctl: off=%d count=%d\n",
-				      __func__, off, count);
-			rc = -EIO;
-			goto query_rp_exit;
-		}
-
-		reparse_buf = (void *)((u8 *)ioctl_rsp + off);
-		len = sizeof(*reparse_buf);
-		if (count < len ||
-		    count < le16_to_cpu(reparse_buf->ReparseDataLength) + len) {
-			cifs_tcon_dbg(VFS, "%s: invalid ioctl: off=%d count=%d\n",
-				      __func__, off, count);
-			rc = -EIO;
-			goto query_rp_exit;
-		}
-		*tag = le32_to_cpu(reparse_buf->ReparseTag);
-		*rsp = rsp_iov[1];
-		*rsp_buftype = resp_buftype[1];
-		resp_buftype[1] = CIFS_NO_BUFFER;
-	}
-
- query_rp_exit:
-	SMB2_open_free(&rqst[0]);
-	SMB2_ioctl_free(&rqst[1]);
-	SMB2_close_free(&rqst[2]);
-	free_rsp_buf(resp_buftype[0], rsp_iov[0].iov_base);
-	free_rsp_buf(resp_buftype[1], rsp_iov[1].iov_base);
-	free_rsp_buf(resp_buftype[2], rsp_iov[2].iov_base);
-	kfree(vars);
-out_free_path:
-	kfree(utf16_path);
-	return rc;
-}
-
 static struct cifs_ntsd *
 get_smb2_acl_by_fid(struct cifs_sb_info *cifs_sb,
 		    const struct cifs_fid *cifsfid, u32 *pacllen, u32 info)
@@ -5280,7 +5153,7 @@ static int smb2_create_reparse_symlink(const unsigned int xid,
 	buf->ReparseDataLength = cpu_to_le16(len - sizeof(struct reparse_data_buffer));
 	buf->SubstituteNameOffset = cpu_to_le16(plen);
 	buf->SubstituteNameLength = cpu_to_le16(plen);
-	memcpy((u8 *)buf->PathBuffer + plen, path, plen);
+	memcpy(&buf->PathBuffer[plen], path, plen);
 	buf->PrintNameOffset = 0;
 	buf->PrintNameLength = cpu_to_le16(plen);
 	memcpy(buf->PathBuffer, path, plen);

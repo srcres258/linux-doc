@@ -159,6 +159,10 @@ zswap itself) on a cgroup-basis as follows:
 
 	echo 0 > /sys/fs/cgroup/<cgroup-name>/memory.zswap.writeback
 
+Note that if the store failures are recurring (for e.g if the pages are
+incompressible), users can observe reclaim inefficiency after disabling
+writeback (because the same pages might be rejected again and again).
+
 When there is a sizable amount of cold memory residing in the zswap pool, it
 can be advantageous to proactively write these cold pages to swap and reclaim
 the memory for other use cases. By default, the zswap shrinker is disabled.

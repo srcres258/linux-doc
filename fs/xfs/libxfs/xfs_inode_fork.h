@@ -13,14 +13,12 @@ struct xfs_dinode;
  * File incore extent information, present for each of data & attr forks.
  */
 struct xfs_ifork {
-	int64_t			if_bytes;	/* bytes in if_u1 */
+	int64_t			if_bytes;	/* bytes in if_data */
 	struct xfs_btree_block	*if_broot;	/* file's incore btree root */
 	unsigned int		if_seq;		/* fork mod counter */
 	int			if_height;	/* height of the extent tree */
-	union {
-		void		*if_root;	/* extent tree root */
-		char		*if_data;	/* inline file data */
-	} if_u1;
+	void			*if_data;	/* extent tree root or
+						   inline data */
 	xfs_extnum_t		if_nextents;	/* # of extents in this fork */
 	short			if_broot_bytes;	/* bytes allocated for root */
 	int8_t			if_format;	/* format of this fork */
@@ -170,7 +168,7 @@ int		xfs_iformat_attr_fork(struct xfs_inode *, struct xfs_dinode *);
 void		xfs_iflush_fork(struct xfs_inode *, struct xfs_dinode *,
 				struct xfs_inode_log_item *, int);
 void		xfs_idestroy_fork(struct xfs_ifork *ifp);
-void		xfs_idata_realloc(struct xfs_inode *ip, int64_t byte_diff,
+void *		xfs_idata_realloc(struct xfs_inode *ip, int64_t byte_diff,
 				int whichfork);
 void		xfs_iroot_realloc(struct xfs_inode *, int, int);
 int		xfs_iread_extents(struct xfs_trans *, struct xfs_inode *, int);

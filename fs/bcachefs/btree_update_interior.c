@@ -556,8 +556,6 @@ static void btree_update_add_key(struct btree_update *as,
 static int btree_update_nodes_written_trans(struct btree_trans *trans,
 					    struct btree_update *as)
 {
-	struct bkey_i *k;
-
 	struct jset_entry *e = bch2_trans_jset_entry_alloc(trans, as->journal_u64s);
 	int ret = PTR_ERR_OR_ZERO(e);
 	if (ret)
@@ -570,7 +568,8 @@ static int btree_update_nodes_written_trans(struct btree_trans *trans,
 	for_each_keylist_key(&as->old_keys, k) {
 		unsigned level = bkey_i_to_btree_ptr_v2(k)->v.mem_ptr;
 
-		ret = bch2_trans_mark_old(trans, as->btree_id, level, bkey_i_to_s_c(k), 0);
+		ret = bch2_key_trigger_old(trans, as->btree_id, level, bkey_i_to_s_c(k),
+					   BTREE_TRIGGER_TRANSACTIONAL);
 		if (ret)
 			return ret;
 	}
@@ -578,7 +577,8 @@ static int btree_update_nodes_written_trans(struct btree_trans *trans,
 	for_each_keylist_key(&as->new_keys, k) {
 		unsigned level = bkey_i_to_btree_ptr_v2(k)->v.mem_ptr;
 
-		ret = bch2_trans_mark_new(trans, as->btree_id, level, k, 0);
+		ret = bch2_key_trigger_new(trans, as->btree_id, level, bkey_i_to_s(k),
+					   BTREE_TRIGGER_TRANSACTIONAL);
 		if (ret)
 			return ret;
 	}
@@ -2158,13 +2158,12 @@ static int __bch2_btree_node_update_key(struct btree_trans *trans,
 	int ret;
 
 	if (!skip_triggers) {
-		ret = bch2_trans_mark_old(trans, b->c.btree_id, b->c.level + 1,
-					  bkey_i_to_s_c(&b->key), 0);
-		if (ret)
-			return ret;
-
-		ret = bch2_trans_mark_new(trans, b->c.btree_id, b->c.level + 1,
-					  new_key, 0);
+		ret   = bch2_key_trigger_old(trans, b->c.btree_id, b->c.level + 1,
+					     bkey_i_to_s_c(&b->key),
+					     BTREE_TRIGGER_TRANSACTIONAL) ?:
+			bch2_key_trigger_new(trans, b->c.btree_id, b->c.level + 1,
+					     bkey_i_to_s(new_key),
+					     BTREE_TRIGGER_TRANSACTIONAL);
 		if (ret)
 			return ret;
 	}

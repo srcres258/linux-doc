@@ -495,11 +495,6 @@ static void release_pte_folio(struct folio *folio)
 	folio_putback_lru(folio);
 }
 
-static void release_pte_page(struct page *page)
-{
-	release_pte_folio(page_folio(page));
-}
-
 static void release_pte_pages(pte_t *pte, pte_t *_pte,
 		struct list_head *compound_pagelist)
 {
@@ -688,6 +683,7 @@ static void __collapse_huge_page_copy_succeeded(pte_t *pte,
 						spinlock_t *ptl,
 						struct list_head *compound_pagelist)
 {
+	struct folio *src_folio;
 	struct page *src_page;
 	struct page *tmp;
 	pte_t *_pte;
@@ -709,16 +705,17 @@ static void __collapse_huge_page_copy_succeeded(pte_t *pte,
 			}
 		} else {
 			src_page = pte_page(pteval);
-			if (!PageCompound(src_page))
-				release_pte_page(src_page);
+			src_folio = page_folio(src_page);
+			if (!folio_test_large(src_folio))
+				release_pte_folio(src_folio);
 			/*
 			 * ptl mostly unnecessary, but preempt has to
 			 * be disabled to update the per-cpu stats
-			 * inside page_remove_rmap().
+			 * inside folio_remove_rmap_pte().
 			 */
 			spin_lock(ptl);
 			ptep_clear(vma->vm_mm, address, _pte);
-			page_remove_rmap(src_page, vma, false);
+			folio_remove_rmap_pte(src_folio, src_page, vma);
 			spin_unlock(ptl);
 			free_page_and_swap_cache(src_page);
 		}
@@ -1626,7 +1623,7 @@ int collapse_pte_mapped_thp(struct mm_struct *mm, unsigned long addr,
 		 * PTE dirty? Shmem page is already dirty; file is read-only.
 		 */
 		ptep_clear(mm, addr, pte);
-		page_remove_rmap(page, vma, false);
+		folio_remove_rmap_pte(folio, page, vma);
 		nr_ptes++;
 	}
 
@@ -2126,23 +2123,23 @@ immap_locked:
 		xas_lock_irq(&xas);
 	}
 
-	nr = thp_nr_pages(hpage);
+	folio = page_folio(hpage);
+	nr = folio_nr_pages(folio);
 	if (is_shmem)
-		__mod_lruvec_page_state(hpage, NR_SHMEM_THPS, nr);
+		__lruvec_stat_mod_folio(folio, NR_SHMEM_THPS, nr);
 	else
-		__mod_lruvec_page_state(hpage, NR_FILE_THPS, nr);
+		__lruvec_stat_mod_folio(folio, NR_FILE_THPS, nr);
 
 	if (nr_none) {
-		__mod_lruvec_page_state(hpage, NR_FILE_PAGES, nr_none);
+		__lruvec_stat_mod_folio(folio, NR_FILE_PAGES, nr_none);
 		/* nr_none is always 0 for non-shmem. */
-		__mod_lruvec_page_state(hpage, NR_SHMEM, nr_none);
+		__lruvec_stat_mod_folio(folio, NR_SHMEM, nr_none);
 	}
 
 	/*
 	 * Mark hpage as uptodate before inserting it into the page cache so
 	 * that it isn't mistaken for an fallocated but unwritten page.
 	 */
-	folio = page_folio(hpage);
 	folio_mark_uptodate(folio);
 	folio_ref_add(folio, HPAGE_PMD_NR - 1);
 
@@ -2152,7 +2149,7 @@ immap_locked:
 
 	/* Join all the small entries into a single multi-index entry. */
 	xas_set_order(&xas, start, HPAGE_PMD_ORDER);
-	xas_store(&xas, hpage);
+	xas_store(&xas, folio);
 	WARN_ON_ONCE(xas_error(&xas));
 	xas_unlock_irq(&xas);
 
@@ -2163,7 +2160,7 @@ immap_locked:
 	retract_page_tables(mapping, start);
 	if (cc && !cc->is_khugepaged)
 		result = SCAN_PTE_MAPPED_HUGEPAGE;
-	unlock_page(hpage);
+	folio_unlock(folio);
 
 	/*
 	 * The collapse has succeeded, so free the old pages.

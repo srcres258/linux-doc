@@ -200,26 +200,14 @@ asmlinkage void __init kasan_early_init(void)
 {
 	BUILD_BUG_ON(KASAN_SHADOW_OFFSET !=
 		KASAN_SHADOW_END - (1UL << (64 - KASAN_SHADOW_SCALE_SHIFT)));
-	BUILD_BUG_ON(!IS_ALIGNED(_KASAN_SHADOW_START(VA_BITS), SHADOW_ALIGN));
-	BUILD_BUG_ON(!IS_ALIGNED(_KASAN_SHADOW_START(VA_BITS_MIN), SHADOW_ALIGN));
-	BUILD_BUG_ON(!IS_ALIGNED(KASAN_SHADOW_END, SHADOW_ALIGN));
-
-	if (!root_level_aligned(KASAN_SHADOW_START)) {
-		/*
-		 * The start address is misaligned, and so the next level table
-		 * will be shared with the linear region. This can happen with
-		 * 4 or 5 level paging, so install a generic pte_t[] as the
-		 * next level. This prevents the kasan_pgd_populate call below
-		 * from inserting an entry that refers to the shared KASAN zero
-		 * shadow pud_t[]/p4d_t[], which could end up getting corrupted
-		 * when the linear region is mapped.
-		 */
-		static pte_t tbl[PTRS_PER_PTE] __page_aligned_bss;
-		pgd_t *pgdp = pgd_offset_k(KASAN_SHADOW_START);
-
-		set_pgd(pgdp, __pgd(__pa_symbol(tbl) | PGD_TYPE_TABLE));
-	}
-
+	/*
+	 * We cannot check the actual value of KASAN_SHADOW_START during build,
+	 * as it depends on vabits_actual. As a best-effort approach, check
+	 * potential values calculated based on VA_BITS and VA_BITS_MIN.
+	 */
+	BUILD_BUG_ON(!IS_ALIGNED(_KASAN_SHADOW_START(VA_BITS), PGDIR_SIZE));
+	BUILD_BUG_ON(!IS_ALIGNED(_KASAN_SHADOW_START(VA_BITS_MIN), PGDIR_SIZE));
+	BUILD_BUG_ON(!IS_ALIGNED(KASAN_SHADOW_END, PGDIR_SIZE));
 	kasan_pgd_populate(KASAN_SHADOW_START, KASAN_SHADOW_END, NUMA_NO_NODE,
 			   true);
 }

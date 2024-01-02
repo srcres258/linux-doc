@@ -41,6 +41,14 @@
 #define DROP_THIS_NODE		10
 #define DROP_PREV_NODE		11
 
+static struct bkey_s unsafe_bkey_s_c_to_s(struct bkey_s_c k)
+{
+	return (struct bkey_s) {{{
+		(struct bkey *) k.k,
+		(struct bch_val *) k.v
+	}}};
+}
+
 static bool should_restart_for_topology_repair(struct bch_fs *c)
 {
 	return c->opts.fix_errors != FSCK_FIX_no &&
@@ -805,9 +813,6 @@ static int bch2_gc_mark_key(struct btree_trans *trans, enum btree_id btree_id,
 	struct bch_fs *c = trans->c;
 	struct bkey deleted = KEY(0, 0, 0);
 	struct bkey_s_c old = (struct bkey_s_c) { &deleted, NULL };
-	unsigned flags =
-		BTREE_TRIGGER_GC|
-		(initial ? BTREE_TRIGGER_NOATOMIC : 0);
 	int ret = 0;
 
 	deleted.p = k->k->p;
@@ -829,7 +834,7 @@ static int bch2_gc_mark_key(struct btree_trans *trans, enum btree_id btree_id,
 	}
 
 	ret = commit_do(trans, NULL, NULL, 0,
-			bch2_mark_key(trans, btree_id, level, old, *k, flags));
+			bch2_key_trigger(trans, btree_id, level, old, unsafe_bkey_s_c_to_s(*k), BTREE_TRIGGER_GC));
 fsck_err:
 err:
 	bch_err_fn(c, ret);
@@ -1589,7 +1594,7 @@ static int bch2_gc_write_reflink_key(struct btree_trans *trans,
 		if (!r->refcount)
 			new->k.type = KEY_TYPE_deleted;
 		else
-			*bkey_refcount(new) = cpu_to_le64(r->refcount);
+			*bkey_refcount(bkey_i_to_s(new)) = cpu_to_le64(r->refcount);
 	}
 fsck_err:
 	printbuf_exit(&buf);
@@ -1844,7 +1849,6 @@ static int gc_btree_gens_key(struct btree_trans *trans,
 {
 	struct bch_fs *c = trans->c;
 	struct bkey_ptrs_c ptrs = bch2_bkey_ptrs_c(k);
-	const struct bch_extent_ptr *ptr;
 	struct bkey_i *u;
 	int ret;
 

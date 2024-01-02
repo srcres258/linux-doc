@@ -82,6 +82,9 @@ enum hist_column {
 	HISTC_ADDR_TO,
 	HISTC_ADDR,
 	HISTC_SIMD,
+	HISTC_TYPE,
+	HISTC_TYPE_OFFSET,
+	HISTC_SYMBOL_OFFSET,
 	HISTC_NR_COLS, /* Last entry */
 };
 

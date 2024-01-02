@@ -256,8 +256,7 @@ struct netfs_io_request {
 	struct iov_iter		iter;		/* Unencrypted-side iterator */
 	struct iov_iter		io_iter;	/* I/O (Encrypted-side) iterator */
 	void			*netfs_priv;	/* Private data for the netfs */
-	struct bio_vec		*direct_bv	/* DIO buffer list (when handling iovec-iter) */
-	__counted_by(direct_bv_count);
+	struct bio_vec		*direct_bv;	/* DIO buffer list (when handling iovec-iter) */
 	unsigned int		direct_bv_count; /* Number of elements in direct_bv[] */
 	unsigned int		debug_id;
 	unsigned int		rsize;		/* Maximum read size (0 for none) */
@@ -456,22 +455,27 @@ static inline struct netfs_inode *netfs_inode(struct inode *inode)
  * netfs_inode_init - Initialise a netfslib inode context
  * @ctx: The netfs inode to initialise
  * @ops: The netfs's operations list
+ * @use_zero_point: True to use the zero_point read optimisation
  *
  * Initialise the netfs library context struct.  This is expected to follow on
  * directly from the VFS inode struct.
  */
 static inline void netfs_inode_init(struct netfs_inode *ctx,
-				    const struct netfs_request_ops *ops)
+				    const struct netfs_request_ops *ops,
+				    bool use_zero_point)
 {
 	ctx->ops = ops;
 	ctx->remote_i_size = i_size_read(&ctx->inode);
-	ctx->zero_point = ctx->remote_i_size;
+	ctx->zero_point = LLONG_MAX;
 	ctx->flags = 0;
 #if IS_ENABLED(CONFIG_FSCACHE)
 	ctx->cache = NULL;
 #endif
 	/* ->releasepage() drives zero_point */
-	mapping_set_release_always(ctx->inode.i_mapping);
+	if (use_zero_point) {
+		ctx->zero_point = ctx->remote_i_size;
+		mapping_set_release_always(ctx->inode.i_mapping);
+	}
 }
 
 /**

@@ -1263,9 +1263,16 @@ static void set_buffer_entries(struct array_buffer *buf, unsigned long val);
 
 int tracing_alloc_snapshot_instance(struct trace_array *tr)
 {
+	int order;
 	int ret;
 
 	if (!tr->allocated_snapshot) {
+
+		/* Make the snapshot buffer have the same order as main buffer */
+		order = ring_buffer_subbuf_order_get(tr->array_buffer.buffer);
+		ret = ring_buffer_subbuf_order_set(tr->max_buffer.buffer, order);
+		if (ret < 0)
+			return ret;
 
 		/* allocate spare buffer */
 		ret = resize_buffer_duplicate_size(&tr->max_buffer,
@@ -1286,6 +1293,7 @@ static void free_snapshot(struct trace_array *tr)
 	 * The max_tr ring buffer has some state (e.g. ring->clock) and
 	 * we want preserve it.
 	 */
+	ring_buffer_subbuf_order_set(tr->max_buffer.buffer, 0);
 	ring_buffer_resize(tr->max_buffer.buffer, 1, RING_BUFFER_ALL_CPUS);
 	set_buffer_entries(&tr->max_buffer, 1);
 	tracing_reset_online_cpus(&tr->max_buffer);
@@ -1894,6 +1902,9 @@ update_max_tr(struct trace_array *tr, struct task_struct *tsk, int cpu,
 	__update_max_tr(tr, tsk, cpu);
 
 	arch_spin_unlock(&tr->max_lock);
+
+	/* Any waiters on the old snapshot buffer need to wake up */
+	ring_buffer_wake_waiters(tr->array_buffer.buffer, RING_BUFFER_ALL_CPUS);
 }
 
 /**
@@ -1945,12 +1956,23 @@ update_max_tr_single(struct trace_array *tr, struct task_struct *tsk, int cpu)
 
 static int wait_on_pipe(struct trace_iterator *iter, int full)
 {
+	int ret;
+
 	/* Iterators are static, they should be filled or empty */
 	if (trace_buffer_iter(iter, iter->cpu_file))
 		return 0;
 
-	return ring_buffer_wait(iter->array_buffer->buffer, iter->cpu_file,
-				full);
+	ret = ring_buffer_wait(iter->array_buffer->buffer, iter->cpu_file, full);
+
+#ifdef CONFIG_TRACER_MAX_TRACE
+	/*
+	 * Make sure this is still the snapshot buffer, as if a snapshot were
+	 * to happen, this would now be the main buffer.
+	 */
+	if (iter->snapshot)
+		iter->array_buffer = &iter->tr->max_buffer;
+#endif
+	return ret;
 }
 
 #ifdef CONFIG_FTRACE_STARTUP_TEST
@@ -5018,7 +5040,7 @@ static int tracing_release(struct inode *inode, struct file *file)
 	return 0;
 }
 
-static int tracing_release_generic_tr(struct inode *inode, struct file *file)
+int tracing_release_generic_tr(struct inode *inode, struct file *file)
 {
 	struct trace_array *tr = inode->i_private;
 
@@ -7582,6 +7604,7 @@ struct ftrace_buffer_info {
 	struct trace_iterator	iter;
 	void			*spare;
 	unsigned int		spare_cpu;
+	unsigned int		spare_size;
 	unsigned int		read;
 };
 
@@ -8286,6 +8309,8 @@ tracing_buffers_read(struct file *filp, char __user *ubuf,
 {
 	struct ftrace_buffer_info *info = filp->private_data;
 	struct trace_iterator *iter = &info->iter;
+	void *trace_data;
+	int page_size;
 	ssize_t ret = 0;
 	ssize_t size;
 
@@ -8297,6 +8322,17 @@ tracing_buffers_read(struct file *filp, char __user *ubuf,
 		return -EBUSY;
 #endif
 
+	page_size = ring_buffer_subbuf_size_get(iter->array_buffer->buffer);
+
+	/* Make sure the spare matches the current sub buffer size */
+	if (info->spare) {
+		if (page_size != info->spare_size) {
+			ring_buffer_free_read_page(iter->array_buffer->buffer,
+						   info->spare_cpu, info->spare);
+			info->spare = NULL;
+		}
+	}
+
 	if (!info->spare) {
 		info->spare = ring_buffer_alloc_read_page(iter->array_buffer->buffer,
 							  iter->cpu_file);
@@ -8305,19 +8341,20 @@ tracing_buffers_read(struct file *filp, char __user *ubuf,
 			info->spare = NULL;
 		} else {
 			info->spare_cpu = iter->cpu_file;
+			info->spare_size = page_size;
 		}
 	}
 	if (!info->spare)
 		return ret;
 
 	/* Do we have previous read data to read? */
-	if (info->read < PAGE_SIZE)
+	if (info->read < page_size)
 		goto read;
 
  again:
 	trace_access_lock(iter->cpu_file);
 	ret = ring_buffer_read_page(iter->array_buffer->buffer,
-				    &info->spare,
+				    info->spare,
 				    count,
 				    iter->cpu_file, 0);
 	trace_access_unlock(iter->cpu_file);
@@ -8338,11 +8375,11 @@ tracing_buffers_read(struct file *filp, char __user *ubuf,
 
 	info->read = 0;
  read:
-	size = PAGE_SIZE - info->read;
+	size = page_size - info->read;
 	if (size > count)
 		size = count;
-
-	ret = copy_to_user(ubuf, info->spare + info->read, size);
+	trace_data = ring_buffer_read_page_data(info->spare);
+	ret = copy_to_user(ubuf, trace_data + info->read, size);
 	if (ret == size)
 		return -EFAULT;
 
@@ -8453,6 +8490,7 @@ tracing_buffers_splice_read(struct file *file, loff_t *ppos,
 		.spd_release	= buffer_spd_release,
 	};
 	struct buffer_ref *ref;
+	int page_size;
 	int entries, i;
 	ssize_t ret = 0;
 
@@ -8461,13 +8499,14 @@ tracing_buffers_splice_read(struct file *file, loff_t *ppos,
 		return -EBUSY;
 #endif
 
-	if (*ppos & (PAGE_SIZE - 1))
+	page_size = ring_buffer_subbuf_size_get(iter->array_buffer->buffer);
+	if (*ppos & (page_size - 1))
 		return -EINVAL;
 
-	if (len & (PAGE_SIZE - 1)) {
-		if (len < PAGE_SIZE)
+	if (len & (page_size - 1)) {
+		if (len < page_size)
 			return -EINVAL;
-		len &= PAGE_MASK;
+		len &= (~(page_size - 1));
 	}
 
 	if (splice_grow_spd(pipe, &spd))
@@ -8477,7 +8516,7 @@ tracing_buffers_splice_read(struct file *file, loff_t *ppos,
 	trace_access_lock(iter->cpu_file);
 	entries = ring_buffer_entries_cpu(iter->array_buffer->buffer, iter->cpu_file);
 
-	for (i = 0; i < spd.nr_pages_max && len && entries; i++, len -= PAGE_SIZE) {
+	for (i = 0; i < spd.nr_pages_max && len && entries; i++, len -= page_size) {
 		struct page *page;
 		int r;
 
@@ -8498,7 +8537,7 @@ tracing_buffers_splice_read(struct file *file, loff_t *ppos,
 		}
 		ref->cpu = iter->cpu_file;
 
-		r = ring_buffer_read_page(ref->buffer, &ref->page,
+		r = ring_buffer_read_page(ref->buffer, ref->page,
 					  len, iter->cpu_file, 1);
 		if (r < 0) {
 			ring_buffer_free_read_page(ref->buffer, ref->cpu,
@@ -8507,14 +8546,14 @@ tracing_buffers_splice_read(struct file *file, loff_t *ppos,
 			break;
 		}
 
-		page = virt_to_page(ref->page);
+		page = virt_to_page(ring_buffer_read_page_data(ref->page));
 
 		spd.pages[i] = page;
-		spd.partial[i].len = PAGE_SIZE;
+		spd.partial[i].len = page_size;
 		spd.partial[i].offset = 0;
 		spd.partial[i].private = (unsigned long)ref;
 		spd.nr_pages++;
-		*ppos += PAGE_SIZE;
+		*ppos += page_size;
 
 		entries = ring_buffer_entries_cpu(iter->array_buffer->buffer, iter->cpu_file);
 	}
@@ -8535,7 +8574,7 @@ tracing_buffers_splice_read(struct file *file, loff_t *ppos,
 
 		wait_index = READ_ONCE(iter->wait_index);
 
-		ret = wait_on_pipe(iter, iter->tr->buffer_percent);
+		ret = wait_on_pipe(iter, iter->snapshot ? 0 : iter->tr->buffer_percent);
 		if (ret)
 			goto out;
 
@@ -9358,6 +9397,103 @@ static const struct file_operations buffer_percent_fops = {
 	.llseek		= default_llseek,
 };
 
+static ssize_t
+buffer_subbuf_size_read(struct file *filp, char __user *ubuf, size_t cnt, loff_t *ppos)
+{
+	struct trace_array *tr = filp->private_data;
+	size_t size;
+	char buf[64];
+	int order;
+	int r;
+
+	order = ring_buffer_subbuf_order_get(tr->array_buffer.buffer);
+	size = (PAGE_SIZE << order) / 1024;
+
+	r = sprintf(buf, "%zd\n", size);
+
+	return simple_read_from_buffer(ubuf, cnt, ppos, buf, r);
+}
+
+static ssize_t
+buffer_subbuf_size_write(struct file *filp, const char __user *ubuf,
+			 size_t cnt, loff_t *ppos)
+{
+	struct trace_array *tr = filp->private_data;
+	unsigned long val;
+	int old_order;
+	int order;
+	int pages;
+	int ret;
+
+	ret = kstrtoul_from_user(ubuf, cnt, 10, &val);
+	if (ret)
+		return ret;
+
+	val *= 1024; /* value passed in is in KB */
+
+	pages = DIV_ROUND_UP(val, PAGE_SIZE);
+	order = fls(pages - 1);
+
+	/* limit between 1 and 128 system pages */
+	if (order < 0 || order > 7)
+		return -EINVAL;
+
+	/* Do not allow tracing while changing the order of the ring buffer */
+	tracing_stop_tr(tr);
+
+	old_order = ring_buffer_subbuf_order_get(tr->array_buffer.buffer);
+	if (old_order == order)
+		goto out;
+
+	ret = ring_buffer_subbuf_order_set(tr->array_buffer.buffer, order);
+	if (ret)
+		goto out;
+
+#ifdef CONFIG_TRACER_MAX_TRACE
+
+	if (!tr->allocated_snapshot)
+		goto out_max;
+
+	ret = ring_buffer_subbuf_order_set(tr->max_buffer.buffer, order);
+	if (ret) {
+		/* Put back the old order */
+		cnt = ring_buffer_subbuf_order_set(tr->array_buffer.buffer, old_order);
+		if (WARN_ON_ONCE(cnt)) {
+			/*
+			 * AARGH! We are left with different orders!
+			 * The max buffer is our "snapshot" buffer.
+			 * When a tracer needs a snapshot (one of the
+			 * latency tracers), it swaps the max buffer
+			 * with the saved snap shot. We succeeded to
+			 * update the order of the main buffer, but failed to
+			 * update the order of the max buffer. But when we tried
+			 * to reset the main buffer to the original size, we
+			 * failed there too. This is very unlikely to
+			 * happen, but if it does, warn and kill all
+			 * tracing.
+			 */
+			tracing_disabled = 1;
+		}
+		goto out;
+	}
+ out_max:
+#endif
+	(*ppos)++;
+ out:
+	if (ret)
+		cnt = ret;
+	tracing_start_tr(tr);
+	return cnt;
+}
+
+static const struct file_operations buffer_subbuf_size_fops = {
+	.open		= tracing_open_generic_tr,
+	.read		= buffer_subbuf_size_read,
+	.write		= buffer_subbuf_size_write,
+	.release	= tracing_release_generic_tr,
+	.llseek		= default_llseek,
+};
+
 static struct dentry *trace_instance_dir;
 
 static void
@@ -9823,6 +9959,9 @@ init_tracer_tracefs(struct trace_array *tr, struct dentry *d_tracer)
 
 	trace_create_file("buffer_percent", TRACE_MODE_WRITE, d_tracer,
 			tr, &buffer_percent_fops);
+
+	trace_create_file("buffer_subbuf_size_kb", TRACE_MODE_WRITE, d_tracer,
+			  tr, &buffer_subbuf_size_fops);
 
 	create_trace_options_dir(tr);
 

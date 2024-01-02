@@ -209,9 +209,16 @@ repeat:
 	dentry = d_first_child(this_parent);
 resume:
 	hlist_for_each_entry_from(dentry, d_sib) {
+		struct tracefs_inode *ti;
+
 		spin_lock_nested(&dentry->d_lock, DENTRY_D_LOCK_NESTED);
 
 		change_gid(dentry, gid);
+
+		/* If this is the events directory, update that too */
+		ti = get_tracefs(dentry->d_inode);
+		if (ti && (ti->flags & TRACEFS_EVENT_INODE))
+			eventfs_update_gid(dentry, gid);
 
 		if (!hlist_empty(&dentry->d_children)) {
 			spin_unlock(&this_parent->d_lock);

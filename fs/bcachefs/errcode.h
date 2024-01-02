@@ -94,6 +94,7 @@
 	x(ENOSPC,			ENOSPC_sb_members)			\
 	x(ENOSPC,			ENOSPC_sb_members_v2)			\
 	x(ENOSPC,			ENOSPC_sb_crypt)			\
+	x(ENOSPC,			ENOSPC_sb_downgrade)			\
 	x(ENOSPC,			ENOSPC_btree_slot)			\
 	x(ENOSPC,			ENOSPC_snapshot_tree)			\
 	x(ENOENT,			ENOENT_bkey_type_mismatch)		\
@@ -169,6 +170,7 @@
 	x(EINVAL,			device_size_too_small)			\
 	x(EINVAL,			device_not_a_member_of_filesystem)	\
 	x(EINVAL,			device_has_been_removed)		\
+	x(EINVAL,			device_splitbrain)			\
 	x(EINVAL,			device_already_online)			\
 	x(EINVAL,			insufficient_devices_to_start)		\
 	x(EINVAL,			invalid)				\
@@ -217,9 +219,13 @@
 	x(BCH_ERR_invalid_sb,		invalid_sb_quota)			\
 	x(BCH_ERR_invalid_sb,		invalid_sb_errors)			\
 	x(BCH_ERR_invalid_sb,		invalid_sb_opt_compression)		\
+	x(BCH_ERR_invalid_sb,		invalid_sb_ext)				\
+	x(BCH_ERR_invalid_sb,		invalid_sb_downgrade)			\
 	x(BCH_ERR_invalid,		invalid_bkey)				\
 	x(BCH_ERR_operation_blocked,    nocow_lock_blocked)			\
 	x(EIO,				btree_node_read_err)			\
+	x(EIO,				sb_not_downgraded)			\
+	x(EIO,				btree_write_all_failed)			\
 	x(BCH_ERR_btree_node_read_err,	btree_node_read_err_fixable)		\
 	x(BCH_ERR_btree_node_read_err,	btree_node_read_err_want_retry)		\
 	x(BCH_ERR_btree_node_read_err,	btree_node_read_err_must_retry)		\

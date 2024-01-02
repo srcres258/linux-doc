@@ -484,7 +484,7 @@ static int decompress_header(struct iaa_device_compression_mode *device_mode,
 
 	desc->decompr_flags = mode->gen_decomp_table_flags;
 
-	desc->priv = 1;
+	desc->priv = 0;
 
 	desc->completion_addr = idxd_desc->compl_dma;
 
@@ -976,7 +976,7 @@ static int wq_table_add_wqs(int iaa, int cpu)
 		pr_debug("rebalance: added wq for cpu=%d: iaa wq %d.%d\n",
 			 cpu, iaa_wq->wq->idxd->id, iaa_wq->wq->id);
 		n_wqs_added++;
-	};
+	}
 
 	if (!n_wqs_added) {
 		pr_debug("couldn't find any iaa wqs!\n");
@@ -1017,11 +1017,16 @@ static void rebalance_wq_table(void)
 		return;
 	}
 
-	for_each_online_node(node) {
+	for_each_node_with_cpus(node) {
 		node_cpus = cpumask_of_node(node);
 
 		for (cpu = 0; cpu < nr_cpus_per_node; cpu++) {
 			int node_cpu = cpumask_nth(cpu, node_cpus);
+
+			if (WARN_ON(node_cpu >= nr_cpu_ids)) {
+				pr_debug("node_cpu %d doesn't exist!\n", node_cpu);
+				return;
+			}
 
 			if ((cpu % cpus_per_iaa) == 0)
 				iaa++;
@@ -1255,7 +1260,7 @@ static int iaa_compress(struct crypto_tfm *tfm,	struct acomp_req *req,
 		IDXD_OP_FLAG_RD_SRC2_AECS | IDXD_OP_FLAG_CC;
 	desc->opcode = IAX_OPCODE_COMPRESS;
 	desc->compr_flags = IAA_COMP_FLAGS;
-	desc->priv = 1;
+	desc->priv = 0;
 
 	desc->src1_addr = (u64)src_addr;
 	desc->src1_size = slen;
@@ -1409,7 +1414,7 @@ static int iaa_compress_verify(struct crypto_tfm *tfm, struct acomp_req *req,
 	desc->flags = IDXD_OP_FLAG_CRAV | IDXD_OP_FLAG_RCR | IDXD_OP_FLAG_CC;
 	desc->opcode = IAX_OPCODE_DECOMPRESS;
 	desc->decompr_flags = IAA_DECOMP_FLAGS | IAA_DECOMP_SUPPRESS_OUTPUT;
-	desc->priv = 1;
+	desc->priv = 0;
 
 	desc->src1_addr = (u64)dst_addr;
 	desc->src1_size = *dlen;
@@ -1495,7 +1500,7 @@ static int iaa_decompress(struct crypto_tfm *tfm, struct acomp_req *req,
 	desc->opcode = IAX_OPCODE_DECOMPRESS;
 	desc->max_dst_size = PAGE_SIZE;
 	desc->decompr_flags = IAA_DECOMP_FLAGS;
-	desc->priv = 1;
+	desc->priv = 0;
 
 	desc->src1_addr = (u64)src_addr;
 	desc->dst_addr = (u64)dst_addr;
@@ -2095,9 +2100,15 @@ static struct idxd_device_driver iaa_crypto_driver = {
 static int __init iaa_crypto_init_module(void)
 {
 	int ret = 0;
+	int node;
 
 	nr_cpus = num_online_cpus();
-	nr_nodes = num_online_nodes();
+	for_each_node_with_cpus(node)
+		nr_nodes++;
+	if (!nr_nodes) {
+		pr_err("IAA couldn't find any nodes with cpus\n");
+		return -ENODEV;
+	}
 	nr_cpus_per_node = nr_cpus / nr_nodes;
 
 	if (crypto_has_comp("deflate-generic", 0, 0))

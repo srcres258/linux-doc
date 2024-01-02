@@ -48,7 +48,7 @@ depot_stack_handle_t kasan_save_stack(gfp_t flags, depot_flags_t depot_flags)
 	return stack_depot_save_flags(entries, nr_entries, flags, depot_flags);
 }
 
-void kasan_set_track(struct kasan_track *track, gfp_t flags)
+void kasan_set_track(struct kasan_track *track, depot_stack_handle_t stack)
 {
 #ifdef CONFIG_KASAN_EXTRA_INFO
 	u32 cpu = raw_smp_processor_id();
@@ -58,8 +58,16 @@ void kasan_set_track(struct kasan_track *track, gfp_t flags)
 	track->timestamp = ts_nsec >> 3;
 #endif /* CONFIG_KASAN_EXTRA_INFO */
 	track->pid = current->pid;
-	track->stack = kasan_save_stack(flags,
+	track->stack = stack;
+}
+
+void kasan_save_track(struct kasan_track *track, gfp_t flags)
+{
+	depot_stack_handle_t stack;
+
+	stack = kasan_save_stack(flags,
 			STACK_DEPOT_FLAG_CAN_ALLOC | STACK_DEPOT_FLAG_GET);
+	kasan_set_track(track, stack);
 }
 
 #if defined(CONFIG_KASAN_GENERIC) || defined(CONFIG_KASAN_SW_TAGS)
@@ -79,6 +87,9 @@ EXPORT_SYMBOL(kasan_disable_current);
 
 void __kasan_unpoison_range(const void *address, size_t size)
 {
+	if (is_kfence_address(address))
+		return;
+
 	kasan_unpoison(address, size, false);
 }
 
@@ -209,9 +220,6 @@ static inline bool poison_slab_object(struct kmem_cache *cache, void *object,
 	tagged_object = object;
 	object = kasan_reset_tag(object);
 
-	if (is_kfence_address(object))
-		return false;
-
 	if (unlikely(nearest_obj(cache, virt_to_slab(object), object) != object)) {
 		kasan_report_invalid_free(tagged_object, ip, KASAN_REPORT_INVALID_FREE);
 		return true;
@@ -238,9 +246,33 @@ static inline bool poison_slab_object(struct kmem_cache *cache, void *object,
 bool __kasan_slab_free(struct kmem_cache *cache, void *object,
 				unsigned long ip, bool init)
 {
-	bool buggy_object = poison_slab_object(cache, object, ip, init);
+	if (is_kfence_address(object))
+		return false;
 
-	return buggy_object ? true : kasan_quarantine_put(cache, object);
+	/*
+	 * If the object is buggy, do not let slab put the object onto the
+	 * freelist. The object will thus never be allocated again and its
+	 * metadata will never get released.
+	 */
+	if (poison_slab_object(cache, object, ip, init))
+		return true;
+
+	/*
+	 * If the object is put into quarantine, do not let slab put the object
+	 * onto the freelist for now. The object's metadata is kept until the
+	 * object gets evicted from quarantine.
+	 */
+	if (kasan_quarantine_put(cache, object))
+		return true;
+
+	/*
+	 * If the object is not put into quarantine, it will likely be quickly
+	 * reallocated. Thus, release its metadata now.
+	 */
+	kasan_release_object_meta(cache, object);
+
+	/* Let slab put the object onto the freelist. */
+	return false;
 }
 
 static inline bool check_page_allocation(void *ptr, unsigned long ip)
@@ -268,8 +300,8 @@ void __kasan_kfree_large(void *ptr, unsigned long ip)
 	/* The object will be poisoned by kasan_poison_pages(). */
 }
 
-void unpoison_slab_object(struct kmem_cache *cache, void *object, gfp_t flags,
-			  bool init)
+static inline void unpoison_slab_object(struct kmem_cache *cache, void *object,
+					gfp_t flags, bool init)
 {
 	/*
 	 * Unpoison the whole object. For kmalloc() allocations,
@@ -350,7 +382,7 @@ void * __must_check __kasan_kmalloc(struct kmem_cache *cache, const void *object
 	if (unlikely(object == NULL))
 		return NULL;
 
-	if (is_kfence_address(kasan_reset_tag(object)))
+	if (is_kfence_address(object))
 		return (void *)object;
 
 	/* The object has already been unpoisoned by kasan_slab_alloc(). */
@@ -408,7 +440,7 @@ void * __must_check __kasan_krealloc(const void *object, size_t size, gfp_t flag
 	if (unlikely(object == ZERO_SIZE_PTR))
 		return (void *)object;
 
-	if (is_kfence_address(kasan_reset_tag(object)))
+	if (is_kfence_address(object))
 		return (void *)object;
 
 	/*
@@ -474,6 +506,9 @@ bool __kasan_mempool_poison_object(void *ptr, unsigned long ip)
 		return true;
 	}
 
+	if (is_kfence_address(ptr))
+		return false;
+
 	slab = folio_slab(folio);
 	return !poison_slab_object(slab->slab_cache, ptr, ip, false);
 }
@@ -482,9 +517,6 @@ void __kasan_mempool_unpoison_object(void *ptr, size_t size, unsigned long ip)
 {
 	struct slab *slab;
 	gfp_t flags = 0; /* Might be executing under a lock. */
-
-	if (is_kfence_address(kasan_reset_tag(ptr)))
-		return;
 
 	slab = virt_to_slab(ptr);
 
@@ -497,6 +529,9 @@ void __kasan_mempool_unpoison_object(void *ptr, size_t size, unsigned long ip)
 		poison_kmalloc_large_redzone(ptr, size, flags);
 		return;
 	}
+
+	if (is_kfence_address(ptr))
+		return;
 
 	/* Unpoison the object and save alloc info for non-kmalloc() allocations. */
 	unpoison_slab_object(slab->slab_cache, ptr, size, flags);

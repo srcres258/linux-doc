@@ -389,7 +389,7 @@ enum fsck_err_opts {
 	  BCH2_NO_SB_OPT,		BCH_SB_SECTOR,			\
 	  "offset",	"Sector offset of superblock")			\
 	x(read_only,			u8,				\
-	  OPT_FS,							\
+	  OPT_FS|OPT_MOUNT,						\
 	  OPT_BOOL(),							\
 	  BCH2_NO_SB_OPT,		false,				\
 	  NULL,		NULL)						\
@@ -414,11 +414,11 @@ enum fsck_err_opts {
 	  OPT_BOOL(),							\
 	  BCH2_NO_SB_OPT,		false,				\
 	  NULL,		"Allocate the buckets_nouse bitmap")		\
-	x(log_output,			u64,				\
+	x(stdio,			u64,				\
 	  0,								\
 	  OPT_UINT(0, S64_MAX),						\
 	  BCH2_NO_SB_OPT,		false,				\
-	  NULL,		"Pointer to a struct log_output")		\
+	  NULL,		"Pointer to a struct stdio_redirect")		\
 	x(project,			u8,				\
 	  OPT_INODE,							\
 	  OPT_BOOL(),							\

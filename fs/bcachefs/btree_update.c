@@ -186,8 +186,11 @@ int bch2_trans_update_extent_overwrite(struct btree_trans *trans,
 	enum btree_id btree_id = iter->btree_id;
 	struct bkey_i *update;
 	struct bpos new_start = bkey_start_pos(new.k);
-	bool front_split = bkey_lt(bkey_start_pos(old.k), new_start);
-	bool back_split  = bkey_gt(old.k->p, new.k->p);
+	unsigned front_split = bkey_lt(bkey_start_pos(old.k), new_start);
+	unsigned back_split  = bkey_gt(old.k->p, new.k->p);
+	unsigned middle_split = (front_split || back_split) &&
+		old.k->p.snapshot != new.k->p.snapshot;
+	unsigned nr_splits = front_split + back_split + middle_split;
 	int ret = 0, compressed_sectors;
 
 	/*
@@ -195,10 +198,9 @@ int bch2_trans_update_extent_overwrite(struct btree_trans *trans,
 	 * so that __bch2_trans_commit() can increase our disk
 	 * reservation:
 	 */
-	if (((front_split && back_split) ||
-	     ((front_split || back_split) && old.k->p.snapshot != new.k->p.snapshot)) &&
+	if (nr_splits > 1 &&
 	    (compressed_sectors = bch2_bkey_sectors_compressed(old)))
-		trans->extra_disk_res += compressed_sectors;
+		trans->extra_disk_res += compressed_sectors * (nr_splits - 1);
 
 	if (front_split) {
 		update = bch2_bkey_make_mut_noupdate(trans, old);
@@ -216,8 +218,7 @@ int bch2_trans_update_extent_overwrite(struct btree_trans *trans,
 	}
 
 	/* If we're overwriting in a different snapshot - middle split: */
-	if (old.k->p.snapshot != new.k->p.snapshot &&
-	    (front_split || back_split)) {
+	if (middle_split) {
 		update = bch2_bkey_make_mut_noupdate(trans, old);
 		if ((ret = PTR_ERR_OR_ZERO(update)))
 			return ret;
@@ -556,9 +557,7 @@ struct jset_entry *__bch2_trans_jset_entry_alloc(struct btree_trans *trans, unsi
 	if (new_top > trans->journal_entries_size) {
 		trans->journal_entries_size = roundup_pow_of_two(new_top);
 
-		struct btree_transaction_stats *s = btree_trans_stats(trans);
-		if (s)
-			s->journal_entries_size = trans->journal_entries_size;
+		btree_trans_stats(trans)->journal_entries_size = trans->journal_entries_size;
 	}
 
 	struct jset_entry *n =

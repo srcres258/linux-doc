@@ -677,12 +677,12 @@ static struct pmc_info arl_pmc_info_list[] = {
  * Set power state of select devices that do not have drivers to D3
  * so that they do not block Package C entry.
  */
-void arl_d3_fixup(void)
+static void arl_d3_fixup(void)
 {
 	pmc_core_set_device_d3(ARL_NPU_PCI_DEV);
 }
 
-int arl_resume(struct pmc_dev *pmcdev)
+static int arl_resume(struct pmc_dev *pmcdev)
 {
 	arl_d3_fixup();
 	return pmc_core_resume_common(pmcdev);
@@ -715,12 +715,6 @@ int arl_core_init(struct pmc_dev *pmcdev)
 
 	pmc_core_get_low_power_modes(pmcdev);
 	pmc_core_punit_pmt_init(pmcdev, ARL_PMT_DMU_GUID);
-
-	/* Due to a hardware limitation, the GBE LTR blocks PC10
-	 * when a cable is attached. Tell the PMC to ignore it.
-	 */
-	dev_dbg(&pmcdev->pdev->dev, "ignoring GBE LTR\n");
-	pmc_core_send_ltr_ignore(pmcdev, 3);
 
 	if (ssram_init)	{
 		ret = pmc_core_ssram_get_lpm_reqs(pmcdev);

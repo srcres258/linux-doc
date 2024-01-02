@@ -1209,7 +1209,6 @@ static btree_path_idx_t btree_path_clone(struct btree_trans *trans, btree_path_i
 					 bool intent)
 {
 	btree_path_idx_t new = btree_path_alloc(trans, src);
-
 	btree_path_copy(trans, trans->paths + new, trans->paths + src);
 	__btree_path_get(trans->paths + new, intent);
 	return new;
@@ -1477,9 +1476,6 @@ static void bch2_trans_update_max_paths(struct btree_trans *trans)
 	struct printbuf buf = PRINTBUF;
 	size_t nr = bitmap_weight(trans->paths_allocated, trans->nr_paths);
 
-	if (!s)
-		return;
-
 	bch2_trans_paths_to_text(&buf, trans);
 
 	if (!buf.allocation_failure) {
@@ -1512,42 +1508,51 @@ int __bch2_btree_trans_too_many_iters(struct btree_trans *trans)
 	return btree_trans_restart(trans, BCH_ERR_transaction_restart_too_many_iters);
 }
 
+noinline __cold
+int __bch2_btree_trans_too_many_iters(struct btree_trans *trans)
+{
+	bch2_dump_trans_paths_updates(trans);
+	bch_err(trans->c, "trans path overflow");
+}
+
 static noinline void btree_paths_realloc(struct btree_trans *trans)
 {
 	unsigned nr = trans->nr_paths * 2;
 
 	void *p = kzalloc(BITS_TO_LONGS(nr) * sizeof(unsigned long) +
-			  nr + 8 +
 			  sizeof(struct btree_trans_paths) +
 			  nr * sizeof(struct btree_path) +
+			  nr * sizeof(btree_path_idx_t) + 8 +
 			  nr * sizeof(struct btree_insert_entry), GFP_KERNEL|__GFP_NOFAIL);
 
 	unsigned long *paths_allocated = p;
-	p += BITS_TO_LONGS(nr) * sizeof(unsigned long);
-	struct btree_path *paths = p;
-	p += nr * sizeof(struct btree_path);
-	u8 *sorted = p;
-	p += nr + 8;
-	struct btree_insert_entry *updates = p;
-
-	*trans_paths_nr(paths) = nr;
-
 	memcpy(paths_allocated, trans->paths_allocated, BITS_TO_LONGS(trans->nr_paths) * sizeof(unsigned long));
-	memcpy(sorted, trans->sorted, trans->nr_sorted);
+	p += BITS_TO_LONGS(nr) * sizeof(unsigned long);
+
+	p += sizeof(struct btree_trans_paths);
+	struct btree_path *paths = p;
+	*trans_paths_nr(paths) = nr;
 	memcpy(paths, trans->paths, trans->nr_paths * sizeof(struct btree_path));
-	memcpy(updates, trans->updates, trans->nr_paths * sizeof(struct btree_path));
+	p += nr * sizeof(struct btree_path);
+
+	btree_path_idx_t *sorted = p;
+	memcpy(sorted, trans->sorted, trans->nr_sorted * sizeof(btree_path_idx_t));
+	p += nr * sizeof(btree_path_idx_t) + 8;
+
+	struct btree_insert_entry *updates = p;
+	memcpy(updates, trans->updates, trans->nr_paths * sizeof(struct btree_insert_entry));
 
 	unsigned long *old = trans->paths_allocated;
 
 	rcu_assign_pointer(trans->paths_allocated,	paths_allocated);
-	rcu_assign_pointer(trans->sorted,		sorted);
 	rcu_assign_pointer(trans->paths,		paths);
+	rcu_assign_pointer(trans->sorted,		sorted);
 	rcu_assign_pointer(trans->updates,		updates);
 
 	trans->nr_paths		= nr;
 
 	if (old != trans->_paths_allocated)
-		kfree_rcu_mightsleep(trans->paths_allocated);
+		kfree_rcu_mightsleep(old);
 }
 
 static inline btree_path_idx_t btree_path_alloc(struct btree_trans *trans,
@@ -1555,8 +1560,14 @@ static inline btree_path_idx_t btree_path_alloc(struct btree_trans *trans,
 {
 	btree_path_idx_t idx = find_first_zero_bit(trans->paths_allocated, trans->nr_paths);
 
-	if (unlikely(idx == trans->nr_paths))
+	if (unlikely(idx == trans->nr_paths)) {
+		if (trans->nr_paths == BTREE_ITER_MAX) {
+			btree_path_overflow(trans);
+			return 0;
+		}
+
 		btree_paths_realloc(trans);
+	}
 
 	/*
 	 * Do this before marking the new path as allocated, since it won't be
@@ -2135,18 +2146,16 @@ struct bkey_s_c bch2_btree_iter_peek_upto(struct btree_iter *iter, struct bpos e
 			goto out_no_locked;
 
 		/*
-		 * iter->pos should be mononotically increasing, and always be
-		 * equal to the key we just returned - except extents can
-		 * straddle iter->pos:
+		 * We need to check against @end before FILTER_SNAPSHOTS because
+		 * if we get to a different inode that requested we might be
+		 * seeing keys for a different snapshot tree that will all be
+		 * filtered out.
+		 *
+		 * But we can't do the full check here, because bkey_start_pos()
+		 * isn't monotonically increasing before FILTER_SNAPSHOTS, and
+		 * that's what we check against in extents mode:
 		 */
-		if (!(iter->flags & BTREE_ITER_IS_EXTENTS))
-			iter_pos = k.k->p;
-		else
-			iter_pos = bkey_max(iter->pos, bkey_start_pos(k.k));
-
-		if (unlikely(!(iter->flags & BTREE_ITER_IS_EXTENTS)
-			     ? bkey_gt(iter_pos, end)
-			     : bkey_ge(iter_pos, end)))
+		if (k.k->p.inode > end.inode)
 			goto end;
 
 		if (iter->update_path &&
@@ -2204,6 +2213,21 @@ struct bkey_s_c bch2_btree_iter_peek_upto(struct btree_iter *iter, struct bpos e
 			search_key = bkey_successor(iter, k.k->p);
 			continue;
 		}
+
+		/*
+		 * iter->pos should be mononotically increasing, and always be
+		 * equal to the key we just returned - except extents can
+		 * straddle iter->pos:
+		 */
+		if (!(iter->flags & BTREE_ITER_IS_EXTENTS))
+			iter_pos = k.k->p;
+		else
+			iter_pos = bkey_max(iter->pos, bkey_start_pos(k.k));
+
+		if (unlikely(!(iter->flags & BTREE_ITER_IS_EXTENTS)
+			     ? bkey_gt(iter_pos, end)
+			     : bkey_ge(iter_pos, end)))
+			goto end;
 
 		break;
 	}
@@ -2640,21 +2664,18 @@ out:
 static inline void btree_path_list_remove(struct btree_trans *trans,
 					  struct btree_path *path)
 {
-	unsigned i;
-
 	EBUG_ON(path->sorted_idx >= trans->nr_sorted);
 #ifdef CONFIG_HAVE_EFFICIENT_UNALIGNED_ACCESS
 	trans->nr_sorted--;
 	memmove_u64s_down_small(trans->sorted + path->sorted_idx,
 				trans->sorted + path->sorted_idx + 1,
-				DIV_ROUND_UP(trans->nr_sorted - path->sorted_idx, 8));
+				DIV_ROUND_UP(trans->nr_sorted - path->sorted_idx,
+					     sizeof(u64) / sizeof(btree_path_idx_t)));
 #else
 	array_remove_item(trans->sorted, trans->nr_sorted, path->sorted_idx);
 #endif
-	for (i = path->sorted_idx; i < trans->nr_sorted; i++)
+	for (unsigned i = path->sorted_idx; i < trans->nr_sorted; i++)
 		trans->paths[trans->sorted[i]].sorted_idx = i;
-
-	path->sorted_idx = U8_MAX;
 }
 
 static inline void btree_path_list_add(struct btree_trans *trans,
@@ -2662,21 +2683,21 @@ static inline void btree_path_list_add(struct btree_trans *trans,
 				       btree_path_idx_t path_idx)
 {
 	struct btree_path *path = trans->paths + path_idx;
-	unsigned i;
 
 	path->sorted_idx = pos ? trans->paths[pos].sorted_idx + 1 : trans->nr_sorted;
 
 #ifdef CONFIG_HAVE_EFFICIENT_UNALIGNED_ACCESS
 	memmove_u64s_up_small(trans->sorted + path->sorted_idx + 1,
 			      trans->sorted + path->sorted_idx,
-			      DIV_ROUND_UP(trans->nr_sorted - path->sorted_idx, 8));
+			      DIV_ROUND_UP(trans->nr_sorted - path->sorted_idx,
+					   sizeof(u64) / sizeof(btree_path_idx_t)));
 	trans->nr_sorted++;
 	trans->sorted[path->sorted_idx] = path_idx;
 #else
 	array_insert_item(trans->sorted, trans->nr_sorted, path->sorted_idx, path_idx);
 #endif
 
-	for (i = path->sorted_idx; i < trans->nr_sorted; i++)
+	for (unsigned i = path->sorted_idx; i < trans->nr_sorted; i++)
 		trans->paths[trans->sorted[i]].sorted_idx = i;
 
 	btree_trans_verify_sorted_refs(trans);
@@ -2758,8 +2779,7 @@ void *__bch2_trans_kmalloc(struct btree_trans *trans, size_t size)
 	WARN_ON_ONCE(new_bytes > BTREE_TRANS_MEM_MAX);
 
 	struct btree_transaction_stats *s = btree_trans_stats(trans);
-	if (s)
-		s->max_mem = max(s->max_mem, new_bytes);
+	s->max_mem = max(s->max_mem, new_bytes);
 
 	new_mem = krealloc(trans->mem, new_bytes, GFP_NOWAIT|__GFP_NOWARN);
 	if (unlikely(!new_mem)) {
@@ -2875,9 +2895,15 @@ u32 bch2_trans_begin(struct btree_trans *trans)
 	}
 
 	now = local_clock();
+
+	if (!IS_ENABLED(CONFIG_BCACHEFS_NO_LATENCY_ACCT) &&
+	    time_after64(now, trans->last_begin_time + 10))
+		__bch2_time_stats_update(&btree_trans_stats(trans)->duration,
+					 trans->last_begin_time, now);
+
 	if (!trans->restarted &&
 	    (need_resched() ||
-	     now - trans->last_begin_time > BTREE_TRANS_MAX_LOCK_HOLD_TIME_NS)) {
+	     time_after64(now, trans->last_begin_time + BTREE_TRANS_MAX_LOCK_HOLD_TIME_NS))) {
 		drop_locks_do(trans, (cond_resched(), 0));
 		now = local_clock();
 	}
@@ -2896,13 +2922,11 @@ u32 bch2_trans_begin(struct btree_trans *trans)
 	return trans->restart_count;
 }
 
-const char *bch2_btree_transaction_fns[BCH_TRANSACTIONS_NR];
+const char *bch2_btree_transaction_fns[BCH_TRANSACTIONS_NR] = { "(unknown)" };
 
 unsigned bch2_trans_get_fn_idx(const char *fn)
 {
-	unsigned i;
-
-	for (i = 0; i < ARRAY_SIZE(bch2_btree_transaction_fns); i++)
+	for (unsigned i = 0; i < ARRAY_SIZE(bch2_btree_transaction_fns); i++)
 		if (!bch2_btree_transaction_fns[i] ||
 		    bch2_btree_transaction_fns[i] == fn) {
 			bch2_btree_transaction_fns[i] = fn;
@@ -2910,7 +2934,7 @@ unsigned bch2_trans_get_fn_idx(const char *fn)
 		}
 
 	pr_warn_once("BCH_TRANSACTIONS_NR not big enough!");
-	return i;
+	return 0;
 }
 
 struct btree_trans *__bch2_trans_get(struct bch_fs *c, unsigned fn_idx)
@@ -2972,7 +2996,7 @@ got_trans:
 	trans->paths		= trans->_paths;
 	trans->updates		= trans->_updates;
 
-	*trans_paths_nr(trans->paths) = BTREE_ITER_MAX;
+	*trans_paths_nr(trans->paths) = BTREE_ITER_INITIAL;
 
 	trans->paths_allocated[0] = 1;
 
@@ -3215,6 +3239,7 @@ void bch2_fs_btree_iter_init_early(struct bch_fs *c)
 	for (s = c->btree_transaction_stats;
 	     s < c->btree_transaction_stats + ARRAY_SIZE(c->btree_transaction_stats);
 	     s++) {
+		bch2_time_stats_init(&s->duration);
 		bch2_time_stats_init(&s->lock_hold_times);
 		mutex_init(&s->lock);
 	}

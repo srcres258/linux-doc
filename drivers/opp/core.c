@@ -842,9 +842,14 @@ EXPORT_SYMBOL_GPL(dev_pm_opp_find_level_ceil);
  * use.
  */
 struct dev_pm_opp *dev_pm_opp_find_level_floor(struct device *dev,
-					       unsigned long *level)
+					       unsigned int *level)
 {
-	return _find_key_floor(dev, level, 0, true, _read_level, NULL);
+	unsigned long temp = *level;
+	struct dev_pm_opp *opp;
+
+	opp = _find_key_floor(dev, &temp, 0, true, _read_level, NULL);
+	*level = temp;
+	return opp;
 }
 EXPORT_SYMBOL_GPL(dev_pm_opp_find_level_floor);
 
@@ -1061,6 +1066,7 @@ static int _set_required_opps(struct device *dev, struct opp_table *opp_table,
 			      struct dev_pm_opp *opp, bool up)
 {
 	struct device **devs = opp_table->required_devs;
+	struct dev_pm_opp *required_opp;
 	int index, target, delta, ret;
 
 	if (!devs)
@@ -1083,7 +1089,9 @@ static int _set_required_opps(struct device *dev, struct opp_table *opp_table,
 
 	while (index != target) {
 		if (devs[index]) {
-			ret = dev_pm_opp_set_opp(devs[index], opp->required_opps[index]);
+			required_opp = opp ? opp->required_opps[index] : NULL;
+
+			ret = dev_pm_opp_set_opp(devs[index], required_opp);
 			if (ret)
 				return ret;
 		}

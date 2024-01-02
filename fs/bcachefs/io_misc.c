@@ -58,7 +58,7 @@ int bch2_extent_fallocate(struct btree_trans *trans,
 	 */
 	ret = bch2_disk_reservation_get(c, &disk_res, sectors, new_replicas, 0);
 	if (unlikely(ret))
-		goto err;
+		goto err_noprint;
 
 	bch2_bkey_buf_reassemble(&old, c, k);
 
@@ -74,7 +74,6 @@ int bch2_extent_fallocate(struct btree_trans *trans,
 		struct bkey_i_extent *e;
 		struct bch_devs_list devs_have;
 		struct write_point *wp;
-		struct bch_extent_ptr *ptr;
 
 		devs_have.nr = 0;
 
@@ -119,7 +118,7 @@ err:
 			inum.inum,
 			iter->pos.offset << 9,
 			"%s(): error: %s", __func__, bch2_err_str(ret));
-
+err_noprint:
 	bch2_open_buckets_put(c, &open_buckets);
 	bch2_disk_reservation_put(c, &disk_res);
 	bch2_bkey_buf_exit(&new, c);
