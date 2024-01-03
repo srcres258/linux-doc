@@ -434,9 +434,6 @@ struct mii_bus {
 
 	/** @shared: shared state across different PHYs */
 	struct phy_package_shared *shared[PHY_MAX_ADDR];
-
-	/** @__unregister_callback: called at the last step of unregistration */
-	void (*__unregister_callback)(struct mii_bus *bus);
 };
 #define to_mii_bus(d) container_of(d, struct mii_bus, dev)
 
@@ -575,7 +572,6 @@ struct macsec_ops;
  *      - Bits [31:24] are reserved for defining generic
  *        PHY driver behavior.
  * @irq: IRQ number of the PHY's interrupt (-1 if none)
- * @phy_timer: The timer for handling the state machine
  * @phylink: Pointer to phylink instance for this PHY
  * @sfp_bus_attached: Flag indicating whether the SFP bus has been attached
  * @sfp_bus: SFP bus attached to this PHY's fiber port

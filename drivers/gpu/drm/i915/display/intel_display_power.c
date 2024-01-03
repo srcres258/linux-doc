@@ -406,7 +406,7 @@ print_async_put_domains_state(struct i915_power_domains *power_domains)
 						     display.power.domains);
 
 	drm_dbg(&i915->drm, "async_put_wakeref %lu\n",
-		power_domains->async_put_wakeref);
+		(unsigned long int)power_domains->async_put_wakeref);
 
 	print_power_domains(power_domains, "async_put_domains[0]",
 			    &power_domains->async_put_domains[0]);

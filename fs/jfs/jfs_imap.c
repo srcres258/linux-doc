@@ -2179,7 +2179,7 @@ static int diNewExt(struct inomap * imap, struct iag * iagp, int extno)
 	/* get the ag and iag numbers for this iag.
 	 */
 	agno = BLKTOAG(le64_to_cpu(iagp->agstart), sbi);
-	if (agno > MAXAG || agno < 0)
+	if (agno >= MAXAG || agno < 0)
 		return -EIO;
 
 	iagno = le32_to_cpu(iagp->iagnum);

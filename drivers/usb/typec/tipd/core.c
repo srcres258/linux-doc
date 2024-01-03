@@ -115,6 +115,8 @@ struct tipd_data {
 	void (*trace_power_status)(u16 status);
 	void (*trace_status)(u32 status);
 	int (*apply_patch)(struct tps6598x *tps);
+	int (*init)(struct tps6598x *tps);
+	int (*reset)(struct tps6598x *tps);
 };
 
 struct tps6598x {
@@ -328,7 +330,7 @@ static void tps6598x_disconnect(struct tps6598x *tps, u32 status)
 }
 
 static int tps6598x_exec_cmd_tmo(struct tps6598x *tps, const char *cmd,
-			     size_t in_len, u8 *in_data,
+			     size_t in_len, const u8 *in_data,
 			     size_t out_len, u8 *out_data,
 			     u32 cmd_timeout_ms, u32 res_delay_ms)
 {
@@ -394,7 +396,7 @@ static int tps6598x_exec_cmd_tmo(struct tps6598x *tps, const char *cmd,
 }
 
 static int tps6598x_exec_cmd(struct tps6598x *tps, const char *cmd,
-			     size_t in_len, u8 *in_data,
+			     size_t in_len, const u8 *in_data,
 			     size_t out_len, u8 *out_data)
 {
 	return tps6598x_exec_cmd_tmo(tps, cmd, in_len, in_data,
@@ -871,6 +873,30 @@ tps6598x_register_port(struct tps6598x *tps, struct fwnode_handle *fwnode)
 	return 0;
 }
 
+static int tps_request_firmware(struct tps6598x *tps, const struct firmware **fw)
+{
+	const char *firmware_name;
+	int ret;
+
+	ret = device_property_read_string(tps->dev, "firmware-name",
+					  &firmware_name);
+	if (ret)
+		return ret;
+
+	ret = request_firmware(fw, firmware_name, tps->dev);
+	if (ret) {
+		dev_err(tps->dev, "failed to retrieve \"%s\"\n", firmware_name);
+		return ret;
+	}
+
+	if ((*fw)->size == 0) {
+		release_firmware(*fw);
+		ret = -EINVAL;
+	}
+
+	return ret;
+}
+
 static int
 tps25750_write_firmware(struct tps6598x *tps,
 			u8 bpms_addr, const u8 *data, size_t len)
@@ -959,16 +985,9 @@ static int tps25750_start_patch_burst_mode(struct tps6598x *tps)
 	if (ret)
 		return ret;
 
-	ret = request_firmware(&fw, firmware_name, tps->dev);
-	if (ret) {
-		dev_err(tps->dev, "failed to retrieve \"%s\"\n", firmware_name);
+	ret = tps_request_firmware(tps, &fw);
+	if (ret)
 		return ret;
-	}
-
-	if (fw->size == 0) {
-		ret = -EINVAL;
-		goto release_fw;
-	}
 
 	ret = of_property_match_string(np, "reg-names", "patch-address");
 	if (ret < 0) {
@@ -1106,6 +1125,76 @@ wait_for_app:
 	return 0;
 };
 
+static int tps6598x_apply_patch(struct tps6598x *tps)
+{
+	u8 in = TPS_PTCS_CONTENT_DEV | TPS_PTCS_CONTENT_APP;
+	u8 out[TPS_MAX_LEN] = {0};
+	size_t in_len = sizeof(in);
+	size_t copied_bytes = 0;
+	size_t bytes_left;
+	const struct firmware *fw;
+	const char *firmware_name;
+	int ret;
+
+	ret = device_property_read_string(tps->dev, "firmware-name",
+					  &firmware_name);
+	if (ret)
+		return ret;
+
+	ret = tps_request_firmware(tps, &fw);
+	if (ret)
+		return ret;
+
+	ret = tps6598x_exec_cmd(tps, "PTCs", in_len, &in,
+				TPS_PTCS_OUT_BYTES, out);
+	if (ret || out[TPS_PTCS_STATUS] == TPS_PTCS_STATUS_FAIL) {
+		if (!ret)
+			ret = -EBUSY;
+		dev_err(tps->dev, "Update start failed (%d)\n", ret);
+		goto release_fw;
+	}
+
+	bytes_left = fw->size;
+	while (bytes_left) {
+		if (bytes_left < TPS_MAX_LEN)
+			in_len = bytes_left;
+		else
+			in_len = TPS_MAX_LEN;
+		ret = tps6598x_exec_cmd(tps, "PTCd", in_len,
+					fw->data + copied_bytes,
+					TPS_PTCD_OUT_BYTES, out);
+		if (ret || out[TPS_PTCD_TRANSFER_STATUS] ||
+		    out[TPS_PTCD_LOADING_STATE] == TPS_PTCD_LOAD_ERR) {
+			if (!ret)
+				ret = -EBUSY;
+			dev_err(tps->dev, "Patch download failed (%d)\n", ret);
+			goto release_fw;
+		}
+		copied_bytes += in_len;
+		bytes_left -= in_len;
+	}
+
+	ret = tps6598x_exec_cmd(tps, "PTCc", 0, NULL, TPS_PTCC_OUT_BYTES, out);
+	if (ret || out[TPS_PTCC_DEV] || out[TPS_PTCC_APP]) {
+		if (!ret)
+			ret = -EBUSY;
+		dev_err(tps->dev, "Update completion failed (%d)\n", ret);
+		goto release_fw;
+	}
+	msleep(TPS_SETUP_MS);
+	dev_info(tps->dev, "Firmware update succeeded\n");
+
+release_fw:
+	release_firmware(fw);
+
+	return ret;
+};
+
+static int cd321x_init(struct tps6598x *tps)
+{
+	return 0;
+}
+
 static int tps25750_init(struct tps6598x *tps)
 {
 	int ret;
@@ -1122,6 +1211,21 @@ static int tps25750_init(struct tps6598x *tps)
 			 __func__, ret);
 
 	return 0;
+}
+
+static int tps6598x_init(struct tps6598x *tps)
+{
+	return tps->data->apply_patch(tps);
+}
+
+static int cd321x_reset(struct tps6598x *tps)
+{
+	return 0;
+}
+
+static int tps6598x_reset(struct tps6598x *tps)
+{
+	return tps6598x_exec_cmd_tmo(tps, "GAID", 0, NULL, 0, NULL, 2000, 0);
 }
 
 static int
@@ -1187,7 +1291,6 @@ static int tps6598x_probe(struct i2c_client *client)
 	u32 vid;
 	int ret;
 	u64 mask1;
-	bool is_tps25750;
 
 	tps = devm_kzalloc(&client->dev, sizeof(*tps), GFP_KERNEL);
 	if (!tps)
@@ -1207,8 +1310,7 @@ static int tps6598x_probe(struct i2c_client *client)
 	if (IS_ERR(tps->regmap))
 		return PTR_ERR(tps->regmap);
 
-	is_tps25750 = device_is_compatible(tps->dev, "ti,tps25750");
-	if (!is_tps25750) {
+	if (!device_is_compatible(tps->dev, "ti,tps25750")) {
 		ret = tps6598x_read32(tps, TPS_REG_VID, &vid);
 		if (ret < 0 || !vid)
 			return -ENODEV;
@@ -1251,8 +1353,8 @@ static int tps6598x_probe(struct i2c_client *client)
 	if (ret < 0)
 		return ret;
 
-	if (is_tps25750 && ret == TPS_MODE_PTCH) {
-		ret = tps25750_init(tps);
+	if (ret == TPS_MODE_PTCH) {
+		ret = tps->data->init(tps);
 		if (ret)
 			return ret;
 	}
@@ -1340,8 +1442,8 @@ err_clear_mask:
 	tps6598x_write64(tps, TPS_REG_INT_MASK1, 0);
 err_reset_controller:
 	/* Reset PD controller to remove any applied patch */
-	if (is_tps25750)
-		tps6598x_exec_cmd_tmo(tps, "GAID", 0, NULL, 0, NULL, 2000, 0);
+	tps->data->reset(tps);
+
 	return ret;
 }
 
@@ -1358,8 +1460,7 @@ static void tps6598x_remove(struct i2c_client *client)
 	usb_role_switch_put(tps->role_sw);
 
 	/* Reset PD controller to remove any applied patch */
-	if (device_is_compatible(tps->dev, "ti,tps25750"))
-		tps6598x_exec_cmd_tmo(tps, "GAID", 0, NULL, 0, NULL, 2000, 0);
+	tps->data->reset(tps);
 
 	if (tps->reset)
 		gpiod_set_value_cansleep(tps->reset, 1);
@@ -1393,7 +1494,7 @@ static int __maybe_unused tps6598x_resume(struct device *dev)
 	if (ret < 0)
 		return ret;
 
-	if (device_is_compatible(tps->dev, "ti,tps25750") && ret == TPS_MODE_PTCH) {
+	if (ret == TPS_MODE_PTCH) {
 		ret = tps25750_init(tps);
 		if (ret)
 			return ret;
@@ -1423,6 +1524,8 @@ static const struct tipd_data cd321x_data = {
 	.register_port = tps6598x_register_port,
 	.trace_power_status = trace_tps6598x_power_status,
 	.trace_status = trace_tps6598x_status,
+	.init = cd321x_init,
+	.reset = cd321x_reset,
 };
 
 static const struct tipd_data tps6598x_data = {
@@ -1430,6 +1533,9 @@ static const struct tipd_data tps6598x_data = {
 	.register_port = tps6598x_register_port,
 	.trace_power_status = trace_tps6598x_power_status,
 	.trace_status = trace_tps6598x_status,
+	.apply_patch = tps6598x_apply_patch,
+	.init = tps6598x_init,
+	.reset = tps6598x_reset,
 };
 
 static const struct tipd_data tps25750_data = {
@@ -1438,6 +1544,8 @@ static const struct tipd_data tps25750_data = {
 	.trace_power_status = trace_tps25750_power_status,
 	.trace_status = trace_tps25750_status,
 	.apply_patch = tps25750_apply_patch,
+	.init = tps25750_init,
+	.reset = tps6598x_reset,
 };
 
 static const struct of_device_id tps6598x_of_match[] = {

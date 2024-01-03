@@ -578,6 +578,13 @@ int crash_exclude_mem_range(struct crash_mem *mem,
 		if (p_start > end)
 			continue;
 
+		/*
+		 * Because the memory ranges in mem->ranges are stored in
+		 * ascending order, when we detect `p_end < start`, we can
+		 * immediately exit the for loop, as the subsequent memory
+		 * ranges will definitely be outside the range we are looking
+		 * for.
+		 */
 		if (p_end < start)
 			break;
 
