@@ -573,9 +573,6 @@ void update_audio_usage(
 
 unsigned int resource_pixel_format_to_bpp(enum surface_pixel_format format);
 
-void get_audio_check(struct audio_info *aud_modes,
-	struct audio_check *aud_chk);
-
 bool get_temp_dp_link_res(struct dc_link *link,
 		struct link_resource *link_res,
 		struct dc_link_settings *link_settings);
@@ -611,6 +608,9 @@ bool dc_resource_acquire_secondary_pipe_for_mpc_odm_legacy(
 		struct pipe_ctx *pri_pipe,
 		struct pipe_ctx *sec_pipe,
 		bool odm);
+
+bool resource_subvp_in_use(struct dc *dc,
+		struct dc_state *context);
 
 /* A test harness interface that modifies dp encoder resources in the given dc
  * state and bypasses the need to revalidate. The interface assumes that the

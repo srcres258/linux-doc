@@ -183,20 +183,6 @@ bool dcn32_all_pipes_have_stream_and_plane(struct dc *dc,
 	return true;
 }
 
-bool dcn32_subvp_in_use(struct dc *dc,
-		struct dc_state *context)
-{
-	uint32_t i;
-
-	for (i = 0; i < dc->res_pool->pipe_count; i++) {
-		struct pipe_ctx *pipe = &context->res_ctx.pipe_ctx[i];
-
-		if (dc_state_get_pipe_subvp_type(context, pipe) != SUBVP_NONE)
-			return true;
-	}
-	return false;
-}
-
 bool dcn32_mpo_in_use(struct dc_state *context)
 {
 	uint32_t i;
@@ -290,7 +276,7 @@ static void override_det_for_subvp(struct dc *dc, struct dc_state *context, uint
 		for (i = 0; i < dc->res_pool->pipe_count; i++) {
 			struct pipe_ctx *pipe_ctx = &context->res_ctx.pipe_ctx[i];
 
-			if (pipe_ctx->stream && pipe_ctx->plane_state && dc_state_get_pipe_subvp_type(context, pipe_ctx)) {
+			if (pipe_ctx->stream && pipe_ctx->plane_state && dc_state_get_pipe_subvp_type(context, pipe_ctx) != SUBVP_PHANTOM) {
 				if (pipe_ctx->stream->timing.v_addressable == 1080 && pipe_ctx->stream->timing.h_addressable == 1920) {
 					if (pipe_segments[i] > 4)
 						pipe_segments[i] = 4;
@@ -524,13 +510,14 @@ static int get_refresh_rate(struct dc_stream_state *fpo_candidate_stream)
  *
  * Return: Pointer to FPO stream candidate if config can support FPO, otherwise NULL
  */
-struct dc_stream_state *dcn32_can_support_mclk_switch_using_fw_based_vblank_stretch(struct dc *dc, const struct dc_state *context)
+struct dc_stream_state *dcn32_can_support_mclk_switch_using_fw_based_vblank_stretch(struct dc *dc, struct dc_state *context)
 {
 	int refresh_rate = 0;
 	const int minimum_refreshrate_supported = 120;
 	struct dc_stream_state *fpo_candidate_stream = NULL;
 	bool is_fpo_vactive = false;
 	uint32_t fpo_vactive_margin_us = 0;
+	struct dc_stream_status *fpo_stream_status = NULL;
 
 	if (context == NULL)
 		return NULL;
@@ -553,16 +540,28 @@ struct dc_stream_state *dcn32_can_support_mclk_switch_using_fw_based_vblank_stre
 		DC_FP_START();
 		dcn32_assign_fpo_vactive_candidate(dc, context, &fpo_candidate_stream);
 		DC_FP_END();
-
+		if (fpo_candidate_stream)
+			fpo_stream_status = dc_state_get_stream_status(context, fpo_candidate_stream);
 		DC_FP_START();
 		is_fpo_vactive = dcn32_find_vactive_pipe(dc, context, dc->debug.fpo_vactive_min_active_margin_us);
 		DC_FP_END();
 		if (!is_fpo_vactive || dc->debug.disable_fpo_vactive)
 			return NULL;
-	} else
+	} else {
 		fpo_candidate_stream = context->streams[0];
+		if (fpo_candidate_stream)
+			fpo_stream_status = dc_state_get_stream_status(context, fpo_candidate_stream);
+	}
 
-	if (!fpo_candidate_stream)
+	/* In DCN32/321, FPO uses per-pipe P-State force.
+	 * If there's no planes, HUBP is power gated and
+	 * therefore programming UCLK_PSTATE_FORCE does
+	 * nothing (P-State will always be asserted naturally
+	 * on a pipe that has HUBP power gated. Therefore we
+	 * only want to enable FPO if the FPO pipe has both
+	 * a stream and a plane.
+	 */
+	if (!fpo_candidate_stream || !fpo_stream_status || fpo_stream_status->plane_count == 0)
 		return NULL;
 
 	if (fpo_candidate_stream->sink->edid_caps.panel_patch.disable_fams)

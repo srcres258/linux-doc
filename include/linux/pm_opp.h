@@ -45,24 +45,12 @@ struct dev_pm_opp_supply {
 	unsigned long u_watt;
 };
 
-/**
- * struct dev_pm_opp_icc_bw - Interconnect bandwidth values
- * @avg:	Average bandwidth corresponding to this OPP (in icc units)
- * @peak:	Peak bandwidth corresponding to this OPP (in icc units)
- *
- * This structure stores the bandwidth values for a single interconnect path.
- */
-struct dev_pm_opp_icc_bw {
-	u32 avg;
-	u32 peak;
-};
-
 typedef int (*config_regulators_t)(struct device *dev,
 			struct dev_pm_opp *old_opp, struct dev_pm_opp *new_opp,
 			struct regulator **regulators, unsigned int count);
 
 typedef int (*config_clks_t)(struct device *dev, struct opp_table *opp_table,
-			struct dev_pm_opp *opp, void *data, bool scaling_down);
+			struct dev_pm_opp *opp, bool scaling_down);
 
 /**
  * struct dev_pm_opp_config - Device OPP configuration values
@@ -193,8 +181,7 @@ int dev_pm_opp_set_config(struct device *dev, struct dev_pm_opp_config *config);
 int devm_pm_opp_set_config(struct device *dev, struct dev_pm_opp_config *config);
 void dev_pm_opp_clear_config(int token);
 int dev_pm_opp_config_clks_simple(struct device *dev,
-		struct opp_table *opp_table, struct dev_pm_opp *opp, void *data,
-		bool scaling_down);
+		struct opp_table *opp_table, struct dev_pm_opp *opp, bool scaling_down);
 
 struct dev_pm_opp *dev_pm_opp_xlate_required_opp(struct opp_table *src_table, struct opp_table *dst_table, struct dev_pm_opp *src_opp);
 int dev_pm_opp_xlate_performance_state(struct opp_table *src_table, struct opp_table *dst_table, unsigned int pstate);

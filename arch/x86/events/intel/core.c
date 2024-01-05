@@ -4097,7 +4097,7 @@ static int intel_pmu_hw_config(struct perf_event *event)
 
 /*
  * Currently, the only caller of this function is the atomic_switch_perf_msrs().
- * The host perf conext helps to prepare the values of the real hardware for
+ * The host perf context helps to prepare the values of the real hardware for
  * a set of msrs that need to be switched atomically in a vmx transaction.
  *
  * For example, the pseudocode needed to add a new msr should look like:
@@ -4121,12 +4121,17 @@ static struct perf_guest_switch_msr *intel_guest_get_msrs(int *nr, void *data)
 	u64 pebs_mask = cpuc->pebs_enabled & x86_pmu.pebs_capable;
 	int global_ctrl, pebs_enable;
 
+	/*
+	 * In addition to obeying exclude_guest/exclude_host, remove bits being
+	 * used for PEBS when running a guest, because PEBS writes to virtual
+	 * addresses (not physical addresses).
+	 */
 	*nr = 0;
 	global_ctrl = (*nr)++;
 	arr[global_ctrl] = (struct perf_guest_switch_msr){
 		.msr = MSR_CORE_PERF_GLOBAL_CTRL,
 		.host = intel_ctrl & ~cpuc->intel_ctrl_guest_mask,
-		.guest = intel_ctrl & (~cpuc->intel_ctrl_host_mask | ~pebs_mask),
+		.guest = intel_ctrl & ~cpuc->intel_ctrl_host_mask & ~pebs_mask,
 	};
 
 	if (!x86_pmu.pebs)

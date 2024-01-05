@@ -8,6 +8,7 @@
 #include "cxlpci.h"
 #include "cxlmem.h"
 #include "cxl.h"
+#include "core.h"
 
 struct dsmas_entry {
 	struct range dpa_range;
@@ -315,7 +316,6 @@ static int match_cxlrd_hb(struct device *dev, void *data)
 	struct device *host_bridge = data;
 	struct cxl_switch_decoder *cxlsd;
 	struct cxl_root_decoder *cxlrd;
-	unsigned int seq;
 
 	if (!is_root_decoder(dev))
 		return 0;
@@ -323,13 +323,11 @@ static int match_cxlrd_hb(struct device *dev, void *data)
 	cxlrd = to_cxl_root_decoder(dev);
 	cxlsd = &cxlrd->cxlsd;
 
-	do {
-		seq = read_seqbegin(&cxlsd->target_lock);
-		for (int i = 0; i < cxlsd->nr_targets; i++) {
-			if (host_bridge == cxlsd->target[i]->dport_dev)
-				return 1;
-		}
-	} while (read_seqretry(&cxlsd->target_lock, seq));
+	guard(rwsem_read)(&cxl_region_rwsem);
+	for (int i = 0; i < cxlsd->nr_targets; i++) {
+		if (host_bridge == cxlsd->target[i]->dport_dev)
+			return 1;
+	}
 
 	return 0;
 }

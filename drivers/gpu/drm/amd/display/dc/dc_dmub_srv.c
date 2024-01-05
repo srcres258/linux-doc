@@ -519,10 +519,11 @@ void dc_dmub_srv_get_visual_confirm_color_cmd(struct dc *dc, struct pipe_ctx *pi
 /**
  * populate_subvp_cmd_drr_info - Helper to populate DRR pipe info for the DMCUB subvp command
  *
- * @dc: [in] current dc state
+ * @dc: [in] pointer to dc object
  * @subvp_pipe: [in] pipe_ctx for the SubVP pipe
  * @vblank_pipe: [in] pipe_ctx for the DRR pipe
  * @pipe_data: [in] Pipe data which stores the VBLANK/DRR info
+ * @context: [in] DC state for access to phantom stream
  *
  * Populate the DMCUB SubVP command with DRR pipe info. All the information
  * required for calculating the SubVP + DRR microschedule is populated here.
@@ -1209,20 +1210,16 @@ static void dc_dmub_srv_notify_idle(const struct dc *dc, bool allow_idle)
 	}
 
 	/* NOTE: This does not use the "wake" interface since this is part of the wake path. */
-	dm_execute_dmub_cmd(dc->ctx, &cmd, DM_DMUB_WAIT_TYPE_WAIT);
+	/* We also do not perform a wait since DMCUB could enter idle after the notification. */
+	dm_execute_dmub_cmd(dc->ctx, &cmd, DM_DMUB_WAIT_TYPE_NO_WAIT);
 }
 
 static void dc_dmub_srv_exit_low_power_state(const struct dc *dc)
 {
-	const uint32_t max_num_polls = 10000;
 	uint32_t allow_state = 0;
 	uint32_t commit_state = 0;
-	int i;
 
 	if (dc->debug.dmcub_emulation)
-		return;
-
-	if (!dc->idle_optimizations_allowed)
 		return;
 
 	if (!dc->ctx->dmub_srv || !dc->ctx->dmub_srv->dmub)
@@ -1237,8 +1234,16 @@ static void dc_dmub_srv_exit_low_power_state(const struct dc *dc)
 
 		if (!(allow_state & DMUB_IPS2_ALLOW_MASK)) {
 			// Wait for evaluation time
-			udelay(dc->debug.ips2_eval_delay_us);
-			commit_state = dc->hwss.get_idle_state(dc);
+			for (;;) {
+				udelay(dc->debug.ips2_eval_delay_us);
+				commit_state = dc->hwss.get_idle_state(dc);
+				if (commit_state & DMUB_IPS2_ALLOW_MASK)
+					break;
+
+				/* allow was still set, retry eval delay */
+				dc->hwss.set_idle_state(dc, false);
+			}
+
 			if (!(commit_state & DMUB_IPS2_COMMIT_MASK)) {
 				// Tell PMFW to exit low power state
 				dc->clk_mgr->funcs->exit_low_power_state(dc->clk_mgr);
@@ -1247,17 +1252,13 @@ static void dc_dmub_srv_exit_low_power_state(const struct dc *dc)
 				udelay(dc->debug.ips2_entry_delay_us);
 				dc->clk_mgr->funcs->exit_low_power_state(dc->clk_mgr);
 
-				for (i = 0; i < max_num_polls; ++i) {
+				for (;;) {
 					commit_state = dc->hwss.get_idle_state(dc);
 					if (commit_state & DMUB_IPS2_COMMIT_MASK)
 						break;
 
 					udelay(1);
-
-					if (dc->debug.disable_timeout)
-						i--;
 				}
-				ASSERT(i < max_num_polls);
 
 				if (!dc_dmub_srv_is_hw_pwr_up(dc->ctx->dmub_srv, true))
 					ASSERT(0);
@@ -1272,17 +1273,13 @@ static void dc_dmub_srv_exit_low_power_state(const struct dc *dc)
 
 		dc_dmub_srv_notify_idle(dc, false);
 		if (!(allow_state & DMUB_IPS1_ALLOW_MASK)) {
-			for (i = 0; i < max_num_polls; ++i) {
+			for (;;) {
 				commit_state = dc->hwss.get_idle_state(dc);
 				if (commit_state & DMUB_IPS1_COMMIT_MASK)
 					break;
 
 				udelay(1);
-
-				if (dc->debug.disable_timeout)
-					i--;
 			}
-			ASSERT(i < max_num_polls);
 		}
 	}
 

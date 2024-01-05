@@ -124,7 +124,7 @@ void thermal_zone_device_critical_reboot(struct thermal_zone_device *tz);
 	for (__trip = __tz->trips; __trip - __tz->trips < __tz->num_trips; __trip++)
 
 void __thermal_zone_set_trips(struct thermal_zone_device *tz);
-int thermal_zone_trip_id(struct thermal_zone_device *tz,
+int thermal_zone_trip_id(const struct thermal_zone_device *tz,
 			 const struct thermal_trip *trip);
 void thermal_zone_trip_updated(struct thermal_zone_device *tz,
 			       const struct thermal_trip *trip);

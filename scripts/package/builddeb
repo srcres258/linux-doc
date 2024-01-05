@@ -24,25 +24,9 @@ if_enabled_echo() {
 	fi
 }
 
-create_package() {
-	local pname="$1" pdir="$2"
-
-	export DH_OPTIONS="-p${pname} -P${pdir}"
-
-	dh_installdocs
-	dh_installchangelogs
-	dh_compress
-	dh_fixperms
-	dh_gencontrol
-	dh_md5sums
-	dh_builddeb -- ${KDEB_COMPRESS:+-Z$KDEB_COMPRESS}
-}
-
 install_linux_image () {
-	pdir=$1
-	pname=$2
-
-	rm -rf ${pdir}
+	pname=$1
+	pdir=debian/$1
 
 	# Only some architectures with OF support have this target
 	if is_enabled CONFIG_OF_EARLY_FLATTREE && [ -d "${srctree}/arch/${SRCARCH}/boot/dts" ]; then
@@ -109,9 +93,7 @@ install_linux_image () {
 }
 
 install_linux_image_dbg () {
-	pdir=$1
-
-	rm -rf ${pdir}
+	pdir=debian/$1
 
 	# Parse modules.order directly because 'make modules_install' may sign,
 	# compress modules, and then run unneeded depmod.
@@ -139,10 +121,8 @@ install_linux_image_dbg () {
 }
 
 install_kernel_headers () {
-	pdir=$1
-	version=$2
-
-	rm -rf $pdir
+	pdir=debian/$1
+	version=${1#linux-headers-}
 
 	"${srctree}/scripts/package/install-extmod-build" "${pdir}/usr/src/linux-headers-${version}"
 
@@ -151,11 +131,8 @@ install_kernel_headers () {
 }
 
 install_libc_headers () {
-	pdir=$1
+	pdir=debian/$1
 
-	rm -rf $pdir
-
-	$MAKE -f $srctree/Makefile headers
 	$MAKE -f $srctree/Makefile headers_install INSTALL_HDR_PATH=$pdir/usr
 
 	# move asm headers to /usr/include/<libc-machine>/asm to match the structure
@@ -164,36 +141,15 @@ install_libc_headers () {
 	mv "$pdir/usr/include/asm" "$pdir/usr/include/${DEB_HOST_MULTIARCH}"
 }
 
-rm -f debian/files
+package=$1
 
-packages_enabled=$(dh_listpackages)
-
-for package in ${packages_enabled}
-do
-	case ${package} in
-	*-dbg)
-		install_linux_image_dbg debian/linux-image-dbg;;
-	linux-image-*|user-mode-linux-*)
-		install_linux_image debian/linux-image ${package};;
-	linux-libc-dev)
-		install_libc_headers debian/linux-libc-dev;;
-	linux-headers-*)
-		install_kernel_headers debian/linux-headers ${package#linux-headers-};;
-	esac
-done
-
-for package in ${packages_enabled}
-do
-	case ${package} in
-	*-dbg)
-		create_package ${package} debian/linux-image-dbg;;
-	linux-image-*|user-mode-linux-*)
-		create_package ${package} debian/linux-image;;
-	linux-libc-dev)
-		create_package ${package} debian/linux-libc-dev;;
-	linux-headers-*)
-		create_package ${package} debian/linux-headers;;
-	esac
-done
-
-exit 0
+case "${package}" in
+*-dbg)
+	install_linux_image_dbg "${package}";;
+linux-image-*|user-mode-linux-*)
+	install_linux_image "${package}";;
+linux-libc-dev)
+	install_libc_headers "${package}";;
+linux-headers-*)
+	install_kernel_headers "${package}";;
+esac

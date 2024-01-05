@@ -134,6 +134,7 @@ void dcn35_init_hw(struct dc *dc)
 	struct dc_bios *dcb = dc->ctx->dc_bios;
 	struct resource_pool *res_pool = dc->res_pool;
 	uint32_t backlight = MAX_BACKLIGHT_LEVEL;
+	uint32_t user_level = MAX_BACKLIGHT_LEVEL;
 	int i;
 
 	if (dc->clk_mgr && dc->clk_mgr->funcs->init_clocks)
@@ -280,13 +281,15 @@ void dcn35_init_hw(struct dc *dc)
 	for (i = 0; i < dc->link_count; i++) {
 		struct dc_link *link = dc->links[i];
 
-		if (link->panel_cntl)
+		if (link->panel_cntl) {
 			backlight = link->panel_cntl->funcs->hw_init(link->panel_cntl);
+			user_level = link->panel_cntl->stored_backlight_registers.USER_LEVEL;
+		}
 	}
 	if (dc->ctx->dmub_srv) {
 	for (i = 0; i < dc->res_pool->pipe_count; i++) {
 		if (abms[i] != NULL && abms[i]->funcs != NULL)
-			abms[i]->funcs->abm_init(abms[i], backlight);
+			abms[i]->funcs->abm_init(abms[i], backlight, user_level);
 		}
 	}
 
@@ -1120,21 +1123,28 @@ void dcn35_calc_blocks_to_ungate(struct dc *dc, struct dc_state *context,
 		update_state->pg_res_update[PG_HPO] = true;
 
 }
+
 /**
-	 * power down sequence
-	 * ONO Region 3, DCPG 25: hpo - SKIPPED
-	 * ONO Region 4, DCPG 0: dchubp0, dpp0
-	 * ONO Region 6, DCPG 1: dchubp1, dpp1
-	 * ONO Region 8, DCPG 2: dchubp2, dpp2
-	 * ONO Region 10, DCPG 3: dchubp3, dpp3
-	 * ONO Region 1, DCPG 23: dchubbub dchvm dchubbubmem - SKIPPED. PMFW will pwr dwn at IPS2 entry
-	 * ONO Region 5, DCPG 16: dsc0
-	 * ONO Region 7, DCPG 17: dsc1
-	 * ONO Region 9, DCPG 18: dsc2
-	 * ONO Region 11, DCPG 19: dsc3
-	 * ONO Region 2, DCPG 24: mpc opp optc dwb
-	 * ONO Region 0, DCPG 22: dccg dio dcio - SKIPPED. will be pwr dwn after lono timer is armed
-*/
+ * dcn35_hw_block_power_down() - power down sequence
+ *
+ * The following sequence describes the ON-OFF (ONO) for power down:
+ *
+ *	ONO Region 3, DCPG 25: hpo - SKIPPED
+ *	ONO Region 4, DCPG 0: dchubp0, dpp0
+ *	ONO Region 6, DCPG 1: dchubp1, dpp1
+ *	ONO Region 8, DCPG 2: dchubp2, dpp2
+ *	ONO Region 10, DCPG 3: dchubp3, dpp3
+ *	ONO Region 1, DCPG 23: dchubbub dchvm dchubbubmem - SKIPPED. PMFW will pwr dwn at IPS2 entry
+ *	ONO Region 5, DCPG 16: dsc0
+ *	ONO Region 7, DCPG 17: dsc1
+ *	ONO Region 9, DCPG 18: dsc2
+ *	ONO Region 11, DCPG 19: dsc3
+ *	ONO Region 2, DCPG 24: mpc opp optc dwb
+ *	ONO Region 0, DCPG 22: dccg dio dcio - SKIPPED. will be pwr dwn after lono timer is armed
+ *
+ * @dc: Current DC state
+ * @update_state: update PG sequence states for HW block
+ */
 void dcn35_hw_block_power_down(struct dc *dc,
 	struct pg_block_update *update_state)
 {
@@ -1172,20 +1182,27 @@ void dcn35_hw_block_power_down(struct dc *dc,
 	//domain22, 23, 25 currently always on.
 
 }
+
 /**
-	 * power up sequence
-	 * ONO Region 0, DCPG 22: dccg dio dcio - SKIPPED
-	 * ONO Region 2, DCPG 24: mpc opp optc dwb
-	 * ONO Region 5, DCPG 16: dsc0
-	 * ONO Region 7, DCPG 17: dsc1
-	 * ONO Region 9, DCPG 18: dsc2
-	 * ONO Region 11, DCPG 19: dsc3
-	 * ONO Region 1, DCPG 23: dchubbub dchvm dchubbubmem - SKIPPED. PMFW will power up at IPS2 exit
-	 * ONO Region 4, DCPG 0: dchubp0, dpp0
-	 * ONO Region 6, DCPG 1: dchubp1, dpp1
-	 * ONO Region 8, DCPG 2: dchubp2, dpp2
-	 * ONO Region 10, DCPG 3: dchubp3, dpp3
-	 * ONO Region 3, DCPG 25: hpo - SKIPPED
+ * dcn35_hw_block_power_up() - power up sequence
+ *
+ * The following sequence describes the ON-OFF (ONO) for power up:
+ *
+ *	ONO Region 0, DCPG 22: dccg dio dcio - SKIPPED
+ *	ONO Region 2, DCPG 24: mpc opp optc dwb
+ *	ONO Region 5, DCPG 16: dsc0
+ *	ONO Region 7, DCPG 17: dsc1
+ *	ONO Region 9, DCPG 18: dsc2
+ *	ONO Region 11, DCPG 19: dsc3
+ *	ONO Region 1, DCPG 23: dchubbub dchvm dchubbubmem - SKIPPED. PMFW will power up at IPS2 exit
+ *	ONO Region 4, DCPG 0: dchubp0, dpp0
+ *	ONO Region 6, DCPG 1: dchubp1, dpp1
+ *	ONO Region 8, DCPG 2: dchubp2, dpp2
+ *	ONO Region 10, DCPG 3: dchubp3, dpp3
+ *	ONO Region 3, DCPG 25: hpo - SKIPPED
+ *
+ * @dc: Current DC state
+ * @update_state: update PG sequence states for HW block
  */
 void dcn35_hw_block_power_up(struct dc *dc,
 	struct pg_block_update *update_state)

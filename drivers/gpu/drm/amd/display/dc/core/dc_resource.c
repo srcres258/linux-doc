@@ -2460,6 +2460,9 @@ void resource_remove_otg_master_for_stream_output(struct dc_state *context,
 	struct pipe_ctx *otg_master = resource_get_otg_master_for_stream(
 			&context->res_ctx, stream);
 
+	if (!otg_master)
+		return;
+
 	ASSERT(resource_get_odm_slice_count(otg_master) == 1);
 	ASSERT(otg_master->plane_state == NULL);
 	ASSERT(otg_master->stream_res.stream_enc);
@@ -4981,6 +4984,20 @@ enum dc_status update_dp_encoder_resources_for_test_harness(const struct dc *dc,
 	}
 
 	return DC_OK;
+}
+
+bool resource_subvp_in_use(struct dc *dc,
+		struct dc_state *context)
+{
+	uint32_t i;
+
+	for (i = 0; i < dc->res_pool->pipe_count; i++) {
+		struct pipe_ctx *pipe = &context->res_ctx.pipe_ctx[i];
+
+		if (dc_state_get_pipe_subvp_type(context, pipe) != SUBVP_NONE)
+			return true;
+	}
+	return false;
 }
 
 bool check_subvp_sw_cursor_fallback_req(const struct dc *dc, struct dc_stream_state *stream)

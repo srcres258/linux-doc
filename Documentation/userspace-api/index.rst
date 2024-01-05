@@ -31,6 +31,8 @@ place where this information is gathered.
    vduse
    futex2
    tee
+   isapnp
+   dcdbas
    lsm
 
 .. only::  subproject and html

@@ -1176,6 +1176,9 @@ static int amdgpu_ras_query_error_status_helper(struct amdgpu_device *adev,
 	enum amdgpu_ras_block blk = info ? info->head.block : AMDGPU_RAS_BLOCK_COUNT;
 	struct amdgpu_ras_block_object *block_obj = NULL;
 
+	if (blk == AMDGPU_RAS_BLOCK_COUNT)
+		return -EINVAL;
+
 	if (error_query_mode == AMDGPU_RAS_INVALID_ERROR_QUERY)
 		return -EINVAL;
 
@@ -2551,7 +2554,7 @@ int amdgpu_ras_recovery_init(struct amdgpu_device *adev)
 		return 0;
 
 	data = &con->eh_data;
-	*data = kmalloc(sizeof(**data), GFP_KERNEL | __GFP_ZERO);
+	*data = kzalloc(sizeof(**data), GFP_KERNEL);
 	if (!*data) {
 		ret = -ENOMEM;
 		goto out;
@@ -2838,10 +2841,10 @@ int amdgpu_ras_init(struct amdgpu_device *adev)
 	if (con)
 		return 0;
 
-	con = kmalloc(sizeof(struct amdgpu_ras) +
+	con = kzalloc(sizeof(*con) +
 			sizeof(struct ras_manager) * AMDGPU_RAS_BLOCK_COUNT +
 			sizeof(struct ras_manager) * AMDGPU_RAS_MCA_BLOCK_COUNT,
-			GFP_KERNEL|__GFP_ZERO);
+			GFP_KERNEL);
 	if (!con)
 		return -ENOMEM;
 

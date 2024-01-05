@@ -211,6 +211,10 @@ resume:
 	hlist_for_each_entry_from(dentry, d_sib) {
 		struct tracefs_inode *ti;
 
+		/* Note, getdents() can add a cursor dentry with no inode */
+		if (!dentry->d_inode)
+			continue;
+
 		spin_lock_nested(&dentry->d_lock, DENTRY_D_LOCK_NESTED);
 
 		change_gid(dentry, gid);

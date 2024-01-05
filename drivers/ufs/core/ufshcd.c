@@ -1077,8 +1077,7 @@ out:
 }
 
 int ufshcd_opp_config_clks(struct device *dev, struct opp_table *opp_table,
-			   struct dev_pm_opp *opp, void *data,
-			   bool scaling_down)
+			   struct dev_pm_opp *opp, bool scaling_down)
 {
 	struct ufs_hba *hba = dev_get_drvdata(dev);
 	struct list_head *head = &hba->clk_list_head;
@@ -8725,7 +8724,6 @@ static int ufshcd_add_lus(struct ufs_hba *hba)
 
 	ufs_bsg_probe(hba);
 	scsi_scan_host(hba->host);
-	pm_runtime_put_sync(hba->dev);
 
 out:
 	return ret;
@@ -8994,15 +8992,12 @@ static void ufshcd_async_scan(void *data, async_cookie_t cookie)
 
 	/* Probe and add UFS logical units  */
 	ret = ufshcd_add_lus(hba);
+
 out:
-	/*
-	 * If we failed to initialize the device or the device is not
-	 * present, turn off the power/clocks etc.
-	 */
-	if (ret) {
-		pm_runtime_put_sync(hba->dev);
-		ufshcd_hba_exit(hba);
-	}
+	pm_runtime_put_sync(hba->dev);
+
+	if (ret)
+		dev_err(hba->dev, "%s failed: %d\n", __func__, ret);
 }
 
 static enum scsi_timeout_action ufshcd_eh_timed_out(struct scsi_cmnd *scmd)
