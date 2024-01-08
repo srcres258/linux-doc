@@ -1118,8 +1118,8 @@ struct rt_link_detect {
 	u16				SlotNum;
 	u16				SlotIndex;
 
-	u32				NumTxOkInPeriod;
-	u32				NumRxOkInPeriod;
+	u32				num_tx_ok_in_period;
+	u32				num_rx_ok_in_period;
 	u32				NumRxUnicastOkInPeriod;
 	bool				bBusyTraffic;
 	bool				bHigherBusyTraffic;
@@ -1164,7 +1164,7 @@ struct rt_pmkid_list {
 	u8 Bssid[ETH_ALEN];
 	u8 PMKID[16];
 	u8 SsidBuf[33];
-	u8 bUsed;
+	u8 used;
 };
 
 /*************** DRIVER STATUS   *****/
@@ -1187,7 +1187,7 @@ struct rtllib_device {
 	unsigned long status;
 	u8	CntAfterLink;
 
-	enum rt_op_mode OpMode;
+	enum rt_op_mode op_mode;
 
 	/* The last AssocReq/Resp IEs */
 	u8 *assocreq_ies, *assocresp_ies;
@@ -1402,7 +1402,7 @@ struct rtllib_device {
 	bool FwRWRF;
 
 	struct rt_link_detect link_detect_info;
-	bool bIsAggregateFrame;
+	bool is_aggregate_frame;
 	struct rt_pwr_save_ctrl pwr_save_ctrl;
 
 	/* used if IEEE_SOFTMAC_TX_QUEUE is set */
@@ -1677,7 +1677,7 @@ void rtllib_sta_ps_send_pspoll_frame(struct rtllib_device *ieee);
 void rtllib_start_protocol(struct rtllib_device *ieee);
 void rtllib_stop_protocol(struct rtllib_device *ieee);
 
-void rtllib_EnableNetMonitorMode(struct net_device *dev, bool init_state);
+void rtllib_enable_net_monitor_mode(struct net_device *dev, bool init_state);
 void rtllib_disable_net_monitor_mode(struct net_device *dev, bool init_state);
 
 void rtllib_softmac_stop_protocol(struct rtllib_device *ieee);

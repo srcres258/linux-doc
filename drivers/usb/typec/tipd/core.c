@@ -1223,9 +1223,14 @@ static int cd321x_reset(struct tps6598x *tps)
 	return 0;
 }
 
-static int tps6598x_reset(struct tps6598x *tps)
+static int tps25750_reset(struct tps6598x *tps)
 {
 	return tps6598x_exec_cmd_tmo(tps, "GAID", 0, NULL, 0, NULL, 2000, 0);
+}
+
+static int tps6598x_reset(struct tps6598x *tps)
+{
+	return 0;
 }
 
 static int
@@ -1495,7 +1500,7 @@ static int __maybe_unused tps6598x_resume(struct device *dev)
 		return ret;
 
 	if (ret == TPS_MODE_PTCH) {
-		ret = tps25750_init(tps);
+		ret = tps->data->init(tps);
 		if (ret)
 			return ret;
 	}
@@ -1545,7 +1550,7 @@ static const struct tipd_data tps25750_data = {
 	.trace_status = trace_tps25750_status,
 	.apply_patch = tps25750_apply_patch,
 	.init = tps25750_init,
-	.reset = tps6598x_reset,
+	.reset = tps25750_reset,
 };
 
 static const struct of_device_id tps6598x_of_match[] = {

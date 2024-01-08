@@ -348,7 +348,7 @@ static inline struct sk_buff *rtllib_probe_req(struct rtllib_device *ieee)
 }
 
 /* Enables network monitor mode, all rx packets will be received. */
-void rtllib_EnableNetMonitorMode(struct net_device *dev,
+void rtllib_enable_net_monitor_mode(struct net_device *dev,
 		bool init_state)
 {
 	struct rtllib_device *ieee = netdev_priv_rsl(dev);
@@ -670,7 +670,7 @@ static inline int SecIsInPMKIDList(struct rtllib_device *ieee, u8 *bssid)
 	int i = 0;
 
 	do {
-		if ((ieee->PMKIDList[i].bUsed) &&
+		if ((ieee->PMKIDList[i].used) &&
 		   (memcmp(ieee->PMKIDList[i].Bssid, bssid, ETH_ALEN) == 0))
 			break;
 		i++;
@@ -2076,10 +2076,10 @@ int rtllib_softmac_init(struct rtllib_device *ieee)
 	ieee->link_detect_info.SlotNum = 2;
 	ieee->link_detect_info.NumRecvBcnInPeriod = 0;
 	ieee->link_detect_info.NumRecvDataInPeriod = 0;
-	ieee->link_detect_info.NumTxOkInPeriod = 0;
-	ieee->link_detect_info.NumRxOkInPeriod = 0;
+	ieee->link_detect_info.num_tx_ok_in_period = 0;
+	ieee->link_detect_info.num_rx_ok_in_period = 0;
 	ieee->link_detect_info.NumRxUnicastOkInPeriod = 0;
-	ieee->bIsAggregateFrame = false;
+	ieee->is_aggregate_frame = false;
 	ieee->assoc_id = 0;
 	ieee->queue_stop = 0;
 	ieee->scanning_continue = 0;
@@ -2245,7 +2245,7 @@ static void rtllib_MlmeDisassociateRequest(struct rtllib_device *rtllib,
 					   u8 *asSta, u8 asRsn)
 {
 	u8 i;
-	u8	OpMode;
+	u8	op_mode;
 
 	RemovePeerTS(rtllib, asSta);
 
@@ -2254,10 +2254,10 @@ static void rtllib_MlmeDisassociateRequest(struct rtllib_device *rtllib,
 
 		for (i = 0; i < 6; i++)
 			rtllib->current_network.bssid[i] = 0x22;
-		OpMode = RT_OP_MODE_NO_LINK;
-		rtllib->OpMode = RT_OP_MODE_NO_LINK;
+		op_mode = RT_OP_MODE_NO_LINK;
+		rtllib->op_mode = RT_OP_MODE_NO_LINK;
 		rtllib->SetHwRegHandler(rtllib->dev, HW_VAR_MEDIA_STATUS,
-					(u8 *)(&OpMode));
+					(u8 *)(&op_mode));
 		rtllib_disassociate(rtllib);
 
 		rtllib->SetHwRegHandler(rtllib->dev, HW_VAR_BSSID,

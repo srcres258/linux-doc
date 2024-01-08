@@ -34,15 +34,14 @@ int bch2_reflink_p_invalid(struct bch_fs *c, struct bkey_s_c k,
 			   struct printbuf *err)
 {
 	struct bkey_s_c_reflink_p p = bkey_s_c_to_reflink_p(k);
+	int ret = 0;
 
-	if (c->sb.version >= bcachefs_metadata_version_reflink_p_fix &&
-	    le64_to_cpu(p.v->idx) < le32_to_cpu(p.v->front_pad)) {
-		prt_printf(err, "idx < front_pad (%llu < %u)",
-		       le64_to_cpu(p.v->idx), le32_to_cpu(p.v->front_pad));
-		return -EINVAL;
-	}
-
-	return 0;
+	bkey_fsck_err_on(le64_to_cpu(p.v->idx) < le32_to_cpu(p.v->front_pad),
+			 c, err, reflink_p_front_pad_bad,
+			 "idx < front_pad (%llu < %u)",
+			 le64_to_cpu(p.v->idx), le32_to_cpu(p.v->front_pad));
+fsck_err:
+	return ret;
 }
 
 void bch2_reflink_p_to_text(struct printbuf *out, struct bch_fs *c,
@@ -301,14 +300,6 @@ int bch2_trans_mark_reflink_v(struct btree_trans *trans,
 	if ((flags & BTREE_TRIGGER_TRANSACTIONAL) &&
 	    (flags & BTREE_TRIGGER_INSERT))
 		check_indirect_extent_deleting(new, &flags);
-
-	if (old.k->type == KEY_TYPE_reflink_v &&
-	    new.k->type == KEY_TYPE_reflink_v &&
-	    old.k->u64s == new.k->u64s &&
-	    !memcmp(bkey_s_c_to_reflink_v(old).v->start,
-		    bkey_s_to_reflink_v(new).v->start,
-		    bkey_val_bytes(new.k) - 8))
-		return 0;
 
 	return bch2_trigger_extent(trans, btree_id, level, old, new, flags);
 }

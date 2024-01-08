@@ -730,7 +730,7 @@ static u8 parse_subframe(struct rtllib_device *ieee, struct sk_buff *skb,
 
 	u16		LLCOffset = sizeof(struct ieee80211_hdr_3addr);
 	u16		ChkLength;
-	bool		bIsAggregateFrame = false;
+	bool		is_aggregate_frame = false;
 	u16		nSubframe_Length;
 	u8		nPadding_Length = 0;
 	u16		SeqNum = 0;
@@ -739,7 +739,7 @@ static u8 parse_subframe(struct rtllib_device *ieee, struct sk_buff *skb,
 	SeqNum = WLAN_GET_SEQ_SEQ(le16_to_cpu(hdr->seq_ctrl));
 	if ((RTLLIB_QOS_HAS_SEQ(fc)) &&
 	   (((union frameqos *)(skb->data + RTLLIB_3ADDR_LEN))->field.reserved))
-		bIsAggregateFrame = true;
+		is_aggregate_frame = true;
 
 	if (RTLLIB_QOS_HAS_SEQ(fc))
 		LLCOffset += 2;
@@ -752,8 +752,8 @@ static u8 parse_subframe(struct rtllib_device *ieee, struct sk_buff *skb,
 		return 0;
 
 	skb_pull(skb, LLCOffset);
-	ieee->bIsAggregateFrame = bIsAggregateFrame;
-	if (!bIsAggregateFrame) {
+	ieee->is_aggregate_frame = is_aggregate_frame;
+	if (!is_aggregate_frame) {
 		rxb->nr_subframes = 1;
 
 		/* altered by clark 3/30/2010
@@ -1150,7 +1150,7 @@ static void rtllib_rx_check_leave_lps(struct rtllib_device *ieee, u8 unicast,
 	if (unicast) {
 		if (ieee->link_state == MAC80211_LINKED) {
 			if (((ieee->link_detect_info.NumRxUnicastOkInPeriod +
-			    ieee->link_detect_info.NumTxOkInPeriod) > 8) ||
+			    ieee->link_detect_info.num_tx_ok_in_period) > 8) ||
 			    (ieee->link_detect_info.NumRxUnicastOkInPeriod > 2)) {
 				ieee->leisure_ps_leave(ieee->dev);
 			}
@@ -1285,7 +1285,7 @@ static int rtllib_rx_InfraAdhoc(struct rtllib_device *ieee, struct sk_buff *skb,
 
 	/* Update statstics for AP roaming */
 	ieee->link_detect_info.NumRecvDataInPeriod++;
-	ieee->link_detect_info.NumRxOkInPeriod++;
+	ieee->link_detect_info.num_rx_ok_in_period++;
 
 	/* Data frame - extract src/dst addresses */
 	rtllib_rx_extract_addr(ieee, hdr, dst, src, bssid);
@@ -1358,7 +1358,7 @@ static int rtllib_rx_InfraAdhoc(struct rtllib_device *ieee, struct sk_buff *skb,
 	/* Update WAPI PN */
 
 	/* Check if leave LPS */
-	if (ieee->bIsAggregateFrame)
+	if (ieee->is_aggregate_frame)
 		nr_subframes = rxb->nr_subframes;
 	else
 		nr_subframes = 1;

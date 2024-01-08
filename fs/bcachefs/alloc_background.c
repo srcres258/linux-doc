@@ -922,19 +922,6 @@ int bch2_trigger_alloc(struct btree_trans *trans,
 		percpu_up_read(&c->mark_lock);
 	}
 
-	/*
-	 * need to know if we're getting called from the invalidate path or
-	 * not:
-	 */
-
-	if ((flags & BTREE_TRIGGER_BUCKET_INVALIDATE) &&
-	    old_a->cached_sectors) {
-		ret = bch2_update_cached_sectors_list(trans, new->k.p.inode,
-						      -((s64) old_a->cached_sectors));
-		if (ret)
-			return ret;
-	}
-
 	return 0;
 }
 
@@ -1244,9 +1231,6 @@ int bch2_check_alloc_hole_bucket_gens(struct btree_trans *trans,
 	struct printbuf buf = PRINTBUF;
 	unsigned i, gens_offset, gens_end_offset;
 	int ret;
-
-	if (c->sb.version < bcachefs_metadata_version_bucket_gens)
-		return 0;
 
 	bch2_btree_iter_set_pos(bucket_gens_iter, alloc_gens_pos(start, &gens_offset));
 

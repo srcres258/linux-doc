@@ -73,7 +73,7 @@ clean:
 # directly. Run 'dpkg-architecture --print-set --print-format=make' to
 # generate a makefile construct that exports all DEB_* variables.
 ifndef DEB_HOST_ARCH
--include debian/deb-env.vars
+include debian/deb-env.vars
 
 debian/deb-env.vars:
 	$(Q)dpkg-architecture -a$$(cat debian/arch) --print-set --print-format=make > $@.tmp

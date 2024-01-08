@@ -18,7 +18,6 @@
 #include <linux/fs.h>
 #include <linux/ioctl.h>
 #include <linux/major.h>
-#include <linux/poll.h>
 #include <linux/sched/task.h>
 #include <linux/slab.h>
 #include <linux/uaccess.h>

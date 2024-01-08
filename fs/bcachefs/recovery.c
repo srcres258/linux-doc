@@ -624,15 +624,15 @@ static u64 check_version_upgrade(struct bch_fs *c)
 		bch2_version_to_text(&buf, new_version);
 		prt_newline(&buf);
 
-		u64 recovery_passes = bch2_upgrade_recovery_passes(c, old_version, new_version);
-		if (recovery_passes) {
-			prt_str(&buf, "  running recovery passes: ");
-			prt_bitflags(&buf, bch2_recovery_passes, recovery_passes);
+		struct bch_sb_field_ext *ext = bch2_sb_field_get(c->disk_sb.sb, ext);
+		__le64 passes = ext->recovery_passes_required[0];
+		bch2_sb_set_upgrade(c, old_version, new_version);
+		passes = ext->recovery_passes_required[0] & ~passes;
 
-			struct bch_sb_field_ext *ext = bch2_sb_field_get(c->disk_sb.sb, ext);
-			ext->recovery_passes_required[0] |=
-				cpu_to_le64(bch2_recovery_passes_to_stable(recovery_passes));
-			c->opts.fix_errors = FSCK_FIX_yes;
+		if (passes) {
+			prt_str(&buf, "  running recovery passes: ");
+			prt_bitflags(&buf, bch2_recovery_passes,
+				     bch2_recovery_passes_from_stable(le64_to_cpu(passes)));
 		}
 
 		bch_info(c, "%s", buf.buf);
@@ -696,8 +696,11 @@ static int bch2_run_recovery_passes(struct bch_fs *c)
 
 	while (c->curr_recovery_pass < ARRAY_SIZE(recovery_pass_fns)) {
 		if (should_run_recovery_pass(c, c->curr_recovery_pass)) {
+			unsigned pass = c->curr_recovery_pass;
+
 			ret = bch2_run_recovery_pass(c, c->curr_recovery_pass);
-			if (bch2_err_matches(ret, BCH_ERR_restart_recovery))
+			if (bch2_err_matches(ret, BCH_ERR_restart_recovery) ||
+			    (ret && c->curr_recovery_pass < pass))
 				continue;
 			if (ret)
 				break;

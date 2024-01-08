@@ -1021,9 +1021,6 @@ int __bch2_trans_commit(struct btree_trans *trans, unsigned flags)
 	for (struct jset_entry *i = trans->journal_entries;
 	     i != (void *) ((u64 *) trans->journal_entries + trans->journal_entries_u64s);
 	     i = vstruct_next(i)) {
-		if (!jset_entry_is_key(i))
-			continue;
-
 		enum bkey_invalid_flags invalid_flags = 0;
 
 		if (!(flags & BCH_TRANS_COMMIT_no_journal_res))

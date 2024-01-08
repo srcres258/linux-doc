@@ -463,7 +463,7 @@ EXPORT_SYMBOL_GPL(zynqmp_pm_get_chipid);
  *
  * Return: Returns status, either success or error+reason
  */
-static int zynqmp_pm_get_family_info(u32 *family, u32 *subfamily)
+int zynqmp_pm_get_family_info(u32 *family, u32 *subfamily)
 {
 	u32 ret_payload[PAYLOAD_ARG_CNT];
 	u32 idcode;
@@ -488,6 +488,7 @@ static int zynqmp_pm_get_family_info(u32 *family, u32 *subfamily)
 
 	return 0;
 }
+EXPORT_SYMBOL_GPL(zynqmp_pm_get_family_info);
 
 /**
  * zynqmp_pm_get_trustzone_version() - Get secure trustzone firmware version
@@ -1929,7 +1930,7 @@ static int zynqmp_firmware_probe(struct platform_device *pdev)
 	return of_platform_populate(dev->of_node, NULL, NULL, dev);
 }
 
-static int zynqmp_firmware_remove(struct platform_device *pdev)
+static void zynqmp_firmware_remove(struct platform_device *pdev)
 {
 	struct pm_api_feature_data *feature_data;
 	struct hlist_node *tmp;
@@ -1944,8 +1945,6 @@ static int zynqmp_firmware_remove(struct platform_device *pdev)
 	}
 
 	platform_device_unregister(em_dev);
-
-	return 0;
 }
 
 static const struct of_device_id zynqmp_firmware_of_match[] = {
@@ -1962,6 +1961,6 @@ static struct platform_driver zynqmp_firmware_driver = {
 		.dev_groups = zynqmp_firmware_groups,
 	},
 	.probe = zynqmp_firmware_probe,
-	.remove = zynqmp_firmware_remove,
+	.remove_new = zynqmp_firmware_remove,
 };
 module_platform_driver(zynqmp_firmware_driver);

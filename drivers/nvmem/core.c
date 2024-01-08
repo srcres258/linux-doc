@@ -854,7 +854,7 @@ int nvmem_layout_register(struct nvmem_layout *layout)
 		return -EINVAL;
 
 	/* Populate the cells */
-	ret = layout->add_cells(&layout->nvmem->dev, layout->nvmem);
+	ret = layout->add_cells(layout);
 	if (ret)
 		return ret;
 
@@ -875,19 +875,6 @@ void nvmem_layout_unregister(struct nvmem_layout *layout)
 	/* Keep the API even with an empty stub in case we need it later */
 }
 EXPORT_SYMBOL_GPL(nvmem_layout_unregister);
-
-const void *nvmem_layout_get_match_data(struct nvmem_device *nvmem,
-					struct nvmem_layout *layout)
-{
-	struct device_node __maybe_unused *layout_np;
-	const struct of_device_id *match;
-
-	layout_np = of_nvmem_layout_get_container(nvmem);
-	match = of_match_node(layout->dev.driver->of_match_table, layout_np);
-
-	return match ? match->data : NULL;
-}
-EXPORT_SYMBOL_GPL(nvmem_layout_get_match_data);
 
 /**
  * nvmem_register() - Register a nvmem device for given nvmem_config.
@@ -2180,6 +2167,19 @@ const char *nvmem_dev_name(struct nvmem_device *nvmem)
 	return dev_name(&nvmem->dev);
 }
 EXPORT_SYMBOL_GPL(nvmem_dev_name);
+
+/**
+ * nvmem_dev_size() - Get the size of a given nvmem device.
+ *
+ * @nvmem: nvmem device.
+ *
+ * Return: size of the nvmem device.
+ */
+size_t nvmem_dev_size(struct nvmem_device *nvmem)
+{
+	return nvmem->size;
+}
+EXPORT_SYMBOL_GPL(nvmem_dev_size);
 
 static int __init nvmem_init(void)
 {

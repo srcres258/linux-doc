@@ -480,12 +480,6 @@ enum bch_time_stats {
 
 struct btree;
 
-struct log_output {
-	spinlock_t		lock;
-	wait_queue_head_t	wait;
-	struct printbuf		buf;
-};
-
 enum gc_phase {
 	GC_PHASE_NOT_RUNNING,
 	GC_PHASE_START,
