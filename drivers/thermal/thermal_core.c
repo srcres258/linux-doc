@@ -211,7 +211,7 @@ exit:
 	mutex_unlock(&tz->lock);
 	mutex_unlock(&thermal_governor_lock);
 
-	thermal_notify_tz_gov_change(tz->id, policy);
+	thermal_notify_tz_gov_change(tz, policy);
 
 	return ret;
 }
@@ -381,9 +381,7 @@ static void handle_thermal_trip(struct thermal_zone_device *tz,
 		 * the threshold and the trip temperature will be equal.
 		 */
 		if (tz->temperature >= trip->temperature) {
-			thermal_notify_tz_trip_up(tz->id,
-						  thermal_zone_trip_id(tz, trip),
-						  tz->temperature);
+			thermal_notify_tz_trip_up(tz, trip);
 			trip->threshold = trip->temperature - trip->hysteresis;
 		} else {
 			trip->threshold = trip->temperature;
@@ -400,9 +398,7 @@ static void handle_thermal_trip(struct thermal_zone_device *tz,
 		 * the trip.
 		 */
 		if (tz->temperature < trip->temperature - trip->hysteresis) {
-			thermal_notify_tz_trip_down(tz->id,
-						    thermal_zone_trip_id(tz, trip),
-						    tz->temperature);
+			thermal_notify_tz_trip_down(tz, trip);
 			trip->threshold = trip->temperature;
 		} else {
 			trip->threshold = trip->temperature - trip->hysteresis;
@@ -505,9 +501,9 @@ static int thermal_zone_device_set_mode(struct thermal_zone_device *tz,
 	mutex_unlock(&tz->lock);
 
 	if (mode == THERMAL_DEVICE_ENABLED)
-		thermal_notify_tz_enable(tz->id);
+		thermal_notify_tz_enable(tz);
 	else
-		thermal_notify_tz_disable(tz->id);
+		thermal_notify_tz_disable(tz);
 
 	return ret;
 }
@@ -1411,7 +1407,7 @@ thermal_zone_device_register_with_trips(const char *type, struct thermal_trip *t
 	if (atomic_cmpxchg(&tz->need_update, 1, 0))
 		thermal_zone_device_update(tz, THERMAL_EVENT_UNSPECIFIED);
 
-	thermal_notify_tz_create(tz->id, tz->type);
+	thermal_notify_tz_create(tz);
 
 	return tz;
 
@@ -1470,14 +1466,11 @@ EXPORT_SYMBOL_GPL(thermal_zone_device);
  */
 void thermal_zone_device_unregister(struct thermal_zone_device *tz)
 {
-	int tz_id;
 	struct thermal_cooling_device *cdev;
 	struct thermal_zone_device *pos = NULL;
 
 	if (!tz)
 		return;
-
-	tz_id = tz->id;
 
 	mutex_lock(&thermal_list_lock);
 	list_for_each_entry(pos, &thermal_tz_list, node)
@@ -1514,7 +1507,7 @@ void thermal_zone_device_unregister(struct thermal_zone_device *tz)
 
 	put_device(&tz->device);
 
-	thermal_notify_tz_delete(tz_id);
+	thermal_notify_tz_delete(tz);
 
 	wait_for_completion(&tz->removal);
 	kfree(tz);
