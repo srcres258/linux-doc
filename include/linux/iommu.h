@@ -387,7 +387,7 @@ static inline int __iommu_copy_struct_from_user_array(
  *              array
  * @data_type: The data type of the @kdst. Must match with @user_array->type
  * @index: Index to the location in the array to copy user data from
- * @min_last: The last memember of the data structure @kdst points in the
+ * @min_last: The last member of the data structure @kdst points in the
  *            initial version.
  * Return 0 for success, otherwise -error.
  */

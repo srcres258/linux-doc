@@ -1900,15 +1900,47 @@ static bool pll_enable_wa_needed(struct drm_i915_private *dev_priv)
 		dev_priv->display.cdclk.hw.vco > 0;
 }
 
-static void _bxt_set_cdclk(struct drm_i915_private *dev_priv,
-			   const struct intel_cdclk_config *cdclk_config,
-			   enum pipe pipe)
+static u32 bxt_cdclk_ctl(struct drm_i915_private *i915,
+			 const struct intel_cdclk_config *cdclk_config,
+			 enum pipe pipe)
 {
 	int cdclk = cdclk_config->cdclk;
 	int vco = cdclk_config->vco;
 	int unsquashed_cdclk;
 	u16 waveform;
 	u32 val;
+
+	waveform = cdclk_squash_waveform(i915, cdclk);
+
+	unsquashed_cdclk = DIV_ROUND_CLOSEST(cdclk * cdclk_squash_len,
+					     cdclk_squash_divider(waveform));
+
+	val = bxt_cdclk_cd2x_div_sel(i915, unsquashed_cdclk, vco) |
+		bxt_cdclk_cd2x_pipe(i915, pipe);
+
+	/*
+	 * Disable SSA Precharge when CD clock frequency < 500 MHz,
+	 * enable otherwise.
+	 */
+	if ((IS_GEMINILAKE(i915) || IS_BROXTON(i915)) &&
+	    cdclk >= 500000)
+		val |= BXT_CDCLK_SSA_PRECHARGE_ENABLE;
+
+	if (DISPLAY_VER(i915) >= 20)
+		val |= MDCLK_SOURCE_SEL_CDCLK_PLL;
+	else
+		val |= skl_cdclk_decimal(cdclk);
+
+	return val;
+}
+
+static void _bxt_set_cdclk(struct drm_i915_private *dev_priv,
+			   const struct intel_cdclk_config *cdclk_config,
+			   enum pipe pipe)
+{
+	int cdclk = cdclk_config->cdclk;
+	int vco = cdclk_config->vco;
+	u16 waveform;
 
 	if (HAS_CDCLK_CRAWL(dev_priv) && dev_priv->display.cdclk.hw.vco > 0 && vco > 0 &&
 	    !cdclk_pll_is_unknown(dev_priv->display.cdclk.hw.vco)) {
@@ -1925,29 +1957,10 @@ static void _bxt_set_cdclk(struct drm_i915_private *dev_priv,
 
 	waveform = cdclk_squash_waveform(dev_priv, cdclk);
 
-	unsquashed_cdclk = DIV_ROUND_CLOSEST(cdclk * cdclk_squash_len,
-					     cdclk_squash_divider(waveform));
-
 	if (HAS_CDCLK_SQUASH(dev_priv))
 		dg2_cdclk_squash_program(dev_priv, waveform);
 
-	val = bxt_cdclk_cd2x_div_sel(dev_priv, unsquashed_cdclk, vco) |
-		bxt_cdclk_cd2x_pipe(dev_priv, pipe);
-
-	/*
-	 * Disable SSA Precharge when CD clock frequency < 500 MHz,
-	 * enable otherwise.
-	 */
-	if ((IS_GEMINILAKE(dev_priv) || IS_BROXTON(dev_priv)) &&
-	    cdclk >= 500000)
-		val |= BXT_CDCLK_SSA_PRECHARGE_ENABLE;
-
-	if (DISPLAY_VER(dev_priv) >= 20)
-		val |= MDCLK_SOURCE_SEL_CDCLK_PLL;
-	else
-		val |= skl_cdclk_decimal(cdclk);
-
-	intel_de_write(dev_priv, CDCLK_CTL, val);
+	intel_de_write(dev_priv, CDCLK_CTL, bxt_cdclk_ctl(dev_priv, cdclk_config, pipe));
 
 	if (pipe != INVALID_PIPE)
 		intel_crtc_wait_for_next_vblank(intel_crtc_for_pipe(dev_priv, pipe));
@@ -2038,7 +2051,7 @@ static void bxt_set_cdclk(struct drm_i915_private *dev_priv,
 static void bxt_sanitize_cdclk(struct drm_i915_private *dev_priv)
 {
 	u32 cdctl, expected;
-	int cdclk, clock, vco;
+	int cdclk, vco;
 
 	intel_update_cdclk(dev_priv);
 	intel_cdclk_dump_config(dev_priv, &dev_priv->display.cdclk.hw, "Current CDCLK");
@@ -2046,20 +2059,6 @@ static void bxt_sanitize_cdclk(struct drm_i915_private *dev_priv)
 	if (dev_priv->display.cdclk.hw.vco == 0 ||
 	    dev_priv->display.cdclk.hw.cdclk == dev_priv->display.cdclk.hw.bypass)
 		goto sanitize;
-
-	/* DPLL okay; verify the cdclock
-	 *
-	 * Some BIOS versions leave an incorrect decimal frequency value and
-	 * set reserved MBZ bits in CDCLK_CTL at least during exiting from S4,
-	 * so sanitize this register.
-	 */
-	cdctl = intel_de_read(dev_priv, CDCLK_CTL);
-	/*
-	 * Let's ignore the pipe field, since BIOS could have configured the
-	 * dividers both synching to an active pipe, or asynchronously
-	 * (PIPE_NONE).
-	 */
-	cdctl &= ~bxt_cdclk_cd2x_pipe(dev_priv, INVALID_PIPE);
 
 	/* Make sure this is a legal cdclk value for the platform */
 	cdclk = bxt_calc_cdclk(dev_priv, dev_priv->display.cdclk.hw.cdclk);
@@ -2071,24 +2070,21 @@ static void bxt_sanitize_cdclk(struct drm_i915_private *dev_priv)
 	if (vco != dev_priv->display.cdclk.hw.vco)
 		goto sanitize;
 
-	expected = skl_cdclk_decimal(cdclk);
-
-	/* Figure out what CD2X divider we should be using for this cdclk */
-	if (HAS_CDCLK_SQUASH(dev_priv))
-		clock = dev_priv->display.cdclk.hw.vco / 2;
-	else
-		clock = dev_priv->display.cdclk.hw.cdclk;
-
-	expected |= bxt_cdclk_cd2x_div_sel(dev_priv, clock,
-					   dev_priv->display.cdclk.hw.vco);
+	/*
+	 * Some BIOS versions leave an incorrect decimal frequency value and
+	 * set reserved MBZ bits in CDCLK_CTL at least during exiting from S4,
+	 * so sanitize this register.
+	 */
+	cdctl = intel_de_read(dev_priv, CDCLK_CTL);
+	expected = bxt_cdclk_ctl(dev_priv, &dev_priv->display.cdclk.hw, INVALID_PIPE);
 
 	/*
-	 * Disable SSA Precharge when CD clock frequency < 500 MHz,
-	 * enable otherwise.
+	 * Let's ignore the pipe field, since BIOS could have configured the
+	 * dividers both synching to an active pipe, or asynchronously
+	 * (PIPE_NONE).
 	 */
-	if ((IS_GEMINILAKE(dev_priv) || IS_BROXTON(dev_priv)) &&
-	    dev_priv->display.cdclk.hw.cdclk >= 500000)
-		expected |= BXT_CDCLK_SSA_PRECHARGE_ENABLE;
+	cdctl &= ~bxt_cdclk_cd2x_pipe(dev_priv, INVALID_PIPE);
+	expected &= ~bxt_cdclk_cd2x_pipe(dev_priv, INVALID_PIPE);
 
 	if (cdctl == expected)
 		/* All well; nothing to sanitize */

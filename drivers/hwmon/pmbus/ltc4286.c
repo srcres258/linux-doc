@@ -85,7 +85,7 @@ static int ltc4286_probe(struct i2c_client *client)
 	 */
 	if (ret != LTC4286_MFR_ID_SIZE ||
 	    strncmp(block_buffer, "LTC", LTC4286_MFR_ID_SIZE)) {
-		return dev_err_probe(&client->dev, ret,
+		return dev_err_probe(&client->dev, -ENODEV,
 				     "Manufacturer id mismatch\n");
 	}
 
