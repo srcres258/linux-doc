@@ -3,7 +3,12 @@
 
 config HAVE_KVM
        bool
+
+config KVM_COMMON
+       bool
        select EVENTFD
+       select INTERVAL_TREE
+       select PREEMPT_NOTIFIERS
 
 config HAVE_KVM_PFNCACHE
        bool
@@ -92,7 +97,7 @@ config KVM_GENERIC_MMU_NOTIFIER
        bool
 
 config KVM_GENERIC_MEMORY_ATTRIBUTES
-       select KVM_GENERIC_MMU_NOTIFIER
+       depends on KVM_GENERIC_MMU_NOTIFIER
        bool
 
 config KVM_PRIVATE_MEM

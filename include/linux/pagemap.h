@@ -292,6 +292,21 @@ static inline void mapping_clear_release_always(struct address_space *mapping)
 	clear_bit(AS_RELEASE_ALWAYS, &mapping->flags);
 }
 
+static inline bool mapping_stable_writes(const struct address_space *mapping)
+{
+	return test_bit(AS_STABLE_WRITES, &mapping->flags);
+}
+
+static inline void mapping_set_stable_writes(struct address_space *mapping)
+{
+	set_bit(AS_STABLE_WRITES, &mapping->flags);
+}
+
+static inline void mapping_clear_stable_writes(struct address_space *mapping)
+{
+	clear_bit(AS_STABLE_WRITES, &mapping->flags);
+}
+
 static inline void mapping_set_unmovable(struct address_space *mapping)
 {
 	/*
@@ -306,21 +321,6 @@ static inline void mapping_set_unmovable(struct address_space *mapping)
 static inline bool mapping_unmovable(struct address_space *mapping)
 {
 	return test_bit(AS_UNMOVABLE, &mapping->flags);
-}
-
-static inline bool mapping_stable_writes(const struct address_space *mapping)
-{
-	return test_bit(AS_STABLE_WRITES, &mapping->flags);
-}
-
-static inline void mapping_set_stable_writes(struct address_space *mapping)
-{
-	set_bit(AS_STABLE_WRITES, &mapping->flags);
-}
-
-static inline void mapping_clear_stable_writes(struct address_space *mapping)
-{
-	clear_bit(AS_STABLE_WRITES, &mapping->flags);
 }
 
 static inline gfp_t mapping_gfp_mask(struct address_space * mapping)

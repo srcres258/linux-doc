@@ -61,7 +61,7 @@ build: build-arch build-indep
 build-indep:
 build-arch:
 	$(Q)$(MAKE) $(make-opts) olddefconfig
-	$(Q)$(MAKE) $(make-opts) headers all
+	$(Q)$(MAKE) $(make-opts) $(if $(filter um,$(ARCH)),,headers) all
 
 .PHONY: clean
 clean:
