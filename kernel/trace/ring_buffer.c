@@ -1009,7 +1009,7 @@ static inline u64 rb_time_stamp(struct trace_buffer *buffer)
 	u64 ts;
 
 	/* Skip retpolines :-( */
-	if (IS_ENABLED(CONFIG_RETPOLINE) && likely(buffer->clock == trace_clock_local))
+	if (IS_ENABLED(CONFIG_MITIGATION_RETPOLINE) && likely(buffer->clock == trace_clock_local))
 		ts = trace_clock_local();
 	else
 		ts = buffer->clock();
@@ -5128,12 +5128,6 @@ EXPORT_SYMBOL_GPL(ring_buffer_iter_advance);
  */
 unsigned long ring_buffer_size(struct trace_buffer *buffer, int cpu)
 {
-	/*
-	 * Earlier, this method returned
-	 *	buffer->subbuf_size * buffer->nr_pages
-	 * Since the nr_pages field is now removed, we have converted this to
-	 * return the per cpu buffer value.
-	 */
 	if (!cpumask_test_cpu(cpu, buffer->cpumask))
 		return 0;
 

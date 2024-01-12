@@ -494,8 +494,8 @@ mock_domain_cache_invalidate_user(struct iommu_domain *domain,
 {
 	struct mock_iommu_domain_nested *mock_nested =
 		container_of(domain, struct mock_iommu_domain_nested, domain);
-	u32 hw_error = 0, processed = 0;
 	struct iommu_hwpt_invalidate_selftest inv;
+	u32 processed = 0;
 	int i = 0, j;
 	int rc = 0;
 
@@ -507,13 +507,11 @@ mock_domain_cache_invalidate_user(struct iommu_domain *domain,
 	for ( ; i < array->entry_num; i++) {
 		rc = iommu_copy_struct_from_user_array(&inv, array,
 						       IOMMU_HWPT_INVALIDATE_DATA_SELFTEST,
-						       i, __reserved);
+						       i, iotlb_id);
 		if (rc)
 			break;
 
-		if ((inv.flags & ~(IOMMU_TEST_INVALIDATE_FLAG_ALL |
-				  IOMMU_TEST_INVALIDATE_FLAG_TRIGGER_ERROR)) ||
-		    inv.__reserved) {
+		if (inv.flags & ~IOMMU_TEST_INVALIDATE_FLAG_ALL) {
 			rc = -EOPNOTSUPP;
 			break;
 		}
@@ -523,21 +521,13 @@ mock_domain_cache_invalidate_user(struct iommu_domain *domain,
 			break;
 		}
 
-		if (inv.flags & IOMMU_TEST_INVALIDATE_FLAG_TRIGGER_ERROR) {
-			hw_error = IOMMU_TEST_INVALIDATE_FAKE_ERROR;
-		} else if (inv.flags & IOMMU_TEST_INVALIDATE_FLAG_ALL) {
+		if (inv.flags & IOMMU_TEST_INVALIDATE_FLAG_ALL) {
 			/* Invalidate all mock iotlb entries and ignore iotlb_id */
 			for (j = 0; j < MOCK_NESTED_DOMAIN_IOTLB_NUM; j++)
 				mock_nested->iotlb[j] = 0;
 		} else {
 			mock_nested->iotlb[inv.iotlb_id] = 0;
 		}
-
-		inv.hw_error = hw_error;
-		rc = iommu_respond_struct_to_user_array(array, i, (void *)&inv,
-							sizeof(inv));
-		if (rc)
-			break;
 
 		processed++;
 	}

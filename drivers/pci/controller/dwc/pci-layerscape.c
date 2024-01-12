@@ -273,12 +273,12 @@ static int ls1043a_pcie_exit_from_l2(struct dw_pcie_rp *pp)
 }
 
 static const struct dw_pcie_host_ops ls_pcie_host_ops = {
-	.host_init = ls_pcie_host_init,
+	.init = ls_pcie_host_init,
 	.pme_turn_off = ls_pcie_send_turnoff_msg,
 };
 
 static const struct dw_pcie_host_ops ls1021a_pcie_host_ops = {
-	.host_init = ls_pcie_host_init,
+	.init = ls_pcie_host_init,
 	.pme_turn_off = ls1021a_pcie_send_turnoff_msg,
 };
 
@@ -290,7 +290,7 @@ static const struct ls_pcie_drvdata ls1021a_drvdata = {
 };
 
 static const struct dw_pcie_host_ops ls1043a_pcie_host_ops = {
-	.host_init = ls_pcie_host_init,
+	.init = ls_pcie_host_init,
 	.pme_turn_off = ls1043a_pcie_send_turnoff_msg,
 };
 

@@ -398,27 +398,6 @@ static inline int __iommu_copy_struct_from_user_array(
 		offsetofend(typeof(*(kdst)), min_last))
 
 /**
- * iommu_respond_struct_to_user_array - Copy the response in @ksrc back to
- *                                      a specific entry of user array
- * @user_array: Pointer to a struct iommu_user_data_array for a user space
- *              array
- * @index: Index to the location in the array to copy response
- * @ksrc: Pointer to kernel structure
- * @klen: Length of @ksrc struct
- *
- * This only copies response of one entry (@index) in @user_array.
- */
-static inline int
-iommu_respond_struct_to_user_array(const struct iommu_user_data_array *array,
-				   unsigned int index, void *ksrc, size_t klen)
-{
-	if (copy_to_user(array->uptr + array->entry_len * index, ksrc,
-			 min_t(size_t, array->entry_len, klen)))
-		return -EFAULT;
-	return 0;
-}
-
-/**
  * struct iommu_ops - iommu ops and capabilities
  * @capable: check capability
  * @hw_info: report iommu hardware information. The data buffer returned by this

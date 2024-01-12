@@ -110,9 +110,9 @@ available subsections can be seen below.
    hte/index
    wmi
    dpll
-   tee
    wbrf
    crypto/index
+   tee
 
 .. only::  subproject and html
 

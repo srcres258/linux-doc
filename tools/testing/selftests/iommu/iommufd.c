@@ -390,15 +390,6 @@ TEST_F(iommufd_ioas, alloc_hwpt_nested)
 					 sizeof(*inv_reqs), &num_inv);
 		assert(!num_inv);
 
-		/* Negative test: non-zero __reserved is passed */
-		num_inv = 1;
-		inv_reqs[0].flags = 0;
-		inv_reqs[0].__reserved = 0x1234;
-		test_err_hwpt_invalidate(EOPNOTSUPP, nested_hwpt_id[0], inv_reqs,
-					 IOMMU_HWPT_INVALIDATE_DATA_SELFTEST,
-					 sizeof(*inv_reqs), &num_inv);
-		assert(!num_inv);
-
 		/* Negative test: invalid data_uptr when array is not empty */
 		num_inv = 1;
 		inv_reqs[0].flags = 0;
@@ -418,50 +409,25 @@ TEST_F(iommufd_ioas, alloc_hwpt_nested)
 		/* Negative test: invalid iotlb_id */
 		num_inv = 1;
 		inv_reqs[0].flags = 0;
-		inv_reqs[0].__reserved = 0;
 		inv_reqs[0].iotlb_id = MOCK_NESTED_DOMAIN_IOTLB_ID_MAX + 1;
 		test_err_hwpt_invalidate(EINVAL, nested_hwpt_id[0], inv_reqs,
 					 IOMMU_HWPT_INVALIDATE_DATA_SELFTEST,
 					 sizeof(*inv_reqs), &num_inv);
 		assert(!num_inv);
 
-		/* Negative test: trigger error */
-		num_inv = 1;
-		inv_reqs[0].flags = IOMMU_TEST_INVALIDATE_FLAG_TRIGGER_ERROR;
-		inv_reqs[0].iotlb_id = 0;
-		test_cmd_hwpt_invalidate(nested_hwpt_id[0], inv_reqs,
-					 IOMMU_HWPT_INVALIDATE_DATA_SELFTEST,
-					 sizeof(*inv_reqs), &num_inv);
-		assert(num_inv == 1);
-		assert(inv_reqs[0].hw_error == IOMMU_TEST_INVALIDATE_FAKE_ERROR);
-
-		/* Negative test: trigger error with ALL flag set */
-		num_inv = 1;
-		inv_reqs[0].flags = IOMMU_TEST_INVALIDATE_FLAG_TRIGGER_ERROR |
-				    IOMMU_TEST_INVALIDATE_FLAG_ALL;
-		inv_reqs[0].iotlb_id = 0;
-		test_cmd_hwpt_invalidate(nested_hwpt_id[0], inv_reqs,
-					 IOMMU_HWPT_INVALIDATE_DATA_SELFTEST,
-					 sizeof(*inv_reqs), &num_inv);
-		assert(num_inv == 1);
-		assert(inv_reqs[0].hw_error == IOMMU_TEST_INVALIDATE_FAKE_ERROR);
-
 		/*
 		 * Invalidate the 1st iotlb entry but fail the 2nd request
-		 *  - mock driver error, the hw_error field is meaningful,
-		 *    the ioctl returns 0.
+		 * due to invalid flags configuration in the 2nd request.
 		 */
 		num_inv = 2;
 		inv_reqs[0].flags = 0;
 		inv_reqs[0].iotlb_id = 0;
-		inv_reqs[1].flags = IOMMU_TEST_INVALIDATE_FLAG_TRIGGER_ERROR;
+		inv_reqs[1].flags = 0xffffffff;
 		inv_reqs[1].iotlb_id = 1;
-		test_cmd_hwpt_invalidate(nested_hwpt_id[0], inv_reqs,
+		test_err_hwpt_invalidate(EOPNOTSUPP, nested_hwpt_id[0], inv_reqs,
 					 IOMMU_HWPT_INVALIDATE_DATA_SELFTEST,
 					 sizeof(*inv_reqs), &num_inv);
-		assert(num_inv == 2);
-		assert(!inv_reqs[0].hw_error);
-		assert(inv_reqs[1].hw_error == IOMMU_TEST_INVALIDATE_FAKE_ERROR);
+		assert(num_inv == 1);
 		test_cmd_hwpt_check_iotlb(nested_hwpt_id[0], 0, 0);
 		test_cmd_hwpt_check_iotlb(nested_hwpt_id[0], 1,
 					  IOMMU_TEST_IOTLB_DEFAULT);
@@ -472,7 +438,7 @@ TEST_F(iommufd_ioas, alloc_hwpt_nested)
 
 		/*
 		 * Invalidate the 1st iotlb entry but fail the 2nd request
-		 *  - ioctl error, the hw_error field is meaningless
+		 * due to invalid iotlb_id configuration in the 2nd request.
 		 */
 		num_inv = 2;
 		inv_reqs[0].flags = 0;
@@ -483,7 +449,6 @@ TEST_F(iommufd_ioas, alloc_hwpt_nested)
 					 IOMMU_HWPT_INVALIDATE_DATA_SELFTEST,
 					 sizeof(*inv_reqs), &num_inv);
 		assert(num_inv == 1);
-		assert(!inv_reqs[0].hw_error);
 		test_cmd_hwpt_check_iotlb(nested_hwpt_id[0], 0, 0);
 		test_cmd_hwpt_check_iotlb(nested_hwpt_id[0], 1,
 					  IOMMU_TEST_IOTLB_DEFAULT);
@@ -499,7 +464,7 @@ TEST_F(iommufd_ioas, alloc_hwpt_nested)
 		test_cmd_hwpt_invalidate(nested_hwpt_id[0], inv_reqs,
 					 IOMMU_HWPT_INVALIDATE_DATA_SELFTEST,
 					 sizeof(*inv_reqs), &num_inv);
-		assert(!inv_reqs[0].hw_error);
+		assert(num_inv == 1);
 		test_cmd_hwpt_check_iotlb(nested_hwpt_id[0], 0, 0);
 		test_cmd_hwpt_check_iotlb(nested_hwpt_id[0], 1, 0);
 		test_cmd_hwpt_check_iotlb(nested_hwpt_id[0], 2,
@@ -517,8 +482,6 @@ TEST_F(iommufd_ioas, alloc_hwpt_nested)
 					 IOMMU_HWPT_INVALIDATE_DATA_SELFTEST,
 					 sizeof(*inv_reqs), &num_inv);
 		assert(num_inv == 2);
-		assert(!inv_reqs[0].hw_error);
-		assert(!inv_reqs[1].hw_error);
 		test_cmd_hwpt_check_iotlb_all(nested_hwpt_id[0], 0);
 
 		/* Invalidate all iotlb entries for nested_hwpt_id[1] and verify */
@@ -528,7 +491,6 @@ TEST_F(iommufd_ioas, alloc_hwpt_nested)
 					 IOMMU_HWPT_INVALIDATE_DATA_SELFTEST,
 					 sizeof(*inv_reqs), &num_inv);
 		assert(num_inv == 1);
-		assert(!inv_reqs[0].hw_error);
 		test_cmd_hwpt_check_iotlb_all(nested_hwpt_id[1], 0);
 
 		/* Attach device to nested_hwpt_id[0] that then will be busy */

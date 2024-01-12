@@ -625,7 +625,13 @@ dmabuf_imp_to_refs(struct gntdev_dmabuf_priv *priv, struct device *dev,
 		goto fail_unmap;
 	}
 
-	/* Now convert sgt to array of gfns without accessing underlying pages. */
+	/*
+	 * Now convert sgt to array of gfns without accessing underlying pages.
+	 * It is not allowed to access the underlying struct page of an sg table
+	 * exported by DMA-buf, but since we deal with special Xen dma device here
+	 * (not a normal physical one) look at the dma addresses in the sg table
+	 * and then calculate gfns directly from them.
+	 */
 	i = 0;
 	for_each_sgtable_dma_page(sgt, &sg_iter, 0) {
 		dma_addr_t addr = sg_page_iter_dma_address(&sg_iter);

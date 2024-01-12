@@ -238,20 +238,18 @@ static int _test_cmd_hwpt_invalidate(int fd, __u32 hwpt_id, void *reqs,
 	return rc;
 }
 
-#define test_cmd_hwpt_invalidate(hwpt_id, reqs, data_type, lreq, nreqs)        \
+#define test_cmd_hwpt_invalidate(hwpt_id, reqs, data_type, lreq, nreqs)       \
 	({                                                                    \
 		ASSERT_EQ(0,                                                  \
 			  _test_cmd_hwpt_invalidate(self->fd, hwpt_id, reqs,  \
-						    data_type,                 \
-						    lreq, nreqs));            \
+						    data_type, lreq, nreqs)); \
 	})
-#define test_err_hwpt_invalidate(_errno, hwpt_id, reqs, data_type, lreq,    \
-				 nreqs)                                    \
-	({                                                                 \
-		EXPECT_ERRNO(_errno,                                       \
-			     _test_cmd_hwpt_invalidate(self->fd, hwpt_id,  \
-						       reqs, data_type,     \
-						       lreq, nreqs));      \
+#define test_err_hwpt_invalidate(_errno, hwpt_id, reqs, data_type, lreq, \
+				 nreqs)                                  \
+	({                                                               \
+		EXPECT_ERRNO(_errno, _test_cmd_hwpt_invalidate(          \
+					     self->fd, hwpt_id, reqs,    \
+					     data_type, lreq, nreqs));   \
 	})
 
 static int _test_cmd_access_replace_ioas(int fd, __u32 access_id,

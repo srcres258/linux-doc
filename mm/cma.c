@@ -439,6 +439,9 @@ struct page *cma_alloc(struct cma *cma, unsigned long count,
 	unsigned long i;
 	struct page *page = NULL;
 	int ret = -ENOMEM;
+	const char *name = cma ? cma->name : NULL;
+
+	trace_cma_alloc_start(name, count, align);
 
 	if (!cma || !cma->count || !cma->bitmap)
 		goto out;
@@ -448,8 +451,6 @@ struct page *cma_alloc(struct cma *cma, unsigned long count,
 
 	if (!count)
 		goto out;
-
-	trace_cma_alloc_start(cma->name, count, align);
 
 	mask = cma_bitmap_aligned_mask(cma, align);
 	offset = cma_bitmap_aligned_offset(cma, align);
@@ -499,8 +500,6 @@ struct page *cma_alloc(struct cma *cma, unsigned long count,
 		start = bitmap_no + mask + 1;
 	}
 
-	trace_cma_alloc_finish(cma->name, pfn, page, count, align, ret);
-
 	/*
 	 * CMA can allocate multiple page blocks, which results in different
 	 * blocks being marked with different tags. Reset the tags to ignore
@@ -519,6 +518,7 @@ struct page *cma_alloc(struct cma *cma, unsigned long count,
 
 	pr_debug("%s(): returned %p\n", __func__, page);
 out:
+	trace_cma_alloc_finish(name, pfn, page, count, align, ret);
 	if (page) {
 		count_vm_event(CMA_ALLOC_SUCCESS);
 		cma_sysfs_account_success_pages(cma, count);
