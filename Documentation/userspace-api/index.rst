@@ -30,10 +30,10 @@ place where this information is gathered.
    sysfs-platform_profile
    vduse
    futex2
+   lsm
    tee
    isapnp
    dcdbas
-   lsm
 
 .. only::  subproject and html
 

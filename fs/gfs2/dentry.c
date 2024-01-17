@@ -74,7 +74,7 @@ static int gfs2_drevalidate(struct dentry *dentry, const struct qstr *name,
 			goto out;
 	}
 
-	error = gfs2_dir_check(d_inode(parent), &dentry->d_name, ip);
+	error = gfs2_dir_check(dinode, &dentry->d_name, ip);
 	valid = inode ? !error : (error == -ENOENT);
 
 	if (!had_lock)

@@ -108,7 +108,7 @@ void bch2_kthread_io_clock_wait(struct io_clock *clock,
 	if (cpu_timeout != MAX_SCHEDULE_TIMEOUT)
 		mod_timer(&wait.cpu_timer, cpu_timeout + jiffies);
 
-	while (1) {
+	do {
 		set_current_state(TASK_INTERRUPTIBLE);
 		if (kthread_should_stop())
 			break;
@@ -118,7 +118,7 @@ void bch2_kthread_io_clock_wait(struct io_clock *clock,
 
 		schedule();
 		try_to_freeze();
-	}
+	} while (0);
 
 	__set_current_state(TASK_RUNNING);
 	del_timer_sync(&wait.cpu_timer);

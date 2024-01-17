@@ -467,7 +467,7 @@ static int psp_sw_init(void *handle)
 	}
 
 	ret = amdgpu_bo_create_kernel(adev, PSP_1_MEG, PSP_1_MEG,
-				      (amdgpu_sriov_vf(adev) || fw_bo_location == 1) ?
+				      (amdgpu_sriov_vf(adev) || adev->debug_use_vram_fw_buf) ?
 				      AMDGPU_GEM_DOMAIN_VRAM : AMDGPU_GEM_DOMAIN_GTT,
 				      &psp->fw_pri_bo,
 				      &psp->fw_pri_mc_addr,
@@ -2126,6 +2126,16 @@ int amdgpu_psp_wait_for_bootloader(struct amdgpu_device *adev)
 		ret = psp->funcs->wait_for_bootloader(psp);
 
 	return ret;
+}
+
+bool amdgpu_psp_get_ras_capability(struct psp_context *psp)
+{
+	if (psp->funcs &&
+	    psp->funcs->get_ras_capability) {
+		return psp->funcs->get_ras_capability(psp);
+	} else {
+		return false;
+	}
 }
 
 static int psp_hw_start(struct psp_context *psp)

@@ -512,9 +512,10 @@ void thermal_debug_cdev_remove(struct thermal_cooling_device *cdev)
 
 	thermal_debugfs_cdev_clear(&thermal_dbg->cdev_dbg);
 	cdev->debugfs = NULL;
-	thermal_debugfs_remove_id(thermal_dbg);
 
 	mutex_unlock(&thermal_dbg->lock);
+
+	thermal_debugfs_remove_id(thermal_dbg);
 }
 
 static struct tz_episode *thermal_debugfs_tz_event_alloc(struct thermal_zone_device *tz,
@@ -591,7 +592,7 @@ void thermal_debug_tz_trip_up(struct thermal_zone_device *tz,
 	if (!tz_dbg->nr_trips) {
 		tze = thermal_debugfs_tz_event_alloc(tz, now);
 		if (!tze)
-			return;
+			goto unlock;
 
 		list_add(&tze->node, &tz_dbg->tz_episodes);
 	}
@@ -619,6 +620,7 @@ void thermal_debug_tz_trip_up(struct thermal_zone_device *tz,
 		(temperature - tze->trip_stats[trip_id].avg) /
 		tze->trip_stats[trip_id].count;
 
+unlock:
 	mutex_unlock(&thermal_dbg->lock);
 }
 
@@ -830,7 +832,8 @@ void thermal_debug_tz_remove(struct thermal_zone_device *tz)
 	mutex_lock(&thermal_dbg->lock);
 
 	tz->debugfs = NULL;
-	thermal_debugfs_remove_id(thermal_dbg);
 
 	mutex_unlock(&thermal_dbg->lock);
+
+	thermal_debugfs_remove_id(thermal_dbg);
 }

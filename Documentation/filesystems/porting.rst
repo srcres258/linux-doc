@@ -1064,18 +1064,6 @@ generic_encode_ino32_fh() explicitly.
 
 ---
 
-**recommended**
-
-Block device freezing and thawing have been moved to holder operations.
-
-Before this change, get_active_super() would only be able to find the
-superblock of the main block device, i.e., the one stored in sb->s_bdev. Block
-device freezing now works for any block device owned by a given superblock, not
-just the main block device. The get_active_super() helper and bd_fsfreeze_sb
-pointer are gone.
-
----
-
 **mandatory**
 
 If ->rename() update of .. on cross-directory move needs an exclusion with
@@ -1118,7 +1106,7 @@ by compiler.
 and refcount equal to 0.  They are not permitted to drop/regain ->d_lock.
 None of in-tree instances did anything of that sort.  Make sure yours do not...
 
---
+---
 
 **mandatory**
 
@@ -1134,3 +1122,15 @@ Anyone iterating through the list of children needs to be aware of the
 half-killed dentries that might be seen there; taking ->d_lock on those will
 see them negative, unhashed and with negative refcount, which means that most
 of the in-kernel users would've done the right thing anyway without any adjustment.
+
+---
+
+**recommended**
+
+Block device freezing and thawing have been moved to holder operations.
+
+Before this change, get_active_super() would only be able to find the
+superblock of the main block device, i.e., the one stored in sb->s_bdev. Block
+device freezing now works for any block device owned by a given superblock, not
+just the main block device. The get_active_super() helper and bd_fsfreeze_sb
+pointer are gone.

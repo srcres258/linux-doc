@@ -149,6 +149,8 @@ struct aca_handle {
 	struct aca_handle_manager *mgr;
 	struct aca_error_cache error_cache;
 	const struct aca_bank_ops *bank_ops;
+	struct device_attribute aca_attr;
+	char attr_name[64];
 	const char *name;
 	u32 mask;
 	void *data;
@@ -172,6 +174,7 @@ struct aca_smu_funcs {
 struct amdgpu_aca {
 	struct aca_handle_manager mgr;
 	const struct aca_smu_funcs *smu_funcs;
+	bool is_enabled;
 };
 
 struct aca_info {
@@ -183,6 +186,7 @@ struct aca_info {
 int amdgpu_aca_init(struct amdgpu_device *adev);
 void amdgpu_aca_fini(struct amdgpu_device *adev);
 void amdgpu_aca_set_smu_funcs(struct amdgpu_device *adev, const struct aca_smu_funcs *smu_funcs);
+bool amdgpu_aca_is_enabled(struct amdgpu_device *adev);
 
 int aca_bank_info_decode(struct aca_bank *bank, struct aca_bank_info *info);
 int aca_bank_check_error_codes(struct amdgpu_device *adev, struct aca_bank *bank, int *err_codes, int size);

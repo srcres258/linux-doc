@@ -4834,7 +4834,7 @@ module_init(proc_vmalloc_init);
 
 #endif
 
-static void vmap_init_free_space(void)
+static void __init vmap_init_free_space(void)
 {
 	unsigned long vmap_start = 1;
 	const unsigned long vmap_end = ULONG_MAX;

@@ -71,6 +71,8 @@ enum amdgpu_ras_block {
 	AMDGPU_RAS_BLOCK__MCA,
 	AMDGPU_RAS_BLOCK__VCN,
 	AMDGPU_RAS_BLOCK__JPEG,
+	AMDGPU_RAS_BLOCK__IH,
+	AMDGPU_RAS_BLOCK__MPIO,
 
 	AMDGPU_RAS_BLOCK__LAST
 };
@@ -455,7 +457,7 @@ struct amdgpu_ras {
 	/* Indicates smu whether need update bad channel info */
 	bool update_channel_flag;
 	/* Record status of smu mca debug mode */
-	bool is_mca_debug_mode;
+	bool is_aca_debug_mode;
 
 	/* Record special requirements of gpu reset caller */
 	uint32_t  gpu_reset_flags;
@@ -476,6 +478,7 @@ struct ras_err_info {
 	struct amdgpu_smuio_mcm_config_info mcm_info;
 	u64 ce_count;
 	u64 ue_count;
+	u64 de_count;
 	struct ras_err_addr err_addr;
 };
 
@@ -487,6 +490,7 @@ struct ras_err_node {
 struct ras_err_data {
 	unsigned long ue_count;
 	unsigned long ce_count;
+	unsigned long de_count;
 	unsigned long err_addr_cnt;
 	struct eeprom_table_record *err_addr;
 	u32 err_list_count;
@@ -543,6 +547,8 @@ struct ras_manager {
 	struct ras_ih_data ih_data;
 
 	struct ras_err_data err_data;
+
+	struct aca_handle aca_handle;
 };
 
 struct ras_badpage {
@@ -562,6 +568,7 @@ struct ras_query_if {
 	struct ras_common_if head;
 	unsigned long ue_count;
 	unsigned long ce_count;
+	unsigned long de_count;
 };
 
 struct ras_inject_if {
@@ -796,7 +803,8 @@ int amdgpu_ras_set_context(struct amdgpu_device *adev, struct amdgpu_ras *ras_co
 
 int amdgpu_ras_set_aca_debug_mode(struct amdgpu_device *adev, bool enable);
 int amdgpu_ras_set_mca_debug_mode(struct amdgpu_device *adev, bool enable);
-bool amdgpu_ras_get_mca_debug_mode(struct amdgpu_device *adev);
+int amdgpu_ras_set_aca_debug_mode(struct amdgpu_device *adev, bool enable);
+bool amdgpu_ras_get_aca_debug_mode(struct amdgpu_device *adev);
 bool amdgpu_ras_get_error_query_mode(struct amdgpu_device *adev,
 				     unsigned int *mode);
 
@@ -833,5 +841,15 @@ int amdgpu_ras_error_statistic_ce_count(struct ras_err_data *err_data,
 int amdgpu_ras_error_statistic_ue_count(struct ras_err_data *err_data,
 		struct amdgpu_smuio_mcm_config_info *mcm_info,
 		struct ras_err_addr *err_addr, u64 count);
+int amdgpu_ras_error_statistic_de_count(struct ras_err_data *err_data,
+		struct amdgpu_smuio_mcm_config_info *mcm_info,
+		struct ras_err_addr *err_addr, u64 count);
 void amdgpu_ras_query_boot_status(struct amdgpu_device *adev, u32 num_instances);
+int amdgpu_ras_bind_aca(struct amdgpu_device *adev, enum amdgpu_ras_block blk,
+			       const struct aca_info *aca_info, void *data);
+int amdgpu_ras_unbind_aca(struct amdgpu_device *adev, enum amdgpu_ras_block blk);
+
+ssize_t amdgpu_ras_aca_sysfs_read(struct device *dev, struct device_attribute *attr,
+				  struct aca_handle *handle, char *buf, void *data);
+
 #endif
