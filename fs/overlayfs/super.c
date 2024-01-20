@@ -1026,6 +1026,7 @@ static int ovl_get_layers(struct super_block *sb, struct ovl_fs *ofs,
 		struct ovl_fs_context_layer *l = &ctx->lower[i];
 		struct vfsmount *mnt;
 		struct inode *trap;
+		struct path root;
 		int fsid;
 
 		if (i < nr_merged_lower)
@@ -1067,6 +1068,12 @@ static int ovl_get_layers(struct super_block *sb, struct ovl_fs *ofs,
 		 * will fail instead of modifying lower fs.
 		 */
 		mnt->mnt_flags |= MNT_READONLY | MNT_NOATIME;
+
+		/* overlay.opaque=x means xwhiteouts directory */
+		root.mnt = mnt;
+		root.dentry = mnt->mnt_root;
+		if (ovl_get_opaquedir_val(ofs, &root) == 'x')
+			ofs->xwhiteouts = true;
 
 		layers[ofs->numlayer].trap = trap;
 		layers[ofs->numlayer].mnt = mnt;
@@ -1272,6 +1279,8 @@ static struct dentry *ovl_get_root(struct super_block *sb,
 
 	/* Root is always merge -> can have whiteouts */
 	ovl_set_flag(OVL_WHITEOUTS, d_inode(root));
+	if (OVL_FS(sb)->xwhiteouts)
+		ovl_dentry_set_flag(OVL_E_XWHITEOUTS, root);
 	ovl_dentry_set_flag(OVL_E_CONNECTED, root);
 	ovl_set_upperdata(d_inode(root));
 	ovl_inode_init(d_inode(root), &oip, ino, fsid);
