@@ -74,6 +74,8 @@ const char *ras_block_string[] = {
 	"mca",
 	"vcn",
 	"jpeg",
+	"ih",
+	"mpio",
 };
 
 const char *ras_mca_block_string[] = {
@@ -95,7 +97,8 @@ const char *get_ras_block_str(struct ras_common_if *ras_block)
 	if (!ras_block)
 		return "NULL";
 
-	if (ras_block->block >= AMDGPU_RAS_BLOCK_COUNT)
+	if (ras_block->block >= AMDGPU_RAS_BLOCK_COUNT ||
+	    ras_block->block >= ARRAY_SIZE(ras_block_string))
 		return "OUT OF RANGE";
 
 	if (ras_block->block == AMDGPU_RAS_BLOCK__MCA)
@@ -629,8 +632,12 @@ static ssize_t amdgpu_ras_sysfs_read(struct device *dev,
 			dev_warn(obj->adev->dev, "Failed to reset error counter and error status");
 	}
 
-	return sysfs_emit(buf, "%s: %lu\n%s: %lu\n", "ue", info.ue_count,
-			  "ce", info.ce_count);
+	if (info.head.block == AMDGPU_RAS_BLOCK__UMC)
+		return sysfs_emit(buf, "%s: %lu\n%s: %lu\n%s: %lu\n", "ue", info.ue_count,
+				"ce", info.ce_count, "de", info.de_count);
+	else
+		return sysfs_emit(buf, "%s: %lu\n%s: %lu\n", "ue", info.ue_count,
+				"ce", info.ce_count);
 }
 
 /* obj begin */

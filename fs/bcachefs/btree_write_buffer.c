@@ -125,13 +125,12 @@ static inline int wb_flush_one(struct btree_trans *trans, struct btree_iter *ite
 			       struct btree_write_buffered_key *wb,
 			       bool *write_locked, size_t *fast)
 {
-	struct bch_fs *c = trans->c;
 	struct btree_path *path;
 	int ret;
 
 	EBUG_ON(!wb->journal_seq);
-	EBUG_ON(!c->btree_write_buffer.flushing.pin.seq);
-	EBUG_ON(c->btree_write_buffer.flushing.pin.seq > wb->journal_seq);
+	EBUG_ON(!trans->c->btree_write_buffer.flushing.pin.seq);
+	EBUG_ON(trans->c->btree_write_buffer.flushing.pin.seq > wb->journal_seq);
 
 	ret = bch2_btree_iter_traverse(iter);
 	if (ret)

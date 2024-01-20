@@ -95,7 +95,7 @@ static int __gfs2_unstuff_inode(struct gfs2_inode *ip, struct folio *folio)
 	int isdir = gfs2_is_dir(ip);
 	int error;
 
-	error = gfs2_meta_inode_buffer(ip, &dibh);
+	error = gfs2_meta_inode_buffer(ip, 0, &dibh);
 	if (error)
 		return error;
 
@@ -301,7 +301,7 @@ static void gfs2_metapath_ra(struct gfs2_glock *gl, __be64 *start, __be64 *end)
 		if (!*t)
 			continue;
 
-		rabh = gfs2_getbuf(gl, be64_to_cpu(*t), CREATE);
+		rabh = gfs2_getbuf(gl, be64_to_cpu(*t), FGP_CREAT);
 		if (trylock_buffer(rabh)) {
 			if (!buffer_uptodate(rabh)) {
 				rabh->b_end_io = end_buffer_read_sync;
@@ -351,7 +351,8 @@ static int __fillup_metapath(struct gfs2_inode *ip, struct metapath *mp,
 
 		if (!dblock)
 			break;
-		ret = gfs2_meta_buffer(ip, GFS2_METATYPE_IN, dblock, &mp->mp_bh[x + 1]);
+		ret = gfs2_meta_buffer(ip, GFS2_METATYPE_IN, dblock, 0,
+				       &mp->mp_bh[x + 1]);
 		if (ret)
 			return ret;
 	}
@@ -877,6 +878,11 @@ static int __gfs2_iomap_get(struct inode *inode, loff_t pos, loff_t length,
 
 	down_read(&ip->i_rw_mutex);
 
+	ret = gfs2_meta_inode_buffer(ip, 0, &dibh);
+	if (ret)
+		goto unlock;
+	mp->mp_bh[0] = dibh;
+
 	if (gfs2_is_stuffed(ip)) {
 		struct buffer_head *dibh = metapath_dibh(mp);
 
@@ -1394,7 +1400,7 @@ static int trunc_start(struct inode *inode, u64 newsize)
 	if (error)
 		return error;
 
-	error = gfs2_meta_inode_buffer(ip, &dibh);
+	error = gfs2_meta_inode_buffer(ip, 0, &dibh);
 	if (error)
 		goto out;
 
@@ -1603,7 +1609,7 @@ out_unlock:
 		if (current->journal_info) {
 			struct buffer_head *dibh;
 
-			ret = gfs2_meta_inode_buffer(ip, &dibh);
+			ret = gfs2_meta_inode_buffer(ip, 0, &dibh);
 			if (ret)
 				goto out;
 
@@ -1808,7 +1814,7 @@ static int punch_hole(struct gfs2_inode *ip, u64 offset, u64 length)
 	}
 	start_aligned = mp_h;
 
-	ret = init_metapath(&mp, &ip->i_inode);
+	ret = gfs2_meta_inode_buffer(ip, 0, &dibh);
 	if (ret)
 		return ret;
 
@@ -2009,7 +2015,7 @@ static int trunc_end(struct gfs2_inode *ip)
 
 	down_write(&ip->i_rw_mutex);
 
-	error = gfs2_meta_inode_buffer(ip, &dibh);
+	error = gfs2_meta_inode_buffer(ip, 0, &dibh);
 	if (error)
 		goto out;
 
@@ -2115,7 +2121,7 @@ static int do_grow(struct inode *inode, u64 size)
 			goto do_end_trans;
 	}
 
-	error = gfs2_meta_inode_buffer(ip, &dibh);
+	error = gfs2_meta_inode_buffer(ip, 0, &dibh);
 	if (error)
 		goto do_end_trans;
 
@@ -2369,7 +2375,7 @@ static int stuffed_zero_range(struct inode *inode, loff_t offset, loff_t length)
 	if (offset + length > inode->i_size)
 		length = inode->i_size - offset;
 
-	error = gfs2_meta_inode_buffer(ip, &dibh);
+	error = gfs2_meta_inode_buffer(ip, 0, &dibh);
 	if (error)
 		return error;
 	gfs2_trans_add_meta(ip->i_gl, dibh);

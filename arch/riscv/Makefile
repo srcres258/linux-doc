@@ -43,14 +43,12 @@ else
 	KBUILD_LDFLAGS += -melf32lriscv
 endif
 
-ifeq ($(CONFIG_LD_IS_LLD),y)
-ifeq ($(call test-lt, $(CONFIG_LLD_VERSION), 150000),y)
+ifndef CONFIG_RISCV_USE_LINKER_RELAXATION
 	KBUILD_CFLAGS += -mno-relax
 	KBUILD_AFLAGS += -mno-relax
 ifndef CONFIG_AS_IS_LLVM
 	KBUILD_CFLAGS += -Wa,-mno-relax
 	KBUILD_AFLAGS += -Wa,-mno-relax
-endif
 endif
 endif
 
@@ -165,6 +163,8 @@ BOOT_TARGETS := Image Image.gz loader loader.bin xipImage vmlinuz.efi
 
 all:	$(notdir $(KBUILD_IMAGE))
 
+loader.bin: loader
+Image.gz loader vmlinuz.efi: Image
 $(BOOT_TARGETS): vmlinux
 	$(Q)$(MAKE) $(build)=$(boot) $(boot)/$@
 	@$(kecho) '  Kernel: $(boot)/$@ is ready'

@@ -267,8 +267,7 @@ static int kvm_gmem_migrate_folio(struct address_space *mapping,
 	return -EINVAL;
 }
 
-static int kvm_gmem_error_folio(struct address_space *mapping,
-		struct folio *folio)
+static int kvm_gmem_error_folio(struct address_space *mapping, struct folio *folio)
 {
 	struct list_head *gmem_list = &mapping->i_private_list;
 	struct kvm_gmem *gmem;
