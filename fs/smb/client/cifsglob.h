@@ -50,6 +50,11 @@
 #define CIFS_DEF_ACTIMEO (1 * HZ)
 
 /*
+ * max sleep time before retry to server
+ */
+#define CIFS_MAX_SLEEP 2000
+
+/*
  * max attribute cache timeout (jiffies) - 2^30
  */
 #define CIFS_MAX_ACTIMEO (1 << 30)
@@ -1501,6 +1506,7 @@ struct cifs_writedata {
 	struct smbd_mr			*mr;
 #endif
 	struct cifs_credits		credits;
+	bool				replay;
 };
 
 /*
@@ -1827,6 +1833,13 @@ static inline bool is_interrupt_error(int error)
 static inline bool is_retryable_error(int error)
 {
 	if (is_interrupt_error(error) || error == -EAGAIN)
+		return true;
+	return false;
+}
+
+static inline bool is_replayable_error(int error)
+{
+	if (error == -EAGAIN || error == -ECONNABORTED)
 		return true;
 	return false;
 }
