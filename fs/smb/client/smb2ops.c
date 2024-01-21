@@ -1433,9 +1433,10 @@ smb2_close_getattr(const unsigned int xid, struct cifs_tcon *tcon,
 	 * but instead 512 byte (2**9) size is required for
 	 * calculating num blocks.
 	 */
-	if (le64_to_cpu(file_inf.AllocationSize) > 4096)
-		inode->i_blocks =
-			(512 - 1 + le64_to_cpu(file_inf.AllocationSize)) >> 9;
+	inode->i_blocks = (512 - 1 + le64_to_cpu(file_inf.AllocationSize)) >> 9;
+
+	CIFS_I(inode)->server_eof = le64_to_cpu(file_inf.EndOfFile);
+	i_size_write(inode, CIFS_I(inode)->server_eof);
 
 	/* End of file and Attributes should not have to be updated on close */
 	spin_unlock(&inode->i_lock);
