@@ -40,6 +40,8 @@ struct ovl_layer {
 	int idx;
 	/* One fsid per unique underlying sb (upper fsid == 0) */
 	int fsid;
+	/* xwhiteouts are enabled on this layer*/
+	bool xwhiteouts;
 };
 
 struct ovl_path {

@@ -1026,6 +1026,7 @@ static int ovl_get_layers(struct super_block *sb, struct ovl_fs *ofs,
 		struct ovl_fs_context_layer *l = &ctx->lower[i];
 		struct vfsmount *mnt;
 		struct inode *trap;
+		struct path root;
 		int fsid;
 
 		if (i < nr_merged_lower)
@@ -1067,6 +1068,16 @@ static int ovl_get_layers(struct super_block *sb, struct ovl_fs *ofs,
 		 * will fail instead of modifying lower fs.
 		 */
 		mnt->mnt_flags |= MNT_READONLY | MNT_NOATIME;
+
+		/*
+		 * Check if xwhiteout (xattr whiteout) support is enabled on
+		 * this layer.
+		 */
+		root.mnt = mnt;
+		root.dentry = mnt->mnt_root;
+		err = ovl_path_getxattr(ofs, &root, OVL_XATTR_XWHITEOUTS, NULL, 0);
+		if (err >= 0)
+			layers[ofs->numlayer].xwhiteouts = true;
 
 		layers[ofs->numlayer].trap = trap;
 		layers[ofs->numlayer].mnt = mnt;
