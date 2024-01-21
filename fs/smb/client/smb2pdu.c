@@ -167,7 +167,7 @@ cifs_chan_skip_or_disable(struct cifs_ses *ses,
 
 	if (SERVER_IS_CHAN(server)) {
 		cifs_dbg(VFS,
-			"server %s does not support multichannel anymore. Skip secondary channel\n",
+			 "server %s does not support multichannel anymore. Skip secondary channel\n",
 			 ses->server->hostname);
 
 		spin_lock(&ses->chan_lock);
@@ -195,14 +195,12 @@ cifs_chan_skip_or_disable(struct cifs_ses *ses,
 		pserver = server->primary_server;
 		cifs_signal_cifsd_for_reconnect(pserver, false);
 skip_terminate:
-		mutex_unlock(&ses->session_mutex);
 		return -EHOSTDOWN;
 	}
 
 	cifs_server_dbg(VFS,
-		"server does not support multichannel anymore. Disable all other channels\n");
+			"server does not support multichannel anymore. Disable all other channels\n");
 	cifs_disable_secondary_channels(ses);
-
 
 	return 0;
 }
