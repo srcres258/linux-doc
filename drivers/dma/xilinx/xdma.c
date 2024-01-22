@@ -548,11 +548,11 @@ static void xdma_synchronize(struct dma_chan *chan)
 
 /**
  * xdma_fill_descs - Fill hardware descriptors with contiguous memory block addresses
- * @sw_desc - tx descriptor state container
- * @src_addr - Value for a ->src_addr field of a first descriptor
- * @dst_addr - Value for a ->dst_addr field of a first descriptor
- * @size - Total size of a contiguous memory block
- * @filled_descs_num - Number of filled hardware descriptors for corresponding sw_desc
+ * @sw_desc: tx descriptor state container
+ * @src_addr: Value for a ->src_addr field of a first descriptor
+ * @dst_addr: Value for a ->dst_addr field of a first descriptor
+ * @size: Total size of a contiguous memory block
+ * @filled_descs_num: Number of filled hardware descriptors for corresponding sw_desc
  */
 static inline u32 xdma_fill_descs(struct xdma_desc *sw_desc, u64 src_addr,
 				  u64 dst_addr, u32 size, u32 filled_descs_num)
@@ -754,10 +754,10 @@ xdma_prep_interleaved_dma(struct dma_chan *chan,
 	dst_addr = xt->dst_start;
 	for (i = 0; i < xt->frame_size; ++i) {
 		desc_num += xdma_fill_descs(sw_desc, src_addr, dst_addr, xt->sgl[i].size, desc_num);
-		src_addr += dmaengine_get_src_icg(xt, &xt->sgl[i]) + xt->src_inc ?
-							      xt->sgl[i].size : 0;
-		dst_addr += dmaengine_get_dst_icg(xt, &xt->sgl[i]) + xt->dst_inc ?
-							      xt->sgl[i].size : 0;
+		src_addr += dmaengine_get_src_icg(xt, &xt->sgl[i]) + (xt->src_inc ?
+							      xt->sgl[i].size : 0);
+		dst_addr += dmaengine_get_dst_icg(xt, &xt->sgl[i]) + (xt->dst_inc ?
+							      xt->sgl[i].size : 0);
 		period_size += xt->sgl[i].size;
 	}
 	sw_desc->period_size = period_size;
@@ -888,6 +888,8 @@ static irqreturn_t xdma_channel_isr(int irq, void *dev_id)
 	if (ret)
 		goto out;
 
+	desc = to_xdma_desc(vd);
+
 	st &= XDMA_CHAN_STATUS_MASK;
 	if ((st & XDMA_CHAN_ERROR_MASK) ||
 	    !(st & (CHAN_CTRL_IE_DESC_COMPLETED | CHAN_CTRL_IE_DESC_STOPPED))) {
@@ -901,7 +903,6 @@ static irqreturn_t xdma_channel_isr(int irq, void *dev_id)
 	if (ret)
 		goto out;
 
-	desc = to_xdma_desc(vd);
 	if (desc->interleaved_dma) {
 		xchan->busy = false;
 		desc->completed_desc_num += complete_desc_num;

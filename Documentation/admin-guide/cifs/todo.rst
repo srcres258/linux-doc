@@ -2,8 +2,7 @@
 TODO
 ====
 
-As of 6.7 kernel, see
-   https://wiki.samba.org/index.php/LinuxCIFSKernel
+As of 6.7 kernel. See https://wiki.samba.org/index.php/LinuxCIFSKernel
 for list of features added by release
 
 A Partial List of Missing Features
@@ -14,12 +13,12 @@ for visible, important contributions to this module.  Here
 is a partial list of the known problems and missing features:
 
 a) SMB3 (and SMB3.1.1) missing optional features:
-   - multichannel performance optimizations, algorithmic channel selection
-   - directory leases optimizations
-   - T10 copy offload ie "ODX" (copy chunk, and "Duplicate Extents" ioctl
-     currently the only two server side copy mechanisms supported)
-   - support for faster packet signing (GMAC)
-   - support for compression over the network
+   multichannel performance optimizations, algorithmic channel selection,
+   directory leases optimizations,
+   support for faster packet signing (GMAC),
+   support for compression over the network,
+   T10 copy offload ie "ODX" (copy chunk, and "Duplicate Extents" ioctl
+   are currently the only two server side copy mechanisms supported)
 
 b) Better optimized compounding and error handling for sparse file support,
    perhaps addition of new optional SMB3.1.1 fsctls to make collapse range
@@ -29,7 +28,7 @@ c) Support for SMB3.1.1 over QUIC (and perhaps other socket based protocols
    like SCTP)
 
 d) quota support (needs minor kernel change since quota calls otherwise
-    won't make it to network filesystems or deviceless filesystems).
+   won't make it to network filesystems or deviceless filesystems).
 
 e) Additional use cases can be optimized to use "compounding" (e.g.
    open/query/close and open/setinfo/close) to reduce the number of
@@ -107,13 +106,7 @@ Known Bugs
 
 See https://bugzilla.samba.org - search on product "CifsVFS" for
 current bug list.  Also check http://bugzilla.kernel.org (Product = File System, Component = CIFS)
-
-1) existing symbolic links (Windows reparse points) are recognized but
-   can not be created remotely. They are implemented for Samba and those that
-   support the CIFS Unix extensions, although earlier versions of Samba
-   overly restrict the pathnames.
-2) follow_link and readdir code does not follow dfs junctions
-   but recognizes them
+and xfstest results e.g. https://wiki.samba.org/index.php/Xfstest-results-smb3
 
 Misc testing to do
 ==================

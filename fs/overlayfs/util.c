@@ -739,10 +739,15 @@ bool ovl_path_check_xwhiteout_xattr(struct ovl_fs *ofs, const struct path *path)
 	return res >= 0;
 }
 
-bool ovl_path_check_xwhiteouts_xattr(struct ovl_fs *ofs, const struct path *path)
+bool ovl_path_check_xwhiteouts_xattr(struct ovl_fs *ofs,
+				     const struct ovl_layer *layer,
+				     const struct path *path)
 {
 	struct dentry *dentry = path->dentry;
 	int res;
+
+	if (!layer->xwhiteouts)
+		return false;
 
 	/* xattr.whiteouts must be a directory */
 	if (!d_is_dir(dentry))

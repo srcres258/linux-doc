@@ -243,7 +243,6 @@ static noinstr void mce_panic(const char *msg, struct mce *final, char *exp)
 	struct llist_node *pending;
 	struct mce_evt_llist *l;
 	int apei_err = 0;
-	struct page *p;
 	const char *memmsg;
 
 	/*
@@ -312,6 +311,7 @@ static noinstr void mce_panic(const char *msg, struct mce *final, char *exp)
 		 */
 		if (kexec_crash_loaded()) {
 			if (final && (final->status & MCI_STATUS_ADDRV)) {
+				struct page *p;
 				p = pfn_to_online_page(final->addr >> PAGE_SHIFT);
 				if (p)
 					SetPageHWPoison(p);
