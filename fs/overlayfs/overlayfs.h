@@ -50,7 +50,6 @@ enum ovl_xattr {
 	OVL_XATTR_METACOPY,
 	OVL_XATTR_PROTATTR,
 	OVL_XATTR_XWHITEOUT,
-	OVL_XATTR_XWHITEOUTS,
 };
 
 enum ovl_inode_flag {
@@ -70,6 +69,8 @@ enum ovl_entry_flag {
 	OVL_E_UPPER_ALIAS,
 	OVL_E_OPAQUE,
 	OVL_E_CONNECTED,
+	/* Lower stack may contain xwhiteout entries */
+	OVL_E_XWHITEOUTS,
 };
 
 enum {
@@ -476,6 +477,8 @@ void ovl_dentry_clear_flag(unsigned long flag, struct dentry *dentry);
 bool ovl_dentry_test_flag(unsigned long flag, struct dentry *dentry);
 bool ovl_dentry_is_opaque(struct dentry *dentry);
 bool ovl_dentry_is_whiteout(struct dentry *dentry);
+bool ovl_dentry_is_xwhiteouts(struct dentry *dentry);
+void ovl_dentry_set_xwhiteouts(struct dentry *dentry);
 void ovl_dentry_set_opaque(struct dentry *dentry);
 bool ovl_dentry_has_upper_alias(struct dentry *dentry);
 void ovl_dentry_set_upper_alias(struct dentry *dentry);
@@ -494,11 +497,10 @@ struct file *ovl_path_open(const struct path *path, int flags);
 int ovl_copy_up_start(struct dentry *dentry, int flags);
 void ovl_copy_up_end(struct dentry *dentry);
 bool ovl_already_copied_up(struct dentry *dentry, int flags);
-bool ovl_path_check_dir_xattr(struct ovl_fs *ofs, const struct path *path,
-			      enum ovl_xattr ox);
+char ovl_get_dir_xattr_val(struct ovl_fs *ofs, const struct path *path,
+			   enum ovl_xattr ox);
 bool ovl_path_check_origin_xattr(struct ovl_fs *ofs, const struct path *path);
 bool ovl_path_check_xwhiteout_xattr(struct ovl_fs *ofs, const struct path *path);
-bool ovl_path_check_xwhiteouts_xattr(struct ovl_fs *ofs, const struct path *path);
 bool ovl_init_uuid_xattr(struct super_block *sb, struct ovl_fs *ofs,
 			 const struct path *upperpath);
 
@@ -573,7 +575,13 @@ static inline bool ovl_is_impuredir(struct super_block *sb,
 		.mnt = ovl_upper_mnt(ofs),
 	};
 
-	return ovl_path_check_dir_xattr(ofs, &upperpath, OVL_XATTR_IMPURE);
+	return ovl_get_dir_xattr_val(ofs, &upperpath, OVL_XATTR_IMPURE) == 'y';
+}
+
+static inline char ovl_get_opaquedir_val(struct ovl_fs *ofs,
+					 const struct path *path)
+{
+	return ovl_get_dir_xattr_val(ofs, path, OVL_XATTR_OPAQUE);
 }
 
 static inline bool ovl_redirect_follow(struct ovl_fs *ofs)
