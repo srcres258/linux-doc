@@ -8,7 +8,7 @@
 		"copy %%r0,%0\n"			\
 		"8:\tlpa %%r0(%1),%0\n"			\
 		"9:\n"					\
-		ASM_EXCEPTIONTABLE_ENTRY(8b, 9b)	\
+		ASM_EXCEPTIONTABLE_ENTRY(8b, 9b, "nop")	\
 		: "=&r" (pa)				\
 		: "r" (va)				\
 		: "memory"				\
@@ -22,7 +22,7 @@
 		"copy %%r0,%0\n"			\
 		"8:\tlpa %%r0(%%sr3,%1),%0\n"		\
 		"9:\n"					\
-		ASM_EXCEPTIONTABLE_ENTRY(8b, 9b)	\
+		ASM_EXCEPTIONTABLE_ENTRY(8b, 9b, "nop")	\
 		: "=&r" (pa)				\
 		: "r" (va)				\
 		: "memory"				\
