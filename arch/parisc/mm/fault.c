@@ -157,7 +157,7 @@ int fixup_exception(struct pt_regs *regs)
 			int fault_error_reg = fix->err_opcode & 0x1f;
 			if (fault_error_reg)
 				regs->gr[fault_error_reg] = -EFAULT;
-			pr_info(" FIXUP REG %d at %pS\n", fault_error_reg,
+			pr_debug("FIXUP REG %d at %pS\n", fault_error_reg,
 				(void*)regs->iaoq[0]);
 
 			/* zero target register for get_user() */

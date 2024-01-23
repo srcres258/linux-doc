@@ -6,8 +6,6 @@
 #include <linux/stddef.h>
 #include <asm/ptrace.h>
 
-extern void apply_relocation(u8 *buf, size_t len, u8 *dest, u8 *src, size_t src_len);
-
 /*
  * Currently, the max observed size in the kernel code is
  * JUMP_LABEL_NOP_SIZE/RELATIVEJUMP_SIZE, which are 5.
@@ -16,6 +14,8 @@ extern void apply_relocation(u8 *buf, size_t len, u8 *dest, u8 *src, size_t src_
 #define POKE_MAX_OPCODE_SIZE	5
 
 extern void text_poke_early(void *addr, const void *opcode, size_t len);
+
+extern void apply_relocation(u8 *buf, size_t len, u8 *dest, u8 *src, size_t src_len);
 
 /*
  * Clear and restore the kernel write-protection flag on the local CPU.

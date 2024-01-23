@@ -11,8 +11,14 @@ ifneq (,$(filter-out parallel=1,$(filter parallel=%,$(DEB_BUILD_OPTIONS))))
     MAKEFLAGS += -j$(NUMJOBS)
 endif
 
-ifneq (,$(filter terse,$(DEB_BUILD_OPTIONS)))
-    Q ?= @
+# When KBUILD_VERBOSE is undefined (presumably you are directly working with
+# the debianized tree), show verbose logs unless DEB_BUILD_OPTION=terse is set.
+ifeq ($(origin KBUILD_VERBOSE),undefined)
+    ifeq (,$(filter terse,$(DEB_BUILD_OPTIONS)))
+        export KBUILD_VERBOSE := 1
+    else
+        Q := @
+    endif
 endif
 
 revision = $(lastword $(subst -, ,$(shell dpkg-parsechangelog -S Version)))
@@ -29,6 +35,10 @@ headers-package = $(filter linux-headers-%, $(all-packages))
 
 mk-files = $(patsubst binary-%,debian/%.files,$1)
 package = $($(@:binary-%=%-package))
+
+# DH_OPTION is an environment variable common for all debhelper commands.
+# We could 'export' it, but here it is passed from the command line to clarify
+# which package is being processed in the build log.
 DH_OPTIONS = -p$(package)
 
 define binary
@@ -60,8 +70,8 @@ binary-arch: $(binary-targets)
 build: build-arch build-indep
 build-indep:
 build-arch:
-	$(MAKE) $(make-opts) olddefconfig
-	$(MAKE) $(make-opts) $(if $(filter um,$(ARCH)),,headers) all
+	$(Q)$(MAKE) $(make-opts) olddefconfig
+	$(Q)$(MAKE) $(make-opts) $(if $(filter um,$(ARCH)),,headers) all
 
 .PHONY: clean
 clean:

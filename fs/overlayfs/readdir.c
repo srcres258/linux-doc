@@ -305,6 +305,9 @@ static inline int ovl_dir_read(const struct path *realpath,
 	if (IS_ERR(realfile))
 		return PTR_ERR(realfile);
 
+	/* No need to check for xwhiteouts in upper and lowermost layers */
+	rdd->in_xwhiteouts_dir = !rdd->is_upper && !rdd->is_lowest &&
+		rdd->dentry && ovl_dentry_is_xwhiteouts(rdd->dentry);
 	rdd->first_maybe_whiteout = NULL;
 	rdd->ctx.pos = 0;
 	do {

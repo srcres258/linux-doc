@@ -141,6 +141,7 @@ struct dcn_dpp_state {
 	uint32_t igam_input_format;
 	uint32_t dgam_lut_mode;
 	uint32_t rgam_lut_mode;
+	// gamut_remap data for dcn10_get_cm_states()
 	uint32_t gamut_remap_mode;
 	uint32_t gamut_remap_c11_c12;
 	uint32_t gamut_remap_c13_c14;
@@ -148,6 +149,16 @@ struct dcn_dpp_state {
 	uint32_t gamut_remap_c23_c24;
 	uint32_t gamut_remap_c31_c32;
 	uint32_t gamut_remap_c33_c34;
+	// gamut_remap data for dcn*_log_color_state()
+	struct dpp_grph_csc_adjustment gamut_remap;
+	uint32_t shaper_lut_mode;
+	uint32_t lut3d_mode;
+	uint32_t lut3d_bit_depth;
+	uint32_t lut3d_size;
+	uint32_t blnd_lut_mode;
+	uint32_t pre_dgam_mode;
+	uint32_t pre_dgam_select;
+	uint32_t gamcor_mode;
 };
 
 struct CM_bias_params {
@@ -290,6 +301,9 @@ struct dpp_funcs {
 	void (*dpp_cnv_set_alpha_keyer)(
 			struct dpp *dpp_base,
 			struct cnv_color_keyer_params *color_keyer);
+
+	void (*dpp_get_gamut_remap)(struct dpp *dpp_base,
+				    struct dpp_grph_csc_adjustment *adjust);
 };
 
 

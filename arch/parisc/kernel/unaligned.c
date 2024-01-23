@@ -404,7 +404,8 @@ void handle_unaligned(struct pt_regs *regs)
 		if (!unaligned_enabled)
 			goto force_sigbus;
 	} else {
-		if (__ratelimit(&ratelimit))
+		static DEFINE_RATELIMIT_STATE(kernel_ratelimit, 5 * HZ, 5);
+		if (__ratelimit(&kernel_ratelimit))
 			pr_warn("Kernel unaligned access to " RFMT
 				" at %pS (iir " RFMT ")\n",
 				regs->ior, (void *)regs->iaoq[0], regs->iir);
