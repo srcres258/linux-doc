@@ -514,7 +514,7 @@ static int smu_v11_0_atom_get_smu_clockinfo(struct amdgpu_device *adev,
 					    getsmuclockinfo);
 
 	ret = amdgpu_atom_execute_table(adev->mode_info.atom_context, index,
-					(uint32_t *)&input);
+					(uint32_t *)&input, sizeof(input));
 	if (ret)
 		return -EINVAL;
 
@@ -1442,10 +1442,12 @@ static int smu_v11_0_irq_process(struct amdgpu_device *adev,
 			case 0x3:
 				dev_dbg(adev->dev, "Switched to AC mode!\n");
 				schedule_work(&smu->interrupt_work);
+				adev->pm.ac_power = true;
 				break;
 			case 0x4:
 				dev_dbg(adev->dev, "Switched to DC mode!\n");
 				schedule_work(&smu->interrupt_work);
+				adev->pm.ac_power = false;
 				break;
 			case 0x7:
 				/*
