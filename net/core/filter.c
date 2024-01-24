@@ -777,7 +777,7 @@ jmp_rest:
 			BPF_EMIT_JMP;
 			break;
 
-		/* ldxb 4 * ([14] & 0xf) is remaped into 6 insns. */
+		/* ldxb 4 * ([14] & 0xf) is remapped into 6 insns. */
 		case BPF_LDX | BPF_MSH | BPF_B: {
 			struct sock_filter tmp = {
 				.code	= BPF_LD | BPF_ABS | BPF_B,
@@ -803,7 +803,7 @@ jmp_rest:
 			*insn = BPF_MOV64_REG(BPF_REG_A, BPF_REG_TMP);
 			break;
 		}
-		/* RET_K is remaped into 2 insns. RET_A case doesn't need an
+		/* RET_K is remapped into 2 insns. RET_A case doesn't need an
 		 * extra mov as BPF_REG_0 is already mapped into BPF_REG_A.
 		 */
 		case BPF_RET | BPF_A:
@@ -2967,7 +2967,7 @@ BPF_CALL_4(bpf_msg_pop_data, struct sk_msg *, msg, u32, start,
 	 *
 	 * Then if B is non-zero AND there is no space allocate space and
 	 * compact A, B regions into page. If there is space shift ring to
-	 * the rigth free'ing the next element in ring to place B, leaving
+	 * the right free'ing the next element in ring to place B, leaving
 	 * A untouched except to reduce length.
 	 */
 	if (start != offset) {
@@ -8226,7 +8226,7 @@ xdp_func_proto(enum bpf_func_id func_id, const struct bpf_prog *prog)
 #if IS_MODULE(CONFIG_NF_CONNTRACK) && IS_ENABLED(CONFIG_DEBUG_INFO_BTF_MODULES)
 	/* The nf_conn___init type is used in the NF_CONNTRACK kfuncs. The
 	 * kfuncs are defined in two different modules, and we want to be able
-	 * to use them interchangably with the same BTF type ID. Because modules
+	 * to use them interchangeably with the same BTF type ID. Because modules
 	 * can't de-duplicate BTF IDs between each other, we need the type to be
 	 * referenced in the vmlinux BTF or the verifier will get confused about
 	 * the different types. So we add this dummy type reference which will
@@ -11837,6 +11837,103 @@ __bpf_kfunc int bpf_sock_addr_set_sun_path(struct bpf_sock_addr_kern *sa_kern,
 
 	return 0;
 }
+
+__bpf_kfunc int bpf_sk_assign_tcp_reqsk(struct sk_buff *skb, struct sock *sk,
+					struct bpf_tcp_req_attrs *attrs, int attrs__sz)
+{
+#if IS_ENABLED(CONFIG_SYN_COOKIES)
+	const struct request_sock_ops *ops;
+	struct inet_request_sock *ireq;
+	struct tcp_request_sock *treq;
+	struct request_sock *req;
+	struct net *net;
+	__u16 min_mss;
+	u32 tsoff = 0;
+
+	if (attrs__sz != sizeof(*attrs) ||
+	    attrs->reserved[0] || attrs->reserved[1] || attrs->reserved[2])
+		return -EINVAL;
+
+	if (!skb_at_tc_ingress(skb))
+		return -EINVAL;
+
+	net = dev_net(skb->dev);
+	if (net != sock_net(sk))
+		return -ENETUNREACH;
+
+	switch (skb->protocol) {
+	case htons(ETH_P_IP):
+		ops = &tcp_request_sock_ops;
+		min_mss = 536;
+		break;
+#if IS_BUILTIN(CONFIG_IPV6)
+	case htons(ETH_P_IPV6):
+		ops = &tcp6_request_sock_ops;
+		min_mss = IPV6_MIN_MTU - 60;
+		break;
+#endif
+	default:
+		return -EINVAL;
+	}
+
+	if (sk->sk_type != SOCK_STREAM || sk->sk_state != TCP_LISTEN ||
+	    sk_is_mptcp(sk))
+		return -EINVAL;
+
+	if (attrs->mss < min_mss)
+		return -EINVAL;
+
+	if (attrs->wscale_ok) {
+		if (!READ_ONCE(net->ipv4.sysctl_tcp_window_scaling))
+			return -EINVAL;
+
+		if (attrs->snd_wscale > TCP_MAX_WSCALE ||
+		    attrs->rcv_wscale > TCP_MAX_WSCALE)
+			return -EINVAL;
+	}
+
+	if (attrs->sack_ok && !READ_ONCE(net->ipv4.sysctl_tcp_sack))
+		return -EINVAL;
+
+	if (attrs->tstamp_ok) {
+		if (!READ_ONCE(net->ipv4.sysctl_tcp_timestamps))
+			return -EINVAL;
+
+		tsoff = attrs->rcv_tsecr - tcp_ns_to_ts(attrs->usec_ts_ok, tcp_clock_ns());
+	}
+
+	req = inet_reqsk_alloc(ops, sk, false);
+	if (!req)
+		return -ENOMEM;
+
+	ireq = inet_rsk(req);
+	treq = tcp_rsk(req);
+
+	req->rsk_listener = sk;
+	req->syncookie = 1;
+	req->mss = attrs->mss;
+	req->ts_recent = attrs->rcv_tsval;
+
+	ireq->snd_wscale = attrs->snd_wscale;
+	ireq->rcv_wscale = attrs->rcv_wscale;
+	ireq->tstamp_ok	= !!attrs->tstamp_ok;
+	ireq->sack_ok = !!attrs->sack_ok;
+	ireq->wscale_ok = !!attrs->wscale_ok;
+	ireq->ecn_ok = !!attrs->ecn_ok;
+
+	treq->req_usec_ts = !!attrs->usec_ts_ok;
+	treq->ts_off = tsoff;
+
+	skb_orphan(skb);
+	skb->sk = req_to_sk(req);
+	skb->destructor = sock_pfree;
+
+	return 0;
+#else
+	return -EOPNOTSUPP;
+#endif
+}
+
 __bpf_kfunc_end_defs();
 
 int bpf_dynptr_from_skb_rdonly(struct sk_buff *skb, u64 flags,
@@ -11865,6 +11962,10 @@ BTF_SET8_START(bpf_kfunc_check_set_sock_addr)
 BTF_ID_FLAGS(func, bpf_sock_addr_set_sun_path)
 BTF_SET8_END(bpf_kfunc_check_set_sock_addr)
 
+BTF_SET8_START(bpf_kfunc_check_set_tcp_reqsk)
+BTF_ID_FLAGS(func, bpf_sk_assign_tcp_reqsk, KF_TRUSTED_ARGS)
+BTF_SET8_END(bpf_kfunc_check_set_tcp_reqsk)
+
 static const struct btf_kfunc_id_set bpf_kfunc_set_skb = {
 	.owner = THIS_MODULE,
 	.set = &bpf_kfunc_check_set_skb,
@@ -11878,6 +11979,11 @@ static const struct btf_kfunc_id_set bpf_kfunc_set_xdp = {
 static const struct btf_kfunc_id_set bpf_kfunc_set_sock_addr = {
 	.owner = THIS_MODULE,
 	.set = &bpf_kfunc_check_set_sock_addr,
+};
+
+static const struct btf_kfunc_id_set bpf_kfunc_set_tcp_reqsk = {
+	.owner = THIS_MODULE,
+	.set = &bpf_kfunc_check_set_tcp_reqsk,
 };
 
 static int __init bpf_kfunc_init(void)
@@ -11895,8 +12001,9 @@ static int __init bpf_kfunc_init(void)
 	ret = ret ?: register_btf_kfunc_id_set(BPF_PROG_TYPE_LWT_SEG6LOCAL, &bpf_kfunc_set_skb);
 	ret = ret ?: register_btf_kfunc_id_set(BPF_PROG_TYPE_NETFILTER, &bpf_kfunc_set_skb);
 	ret = ret ?: register_btf_kfunc_id_set(BPF_PROG_TYPE_XDP, &bpf_kfunc_set_xdp);
-	return ret ?: register_btf_kfunc_id_set(BPF_PROG_TYPE_CGROUP_SOCK_ADDR,
-						&bpf_kfunc_set_sock_addr);
+	ret = ret ?: register_btf_kfunc_id_set(BPF_PROG_TYPE_CGROUP_SOCK_ADDR,
+					       &bpf_kfunc_set_sock_addr);
+	return ret ?: register_btf_kfunc_id_set(BPF_PROG_TYPE_SCHED_CLS, &bpf_kfunc_set_tcp_reqsk);
 }
 late_initcall(bpf_kfunc_init);
 

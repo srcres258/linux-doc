@@ -97,6 +97,28 @@ Definitions
     A:          10000110
     B: 11111111 10000110
 
+Conformance groups
+------------------
+
+An implementation does not need to support all instructions specified in this
+document (e.g., deprecated instructions).  Instead, a number of conformance
+groups are specified.  An implementation must support the "basic" conformance
+group and may support additional conformance groups, where supporting a
+conformance group means it must support all instructions in that conformance
+group.
+
+The use of named conformance groups enables interoperability between a runtime
+that executes instructions, and tools as such compilers that generate
+instructions for the runtime.  Thus, capability discovery in terms of
+conformance groups might be done manually by users or automatically by tools.
+
+Each conformance group has a short ASCII label (e.g., "basic") that
+corresponds to a set of instructions that are mandatory.  That is, each
+instruction has one or more conformance groups of which it is a member.
+
+The "basic" conformance group includes all instructions defined in this
+specification unless otherwise noted.
+
 Instruction encoding
 ====================
 
@@ -295,7 +317,8 @@ The ``BPF_MOVSX`` instruction does a move operation with sign extension.
 ``BPF_ALU | BPF_MOVSX`` :term:`sign extends<Sign Extend>` 8-bit and 16-bit operands into 32
 bit operands, and zeroes the remaining upper 32 bits.
 ``BPF_ALU64 | BPF_MOVSX`` :term:`sign extends<Sign Extend>` 8-bit, 16-bit, and 32-bit
-operands into 64 bit operands.
+operands into 64 bit operands.  Unlike other arithmetic instructions,
+``BPF_MOVSX`` is only defined for register source operands (``BPF_X``).
 
 Shift operations use a mask of 0x3F (63) for 64-bit operations and 0x1F (31)
 for 32-bit operations.
@@ -610,4 +633,6 @@ Legacy BPF Packet access instructions
 
 BPF previously introduced special instructions for access to packet data that were
 carried over from classic BPF. However, these instructions are
-deprecated and should no longer be used.
+deprecated and should no longer be used.  All legacy packet access
+instructions belong to the "legacy" conformance group instead of the "basic"
+conformance group.
