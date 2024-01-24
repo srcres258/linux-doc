@@ -296,6 +296,7 @@ static int ovl_lookup_single(struct dentry *base, struct ovl_lookup_data *d,
 		val = ovl_get_opaquedir_val(ofs, &path);
 		if (last_element && !is_upper && val == 'x') {
 			d->xwhiteouts = true;
+			ovl_layer_set_xwhiteouts(ofs, d->layer);
 		} else if (val == 'y') {
 			d->stop = true;
 			if (last_element)

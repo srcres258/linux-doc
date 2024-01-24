@@ -305,9 +305,6 @@ static inline int ovl_dir_read(const struct path *realpath,
 	if (IS_ERR(realfile))
 		return PTR_ERR(realfile);
 
-	/* No need to check for xwhiteouts in upper and lowermost layers */
-	rdd->in_xwhiteouts_dir = !rdd->is_upper && !rdd->is_lowest &&
-		rdd->dentry && ovl_dentry_is_xwhiteouts(rdd->dentry);
 	rdd->first_maybe_whiteout = NULL;
 	rdd->ctx.pos = 0;
 	do {
@@ -360,14 +357,13 @@ static int ovl_dir_read_merged(struct dentry *dentry, struct list_head *list,
 		.is_lowest = false,
 	};
 	int idx, next;
-	struct ovl_fs *ofs = OVL_FS(dentry->d_sb);
 	const struct ovl_layer *layer;
 
 	for (idx = 0; idx != -1; idx = next) {
 		next = ovl_path_next(idx, dentry, &realpath, &layer);
 		rdd.is_upper = ovl_dentry_upper(dentry) == realpath.dentry;
-		if (ovl_path_check_xwhiteouts_xattr(ofs, layer, &realpath))
-			rdd.in_xwhiteouts_dir = true;
+		rdd.in_xwhiteouts_dir = layer->has_xwhiteouts &&
+					ovl_dentry_has_xwhiteouts(dentry);
 
 		if (next != -1) {
 			err = ovl_dir_read(&realpath, &rdd);

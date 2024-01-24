@@ -3310,30 +3310,48 @@ static int btf_find_kptr(const struct btf *btf, const struct btf_type *t,
 	return BTF_FIELD_FOUND;
 }
 
+int btf_find_next_decl_tag(const struct btf *btf, const struct btf_type *pt,
+			   int comp_idx, const char *tag_key, int last_id)
+{
+	int len = strlen(tag_key);
+	int i, n;
+
+	for (i = last_id + 1, n = btf_nr_types(btf); i < n; i++) {
+		const struct btf_type *t = btf_type_by_id(btf, i);
+
+		if (!btf_type_is_decl_tag(t))
+			continue;
+		if (pt != btf_type_by_id(btf, t->type))
+			continue;
+		if (btf_type_decl_tag(t)->component_idx != comp_idx)
+			continue;
+		if (strncmp(__btf_name_by_offset(btf, t->name_off), tag_key, len))
+			continue;
+		return i;
+	}
+	return -ENOENT;
+}
+
 const char *btf_find_decl_tag_value(const struct btf *btf, const struct btf_type *pt,
 				    int comp_idx, const char *tag_key)
 {
 	const char *value = NULL;
-	int i;
+	const struct btf_type *t;
+	int len, id;
 
-	for (i = 1; i < btf_nr_types(btf); i++) {
-		const struct btf_type *t = btf_type_by_id(btf, i);
-		int len = strlen(tag_key);
+	id = btf_find_next_decl_tag(btf, pt, comp_idx, tag_key, 0);
+	if (id < 0)
+		return ERR_PTR(id);
 
-		if (!btf_type_is_decl_tag(t))
-			continue;
-		if (pt != btf_type_by_id(btf, t->type) ||
-		    btf_type_decl_tag(t)->component_idx != comp_idx)
-			continue;
-		if (strncmp(__btf_name_by_offset(btf, t->name_off), tag_key, len))
-			continue;
-		/* Prevent duplicate entries for same type */
-		if (value)
-			return ERR_PTR(-EEXIST);
-		value = __btf_name_by_offset(btf, t->name_off) + len;
-	}
-	if (!value)
-		return ERR_PTR(-ENOENT);
+	t = btf_type_by_id(btf, id);
+	len = strlen(tag_key);
+	value = __btf_name_by_offset(btf, t->name_off) + len;
+
+	/* Prevent duplicate entries for same type */
+	id = btf_find_next_decl_tag(btf, pt, comp_idx, tag_key, id);
+	if (id >= 0)
+		return ERR_PTR(-EEXIST);
+
 	return value;
 }
 
@@ -6946,6 +6964,11 @@ static bool btf_is_dynptr_ptr(const struct btf *btf, const struct btf_type *t)
 	return false;
 }
 
+enum btf_arg_tag {
+	ARG_TAG_CTX = 0x1,
+	ARG_TAG_NONNULL = 0x2,
+};
+
 /* Process BTF of a function to produce high-level expectation of function
  * arguments (like ARG_PTR_TO_CTX, or ARG_PTR_TO_MEM, etc). This information
  * is cached in subprog info for reuse.
@@ -7027,69 +7050,85 @@ int btf_prepare_func_args(struct bpf_verifier_env *env, int subprog)
 	 * Only PTR_TO_CTX and SCALAR are supported atm.
 	 */
 	for (i = 0; i < nargs; i++) {
-		bool is_nonnull = false;
-		const char *tag;
+		u32 tags = 0;
+		int id = 0;
 
-		t = btf_type_by_id(btf, args[i].type);
-
-		tag = btf_find_decl_tag_value(btf, fn_t, i, "arg:");
-		if (IS_ERR(tag) && PTR_ERR(tag) == -ENOENT) {
-			tag = NULL;
-		} else if (IS_ERR(tag)) {
-			bpf_log(log, "arg#%d type's tag fetching failure: %ld\n", i, PTR_ERR(tag));
-			return PTR_ERR(tag);
-		}
 		/* 'arg:<tag>' decl_tag takes precedence over derivation of
 		 * register type from BTF type itself
 		 */
-		if (tag) {
+		while ((id = btf_find_next_decl_tag(btf, fn_t, i, "arg:", id)) > 0) {
+			const struct btf_type *tag_t = btf_type_by_id(btf, id);
+			const char *tag = __btf_name_by_offset(btf, tag_t->name_off) + 4;
+
 			/* disallow arg tags in static subprogs */
 			if (!is_global) {
 				bpf_log(log, "arg#%d type tag is not supported in static functions\n", i);
 				return -EOPNOTSUPP;
 			}
+
 			if (strcmp(tag, "ctx") == 0) {
-				sub->args[i].arg_type = ARG_PTR_TO_CTX;
-				continue;
+				tags |= ARG_TAG_CTX;
+			} else if (strcmp(tag, "nonnull") == 0) {
+				tags |= ARG_TAG_NONNULL;
+			} else {
+				bpf_log(log, "arg#%d has unsupported set of tags\n", i);
+				return -EOPNOTSUPP;
 			}
-			if (strcmp(tag, "nonnull") == 0)
-				is_nonnull = true;
+		}
+		if (id != -ENOENT) {
+			bpf_log(log, "arg#%d type tag fetching failure: %d\n", i, id);
+			return id;
 		}
 
+		t = btf_type_by_id(btf, args[i].type);
 		while (btf_type_is_modifier(t))
 			t = btf_type_by_id(btf, t->type);
-		if (btf_type_is_int(t) || btf_is_any_enum(t)) {
-			sub->args[i].arg_type = ARG_ANYTHING;
-			continue;
-		}
-		if (btf_type_is_ptr(t) && btf_get_prog_ctx_type(log, btf, t, prog_type, i)) {
+		if (!btf_type_is_ptr(t))
+			goto skip_pointer;
+
+		if ((tags & ARG_TAG_CTX) || btf_get_prog_ctx_type(log, btf, t, prog_type, i)) {
+			if (tags & ~ARG_TAG_CTX) {
+				bpf_log(log, "arg#%d has invalid combination of tags\n", i);
+				return -EINVAL;
+			}
 			sub->args[i].arg_type = ARG_PTR_TO_CTX;
 			continue;
 		}
-		if (btf_type_is_ptr(t) && btf_is_dynptr_ptr(btf, t)) {
+		if (btf_is_dynptr_ptr(btf, t)) {
+			if (tags) {
+				bpf_log(log, "arg#%d has invalid combination of tags\n", i);
+				return -EINVAL;
+			}
 			sub->args[i].arg_type = ARG_PTR_TO_DYNPTR | MEM_RDONLY;
 			continue;
 		}
-		if (is_global && btf_type_is_ptr(t)) {
+		if (is_global) { /* generic user data pointer */
 			u32 mem_size;
 
 			t = btf_type_skip_modifiers(btf, t->type, NULL);
 			ref_t = btf_resolve_size(btf, t, &mem_size);
 			if (IS_ERR(ref_t)) {
-				bpf_log(log,
-				    "arg#%d reference type('%s %s') size cannot be determined: %ld\n",
-				    i, btf_type_str(t), btf_name_by_offset(btf, t->name_off),
+				bpf_log(log, "arg#%d reference type('%s %s') size cannot be determined: %ld\n",
+					i, btf_type_str(t), btf_name_by_offset(btf, t->name_off),
 					PTR_ERR(ref_t));
 				return -EINVAL;
 			}
 
-			sub->args[i].arg_type = is_nonnull ? ARG_PTR_TO_MEM : ARG_PTR_TO_MEM_OR_NULL;
+			sub->args[i].arg_type = ARG_PTR_TO_MEM | PTR_MAYBE_NULL;
+			if (tags & ARG_TAG_NONNULL)
+				sub->args[i].arg_type &= ~PTR_MAYBE_NULL;
 			sub->args[i].mem_size = mem_size;
 			continue;
 		}
-		if (is_nonnull) {
-			bpf_log(log, "arg#%d marked as non-null, but is not a pointer type\n", i);
+
+skip_pointer:
+		if (tags) {
+			bpf_log(log, "arg#%d has pointer tag, but is not a pointer type\n", i);
 			return -EINVAL;
+		}
+		if (btf_type_is_int(t) || btf_is_any_enum(t)) {
+			sub->args[i].arg_type = ARG_ANYTHING;
+			continue;
 		}
 		bpf_log(log, "Arg#%d type %s in %s() is not supported yet.\n",
 			i, btf_type_str(t), tname);

@@ -480,6 +480,10 @@ bool ovl_dentry_is_whiteout(struct dentry *dentry);
 bool ovl_dentry_is_xwhiteouts(struct dentry *dentry);
 void ovl_dentry_set_xwhiteouts(struct dentry *dentry);
 void ovl_dentry_set_opaque(struct dentry *dentry);
+bool ovl_dentry_has_xwhiteouts(struct dentry *dentry);
+void ovl_dentry_set_xwhiteouts(struct dentry *dentry);
+void ovl_layer_set_xwhiteouts(struct ovl_fs *ofs,
+			      const struct ovl_layer *layer);
 bool ovl_dentry_has_upper_alias(struct dentry *dentry);
 void ovl_dentry_set_upper_alias(struct dentry *dentry);
 bool ovl_dentry_needs_data_copy_up(struct dentry *dentry, int flags);

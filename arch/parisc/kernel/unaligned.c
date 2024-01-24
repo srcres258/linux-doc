@@ -405,9 +405,10 @@ void handle_unaligned(struct pt_regs *regs)
 			goto force_sigbus;
 	} else {
 		static DEFINE_RATELIMIT_STATE(kernel_ratelimit, 5 * HZ, 5);
-		if (__ratelimit(&kernel_ratelimit))
-			pr_warn("Kernel unaligned access to " RFMT
-				" at %pS (iir " RFMT ")\n",
+		if (!(current->thread.flags & PARISC_UAC_NOPRINT) &&
+			__ratelimit(&kernel_ratelimit))
+			pr_warn("Kernel: unaligned access to " RFMT " in %pS "
+					"(iir " RFMT ")\n",
 				regs->ior, (void *)regs->iaoq[0], regs->iir);
 	}
 

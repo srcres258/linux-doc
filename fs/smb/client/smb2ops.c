@@ -1453,7 +1453,8 @@ smb2_close_getattr(const unsigned int xid, struct cifs_tcon *tcon,
 	 */
 	inode->i_blocks = (512 - 1 + le64_to_cpu(file_inf.AllocationSize)) >> 9;
 
-	inode->i_size = le64_to_cpu(file_inf.EndOfFile);
+	CIFS_I(inode)->server_eof = le64_to_cpu(file_inf.EndOfFile);
+	i_size_write(inode, CIFS_I(inode)->server_eof);
 
 	/* End of file and Attributes should not have to be updated on close */
 	spin_unlock(&inode->i_lock);

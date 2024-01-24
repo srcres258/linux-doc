@@ -47,6 +47,9 @@ config RISCV
 	select ARCH_SUPPORTS_CFI_CLANG
 	select ARCH_SUPPORTS_DEBUG_PAGEALLOC if MMU
 	select ARCH_SUPPORTS_HUGETLBFS if MMU
+	# LLD >= 14: https://github.com/llvm/llvm-project/issues/50505
+	select ARCH_SUPPORTS_LTO_CLANG if LLD_VERSION >= 140000
+	select ARCH_SUPPORTS_LTO_CLANG_THIN if LLD_VERSION >= 140000
 	select ARCH_SUPPORTS_PAGE_TABLE_CHECK if MMU
 	select ARCH_SUPPORTS_PER_VMA_LOCK if MMU
 	select ARCH_SUPPORTS_SHADOW_CALL_STACK if HAVE_SHADOW_CALL_STACK
@@ -578,6 +581,13 @@ config TOOLCHAIN_HAS_ZBB
 	depends on LLD_VERSION >= 150000 || LD_VERSION >= 23900
 	depends on AS_HAS_OPTION_ARCH
 
+# This symbol indicates that the toolchain supports all v1.0 vector crypto
+# extensions, including Zvk*, Zvbb, and Zvbc.  LLVM added all of these at once.
+# binutils added all except Zvkb, then added Zvkb.  So we just check for Zvkb.
+config TOOLCHAIN_HAS_VECTOR_CRYPTO
+	def_bool $(as-instr, .option arch$(comma) +zvkb)
+	depends on AS_HAS_OPTION_ARCH
+
 config RISCV_ISA_ZBB
 	bool "Zbb extension support for bit manipulation instructions"
 	depends on TOOLCHAIN_HAS_ZBB
@@ -1001,11 +1011,8 @@ menu "Power management options"
 
 source "kernel/power/Kconfig"
 
-# Hibernation is only possible on systems where the SBI implementation has
-# marked its reserved memory as not accessible from, or does not run
-# from the same memory as, Linux
 config ARCH_HIBERNATION_POSSIBLE
-	def_bool NONPORTABLE
+	def_bool y
 
 config ARCH_HIBERNATION_HEADER
 	def_bool HIBERNATION

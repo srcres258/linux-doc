@@ -131,19 +131,24 @@ struct buffer_head *gfs2_getbuf(struct gfs2_glock *gl, u64 blkno,
 	index = blkno >> shift;             /* convert block to page */
 	bufnum = blkno - (index << shift);  /* block buf index within page */
 
-	fgp_flags |= FGP_LOCK | FGP_ACCESSED;
 	if (fgp_flags & FGP_CREAT) {
 		folio = __filemap_get_folio(mapping, index,
-				fgp_flags,
+				FGP_LOCK | FGP_ACCESSED | fgp_flags,
 				mapping_gfp_mask(mapping) | __GFP_NOFAIL);
 		if (IS_ERR(folio))
 			return ERR_CAST(folio);
 		bh = folio_buffers(folio);
-		if (!bh && !(fgp_flags & FGP_NOWAIT))
+		if (!bh) {
+			if (fgp_flags & FGP_NOWAIT) {
+				bh = ERR_PTR(-EAGAIN);
+				goto out_unlock;
+			}
 			bh = create_empty_buffers(folio,
 				sdp->sd_sb.sb_bsize, 0);
+		}
 	} else {
-		folio = __filemap_get_folio(mapping, index, fgp_flags, 0);
+		folio = __filemap_get_folio(mapping, index,
+				FGP_LOCK | FGP_ACCESSED | fgp_flags, 0);
 		if (IS_ERR(folio))
 			return NULL;
 		bh = folio_buffers(folio);
@@ -265,8 +270,7 @@ int gfs2_meta_read_async(struct gfs2_glock *gl, u64 blkno, fgf_t fgp_flags,
 		return -EIO;
 	}
 
-	fgp_flags |= FGP_CREAT;
-	*bhp = bh = gfs2_getbuf(gl, blkno, fgp_flags);
+	*bhp = bh = gfs2_getbuf(gl, blkno, FGP_CREAT | fgp_flags);
 	if (IS_ERR(bh)) {
 		*bhp = NULL;
 		return PTR_ERR(bh);
@@ -299,7 +303,7 @@ int gfs2_meta_read_async(struct gfs2_glock *gl, u64 blkno, fgf_t fgp_flags,
 	}
 
 	if (rahead) {
-		bh = gfs2_getbuf(gl, blkno + 1, fgp_flags);
+		bh = gfs2_getbuf(gl, blkno + 1, FGP_CREAT | fgp_flags);
 		if (IS_ERR(bh))
 			goto out;
 
@@ -350,7 +354,7 @@ int gfs2_meta_read(struct gfs2_glock *gl, u64 blkno, fgf_t fgp_flags,
 	int ret;
 
 	ret = gfs2_meta_read_async(gl, blkno, fgp_flags, rahead, bhp);
-	if (ret)
+	if (ret || (fgp_flags & FGP_NOWAIT))
 		return ret;
 
 	ret = gfs2_meta_wait(sdp, *bhp);
