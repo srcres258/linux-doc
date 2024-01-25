@@ -192,7 +192,7 @@ static int set_is_seen(struct ctl_table_set *set)
 }
 
 static void ipc_set_ownership(struct ctl_table_header *head,
-			      const struct ctl_table *table,
+			      struct ctl_table *table,
 			      kuid_t *uid, kgid_t *gid)
 {
 	struct ipc_namespace *ns =
@@ -205,7 +205,7 @@ static void ipc_set_ownership(struct ctl_table_header *head,
 	*gid = gid_valid(ns_root_gid) ? ns_root_gid : GLOBAL_ROOT_GID;
 }
 
-static int ipc_permissions(struct ctl_table_header *head, const struct ctl_table *table)
+static int ipc_permissions(struct ctl_table_header *head, struct ctl_table *table)
 {
 	int mode = table->mode;
 
