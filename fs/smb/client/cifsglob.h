@@ -1368,6 +1368,7 @@ struct cifs_open_parms {
 	struct cifs_fid *fid;
 	umode_t mode;
 	bool reconnect:1;
+	struct kvec *ea_cctx;
 };
 
 struct cifs_fid {
