@@ -85,6 +85,23 @@ static int parse_posix_sids(struct cifs_open_info_data *data,
 	return 0;
 }
 
+struct wsl_query_ea {
+	__le32	next;
+	__u8	name_len;
+	__u8	name[SMB2_WSL_XATTR_NAME_LEN + 1];
+} __packed;
+
+#define NEXT_OFF cpu_to_le32(sizeof(struct wsl_query_ea))
+
+static const struct wsl_query_ea wsl_query_eas[] = {
+	{ .next = NEXT_OFF, .name_len = SMB2_WSL_XATTR_NAME_LEN, .name = SMB2_WSL_XATTR_UID, },
+	{ .next = NEXT_OFF, .name_len = SMB2_WSL_XATTR_NAME_LEN, .name = SMB2_WSL_XATTR_GID, },
+	{ .next = NEXT_OFF, .name_len = SMB2_WSL_XATTR_NAME_LEN, .name = SMB2_WSL_XATTR_MODE, },
+	{ .next = 0,        .name_len = SMB2_WSL_XATTR_NAME_LEN, .name = SMB2_WSL_XATTR_DEV, },
+};
+
+static_assert(IS_ALIGNED(sizeof(wsl_query_eas), 4));
+
 /*
  * note: If cfile is passed, the reference to it is dropped here.
  * So make sure that you do not reuse cfile after return from this func.
@@ -455,6 +472,39 @@ replay_again:
 			trace_smb3_get_reparse_compound_enter(xid, ses->Suid,
 							      tcon->tid, full_path);
 			break;
+		case SMB2_OP_QUERY_WSL_EA:
+			rqst[num_rqst].rq_iov = &vars->ea_iov;
+			rqst[num_rqst].rq_nvec = 1;
+
+			if (cfile) {
+				rc = SMB2_query_info_init(tcon, server,
+							  &rqst[num_rqst],
+							  cfile->fid.persistent_fid,
+							  cfile->fid.volatile_fid,
+							  FILE_FULL_EA_INFORMATION,
+							  SMB2_O_INFO_FILE, 0,
+							  SMB2_WSL_MAX_QUERY_EA_RESP_SIZE,
+							  sizeof(wsl_query_eas),
+							  (void *)wsl_query_eas);
+			} else {
+				rc = SMB2_query_info_init(tcon, server,
+							  &rqst[num_rqst],
+							  COMPOUND_FID,
+							  COMPOUND_FID,
+							  FILE_FULL_EA_INFORMATION,
+							  SMB2_O_INFO_FILE, 0,
+							  SMB2_WSL_MAX_QUERY_EA_RESP_SIZE,
+							  sizeof(wsl_query_eas),
+							  (void *)wsl_query_eas);
+			}
+			if (!rc && (!cfile || num_rqst > 1)) {
+				smb2_set_next_command(tcon, &rqst[num_rqst]);
+				smb2_set_related(&rqst[num_rqst]);
+			} else if (rc) {
+				goto finished;
+			}
+			num_rqst++;
+			break;
 		default:
 			cifs_dbg(VFS, "Invalid command\n");
 			rc = -EINVAL;
@@ -637,10 +687,26 @@ finished:
 				memset(iov, 0, sizeof(*iov));
 				resp_buftype[i + 1] = CIFS_NO_BUFFER;
 			} else {
-				trace_smb3_set_reparse_compound_err(xid,  ses->Suid,
+				trace_smb3_set_reparse_compound_err(xid, ses->Suid,
 								    tcon->tid, rc);
 			}
 			SMB2_ioctl_free(&rqst[num_rqst++]);
+			break;
+		case SMB2_OP_QUERY_WSL_EA:
+			if (!rc) {
+				iov = &rsp_iov[i + 1];
+				idata = in_iov[i].iov_base;
+				idata->wsl.ea_iov = *iov;
+				idata->wsl.ea_buftype = resp_buftype[i + 1];
+				memset(iov, 0, sizeof(*iov));
+				resp_buftype[i + 1] = CIFS_NO_BUFFER;
+				trace_smb3_query_wsl_ea_compound_done(xid, ses->Suid,
+								      tcon->tid);
+			} else {
+				trace_smb3_query_wsl_ea_compound_err(xid, ses->Suid,
+								     tcon->tid, rc);
+			}
+			SMB2_query_info_free(&rqst[num_rqst++]);
 			break;
 		}
 	}
@@ -709,11 +775,11 @@ int smb2_query_path_info(const unsigned int xid,
 	struct cifsFileInfo *cfile;
 	struct cached_fid *cfid = NULL;
 	struct smb2_hdr *hdr;
-	struct kvec in_iov[2], out_iov[3] = {};
+	struct kvec in_iov[3], out_iov[3] = {};
 	int out_buftype[3] = {};
-	int cmds[2];
+	int cmds[3];
 	bool islink;
-	int i, num_cmds;
+	int i, num_cmds = 0;
 	int rc, rc2;
 
 	data->adjust_tz = false;
@@ -746,21 +812,22 @@ int smb2_query_path_info(const unsigned int xid,
 			close_cached_dir(cfid);
 			return rc;
 		}
-		cmds[0] = SMB2_OP_QUERY_INFO;
+		cmds[num_cmds++] = SMB2_OP_QUERY_INFO;
 	} else {
-		cmds[0] = SMB2_OP_POSIX_QUERY_INFO;
+		cmds[num_cmds++] = SMB2_OP_POSIX_QUERY_INFO;
 	}
 
 	in_iov[0].iov_base = data;
 	in_iov[0].iov_len = sizeof(*data);
 	in_iov[1] = in_iov[0];
+	in_iov[2] = in_iov[0];
 
 	cifs_get_readable_path(tcon, full_path, &cfile);
 	oparms = CIFS_OPARMS(cifs_sb, tcon, full_path, FILE_READ_ATTRIBUTES,
 			     FILE_OPEN, create_options, ACL_NO_MODE);
 	rc = smb2_compound_op(xid, tcon, cifs_sb, full_path,
-			      &oparms, in_iov, cmds, 1, cfile,
-			      out_iov, out_buftype);
+			      &oparms, in_iov, cmds, num_cmds,
+			      cfile, out_iov, out_buftype);
 	hdr = out_iov[0].iov_base;
 	/*
 	 * If first iov is unset, then SMB session was dropped or we've got a
@@ -780,17 +847,18 @@ int smb2_query_path_info(const unsigned int xid,
 		if (rc || !data->reparse_point)
 			goto out;
 
-		if (data->reparse.tag == IO_REPARSE_TAG_SYMLINK) {
-			/* symlink already parsed in create response */
-			num_cmds = 1;
-		} else {
-			cmds[1] = SMB2_OP_GET_REPARSE;
-			num_cmds = 2;
-		}
+		cmds[num_cmds++] = SMB2_OP_QUERY_WSL_EA;
+		/*
+		 * Skip SMB2_OP_GET_REPARSE if symlink already parsed in create
+		 * response.
+		 */
+		if (data->reparse.tag != IO_REPARSE_TAG_SYMLINK)
+			cmds[num_cmds++] = SMB2_OP_GET_REPARSE;
+
 		oparms = CIFS_OPARMS(cifs_sb, tcon, full_path,
-				     FILE_READ_ATTRIBUTES, FILE_OPEN,
-				     create_options | OPEN_REPARSE_POINT,
-				     ACL_NO_MODE);
+				     FILE_READ_ATTRIBUTES | FILE_READ_EA,
+				     FILE_OPEN, create_options |
+				     OPEN_REPARSE_POINT, ACL_NO_MODE);
 		cifs_get_readable_path(tcon, full_path, &cfile);
 		rc = smb2_compound_op(xid, tcon, cifs_sb, full_path,
 				      &oparms, in_iov, cmds, num_cmds,

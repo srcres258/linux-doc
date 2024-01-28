@@ -214,6 +214,10 @@ struct cifs_open_info_data {
 			struct reparse_posix_data *posix;
 		};
 	} reparse;
+	struct {
+		struct kvec ea_iov;
+		int ea_buftype;
+	} wsl;
 	char *symlink_target;
 	struct cifs_sid posix_owner;
 	struct cifs_sid posix_group;
@@ -2289,6 +2293,7 @@ struct smb2_compound_vars {
 	struct kvec close_iov;
 	struct smb2_file_rename_info rename_info;
 	struct smb2_file_link_info link_info;
+	struct kvec ea_iov;
 };
 
 #endif	/* _CIFS_GLOB_H */

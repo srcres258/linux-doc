@@ -767,6 +767,7 @@ static inline void cifs_free_open_info(struct cifs_open_info_data *data)
 {
 	kfree(data->symlink_target);
 	free_rsp_buf(data->reparse.io.buftype, data->reparse.io.iov.iov_base);
+	free_rsp_buf(data->wsl.ea_buftype, data->wsl.ea_iov.iov_base);
 	memset(data, 0, sizeof(*data));
 }
 
