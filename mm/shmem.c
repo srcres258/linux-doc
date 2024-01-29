@@ -2148,6 +2148,10 @@ unlock:
  *
  * If this function returns a folio, it is returned with an increased refcount.
  *
+ * If the caller modifies data in the folio, it must call folio_mark_dirty()
+ * before unlocking the folio to ensure that the folio is not reclaimed.
+ * These is no need to reserve space before calling folio_mark_dirty().
+ *
  * Return: The found folio, %NULL if SGP_READ or SGP_NOALLOC was passed in @sgp
  * and no folio was found at @index, or an ERR_PTR() otherwise.
  */
