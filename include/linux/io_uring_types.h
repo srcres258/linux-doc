@@ -599,8 +599,6 @@ struct io_kiocb {
 	 */
 	u16				buf_index;
 
-	atomic_t			refs;
-
 	u64				flags;
 
 	struct io_ring_ctx		*ctx;
@@ -626,8 +624,11 @@ struct io_kiocb {
 	union {
 		/* used by request caches, completion batching and iopoll */
 		struct io_wq_work_node	comp_list;
-		/* cache ->apoll->events */
-		__poll_t apoll_events;
+		struct {
+			/* cache ->apoll->events */
+			__poll_t apoll_events;
+			unsigned nr_tw;
+		};
 	};
 
 	struct io_rsrc_node		*rsrc_node;
@@ -636,7 +637,7 @@ struct io_kiocb {
 
 	struct io_task_work		io_task_work;
 	atomic_t			poll_refs;
-	unsigned			nr_tw;
+	atomic_t			refs;
 	/* internal polling, see IORING_FEAT_FAST_POLL */
 	struct async_poll		*apoll;
 	/* opcode allocated if it needs to store data for async defer */
