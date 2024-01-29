@@ -2137,12 +2137,27 @@ unlock:
 	return error;
 }
 
+/**
+ * shmem_get_folio - find and get a reference to a shmem folio.
+ * @inode:	inode to search
+ * @index:	the page index.
+ * @foliop:	pointer to the found folio if one was found
+ * @sgp:	SGP_* flags to control behavior
+ *
+ * Looks up the page cache entry at @inode & @index.
+ *
+ * If this function returns a folio, it is returned with an increased refcount.
+ *
+ * Return: The found folio, %NULL if SGP_READ or SGP_NOALLOC was passed in @sgp
+ * and no folio was found at @index, or an ERR_PTR() otherwise.
+ */
 int shmem_get_folio(struct inode *inode, pgoff_t index, struct folio **foliop,
 		enum sgp_type sgp)
 {
 	return shmem_get_folio_gfp(inode, index, foliop, sgp,
 			mapping_gfp_mask(inode->i_mapping), NULL, NULL);
 }
+EXPORT_SYMBOL_GPL(shmem_get_folio);
 
 /*
  * This is like autoremove_wake_function, but it removes the wait queue
