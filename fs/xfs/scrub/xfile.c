@@ -68,28 +68,13 @@ xfile_create(
 	if (!xf)
 		return -ENOMEM;
 
-	xf->file = shmem_file_setup(description, isize, 0);
+	xf->file = shmem_kernel_file_setup(description, isize, 0);
 	if (IS_ERR(xf->file)) {
 		error = PTR_ERR(xf->file);
 		goto out_xfile;
 	}
 
-	/*
-	 * We want a large sparse file that we can pread, pwrite, and seek.
-	 * xfile users are responsible for keeping the xfile hidden away from
-	 * all other callers, so we skip timestamp updates and security checks.
-	 * Make the inode only accessible by root, just in case the xfile ever
-	 * escapes.
-	 */
-	xf->file->f_mode |= FMODE_PREAD | FMODE_PWRITE | FMODE_NOCMTIME |
-			    FMODE_LSEEK;
-	xf->file->f_flags |= O_RDWR | O_LARGEFILE | O_NOATIME;
 	inode = file_inode(xf->file);
-	inode->i_flags |= S_PRIVATE | S_NOCMTIME | S_NOATIME;
-	inode->i_mode &= ~0177;
-	inode->i_uid = GLOBAL_ROOT_UID;
-	inode->i_gid = GLOBAL_ROOT_GID;
-
 	lockdep_set_class(&inode->i_rwsem, &xfile_i_mutex_key);
 
 	trace_xfile_create(xf);
