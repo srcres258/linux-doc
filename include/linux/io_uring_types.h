@@ -464,6 +464,7 @@ enum {
 	REQ_F_ISREG_BIT,
 	REQ_F_POLL_NO_LAZY_BIT,
 	REQ_F_CAN_POLL_BIT,
+	REQ_F_CANCEL_SEQ_BIT,
 
 	/* not a real bit, just to check we're not overflowing the space */
 	__REQ_F_LAST_BIT,
@@ -535,6 +536,8 @@ enum {
 	REQ_F_POLL_NO_LAZY	= BIT(REQ_F_POLL_NO_LAZY_BIT),
 	/* file is pollable */
 	REQ_F_CAN_POLL		= BIT(REQ_F_CAN_POLL_BIT),
+	/* cancel sequence is set and valid */
+	REQ_F_CANCEL_SEQ	= BIT(REQ_F_CANCEL_SEQ_BIT),
 };
 
 typedef void (*io_req_tw_func_t)(struct io_kiocb *req, struct io_tw_state *ts);
