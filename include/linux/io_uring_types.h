@@ -592,14 +592,13 @@ struct io_kiocb {
 	 * and after selection it points to the buffer ID itself.
 	 */
 	u16				buf_index;
-	unsigned int			flags;
 
-	struct io_cqe			cqe;
+	atomic_t			refs;
+
+	u64				flags;
 
 	struct io_ring_ctx		*ctx;
 	struct task_struct		*task;
-
-	struct io_rsrc_node		*rsrc_node;
 
 	union {
 		/* store used ubuf, so we can prevent reloading */
@@ -615,18 +614,23 @@ struct io_kiocb {
 		struct io_buffer_list	*buf_list;
 	};
 
+	/* for polled requests, i.e. IORING_OP_POLL_ADD and async armed poll */
+	struct hlist_node		hash_node;
+
 	union {
 		/* used by request caches, completion batching and iopoll */
 		struct io_wq_work_node	comp_list;
 		/* cache ->apoll->events */
 		__poll_t apoll_events;
 	};
-	atomic_t			refs;
-	atomic_t			poll_refs;
+
+	struct io_rsrc_node		*rsrc_node;
+
+	struct io_cqe			cqe;
+
 	struct io_task_work		io_task_work;
+	atomic_t			poll_refs;
 	unsigned			nr_tw;
-	/* for polled requests, i.e. IORING_OP_POLL_ADD and async armed poll */
-	struct hlist_node		hash_node;
 	/* internal polling, see IORING_FEAT_FAST_POLL */
 	struct async_poll		*apoll;
 	/* opcode allocated if it needs to store data for async defer */
