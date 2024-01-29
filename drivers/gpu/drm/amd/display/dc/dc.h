@@ -51,7 +51,7 @@ struct aux_payload;
 struct set_config_cmd_payload;
 struct dmub_notification;
 
-#define DC_VER "3.2.266"
+#define DC_VER "3.2.269"
 
 #define MAX_SURFACES 3
 #define MAX_PLANES 6
@@ -435,6 +435,7 @@ struct dc_config {
 	bool enable_auto_dpm_test_logs;
 	unsigned int disable_ips;
 	unsigned int disable_ips_in_vpb;
+	bool usb4_bw_alloc_support;
 };
 
 enum visual_confirm {
@@ -1068,6 +1069,7 @@ struct dc {
 	} scratch;
 
 	struct dml2_configuration_options dml2_options;
+	enum dc_acpi_cm_power_state power_state;
 };
 
 enum frame_buffer_mode {

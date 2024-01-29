@@ -514,7 +514,7 @@ static int smu_v11_0_atom_get_smu_clockinfo(struct amdgpu_device *adev,
 					    getsmuclockinfo);
 
 	ret = amdgpu_atom_execute_table(adev->mode_info.atom_context, index,
-					(uint32_t *)&input);
+					(uint32_t *)&input, sizeof(input));
 	if (ret)
 		return -EINVAL;
 
@@ -1461,6 +1461,10 @@ static int smu_v11_0_irq_process(struct amdgpu_device *adev,
 				if (__ratelimit(&adev->throttling_logging_rs))
 					schedule_work(&smu->throttling_logging_work);
 
+				break;
+			default:
+				dev_dbg(adev->dev, "Unhandled context id %d from client:%d!\n",
+									ctxid, client_id);
 				break;
 			}
 		}
