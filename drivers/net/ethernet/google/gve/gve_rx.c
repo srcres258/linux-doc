@@ -105,7 +105,8 @@ static void gve_setup_rx_buffer(struct gve_rx_slot_page_info *page_info,
 
 static int gve_rx_alloc_buffer(struct gve_priv *priv, struct device *dev,
 			       struct gve_rx_slot_page_info *page_info,
-			       union gve_rx_data_slot *data_slot)
+			       union gve_rx_data_slot *data_slot,
+			       struct gve_rx_ring *rx)
 {
 	struct page *page;
 	dma_addr_t dma;
@@ -113,8 +114,12 @@ static int gve_rx_alloc_buffer(struct gve_priv *priv, struct device *dev,
 
 	err = gve_alloc_page(priv, dev, &page, &dma, DMA_FROM_DEVICE,
 			     GFP_ATOMIC);
-	if (err)
+	if (err) {
+		u64_stats_update_begin(&rx->statss);
+		rx->rx_buf_alloc_fail++;
+		u64_stats_update_end(&rx->statss);
 		return err;
+	}
 
 	gve_setup_rx_buffer(page_info, dma, page, &data_slot->addr);
 	return 0;
@@ -156,8 +161,9 @@ static int gve_rx_prefill_pages(struct gve_rx_ring *rx,
 					    &rx->data.data_ring[i].qpl_offset);
 			continue;
 		}
-		err = gve_rx_alloc_buffer(priv, &priv->pdev->dev, &rx->data.page_info[i],
-					  &rx->data.data_ring[i]);
+		err = gve_rx_alloc_buffer(priv, &priv->pdev->dev,
+					  &rx->data.page_info[i],
+					  &rx->data.data_ring[i], rx);
 		if (err)
 			goto alloc_err_rda;
 	}
@@ -396,7 +402,7 @@ static enum pkt_hash_types gve_rss_type(__be16 pkt_flags)
 
 static struct sk_buff *gve_rx_add_frags(struct napi_struct *napi,
 					struct gve_rx_slot_page_info *page_info,
-					u16 packet_buffer_size, u16 len,
+					unsigned int truesize, u16 len,
 					struct gve_rx_ctx *ctx)
 {
 	u32 offset = page_info->page_offset + page_info->pad;
@@ -429,10 +435,10 @@ static struct sk_buff *gve_rx_add_frags(struct napi_struct *napi,
 	if (skb != ctx->skb_head) {
 		ctx->skb_head->len += len;
 		ctx->skb_head->data_len += len;
-		ctx->skb_head->truesize += packet_buffer_size;
+		ctx->skb_head->truesize += truesize;
 	}
 	skb_add_rx_frag(skb, num_frags, page_info->page,
-			offset, len, packet_buffer_size);
+			offset, len, truesize);
 
 	return ctx->skb_head;
 }
@@ -526,7 +532,7 @@ static struct sk_buff *gve_rx_copy_to_pool(struct gve_rx_ring *rx,
 
 		memcpy(alloc_page_info.page_address, src, page_info->pad + len);
 		skb = gve_rx_add_frags(napi, &alloc_page_info,
-				       rx->packet_buffer_size,
+				       PAGE_SIZE,
 				       len, ctx);
 
 		u64_stats_update_begin(&rx->statss);
@@ -936,10 +942,7 @@ static bool gve_rx_refill_buffers(struct gve_priv *priv, struct gve_rx_ring *rx)
 				gve_rx_free_buffer(dev, page_info, data_slot);
 				page_info->page = NULL;
 				if (gve_rx_alloc_buffer(priv, dev, page_info,
-							data_slot)) {
-					u64_stats_update_begin(&rx->statss);
-					rx->rx_buf_alloc_fail++;
-					u64_stats_update_end(&rx->statss);
+							data_slot, rx)) {
 					break;
 				}
 			}

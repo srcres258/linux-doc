@@ -56,7 +56,7 @@
 
 #include "workqueue_internal.h"
 
-enum {
+enum worker_pool_flags {
 	/*
 	 * worker_pool flags
 	 *
@@ -75,7 +75,9 @@ enum {
 	 */
 	POOL_MANAGER_ACTIVE	= 1 << 0,	/* being managed */
 	POOL_DISASSOCIATED	= 1 << 2,	/* cpu can't serve workers */
+};
 
+enum worker_flags {
 	/* worker flags */
 	WORKER_DIE		= 1 << 1,	/* die die die */
 	WORKER_IDLE		= 1 << 2,	/* is idle */
@@ -86,7 +88,9 @@ enum {
 
 	WORKER_NOT_RUNNING	= WORKER_PREP | WORKER_CPU_INTENSIVE |
 				  WORKER_UNBOUND | WORKER_REBOUND,
+};
 
+enum wq_internal_consts {
 	NR_STD_WORKER_POOLS	= 2,		/* # standard pools per cpu */
 
 	UNBOUND_POOL_HASH_ORDER	= 6,		/* hashed by pool->attrs */
@@ -2217,12 +2221,11 @@ static struct worker *create_worker(struct worker_pool *pool)
 
 	worker->pool->nr_workers++;
 	worker_enter_idle(worker);
-	kick_pool(pool);
 
 	/*
 	 * @worker is waiting on a completion in kthread() and will trigger hung
-	 * check if not woken up soon. As kick_pool() might not have waken it
-	 * up, wake it up explicitly once more.
+	 * check if not woken up soon. As kick_pool() is noop if @pool is empty,
+	 * wake it up explicitly.
 	 */
 	wake_up_process(worker->task);
 
@@ -6706,7 +6709,7 @@ void __init workqueue_init_early(void)
 					      WQ_FREEZABLE, 0);
 	system_power_efficient_wq = alloc_workqueue("events_power_efficient",
 					      WQ_POWER_EFFICIENT, 0);
-	system_freezable_power_efficient_wq = alloc_workqueue("events_freezable_power_efficient",
+	system_freezable_power_efficient_wq = alloc_workqueue("events_freezable_pwr_efficient",
 					      WQ_FREEZABLE | WQ_POWER_EFFICIENT,
 					      0);
 	BUG_ON(!system_wq || !system_highpri_wq || !system_long_wq ||

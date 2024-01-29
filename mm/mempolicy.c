@@ -140,8 +140,9 @@ static struct mempolicy preferred_node_policy[MAX_NUMNODES];
 
 /*
  * iw_table is the sysfs-set interleave weight table, a value of 0 denotes
- * system-default value should be used. Until system-defaults are implemented,
- * the system-default is always 1.
+ * system-default value should be used. A NULL iw_table also denotes that
+ * system-default values should be used. Until the system-default table
+ * is implemented, the system-default is always 1.
  *
  * iw_table is RCU protected
  */
@@ -320,7 +321,7 @@ static struct mempolicy *mpol_new(unsigned short mode, unsigned short flags,
 	policy->mode = mode;
 	policy->flags = flags;
 	policy->home_node = NUMA_NO_NODE;
-	policy->wil.cur_weight = 0;
+	atomic_set(&policy->cur_il_weight, 0);
 
 	return policy;
 }
@@ -355,6 +356,7 @@ static void mpol_rebind_nodemask(struct mempolicy *pol, const nodemask_t *nodes)
 		tmp = *nodes;
 
 	pol->nodes = tmp;
+	atomic_set(&pol->cur_il_weight, 0);
 }
 
 static void mpol_rebind_preferred(struct mempolicy *pol,
@@ -968,8 +970,10 @@ static long do_get_mempolicy(int *policy, nodemask_t *nmask,
 			*policy = next_node_in(current->il_prev, pol->nodes);
 		} else if (pol == current->mempolicy &&
 				(pol->mode == MPOL_WEIGHTED_INTERLEAVE)) {
-			if (pol->wil.cur_weight)
-				*policy = current->il_prev;
+			int cweight = atomic_read(&pol->cur_il_weight);
+
+			if (cweight & 0xFF)
+				*policy = cweight >> 8;
 			else
 				*policy = next_node_in(current->il_prev,
 						       pol->nodes);
@@ -1785,7 +1789,8 @@ struct mempolicy *__get_vma_policy(struct vm_area_struct *vma,
  * @vma: virtual memory area whose policy is sought
  * @addr: address in @vma for shared policy lookup
  * @order: 0, or appropriate huge_page_order for interleaving
- * @ilx: interleave index (output), for use only when MPOL_INTERLEAVE
+ * @ilx: interleave index (output), for use only when MPOL_INTERLEAVE or
+ *       MPOL_WEIGHTED_INTERLEAVE
  *
  * Returns effective policy for a VMA at specified address.
  * Falls back to current->mempolicy or system default policy, as necessary.
@@ -1855,24 +1860,52 @@ bool apply_policy_zone(struct mempolicy *policy, enum zone_type zone)
 
 static unsigned int weighted_interleave_nodes(struct mempolicy *policy)
 {
-	unsigned int next;
+	unsigned int node, next;
 	struct task_struct *me = current;
 	u8 __rcu *table;
+	int cur_weight;
+	u8 weight;
 
-	next = next_node_in(me->il_prev, policy->nodes);
-	if (next == MAX_NUMNODES)
-		return next;
+	cur_weight = atomic_read(&policy->cur_il_weight);
+	node = cur_weight >> 8;
+	weight = cur_weight & 0xff;
 
-	rcu_read_lock();
-	table = rcu_dereference(iw_table);
-	if (!policy->wil.cur_weight)
-		policy->wil.cur_weight = table ? table[next] : 1;
-	rcu_read_unlock();
+	/* If nodemask was rebound, just fetch the next node */
+	if (!weight || !node_isset(node, policy->nodes)) {
+		node = next_node_in(me->il_prev, policy->nodes);
+		/* can only happen if nodemask has become invalid */
+		if (node == MAX_NUMNODES)
+			return node;
+		rcu_read_lock();
+		table = rcu_dereference(iw_table);
+		/* detect system-default values */
+		weight = table ? table[node] : 1;
+		weight = weight ? weight : 1;
+		rcu_read_unlock();
+	}
 
-	policy->wil.cur_weight--;
-	if (!policy->wil.cur_weight)
-		me->il_prev = next;
-	return next;
+	/* account for this allocation call */
+	weight--;
+
+	/* if now at 0, move to next node and set up that node's weight */
+	if (unlikely(!weight)) {
+		me->il_prev = node;
+		next = next_node_in(node, policy->nodes);
+		if (next != MAX_NUMNODES) {
+			rcu_read_lock();
+			table = rcu_dereference(iw_table);
+			/* detect system-default values */
+			weight = table ? table[next] : 1;
+			weight = weight ? weight : 1;
+			rcu_read_unlock();
+			cur_weight = (next << 8) | weight;
+		} else /* policy->nodes became invalid */
+			cur_weight = 0;
+	} else
+		cur_weight = (node << 8) | weight;
+
+	atomic_set(&policy->cur_il_weight, cur_weight);
+	return node;
 }
 
 /* Do dynamic interleaving for a process */
@@ -2361,9 +2394,9 @@ static unsigned long alloc_pages_bulk_array_weighted_interleave(gfp_t gfp,
 	unsigned int weight_total = 0;
 	unsigned long rem_pages = nr_pages;
 	nodemask_t nodes;
-	int nnodes, node, weight_nodes, resume_node;
-	int prev_node = NUMA_NO_NODE;
-	bool delta_depleted = false;
+	int nnodes, node, resume_node, next_node;
+	int prev_node = me->il_prev;
+	int cur_node_and_weight = atomic_read(&pol->cur_il_weight);
 	int i;
 
 	if (!nr_pages)
@@ -2373,42 +2406,73 @@ static unsigned long alloc_pages_bulk_array_weighted_interleave(gfp_t gfp,
 	if (!nnodes)
 		return 0;
 
+	node = cur_node_and_weight >> 8;
+	weight = cur_node_and_weight & 0xff;
 	/* Continue allocating from most recent node and adjust the nr_pages */
-	if (pol->wil.cur_weight) {
-		node = next_node_in(me->il_prev, nodes);
-		node_pages = pol->wil.cur_weight;
+	if (weight && node_isset(node, nodes)) {
+		node_pages = weight;
 		if (node_pages > rem_pages)
 			node_pages = rem_pages;
 		nr_allocated = __alloc_pages_bulk(gfp, node, NULL, node_pages,
 						  NULL, page_array);
 		page_array += nr_allocated;
 		total_allocated += nr_allocated;
-		/* if that's all the pages, no need to interleave */
-		if (rem_pages <= pol->wil.cur_weight) {
-			pol->wil.cur_weight -= rem_pages;
+		/*
+		 * if that's all the pages, no need to interleave, otherwise
+		 * we need to set up the next interleave node/weight correctly.
+		 */
+		if (rem_pages < weight) {
+			/* stay on current node, adjust cur_il_weight */
+			weight -= rem_pages;
+			atomic_set(&pol->cur_il_weight, ((node << 8) | weight));
+			return total_allocated;
+		} else if (rem_pages == weight) {
+			/* move to next node / weight */
+			me->il_prev = node;
+			next_node = next_node_in(node, nodes);
+			if (next_node == MAX_NUMNODES) {
+				next_node = 0;
+				weight = 0;
+			} else {
+				rcu_read_lock();
+				table = rcu_dereference(iw_table);
+				weight = table ? table[next_node] : 1;
+				/* detect system-default usage */
+				weight = weight ? weight : 1;
+				rcu_read_unlock();
+			}
+			atomic_set(&pol->cur_il_weight,
+				   ((next_node << 8) | weight));
 			return total_allocated;
 		}
 		/* Otherwise we adjust nr_pages down, and continue from there */
-		rem_pages -= pol->wil.cur_weight;
-		pol->wil.cur_weight = 0;
+		rem_pages -= weight;
 		prev_node = node;
 	}
+	/* clear cur_il_weight in case of an allocation failure */
+	atomic_set(&pol->cur_il_weight, 0);
 
-	/* fetch the weights for this operation and calculate total weight */
-	weights = kmalloc(nnodes, GFP_KERNEL);
+	/* create a local copy of node weights to operate on outside rcu */
+	weights = kmalloc(nr_node_ids, GFP_KERNEL);
 	if (!weights)
 		return total_allocated;
 
 	rcu_read_lock();
 	table = rcu_dereference(iw_table);
-	weight_nodes = 0;
-	while (weight_nodes < nnodes) {
-		node = next_node_in(prev_node, nodes);
-		weight = table ? table[node] : 1;
-		weights[weight_nodes++] = weight;
-		weight_total += weight;
-	}
+	/* If table is not registered, use system defaults */
+	if (table)
+		memcpy(weights, iw_table, nr_node_ids);
+	else
+		memset(weights, 1, nr_node_ids);
 	rcu_read_unlock();
+
+	/* calculate total, detect system default usage */
+	for_each_node_mask(node, nodes) {
+		/* detect system-default usage */
+		if (!weights[node])
+			weights[node] = 1;
+		weight_total += weights[node];
+	}
 
 	/*
 	 * Now we can continue allocating from 0 instead of an offset
@@ -2417,7 +2481,9 @@ static unsigned long alloc_pages_bulk_array_weighted_interleave(gfp_t gfp,
 	 * This requires us to track which node we should resume from.
 	 *
 	 * if (rounds > 0) and (delta == 0), resume_node will always be
-	 * the current me->il_prev
+	 * the current value of prev_node, which may be NUMA_NO_NODE if
+	 * this is the first allocation after a policy is replaced. The
+	 * resume weight will be the weight of the next node.
 	 *
 	 * if (delta > 0) and delta is depleted exactly on a node-weight
 	 * boundary, resume node will be the node last allocated from when
@@ -2430,32 +2496,31 @@ static unsigned long alloc_pages_bulk_array_weighted_interleave(gfp_t gfp,
 	 */
 	rounds = rem_pages / weight_total;
 	delta = rem_pages % weight_total;
+	resume_node = prev_node;
+	resume_weight = weights[next_node_in(prev_node, nodes)];
 	/* If no delta, we'll resume from current prev_node and first weight */
 	for (i = 0; i < nnodes; i++) {
 		node = next_node_in(prev_node, nodes);
-		weight = weights[i];
+		weight = weights[node];
 		node_pages = weight * rounds;
 		/* If a delta exists, add this node's portion of the delta */
-		if (delta >= weight) {
+		if (delta > weight) {
 			node_pages += weight;
 			delta -= weight;
 			resume_node = node;
-			resume_weight = i < (nnodes - 1) ? weights[i+1] :
-							   weights[0];
-			/* stop tracking iff (delta == weight) */
-			delta_depleted = !delta;
-		} else if (delta) { /* <= weight */
-			/* if delta depleted, resume from this node */
+		} else if (delta) {
 			node_pages += delta;
+			if (delta == weight) {
+				/* resume from next node with its weight */
+				resume_node = node;
+				next_node = next_node_in(node, nodes);
+				resume_weight = weights[next_node];
+			} else {
+				/* resume from this node w/ remaining weight */
+				resume_node = prev_node;
+				resume_weight = weight - (node_pages % weight);
+			}
 			delta = 0;
-			resume_node = prev_node;
-			resume_weight = weight - (node_pages % weight);
-			delta_depleted = true; /* stop tracking */
-		} else if (!delta_depleted) {
-			/* if there was no delta, track last allocated node */
-			resume_node = node;
-			resume_weight = i < (nnodes - 1) ? weights[i+1] :
-							   weights[0];
 		}
 		/* node_pages can be 0 if an allocation fails and rounds == 0 */
 		if (!node_pages)
@@ -2470,7 +2535,8 @@ static unsigned long alloc_pages_bulk_array_weighted_interleave(gfp_t gfp,
 	}
 	/* resume allocating from the calculated node and weight */
 	me->il_prev = resume_node;
-	pol->wil.cur_weight = resume_weight;
+	resume_node = next_node_in(resume_node, nodes);
+	atomic_set(&pol->cur_il_weight, ((resume_node << 8) | resume_weight));
 	kfree(weights);
 	return total_allocated;
 }
@@ -3346,14 +3412,13 @@ static ssize_t node_store(struct kobject *kobj, struct kobj_attribute *attr,
 		return -EINVAL;
 
 	/*
-	 * The default weight is 1 (for now), when the kernel-internal
-	 * default weight array is implemented, this should be updated to
-	 * collect the system-default weight of the node if the user passes 0.
+	 * The default weight is 1, for now. When the kernel-internal
+	 * default weight array is implemented, 0 will be a directive to
+	 * the allocators to use the system-default weight instead.
 	 */
 	if (!weight)
 		weight = 1;
 
-	/* We only need to allocate up to the number of possible nodes */
 	new = kmalloc(nr_node_ids, GFP_KERNEL);
 	if (!new)
 		return -ENOMEM;
@@ -3373,7 +3438,7 @@ static ssize_t node_store(struct kobject *kobj, struct kobj_attribute *attr,
 	return count;
 }
 
-static struct iw_node_attr *node_attrs[MAX_NUMNODES];
+static struct iw_node_attr **node_attrs;
 
 static void sysfs_wi_node_release(struct iw_node_attr *node_attr,
 				  struct kobject *parent)
@@ -3389,7 +3454,7 @@ static void sysfs_wi_release(struct kobject *wi_kobj)
 {
 	int i;
 
-	for (i = 0; i < MAX_NUMNODES; i++)
+	for (i = 0; i < nr_node_ids; i++)
 		sysfs_wi_node_release(node_attrs[i], wi_kobj);
 	kobject_put(wi_kobj);
 }
@@ -3448,7 +3513,6 @@ static int add_weighted_interleave_group(struct kobject *root_kobj)
 		return err;
 	}
 
-	memset(node_attrs, 0, sizeof(node_attrs));
 	for_each_node_state(nid, N_POSSIBLE) {
 		err = add_weight_node(nid, wi_kobj);
 		if (err) {
@@ -3471,8 +3535,8 @@ static void mempolicy_kobj_release(struct kobject *kobj)
 	rcu_assign_pointer(iw_table, NULL);
 	mutex_unlock(&iw_table_lock);
 	synchronize_rcu();
-	/* Never free the default table, it's always in use */
 	kfree(old);
+	kfree(node_attrs);
 	kfree(kobj);
 }
 
@@ -3480,51 +3544,45 @@ static const struct kobj_type mempolicy_ktype = {
 	.release = mempolicy_kobj_release
 };
 
-static struct kobject *mempolicy_kobj;
 static int __init mempolicy_sysfs_init(void)
 {
 	int err;
-	struct kobject *mempolicy_kobj;
+	static struct kobject *mempolicy_kobj;
 
-	/* A NULL iw_table is interpreted by interleave logic as "all 1s" */
-	iw_table = NULL;
 	mempolicy_kobj = kzalloc(sizeof(*mempolicy_kobj), GFP_KERNEL);
 	if (!mempolicy_kobj) {
-		pr_err("failed to add mempolicy kobject to the system\n");
-		return -ENOMEM;
+		err = -ENOMEM;
+		goto err_out;
 	}
+
+	node_attrs = kcalloc(nr_node_ids, sizeof(struct iw_node_attr *),
+			     GFP_KERNEL);
+	if (!node_attrs) {
+		err = -ENOMEM;
+		goto mempol_out;
+	}
+
 	err = kobject_init_and_add(mempolicy_kobj, &mempolicy_ktype, mm_kobj,
 				   "mempolicy");
-	if (err) {
-		kfree(mempolicy_kobj);
-		return err;
-	}
+	if (err)
+		goto node_out;
 
 	err = add_weighted_interleave_group(mempolicy_kobj);
-
 	if (err) {
+		pr_err("mempolicy sysfs structure failed to initialize\n");
 		kobject_put(mempolicy_kobj);
 		return err;
 	}
 
 	return err;
+node_out:
+	kfree(node_attrs);
+mempol_out:
+	kfree(mempolicy_kobj);
+err_out:
+	pr_err("failed to add mempolicy kobject to the system\n");
+	return err;
 }
 
-static void __exit mempolicy_exit(void)
-{
-	if (mempolicy_kobj)
-		kobject_put(mempolicy_kobj);
-}
-
-#else
-static int __init mempolicy_sysfs_init(void)
-{
-	/* A NULL iw_table is interpreted by interleave logic as "all 1s" */
-	iw_table = NULL;
-	return 0;
-}
-
-static void __exit mempolicy_exit(void) { }
-#endif /* CONFIG_SYSFS */
 late_initcall(mempolicy_sysfs_init);
-module_exit(mempolicy_exit);
+#endif /* CONFIG_SYSFS */

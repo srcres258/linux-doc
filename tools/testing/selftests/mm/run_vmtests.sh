@@ -19,6 +19,7 @@ usage: ${BASH_SOURCE[0]:-$0} [ options ]
   -t: specify specific categories to tests to run
   -h: display this message
   -n: disable TAP output
+  -d: run destructive tests
 
 The default behavior is to run required tests only.  If -a is specified,
 will run all tests.
@@ -79,6 +80,7 @@ EOF
 }
 
 RUN_ALL=false
+RUN_DESTRUCTIVE_TEST=false
 TAP_PREFIX="# "
 
 while getopts "aht:n" OPT; do
@@ -87,6 +89,7 @@ while getopts "aht:n" OPT; do
 		"h") usage ;;
 		"t") VM_SELFTEST_ITEMS=${OPTARG} ;;
 		"n") TAP_PREFIX= ;;
+		"a") RUN_DESTRUCTIVE_TEST=true ;;
 	esac
 done
 shift $((OPTIND -1))
@@ -304,7 +307,7 @@ echo "$nr_hugepgs" > /proc/sys/vm/nr_hugepages
 
 CATEGORY="compaction" run_test ./compaction_test
 
-CATEGORY="mlock" run_test sudo -u nobody ./on-fault-limit
+CATEGORY="mlock" run_test ./on-fault-limit
 
 CATEGORY="mmap" run_test ./map_populate
 
@@ -317,6 +320,11 @@ CATEGORY="process_mrelease" run_test ./mrelease_test
 CATEGORY="mremap" run_test ./mremap_test
 
 CATEGORY="hugetlb" run_test ./thuge-gen
+CATEGORY="hugetlb" run_test ./charge_reserved_hugetlb.sh -cgroup-v2
+CATEGORY="hugetlb" run_test ./hugetlb_reparenting_test.sh -cgroup-v2
+if $RUN_DESTRUCTIVE_TEST; then
+CATEGORY="hugetlb" run_test ./hugetlb-read-hwpoison
+fi
 
 if [ $VADDR64 -ne 0 ]; then
 

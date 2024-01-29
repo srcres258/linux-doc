@@ -2052,7 +2052,7 @@ static void amdgpu_ras_interrupt_poison_consumption_handler(struct ras_manager *
 		}
 	}
 
-	amdgpu_umc_poison_handler(adev, false);
+	amdgpu_umc_poison_handler(adev, obj->head.block, false);
 
 	if (block_obj->hw_ops && block_obj->hw_ops->handle_poison_consumption)
 		poison_stat = block_obj->hw_ops->handle_poison_consumption(adev);
@@ -2681,7 +2681,11 @@ static int amdgpu_ras_page_retirement_thread(void *param)
 	while (!kthread_should_stop()) {
 
 		wait_event_interruptible(con->page_retirement_wq,
+				kthread_should_stop() ||
 				atomic_read(&con->page_retirement_req_cnt));
+
+		if (kthread_should_stop())
+			break;
 
 		dev_info(adev->dev, "Start processing page retirement. request:%d\n",
 			atomic_read(&con->page_retirement_req_cnt));
@@ -3351,10 +3355,18 @@ int amdgpu_ras_late_init(struct amdgpu_device *adev)
 	if (amdgpu_sriov_vf(adev))
 		return 0;
 
-	if (amdgpu_aca_is_enabled(adev))
+	if (amdgpu_aca_is_enabled(adev)) {
+		if (amdgpu_in_reset(adev))
+			r = amdgpu_aca_reset(adev);
+		 else
+			r = amdgpu_aca_init(adev);
+		if (r)
+			return r;
+
 		amdgpu_ras_set_aca_debug_mode(adev, false);
-	else
+	} else {
 		amdgpu_ras_set_mca_debug_mode(adev, false);
+	}
 
 	list_for_each_entry_safe(node, tmp, &adev->ras_list, node) {
 		obj = node->ras_obj;
@@ -3422,6 +3434,9 @@ int amdgpu_ras_fini(struct amdgpu_device *adev)
 
 	amdgpu_ras_fs_fini(adev);
 	amdgpu_ras_interrupt_remove_all(adev);
+
+	if (amdgpu_aca_is_enabled(adev))
+		amdgpu_aca_fini(adev);
 
 	WARN(AMDGPU_RAS_GET_FEATURES(con->features), "Feature mask is not cleared");
 

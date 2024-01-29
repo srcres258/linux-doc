@@ -208,10 +208,6 @@ extern struct inode *cifs_iget(struct super_block *sb,
 int cifs_get_inode_info(struct inode **inode, const char *full_path,
 			struct cifs_open_info_data *data, struct super_block *sb, int xid,
 			const struct cifs_fid *fid);
-bool cifs_reparse_point_to_fattr(struct cifs_sb_info *cifs_sb,
-				 struct cifs_fattr *fattr,
-				 struct cifs_open_info_data *data);
-
 extern int smb311_posix_get_inode_info(struct inode **inode,
 				       const char *full_path,
 				       struct cifs_open_info_data *data,
@@ -767,6 +763,7 @@ static inline void cifs_free_open_info(struct cifs_open_info_data *data)
 {
 	kfree(data->symlink_target);
 	free_rsp_buf(data->reparse.io.buftype, data->reparse.io.iov.iov_base);
+	free_rsp_buf(data->wsl.ea_buftype, data->wsl.ea_iov.iov_base);
 	memset(data, 0, sizeof(*data));
 }
 

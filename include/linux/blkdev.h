@@ -944,7 +944,7 @@ struct blk_plug {
 	/* if ios_left is > 1, we can batch tag/rq allocations */
 	struct request *cached_rq;
 	u64 cur_ktime;
-	unsigned char nr_ios;
+	unsigned short nr_ios;
 
 	unsigned char rq_count;
 
@@ -972,6 +972,18 @@ static inline void blk_flush_plug(struct blk_plug *plug, bool async)
 {
 	if (plug)
 		__blk_flush_plug(plug, async);
+}
+
+/*
+ * tsk == current here
+ */
+static inline void blk_plug_invalidate_ts(struct task_struct *tsk)
+{
+	struct blk_plug *plug = tsk->plug;
+
+	if (plug)
+		plug->cur_ktime = 0;
+	current->flags &= ~PF_BLOCK_TS;
 }
 
 int blkdev_issue_flush(struct block_device *bdev);
