@@ -28,19 +28,6 @@
 #include "cached_dir.h"
 #include "reparse.h"
 
-/*
- * Set parameters for the netfs library
- */
-static void cifs_set_netfs_context(struct inode *inode)
-{
-	struct cifsInodeInfo *cifs_i = CIFS_I(inode);
-	struct cifs_sb_info *cifs_sb = CIFS_SB(inode->i_sb);
-
-	netfs_inode_init(&cifs_i->netfs, &cifs_req_ops, true);
-	if (cifs_sb->mnt_cifs_flags & CIFS_MOUNT_STRICT_IO)
-		__set_bit(NETFS_ICTX_WRITETHROUGH, &cifs_i->netfs.flags);
-}
-
 static void cifs_set_ops(struct inode *inode)
 {
 	struct cifs_sb_info *cifs_sb = CIFS_SB(inode->i_sb);
@@ -776,6 +763,8 @@ static void cifs_open_info_to_fattr(struct cifs_fattr *fattr,
 	fattr->cf_bytes = le64_to_cpu(info->AllocationSize);
 	fattr->cf_createtime = le64_to_cpu(info->CreationTime);
 	fattr->cf_nlink = le32_to_cpu(info->NumberOfLinks);
+	fattr->cf_uid = cifs_sb->ctx->linux_uid;
+	fattr->cf_gid = cifs_sb->ctx->linux_gid;
 
 	fattr->cf_mode = cifs_sb->ctx->file_mode;
 	if (cifs_open_data_reparse(data) &&
@@ -818,9 +807,6 @@ out_reparse:
 		fattr->cf_symlink_target = data->symlink_target;
 		data->symlink_target = NULL;
 	}
-
-	fattr->cf_uid = cifs_sb->ctx->linux_uid;
-	fattr->cf_gid = cifs_sb->ctx->linux_gid;
 }
 
 static int

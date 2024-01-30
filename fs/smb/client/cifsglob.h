@@ -215,8 +215,8 @@ struct cifs_open_info_data {
 		};
 	} reparse;
 	struct {
-		struct kvec ea_iov;
-		int ea_buftype;
+		__u8		eas[SMB2_WSL_MAX_QUERY_EA_RESP_SIZE];
+		unsigned int	eas_len;
 	} wsl;
 	char *symlink_target;
 	struct cifs_sid posix_owner;

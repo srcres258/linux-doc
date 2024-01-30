@@ -104,6 +104,7 @@
 #include "intel_pmdemand.h"
 #include "intel_pps.h"
 #include "intel_psr.h"
+#include "intel_psr_regs.h"
 #include "intel_sdvo.h"
 #include "intel_snps_phy.h"
 #include "intel_tc.h"
@@ -2706,6 +2707,15 @@ static void intel_set_pipe_src_size(const struct intel_crtc_state *crtc_state)
 	 */
 	intel_de_write(dev_priv, PIPESRC(pipe),
 		       PIPESRC_WIDTH(width - 1) | PIPESRC_HEIGHT(height - 1));
+
+	if (!crtc_state->enable_psr2_su_region_et)
+		return;
+
+	width = drm_rect_width(&crtc_state->psr2_su_area);
+	height = drm_rect_height(&crtc_state->psr2_su_area);
+
+	intel_de_write(dev_priv, PIPE_SRCSZ_ERLY_TPT(pipe),
+		       PIPESRC_WIDTH(width - 1) | PIPESRC_HEIGHT(height - 1));
 }
 
 static bool intel_pipe_is_interlaced(const struct intel_crtc_state *crtc_state)
@@ -5202,13 +5212,6 @@ intel_pipe_config_compare(const struct intel_crtc_state *current_config,
 
 		PIPE_CONF_CHECK_CSC(csc);
 		PIPE_CONF_CHECK_CSC(output_csc);
-
-		if (current_config->active_planes) {
-			PIPE_CONF_CHECK_BOOL(has_psr);
-			PIPE_CONF_CHECK_BOOL(has_psr2);
-			PIPE_CONF_CHECK_BOOL(enable_psr2_sel_fetch);
-			PIPE_CONF_CHECK_I(dc3co_exitline);
-		}
 	}
 
 	PIPE_CONF_CHECK_BOOL(double_wide);

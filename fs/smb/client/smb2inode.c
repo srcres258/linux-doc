@@ -100,7 +100,66 @@ static const struct wsl_query_ea wsl_query_eas[] = {
 	{ .next = 0,        .name_len = SMB2_WSL_XATTR_NAME_LEN, .name = SMB2_WSL_XATTR_DEV, },
 };
 
-static_assert(IS_ALIGNED(sizeof(wsl_query_eas), 4));
+static int check_wsl_eas(struct kvec *rsp_iov)
+{
+	struct smb2_file_full_ea_info *ea;
+	struct smb2_query_info_rsp *rsp = rsp_iov->iov_base;
+	unsigned long addr;
+	u32 outlen, next;
+	u8 nlen;
+	u16 vlen;
+	u8 *end;
+
+	outlen = le32_to_cpu(rsp->OutputBufferLength);
+	if (outlen < SMB2_WSL_MIN_QUERY_EA_RESP_SIZE ||
+	    outlen > SMB2_WSL_MAX_QUERY_EA_RESP_SIZE)
+		return -EINVAL;
+
+	ea = (void *)((u8 *)rsp_iov->iov_base +
+		      le16_to_cpu(rsp->OutputBufferOffset));
+	end = (u8 *)rsp_iov->iov_base + rsp_iov->iov_len;
+	for (;;) {
+		if ((u8 *)ea > end - sizeof(*ea))
+			return -EINVAL;
+
+		nlen = ea->ea_name_length;
+		vlen = le16_to_cpu(ea->ea_value_length);
+		if (nlen != SMB2_WSL_XATTR_NAME_LEN ||
+		    (u8 *)ea + nlen + 1 + vlen > end)
+			return -EINVAL;
+
+		switch (vlen) {
+		case 4:
+			if (strncmp(ea->ea_data, SMB2_WSL_XATTR_UID, nlen) &&
+			    strncmp(ea->ea_data, SMB2_WSL_XATTR_GID, nlen) &&
+			    strncmp(ea->ea_data, SMB2_WSL_XATTR_MODE, nlen))
+				return -EINVAL;
+			break;
+		case 8:
+			if (strncmp(ea->ea_data, SMB2_WSL_XATTR_DEV, nlen))
+				return -EINVAL;
+			break;
+		case 0:
+			if (!strncmp(ea->ea_data, SMB2_WSL_XATTR_UID, nlen) ||
+			    !strncmp(ea->ea_data, SMB2_WSL_XATTR_GID, nlen) ||
+			    !strncmp(ea->ea_data, SMB2_WSL_XATTR_MODE, nlen) ||
+			    !strncmp(ea->ea_data, SMB2_WSL_XATTR_DEV, nlen))
+				break;
+			fallthrough;
+		default:
+			return -EINVAL;
+		}
+
+		next = le32_to_cpu(ea->next_entry_offset);
+		if (!next)
+			break;
+		if (!IS_ALIGNED(next, 4) ||
+		    check_add_overflow((unsigned long)ea, next, &addr))
+			return -EINVAL;
+		ea = (void *)addr;
+	}
+	return 0;
+}
 
 /*
  * note: If cfile is passed, the reference to it is dropped here.
@@ -135,7 +194,7 @@ static int smb2_compound_op(const unsigned int xid, struct cifs_tcon *tcon,
 	__u8 delete_pending[8] = {1, 0, 0, 0, 0, 0, 0, 0};
 	unsigned int size[2];
 	void *data[2];
-	int len;
+	unsigned int len;
 	int retries = 0, cur_sleep = 1;
 
 replay_again:
@@ -694,12 +753,17 @@ finished:
 			break;
 		case SMB2_OP_QUERY_WSL_EA:
 			if (!rc) {
-				iov = &rsp_iov[i + 1];
 				idata = in_iov[i].iov_base;
-				idata->wsl.ea_iov = *iov;
-				idata->wsl.ea_buftype = resp_buftype[i + 1];
-				memset(iov, 0, sizeof(*iov));
-				resp_buftype[i + 1] = CIFS_NO_BUFFER;
+				qi_rsp = rsp_iov[i + 1].iov_base;
+				data[0] = (u8 *)qi_rsp + le16_to_cpu(qi_rsp->OutputBufferOffset);
+				size[0] = le32_to_cpu(qi_rsp->OutputBufferLength);
+				rc = check_wsl_eas(&rsp_iov[i + 1]);
+				if (!rc) {
+					memcpy(idata->wsl.eas, data[0], size[0]);
+					idata->wsl.eas_len = size[0];
+				}
+			}
+			if (!rc) {
 				trace_smb3_query_wsl_ea_compound_done(xid, ses->Suid,
 								      tcon->tid);
 			} else {

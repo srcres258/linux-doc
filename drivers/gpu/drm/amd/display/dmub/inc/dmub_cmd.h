@@ -408,7 +408,13 @@ union replay_debug_flags {
 		 */
 		uint32_t enable_ips_visual_confirm : 1;
 
-		uint32_t reserved : 21;
+		/**
+		 * 0x800 (bit 11)
+		 * @enable_ips_residency_profiling: Enable IPS residency profiling
+		 */
+		uint32_t enable_ips_residency_profiling : 1;
+
+		uint32_t reserved : 20;
 	} bitfields;
 
 	uint32_t u32All;
@@ -1265,11 +1271,11 @@ struct dmub_cmd_PLAT_54186_wa {
 	uint32_t DCSURF_PRIMARY_SURFACE_ADDRESS_HIGH_C; /**< reg value */
 	uint32_t DCSURF_PRIMARY_SURFACE_ADDRESS_C; /**< reg value */
 	struct {
-		uint8_t hubp_inst : 4; /**< HUBP instance */
-		uint8_t tmz_surface : 1; /**< TMZ enable or disable */
-		uint8_t immediate :1; /**< Immediate flip */
-		uint8_t vmid : 4; /**< VMID */
-		uint8_t grph_stereo : 1; /**< 1 if stereo */
+		uint32_t hubp_inst : 4; /**< HUBP instance */
+		uint32_t tmz_surface : 1; /**< TMZ enable or disable */
+		uint32_t immediate :1; /**< Immediate flip */
+		uint32_t vmid : 4; /**< VMID */
+		uint32_t grph_stereo : 1; /**< 1 if stereo */
 		uint32_t reserved : 21; /**< Reserved */
 	} flip_params; /**< Pageflip parameters */
 	uint32_t reserved[9]; /**< Reserved bits */
