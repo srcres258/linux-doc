@@ -542,6 +542,11 @@ void __exfat_fs_error(struct super_block *sb, int report, const char *fmt, ...)
 /* expand to pr_*() with prefix */
 #define exfat_err(sb, fmt, ...)						\
 	pr_err("exFAT-fs (%s): " fmt "\n", (sb)->s_id, ##__VA_ARGS__)
+#define exfat_err_ratelimit(sb, fmt, args...) \
+	do { \
+		if (__ratelimit(&EXFAT_SB(sb)->ratelimit)) \
+			exfat_err(sb, fmt, ## args); \
+	} while (0)
 #define exfat_warn(sb, fmt, ...)					\
 	pr_warn("exFAT-fs (%s): " fmt "\n", (sb)->s_id, ##__VA_ARGS__)
 #define exfat_info(sb, fmt, ...)					\

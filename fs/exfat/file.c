@@ -619,7 +619,7 @@ static int exfat_file_mmap(struct file *file, struct vm_area_struct *vma)
 		ret = exfat_file_zeroed_range(file, ei->valid_size, end);
 		inode_unlock(inode);
 		if (ret < 0) {
-			exfat_err(inode->i_sb,
+			exfat_err_ratelimit(inode->i_sb,
 				  "mmap: fail to zero from %llu to %llu(%d)",
 				  start, end, ret);
 			return ret;
