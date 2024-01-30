@@ -18,6 +18,8 @@
 	compatible = "google,gs101-oriole", "google,gs101";
 
 	aliases {
+		i2c7 = &hsi2c_8;
+		i2c8 = &hsi2c_12;
 		serial0 = &serial_0;
 	};
 
