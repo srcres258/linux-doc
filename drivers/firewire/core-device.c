@@ -323,7 +323,7 @@ static ssize_t show_immediate(struct device *dev,
 	if (value < 0)
 		return -ENOENT;
 
-	return snprintf(buf, buf ? PAGE_SIZE : 0, "0x%06x\n", value);
+	return sysfs_emit(buf, "0x%06x\n", value);
 }
 
 #define IMMEDIATE_ATTR(name, key)				\
@@ -335,8 +335,6 @@ static ssize_t show_text_leaf(struct device *dev,
 	struct config_rom_attribute *attr =
 		container_of(dattr, struct config_rom_attribute, attr);
 	const u32 *directories[] = {NULL, NULL};
-	size_t bufsize;
-	char dummy_buf[2];
 	int i, ret = -ENOENT;
 
 	down_read(&fw_device_rwsem);
@@ -358,15 +356,9 @@ static ssize_t show_text_leaf(struct device *dev,
 		}
 	}
 
-	if (buf) {
-		bufsize = PAGE_SIZE - 1;
-	} else {
-		buf = dummy_buf;
-		bufsize = 1;
-	}
-
 	for (i = 0; i < ARRAY_SIZE(directories) && !!directories[i]; ++i) {
-		int result = fw_csr_string(directories[i], attr->key, buf, bufsize);
+		int result = fw_csr_string(directories[i], attr->key, buf,
+					   PAGE_SIZE - 1);
 		// Detected.
 		if (result >= 0)
 			ret = result;
@@ -482,7 +474,7 @@ static ssize_t is_local_show(struct device *dev,
 {
 	struct fw_device *device = fw_device(dev);
 
-	return sprintf(buf, "%u\n", device->is_local);
+	return sysfs_emit(buf, "%u\n", device->is_local);
 }
 
 static int units_sprintf(char *buf, const u32 *directory)
