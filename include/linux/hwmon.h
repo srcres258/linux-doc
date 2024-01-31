@@ -141,6 +141,7 @@ enum hwmon_in_attributes {
 	hwmon_in_rated_min,
 	hwmon_in_rated_max,
 	hwmon_in_beep,
+	hwmon_in_fault,
 };
 
 #define HWMON_I_ENABLE		BIT(hwmon_in_enable)
@@ -162,6 +163,7 @@ enum hwmon_in_attributes {
 #define HWMON_I_RATED_MIN	BIT(hwmon_in_rated_min)
 #define HWMON_I_RATED_MAX	BIT(hwmon_in_rated_max)
 #define HWMON_I_BEEP		BIT(hwmon_in_beep)
+#define HWMON_I_FAULT		BIT(hwmon_in_fault)
 
 enum hwmon_curr_attributes {
 	hwmon_curr_enable,
@@ -425,12 +427,12 @@ struct hwmon_channel_info {
 	const u32 *config;
 };
 
-#define HWMON_CHANNEL_INFO(stype, ...)	\
-	(&(struct hwmon_channel_info) {	\
-		.type = hwmon_##stype,	\
-		.config = (u32 []) {	\
-			__VA_ARGS__, 0	\
-		}			\
+#define HWMON_CHANNEL_INFO(stype, ...)		\
+	(&(const struct hwmon_channel_info) {	\
+		.type = hwmon_##stype,		\
+		.config = (const u32 []) {	\
+			__VA_ARGS__, 0		\
+		}				\
 	})
 
 /**
