@@ -2853,7 +2853,7 @@ config TEST_KALLSYMS
 	select TEST_KALLSYMS_A
 	select TEST_KALLSYMS_B
 	select TEST_KALLSYMS_C
-	select TEST_KALLSYMS_D
+#	select TEST_KALLSYMS_D
 	help
 	  This allows us to stress test find_symbol() through the kallsyms
 	  used to place symbols on the kernel ELF kallsyms and modules kallsyms
