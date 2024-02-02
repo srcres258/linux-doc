@@ -2019,13 +2019,11 @@ ret:
 	return ret;
 }
 
-static void do_notify_pidfd(struct task_struct *task)
+void pidfd_wake_up_poll(struct task_struct *task, __poll_t mask)
 {
-	struct pid *pid;
-
 	WARN_ON(task->exit_state == 0);
-	pid = task_pid(task);
-	wake_up_all(&pid->wait_pidfd);
+	WARN_ON(mask == 0);
+	wake_up_poll(&task_pid(task)->wait_pidfd, mask);
 }
 
 /*
@@ -2050,9 +2048,12 @@ bool do_notify_parent(struct task_struct *tsk, int sig)
 
 	WARN_ON_ONCE(!tsk->ptrace &&
 	       (tsk->group_leader != tsk || !thread_group_empty(tsk)));
-
-	/* Wake up all pidfd waiters */
-	do_notify_pidfd(tsk);
+	/*
+	 * tsk is a group leader and has no threads, wake up the
+	 * non-PIDFD_THREAD waiters.
+	 */
+	if (thread_group_empty(tsk))
+		pidfd_wake_up_poll(tsk, EPOLLIN | EPOLLRDNORM);
 
 	if (sig != SIGCHLD) {
 		/*
@@ -3924,6 +3925,7 @@ SYSCALL_DEFINE4(pidfd_send_signal, int, pidfd, int, sig,
 		prepare_kill_siginfo(sig, &kinfo);
 	}
 
+	/* TODO: respect PIDFD_THREAD */
 	ret = kill_pid_info(sig, &kinfo, pid);
 
 err:
