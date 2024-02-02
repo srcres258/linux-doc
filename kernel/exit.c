@@ -744,7 +744,7 @@ static void exit_notify(struct task_struct *tsk, int group_dead)
 	 * PIDFD_THREAD waiters.
 	 */
 	if (!thread_group_empty(tsk))
-		do_notify_pidfd(tsk);
+		pidfd_wake_up_poll(tsk, EPOLLIN | EPOLLRDNORM | EPOLLHUP);
 
 	if (unlikely(tsk->ptrace)) {
 		int sig = thread_group_leader(tsk) &&
