@@ -27,6 +27,8 @@
 #include <sys/vfs.h>
 #include <unistd.h>
 
+#include <linux/fs.h>
+
 #include "common.h"
 
 #ifndef renameat2

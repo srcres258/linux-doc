@@ -634,8 +634,8 @@ int amdgpu_ring_test_helper(struct amdgpu_ring *ring)
 		DRM_DEV_DEBUG(adev->dev, "ring test on %s succeeded\n",
 			      ring->name);
 
-	if (!ring->no_scheduler)
-		ring->sched.ready = !r;
+	ring->sched.ready = !r;
+
 	return r;
 }
 

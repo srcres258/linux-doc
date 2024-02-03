@@ -3441,7 +3441,7 @@ int amdgpu_ras_fini(struct amdgpu_device *adev)
 	WARN(AMDGPU_RAS_GET_FEATURES(con->features), "Feature mask is not cleared");
 
 	if (AMDGPU_RAS_GET_FEATURES(con->features))
-		amdgpu_ras_disable_all_features(adev, 1);
+		amdgpu_ras_disable_all_features(adev, 0);
 
 	cancel_delayed_work_sync(&con->ras_counte_delay_work);
 
@@ -4131,6 +4131,18 @@ static int amdgpu_ras_wait_for_boot_complete(struct amdgpu_device *adev,
 	u32 reg_data;
 	int retry_loop;
 
+	reg_addr = (mmMP0_SMN_C2PMSG_92 << 2) +
+		   aqua_vanjaram_encode_ext_smn_addressing(instance);
+
+	for (retry_loop = 0; retry_loop < AMDGPU_RAS_BOOT_STATUS_POLLING_LIMIT; retry_loop++) {
+		reg_data = amdgpu_device_indirect_rreg_ext(adev, reg_addr);
+		if ((reg_data & AMDGPU_RAS_BOOT_STATUS_MASK) == AMDGPU_RAS_BOOT_STEADY_STATUS) {
+			*boot_error = AMDGPU_RAS_BOOT_SUCEESS;
+			return 0;
+		}
+		msleep(1);
+	}
+
 	/* The pattern for smn addressing in other SOC could be different from
 	 * the one for aqua_vanjaram. We should revisit the code if the pattern
 	 * is changed. In such case, replace the aqua_vanjaram implementation
@@ -4138,7 +4150,7 @@ static int amdgpu_ras_wait_for_boot_complete(struct amdgpu_device *adev,
 	reg_addr = (mmMP0_SMN_C2PMSG_126 << 2) +
 		   aqua_vanjaram_encode_ext_smn_addressing(instance);
 
-	for (retry_loop = 0; retry_loop < 1000; retry_loop++) {
+	for (retry_loop = 0; retry_loop < AMDGPU_RAS_BOOT_STATUS_POLLING_LIMIT; retry_loop++) {
 		reg_data = amdgpu_device_indirect_rreg_ext(adev, reg_addr);
 		if (AMDGPU_RAS_GPU_ERR_BOOT_STATUS(reg_data)) {
 			*boot_error = reg_data;

@@ -43,7 +43,8 @@ int module_enable_text_rox(const struct module *mod)
 
 int module_enable_rodata_ro(const struct module *mod, bool after_init)
 {
-	int ret;
+	if (!IS_ENABLED(CONFIG_STRICT_MODULE_RWX) || !rodata_enabled)
+		return;
 
 	if (!IS_ENABLED(CONFIG_STRICT_MODULE_RWX) || !rodata_enabled)
 		return 0;

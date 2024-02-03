@@ -9,7 +9,7 @@ Contact:	Linux memory management mailing list <linux-mm@kvack.org>
 Description:	Weight configuration interface for nodeN
 
 		The interleave weight for a memory node (N). These weights are
-		utilized by taskss which have set their mempolicy to
+		utilized by tasks which have set their mempolicy to
 		MPOL_WEIGHTED_INTERLEAVE.
 
 		These weights only affect new allocations, and changes at runtime

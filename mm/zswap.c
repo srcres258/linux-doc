@@ -278,11 +278,6 @@ static inline struct zswap_tree *swap_zswap_tree(swp_entry_t swp)
 	pr_debug("%s pool %s/%s\n", msg, (p)->tfm_name,		\
 		 zpool_get_type((p)->zpools[0]))
 
-static int zswap_writeback_entry(struct zswap_entry *entry,
-				 swp_entry_t swpentry);
-static int zswap_pool_get(struct zswap_pool *pool);
-static void zswap_pool_put(struct zswap_pool *pool);
-
 static bool zswap_is_full(void)
 {
 	return totalram_pages() * zswap_max_pool_percent / 100 <
@@ -322,670 +317,12 @@ static void zswap_update_total_size(void)
 	zswap_pool_total_size = total;
 }
 
-/* should be called under RCU */
-#ifdef CONFIG_MEMCG
-static inline struct mem_cgroup *mem_cgroup_from_entry(struct zswap_entry *entry)
-{
-	return entry->objcg ? obj_cgroup_memcg(entry->objcg) : NULL;
-}
-#else
-static inline struct mem_cgroup *mem_cgroup_from_entry(struct zswap_entry *entry)
-{
-	return NULL;
-}
-#endif
-
-static inline int entry_to_nid(struct zswap_entry *entry)
-{
-	return page_to_nid(virt_to_page(entry));
-}
-
-void zswap_memcg_offline_cleanup(struct mem_cgroup *memcg)
-{
-	struct zswap_pool *pool;
-
-	/* lock out zswap pools list modification */
-	spin_lock(&zswap_pools_lock);
-	list_for_each_entry(pool, &zswap_pools, list) {
-		if (pool->next_shrink == memcg)
-			pool->next_shrink = mem_cgroup_iter(NULL, pool->next_shrink, NULL);
-	}
-	spin_unlock(&zswap_pools_lock);
-}
-
-/*********************************
-* zswap entry functions
-**********************************/
-static struct kmem_cache *zswap_entry_cache;
-
-static struct zswap_entry *zswap_entry_cache_alloc(gfp_t gfp, int nid)
-{
-	struct zswap_entry *entry;
-	entry = kmem_cache_alloc_node(zswap_entry_cache, gfp, nid);
-	if (!entry)
-		return NULL;
-	entry->refcount = 1;
-	RB_CLEAR_NODE(&entry->rbnode);
-	return entry;
-}
-
-static void zswap_entry_cache_free(struct zswap_entry *entry)
-{
-	kmem_cache_free(zswap_entry_cache, entry);
-}
-
-/*********************************
-* zswap lruvec functions
-**********************************/
-void zswap_lruvec_state_init(struct lruvec *lruvec)
-{
-	atomic_long_set(&lruvec->zswap_lruvec_state.nr_zswap_protected, 0);
-}
-
-void zswap_folio_swapin(struct folio *folio)
-{
-	struct lruvec *lruvec;
-
-	if (folio) {
-		lruvec = folio_lruvec(folio);
-		atomic_long_inc(&lruvec->zswap_lruvec_state.nr_zswap_protected);
-	}
-}
-
-/*********************************
-* lru functions
-**********************************/
-static void zswap_lru_add(struct list_lru *list_lru, struct zswap_entry *entry)
-{
-	atomic_long_t *nr_zswap_protected;
-	unsigned long lru_size, old, new;
-	int nid = entry_to_nid(entry);
-	struct mem_cgroup *memcg;
-	struct lruvec *lruvec;
-
-	/*
-	 * Note that it is safe to use rcu_read_lock() here, even in the face of
-	 * concurrent memcg offlining. Thanks to the memcg->kmemcg_id indirection
-	 * used in list_lru lookup, only two scenarios are possible:
-	 *
-	 * 1. list_lru_add() is called before memcg->kmemcg_id is updated. The
-	 *    new entry will be reparented to memcg's parent's list_lru.
-	 * 2. list_lru_add() is called after memcg->kmemcg_id is updated. The
-	 *    new entry will be added directly to memcg's parent's list_lru.
-	 *
-	 * Similar reasoning holds for list_lru_del().
-	 */
-	rcu_read_lock();
-	memcg = mem_cgroup_from_entry(entry);
-	/* will always succeed */
-	list_lru_add(list_lru, &entry->lru, nid, memcg);
-
-	/* Update the protection area */
-	lru_size = list_lru_count_one(list_lru, nid, memcg);
-	lruvec = mem_cgroup_lruvec(memcg, NODE_DATA(nid));
-	nr_zswap_protected = &lruvec->zswap_lruvec_state.nr_zswap_protected;
-	old = atomic_long_inc_return(nr_zswap_protected);
-	/*
-	 * Decay to avoid overflow and adapt to changing workloads.
-	 * This is based on LRU reclaim cost decaying heuristics.
-	 */
-	do {
-		new = old > lru_size / 4 ? old / 2 : old;
-	} while (!atomic_long_try_cmpxchg(nr_zswap_protected, &old, new));
-	rcu_read_unlock();
-}
-
-static void zswap_lru_del(struct list_lru *list_lru, struct zswap_entry *entry)
-{
-	int nid = entry_to_nid(entry);
-	struct mem_cgroup *memcg;
-
-	rcu_read_lock();
-	memcg = mem_cgroup_from_entry(entry);
-	/* will always succeed */
-	list_lru_del(list_lru, &entry->lru, nid, memcg);
-	rcu_read_unlock();
-}
-
-/*********************************
-* rbtree functions
-**********************************/
-static struct zswap_entry *zswap_rb_search(struct rb_root *root, pgoff_t offset)
-{
-	struct rb_node *node = root->rb_node;
-	struct zswap_entry *entry;
-	pgoff_t entry_offset;
-
-	while (node) {
-		entry = rb_entry(node, struct zswap_entry, rbnode);
-		entry_offset = swp_offset(entry->swpentry);
-		if (entry_offset > offset)
-			node = node->rb_left;
-		else if (entry_offset < offset)
-			node = node->rb_right;
-		else
-			return entry;
-	}
-	return NULL;
-}
-
-/*
- * In the case that a entry with the same offset is found, a pointer to
- * the existing entry is stored in dupentry and the function returns -EEXIST
- */
-static int zswap_rb_insert(struct rb_root *root, struct zswap_entry *entry,
-			struct zswap_entry **dupentry)
-{
-	struct rb_node **link = &root->rb_node, *parent = NULL;
-	struct zswap_entry *myentry;
-	pgoff_t myentry_offset, entry_offset = swp_offset(entry->swpentry);
-
-	while (*link) {
-		parent = *link;
-		myentry = rb_entry(parent, struct zswap_entry, rbnode);
-		myentry_offset = swp_offset(myentry->swpentry);
-		if (myentry_offset > entry_offset)
-			link = &(*link)->rb_left;
-		else if (myentry_offset < entry_offset)
-			link = &(*link)->rb_right;
-		else {
-			*dupentry = myentry;
-			return -EEXIST;
-		}
-	}
-	rb_link_node(&entry->rbnode, parent, link);
-	rb_insert_color(&entry->rbnode, root);
-	return 0;
-}
-
-static bool zswap_rb_erase(struct rb_root *root, struct zswap_entry *entry)
-{
-	if (!RB_EMPTY_NODE(&entry->rbnode)) {
-		rb_erase(&entry->rbnode, root);
-		RB_CLEAR_NODE(&entry->rbnode);
-		return true;
-	}
-	return false;
-}
-
-static struct zpool *zswap_find_zpool(struct zswap_entry *entry)
-{
-	int i = 0;
-
-	if (ZSWAP_NR_ZPOOLS > 1)
-		i = hash_ptr(entry, ilog2(ZSWAP_NR_ZPOOLS));
-
-	return entry->pool->zpools[i];
-}
-
-/*
- * Carries out the common pattern of freeing and entry's zpool allocation,
- * freeing the entry itself, and decrementing the number of stored pages.
- */
-static void zswap_free_entry(struct zswap_entry *entry)
-{
-	if (entry->objcg) {
-		obj_cgroup_uncharge_zswap(entry->objcg, entry->length);
-		obj_cgroup_put(entry->objcg);
-	}
-	if (!entry->length)
-		atomic_dec(&zswap_same_filled_pages);
-	else {
-		zswap_lru_del(&entry->pool->list_lru, entry);
-		zpool_free(zswap_find_zpool(entry), entry->handle);
-		atomic_dec(&entry->pool->nr_stored);
-		zswap_pool_put(entry->pool);
-	}
-	zswap_entry_cache_free(entry);
-	atomic_dec(&zswap_stored_pages);
-	zswap_update_total_size();
-}
-
-/* caller must hold the tree lock */
-static void zswap_entry_get(struct zswap_entry *entry)
-{
-	entry->refcount++;
-}
-
-/* caller must hold the tree lock
-* remove from the tree and free it, if nobody reference the entry
-*/
-static void zswap_entry_put(struct zswap_entry *entry)
-{
-	int refcount = --entry->refcount;
-
-	WARN_ON_ONCE(refcount < 0);
-	if (refcount == 0) {
-		WARN_ON_ONCE(!RB_EMPTY_NODE(&entry->rbnode));
-		zswap_free_entry(entry);
-	}
-}
-
-/* caller must hold the tree lock */
-static struct zswap_entry *zswap_entry_find_get(struct rb_root *root,
-				pgoff_t offset)
-{
-	struct zswap_entry *entry;
-
-	entry = zswap_rb_search(root, offset);
-	if (entry)
-		zswap_entry_get(entry);
-
-	return entry;
-}
-
-/*********************************
-* shrinker functions
-**********************************/
-static enum lru_status shrink_memcg_cb(struct list_head *item, struct list_lru_one *l,
-				       spinlock_t *lock, void *arg);
-
-static unsigned long zswap_shrinker_scan(struct shrinker *shrinker,
-		struct shrink_control *sc)
-{
-	struct lruvec *lruvec = mem_cgroup_lruvec(sc->memcg, NODE_DATA(sc->nid));
-	unsigned long shrink_ret, nr_protected, lru_size;
-	struct zswap_pool *pool = shrinker->private_data;
-	bool encountered_page_in_swapcache = false;
-
-	if (!zswap_shrinker_enabled ||
-			!mem_cgroup_zswap_writeback_enabled(sc->memcg)) {
-		sc->nr_scanned = 0;
-		return SHRINK_STOP;
-	}
-
-	nr_protected =
-		atomic_long_read(&lruvec->zswap_lruvec_state.nr_zswap_protected);
-	lru_size = list_lru_shrink_count(&pool->list_lru, sc);
-
-	/*
-	 * Abort if we are shrinking into the protected region.
-	 *
-	 * This short-circuiting is necessary because if we have too many multiple
-	 * concurrent reclaimers getting the freeable zswap object counts at the
-	 * same time (before any of them made reasonable progress), the total
-	 * number of reclaimed objects might be more than the number of unprotected
-	 * objects (i.e the reclaimers will reclaim into the protected area of the
-	 * zswap LRU).
-	 */
-	if (nr_protected >= lru_size - sc->nr_to_scan) {
-		sc->nr_scanned = 0;
-		return SHRINK_STOP;
-	}
-
-	shrink_ret = list_lru_shrink_walk(&pool->list_lru, sc, &shrink_memcg_cb,
-		&encountered_page_in_swapcache);
-
-	if (encountered_page_in_swapcache)
-		return SHRINK_STOP;
-
-	return shrink_ret ? shrink_ret : SHRINK_STOP;
-}
-
-static unsigned long zswap_shrinker_count(struct shrinker *shrinker,
-		struct shrink_control *sc)
-{
-	struct zswap_pool *pool = shrinker->private_data;
-	struct mem_cgroup *memcg = sc->memcg;
-	struct lruvec *lruvec = mem_cgroup_lruvec(memcg, NODE_DATA(sc->nid));
-	unsigned long nr_backing, nr_stored, nr_freeable, nr_protected;
-
-	if (!zswap_shrinker_enabled || !mem_cgroup_zswap_writeback_enabled(memcg))
-		return 0;
-
-#ifdef CONFIG_MEMCG_KMEM
-	mem_cgroup_flush_stats(memcg);
-	nr_backing = memcg_page_state(memcg, MEMCG_ZSWAP_B) >> PAGE_SHIFT;
-	nr_stored = memcg_page_state(memcg, MEMCG_ZSWAPPED);
-#else
-	/* use pool stats instead of memcg stats */
-	nr_backing = get_zswap_pool_size(pool) >> PAGE_SHIFT;
-	nr_stored = atomic_read(&pool->nr_stored);
-#endif
-
-	if (!nr_stored)
-		return 0;
-
-	nr_protected =
-		atomic_long_read(&lruvec->zswap_lruvec_state.nr_zswap_protected);
-	nr_freeable = list_lru_shrink_count(&pool->list_lru, sc);
-	/*
-	 * Subtract the lru size by an estimate of the number of pages
-	 * that should be protected.
-	 */
-	nr_freeable = nr_freeable > nr_protected ? nr_freeable - nr_protected : 0;
-
-	/*
-	 * Scale the number of freeable pages by the memory saving factor.
-	 * This ensures that the better zswap compresses memory, the fewer
-	 * pages we will evict to swap (as it will otherwise incur IO for
-	 * relatively small memory saving).
-	 */
-	return mult_frac(nr_freeable, nr_backing, nr_stored);
-}
-
-static void zswap_alloc_shrinker(struct zswap_pool *pool)
-{
-	pool->shrinker =
-		shrinker_alloc(SHRINKER_NUMA_AWARE | SHRINKER_MEMCG_AWARE, "mm-zswap");
-	if (!pool->shrinker)
-		return;
-
-	pool->shrinker->private_data = pool;
-	pool->shrinker->scan_objects = zswap_shrinker_scan;
-	pool->shrinker->count_objects = zswap_shrinker_count;
-	pool->shrinker->batch = 0;
-	pool->shrinker->seeks = DEFAULT_SEEKS;
-}
-
-/*********************************
-* per-cpu code
-**********************************/
-static int zswap_cpu_comp_prepare(unsigned int cpu, struct hlist_node *node)
-{
-	struct zswap_pool *pool = hlist_entry(node, struct zswap_pool, node);
-	struct crypto_acomp_ctx *acomp_ctx = per_cpu_ptr(pool->acomp_ctx, cpu);
-	struct crypto_acomp *acomp;
-	struct acomp_req *req;
-	int ret;
-
-	mutex_init(&acomp_ctx->mutex);
-
-	acomp_ctx->buffer = kmalloc_node(PAGE_SIZE * 2, GFP_KERNEL, cpu_to_node(cpu));
-	if (!acomp_ctx->buffer)
-		return -ENOMEM;
-
-	acomp = crypto_alloc_acomp_node(pool->tfm_name, 0, 0, cpu_to_node(cpu));
-	if (IS_ERR(acomp)) {
-		pr_err("could not alloc crypto acomp %s : %ld\n",
-				pool->tfm_name, PTR_ERR(acomp));
-		ret = PTR_ERR(acomp);
-		goto acomp_fail;
-	}
-	acomp_ctx->acomp = acomp;
-
-	req = acomp_request_alloc(acomp_ctx->acomp);
-	if (!req) {
-		pr_err("could not alloc crypto acomp_request %s\n",
-		       pool->tfm_name);
-		ret = -ENOMEM;
-		goto req_fail;
-	}
-	acomp_ctx->req = req;
-
-	crypto_init_wait(&acomp_ctx->wait);
-	/*
-	 * if the backend of acomp is async zip, crypto_req_done() will wakeup
-	 * crypto_wait_req(); if the backend of acomp is scomp, the callback
-	 * won't be called, crypto_wait_req() will return without blocking.
-	 */
-	acomp_request_set_callback(req, CRYPTO_TFM_REQ_MAY_BACKLOG,
-				   crypto_req_done, &acomp_ctx->wait);
-
-	return 0;
-
-req_fail:
-	crypto_free_acomp(acomp_ctx->acomp);
-acomp_fail:
-	kfree(acomp_ctx->buffer);
-	return ret;
-}
-
-static int zswap_cpu_comp_dead(unsigned int cpu, struct hlist_node *node)
-{
-	struct zswap_pool *pool = hlist_entry(node, struct zswap_pool, node);
-	struct crypto_acomp_ctx *acomp_ctx = per_cpu_ptr(pool->acomp_ctx, cpu);
-
-	if (!IS_ERR_OR_NULL(acomp_ctx)) {
-		if (!IS_ERR_OR_NULL(acomp_ctx->req))
-			acomp_request_free(acomp_ctx->req);
-		if (!IS_ERR_OR_NULL(acomp_ctx->acomp))
-			crypto_free_acomp(acomp_ctx->acomp);
-		kfree(acomp_ctx->buffer);
-	}
-
-	return 0;
-}
-
 /*********************************
 * pool functions
 **********************************/
 
-static struct zswap_pool *__zswap_pool_current(void)
-{
-	struct zswap_pool *pool;
-
-	pool = list_first_or_null_rcu(&zswap_pools, typeof(*pool), list);
-	WARN_ONCE(!pool && zswap_has_pool,
-		  "%s: no page storage pool!\n", __func__);
-
-	return pool;
-}
-
-static struct zswap_pool *zswap_pool_current(void)
-{
-	assert_spin_locked(&zswap_pools_lock);
-
-	return __zswap_pool_current();
-}
-
-static struct zswap_pool *zswap_pool_current_get(void)
-{
-	struct zswap_pool *pool;
-
-	rcu_read_lock();
-
-	pool = __zswap_pool_current();
-	if (!zswap_pool_get(pool))
-		pool = NULL;
-
-	rcu_read_unlock();
-
-	return pool;
-}
-
-static struct zswap_pool *zswap_pool_last_get(void)
-{
-	struct zswap_pool *pool, *last = NULL;
-
-	rcu_read_lock();
-
-	list_for_each_entry_rcu(pool, &zswap_pools, list)
-		last = pool;
-	WARN_ONCE(!last && zswap_has_pool,
-		  "%s: no page storage pool!\n", __func__);
-	if (!zswap_pool_get(last))
-		last = NULL;
-
-	rcu_read_unlock();
-
-	return last;
-}
-
-/* type and compressor must be null-terminated */
-static struct zswap_pool *zswap_pool_find_get(char *type, char *compressor)
-{
-	struct zswap_pool *pool;
-
-	assert_spin_locked(&zswap_pools_lock);
-
-	list_for_each_entry_rcu(pool, &zswap_pools, list) {
-		if (strcmp(pool->tfm_name, compressor))
-			continue;
-		/* all zpools share the same type */
-		if (strcmp(zpool_get_type(pool->zpools[0]), type))
-			continue;
-		/* if we can't get it, it's about to be destroyed */
-		if (!zswap_pool_get(pool))
-			continue;
-		return pool;
-	}
-
-	return NULL;
-}
-
-/*
- * If the entry is still valid in the tree, drop the initial ref and remove it
- * from the tree. This function must be called with an additional ref held,
- * otherwise it may race with another invalidation freeing the entry.
- */
-static void zswap_invalidate_entry(struct zswap_tree *tree,
-				   struct zswap_entry *entry)
-{
-	if (zswap_rb_erase(&tree->rbroot, entry))
-		zswap_entry_put(entry);
-}
-
-static enum lru_status shrink_memcg_cb(struct list_head *item, struct list_lru_one *l,
-				       spinlock_t *lock, void *arg)
-{
-	struct zswap_entry *entry = container_of(item, struct zswap_entry, lru);
-	bool *encountered_page_in_swapcache = (bool *)arg;
-	swp_entry_t swpentry;
-	enum lru_status ret = LRU_REMOVED_RETRY;
-	int writeback_result;
-
-	/*
-	 * Rotate the entry to the tail before unlocking the LRU,
-	 * so that in case of an invalidation race concurrent
-	 * reclaimers don't waste their time on it.
-	 *
-	 * If writeback succeeds, or failure is due to the entry
-	 * being invalidated by the swap subsystem, the invalidation
-	 * will unlink and free it.
-	 *
-	 * Temporary failures, where the same entry should be tried
-	 * again immediately, almost never happen for this shrinker.
-	 * We don't do any trylocking; -ENOMEM comes closest,
-	 * but that's extremely rare and doesn't happen spuriously
-	 * either. Don't bother distinguishing this case.
-	 *
-	 * But since they do exist in theory, the entry cannot just
-	 * be unlinked, or we could leak it. Hence, rotate.
-	 */
-	list_move_tail(item, &l->list);
-
-	/*
-	 * Once the lru lock is dropped, the entry might get freed. The
-	 * swpentry is copied to the stack, and entry isn't deref'd again
-	 * until the entry is verified to still be alive in the tree.
-	 */
-	swpentry = entry->swpentry;
-
-	/*
-	 * It's safe to drop the lock here because we return either
-	 * LRU_REMOVED_RETRY or LRU_RETRY.
-	 */
-	spin_unlock(lock);
-
-	writeback_result = zswap_writeback_entry(entry, swpentry);
-
-	if (writeback_result) {
-		zswap_reject_reclaim_fail++;
-		ret = LRU_RETRY;
-
-		/*
-		 * Encountering a page already in swap cache is a sign that we are shrinking
-		 * into the warmer region. We should terminate shrinking (if we're in the dynamic
-		 * shrinker context).
-		 */
-		if (writeback_result == -EEXIST && encountered_page_in_swapcache)
-			*encountered_page_in_swapcache = true;
-	} else {
-		zswap_written_back_pages++;
-	}
-
-	spin_lock(lock);
-	return ret;
-}
-
-static int shrink_memcg(struct mem_cgroup *memcg)
-{
-	struct zswap_pool *pool;
-	int nid, shrunk = 0;
-
-	if (!mem_cgroup_zswap_writeback_enabled(memcg))
-		return -EINVAL;
-
-	/*
-	 * Skip zombies because their LRUs are reparented and we would be
-	 * reclaiming from the parent instead of the dead memcg.
-	 */
-	if (memcg && !mem_cgroup_online(memcg))
-		return -ENOENT;
-
-	pool = zswap_pool_current_get();
-	if (!pool)
-		return -EINVAL;
-
-	for_each_node_state(nid, N_NORMAL_MEMORY) {
-		unsigned long nr_to_walk = 1;
-
-		shrunk += list_lru_walk_one(&pool->list_lru, nid, memcg,
-					    &shrink_memcg_cb, NULL, &nr_to_walk);
-	}
-	zswap_pool_put(pool);
-	return shrunk ? 0 : -EAGAIN;
-}
-
-static void shrink_worker(struct work_struct *w)
-{
-	struct zswap_pool *pool = container_of(w, typeof(*pool),
-						shrink_work);
-	struct mem_cgroup *memcg;
-	int ret, failures = 0;
-
-	/* global reclaim will select cgroup in a round-robin fashion. */
-	do {
-		spin_lock(&zswap_pools_lock);
-		pool->next_shrink = mem_cgroup_iter(NULL, pool->next_shrink, NULL);
-		memcg = pool->next_shrink;
-
-		/*
-		 * We need to retry if we have gone through a full round trip, or if we
-		 * got an offline memcg (or else we risk undoing the effect of the
-		 * zswap memcg offlining cleanup callback). This is not catastrophic
-		 * per se, but it will keep the now offlined memcg hostage for a while.
-		 *
-		 * Note that if we got an online memcg, we will keep the extra
-		 * reference in case the original reference obtained by mem_cgroup_iter
-		 * is dropped by the zswap memcg offlining callback, ensuring that the
-		 * memcg is not killed when we are reclaiming.
-		 */
-		if (!memcg) {
-			spin_unlock(&zswap_pools_lock);
-			if (++failures == MAX_RECLAIM_RETRIES)
-				break;
-
-			goto resched;
-		}
-
-		if (!mem_cgroup_tryget_online(memcg)) {
-			/* drop the reference from mem_cgroup_iter() */
-			mem_cgroup_iter_break(NULL, memcg);
-			pool->next_shrink = NULL;
-			spin_unlock(&zswap_pools_lock);
-
-			if (++failures == MAX_RECLAIM_RETRIES)
-				break;
-
-			goto resched;
-		}
-		spin_unlock(&zswap_pools_lock);
-
-		ret = shrink_memcg(memcg);
-		/* drop the extra reference */
-		mem_cgroup_put(memcg);
-
-		if (ret == -EINVAL)
-			break;
-		if (ret && ++failures == MAX_RECLAIM_RETRIES)
-			break;
-
-resched:
-		cond_resched();
-	} while (!zswap_can_accept());
-}
+static void zswap_alloc_shrinker(struct zswap_pool *pool);
+static void shrink_worker(struct work_struct *w);
 
 static struct zswap_pool *zswap_pool_create(char *type, char *compressor)
 {
@@ -1132,14 +469,6 @@ static void zswap_pool_destroy(struct zswap_pool *pool)
 	kfree(pool);
 }
 
-static int __must_check zswap_pool_get(struct zswap_pool *pool)
-{
-	if (!pool)
-		return 0;
-
-	return kref_get_unless_zero(&pool->kref);
-}
-
 static void __zswap_pool_release(struct work_struct *work)
 {
 	struct zswap_pool *pool = container_of(work, typeof(*pool),
@@ -1153,6 +482,8 @@ static void __zswap_pool_release(struct work_struct *work)
 	/* pool is now off zswap_pools list and has no references. */
 	zswap_pool_destroy(pool);
 }
+
+static struct zswap_pool *zswap_pool_current(void);
 
 static void __zswap_pool_empty(struct kref *kref)
 {
@@ -1172,9 +503,90 @@ static void __zswap_pool_empty(struct kref *kref)
 	spin_unlock(&zswap_pools_lock);
 }
 
+static int __must_check zswap_pool_get(struct zswap_pool *pool)
+{
+	if (!pool)
+		return 0;
+
+	return kref_get_unless_zero(&pool->kref);
+}
+
 static void zswap_pool_put(struct zswap_pool *pool)
 {
 	kref_put(&pool->kref, __zswap_pool_empty);
+}
+
+static struct zswap_pool *__zswap_pool_current(void)
+{
+	struct zswap_pool *pool;
+
+	pool = list_first_or_null_rcu(&zswap_pools, typeof(*pool), list);
+	WARN_ONCE(!pool && zswap_has_pool,
+		  "%s: no page storage pool!\n", __func__);
+
+	return pool;
+}
+
+static struct zswap_pool *zswap_pool_current(void)
+{
+	assert_spin_locked(&zswap_pools_lock);
+
+	return __zswap_pool_current();
+}
+
+static struct zswap_pool *zswap_pool_current_get(void)
+{
+	struct zswap_pool *pool;
+
+	rcu_read_lock();
+
+	pool = __zswap_pool_current();
+	if (!zswap_pool_get(pool))
+		pool = NULL;
+
+	rcu_read_unlock();
+
+	return pool;
+}
+
+static struct zswap_pool *zswap_pool_last_get(void)
+{
+	struct zswap_pool *pool, *last = NULL;
+
+	rcu_read_lock();
+
+	list_for_each_entry_rcu(pool, &zswap_pools, list)
+		last = pool;
+	WARN_ONCE(!last && zswap_has_pool,
+		  "%s: no page storage pool!\n", __func__);
+	if (!zswap_pool_get(last))
+		last = NULL;
+
+	rcu_read_unlock();
+
+	return last;
+}
+
+/* type and compressor must be null-terminated */
+static struct zswap_pool *zswap_pool_find_get(char *type, char *compressor)
+{
+	struct zswap_pool *pool;
+
+	assert_spin_locked(&zswap_pools_lock);
+
+	list_for_each_entry_rcu(pool, &zswap_pools, list) {
+		if (strcmp(pool->tfm_name, compressor))
+			continue;
+		/* all zpools share the same type */
+		if (strcmp(zpool_get_type(pool->zpools[0]), type))
+			continue;
+		/* if we can't get it, it's about to be destroyed */
+		if (!zswap_pool_get(pool))
+			continue;
+		return pool;
+	}
+
+	return NULL;
 }
 
 /*********************************
@@ -1333,7 +745,395 @@ static int zswap_enabled_param_set(const char *val,
 	return ret;
 }
 
-static void __zswap_load(struct zswap_entry *entry, struct page *page)
+/*********************************
+* lru functions
+**********************************/
+
+/* should be called under RCU */
+#ifdef CONFIG_MEMCG
+static inline struct mem_cgroup *mem_cgroup_from_entry(struct zswap_entry *entry)
+{
+	return entry->objcg ? obj_cgroup_memcg(entry->objcg) : NULL;
+}
+#else
+static inline struct mem_cgroup *mem_cgroup_from_entry(struct zswap_entry *entry)
+{
+	return NULL;
+}
+#endif
+
+static inline int entry_to_nid(struct zswap_entry *entry)
+{
+	return page_to_nid(virt_to_page(entry));
+}
+
+static void zswap_lru_add(struct list_lru *list_lru, struct zswap_entry *entry)
+{
+	atomic_long_t *nr_zswap_protected;
+	unsigned long lru_size, old, new;
+	int nid = entry_to_nid(entry);
+	struct mem_cgroup *memcg;
+	struct lruvec *lruvec;
+
+	/*
+	 * Note that it is safe to use rcu_read_lock() here, even in the face of
+	 * concurrent memcg offlining. Thanks to the memcg->kmemcg_id indirection
+	 * used in list_lru lookup, only two scenarios are possible:
+	 *
+	 * 1. list_lru_add() is called before memcg->kmemcg_id is updated. The
+	 *    new entry will be reparented to memcg's parent's list_lru.
+	 * 2. list_lru_add() is called after memcg->kmemcg_id is updated. The
+	 *    new entry will be added directly to memcg's parent's list_lru.
+	 *
+	 * Similar reasoning holds for list_lru_del().
+	 */
+	rcu_read_lock();
+	memcg = mem_cgroup_from_entry(entry);
+	/* will always succeed */
+	list_lru_add(list_lru, &entry->lru, nid, memcg);
+
+	/* Update the protection area */
+	lru_size = list_lru_count_one(list_lru, nid, memcg);
+	lruvec = mem_cgroup_lruvec(memcg, NODE_DATA(nid));
+	nr_zswap_protected = &lruvec->zswap_lruvec_state.nr_zswap_protected;
+	old = atomic_long_inc_return(nr_zswap_protected);
+	/*
+	 * Decay to avoid overflow and adapt to changing workloads.
+	 * This is based on LRU reclaim cost decaying heuristics.
+	 */
+	do {
+		new = old > lru_size / 4 ? old / 2 : old;
+	} while (!atomic_long_try_cmpxchg(nr_zswap_protected, &old, new));
+	rcu_read_unlock();
+}
+
+static void zswap_lru_del(struct list_lru *list_lru, struct zswap_entry *entry)
+{
+	int nid = entry_to_nid(entry);
+	struct mem_cgroup *memcg;
+
+	rcu_read_lock();
+	memcg = mem_cgroup_from_entry(entry);
+	/* will always succeed */
+	list_lru_del(list_lru, &entry->lru, nid, memcg);
+	rcu_read_unlock();
+}
+
+void zswap_lruvec_state_init(struct lruvec *lruvec)
+{
+	atomic_long_set(&lruvec->zswap_lruvec_state.nr_zswap_protected, 0);
+}
+
+void zswap_folio_swapin(struct folio *folio)
+{
+	struct lruvec *lruvec;
+
+	if (folio) {
+		lruvec = folio_lruvec(folio);
+		atomic_long_inc(&lruvec->zswap_lruvec_state.nr_zswap_protected);
+	}
+}
+
+void zswap_memcg_offline_cleanup(struct mem_cgroup *memcg)
+{
+	struct zswap_pool *pool;
+
+	/* lock out zswap pools list modification */
+	spin_lock(&zswap_pools_lock);
+	list_for_each_entry(pool, &zswap_pools, list) {
+		if (pool->next_shrink == memcg)
+			pool->next_shrink = mem_cgroup_iter(NULL, pool->next_shrink, NULL);
+	}
+	spin_unlock(&zswap_pools_lock);
+}
+
+/*********************************
+* rbtree functions
+**********************************/
+static struct zswap_entry *zswap_rb_search(struct rb_root *root, pgoff_t offset)
+{
+	struct rb_node *node = root->rb_node;
+	struct zswap_entry *entry;
+	pgoff_t entry_offset;
+
+	while (node) {
+		entry = rb_entry(node, struct zswap_entry, rbnode);
+		entry_offset = swp_offset(entry->swpentry);
+		if (entry_offset > offset)
+			node = node->rb_left;
+		else if (entry_offset < offset)
+			node = node->rb_right;
+		else
+			return entry;
+	}
+	return NULL;
+}
+
+/*
+ * In the case that a entry with the same offset is found, a pointer to
+ * the existing entry is stored in dupentry and the function returns -EEXIST
+ */
+static int zswap_rb_insert(struct rb_root *root, struct zswap_entry *entry,
+			struct zswap_entry **dupentry)
+{
+	struct rb_node **link = &root->rb_node, *parent = NULL;
+	struct zswap_entry *myentry;
+	pgoff_t myentry_offset, entry_offset = swp_offset(entry->swpentry);
+
+	while (*link) {
+		parent = *link;
+		myentry = rb_entry(parent, struct zswap_entry, rbnode);
+		myentry_offset = swp_offset(myentry->swpentry);
+		if (myentry_offset > entry_offset)
+			link = &(*link)->rb_left;
+		else if (myentry_offset < entry_offset)
+			link = &(*link)->rb_right;
+		else {
+			*dupentry = myentry;
+			return -EEXIST;
+		}
+	}
+	rb_link_node(&entry->rbnode, parent, link);
+	rb_insert_color(&entry->rbnode, root);
+	return 0;
+}
+
+static bool zswap_rb_erase(struct rb_root *root, struct zswap_entry *entry)
+{
+	if (!RB_EMPTY_NODE(&entry->rbnode)) {
+		rb_erase(&entry->rbnode, root);
+		RB_CLEAR_NODE(&entry->rbnode);
+		return true;
+	}
+	return false;
+}
+
+/*********************************
+* zswap entry functions
+**********************************/
+static struct kmem_cache *zswap_entry_cache;
+
+static struct zswap_entry *zswap_entry_cache_alloc(gfp_t gfp, int nid)
+{
+	struct zswap_entry *entry;
+	entry = kmem_cache_alloc_node(zswap_entry_cache, gfp, nid);
+	if (!entry)
+		return NULL;
+	entry->refcount = 1;
+	RB_CLEAR_NODE(&entry->rbnode);
+	return entry;
+}
+
+static void zswap_entry_cache_free(struct zswap_entry *entry)
+{
+	kmem_cache_free(zswap_entry_cache, entry);
+}
+
+static struct zpool *zswap_find_zpool(struct zswap_entry *entry)
+{
+	int i = 0;
+
+	if (ZSWAP_NR_ZPOOLS > 1)
+		i = hash_ptr(entry, ilog2(ZSWAP_NR_ZPOOLS));
+
+	return entry->pool->zpools[i];
+}
+
+/*
+ * Carries out the common pattern of freeing and entry's zpool allocation,
+ * freeing the entry itself, and decrementing the number of stored pages.
+ */
+static void zswap_entry_free(struct zswap_entry *entry)
+{
+	if (!entry->length)
+		atomic_dec(&zswap_same_filled_pages);
+	else {
+		zswap_lru_del(&entry->pool->list_lru, entry);
+		zpool_free(zswap_find_zpool(entry), entry->handle);
+		atomic_dec(&entry->pool->nr_stored);
+		zswap_pool_put(entry->pool);
+	}
+	if (entry->objcg) {
+		obj_cgroup_uncharge_zswap(entry->objcg, entry->length);
+		obj_cgroup_put(entry->objcg);
+	}
+	zswap_entry_cache_free(entry);
+	atomic_dec(&zswap_stored_pages);
+	zswap_update_total_size();
+}
+
+/* caller must hold the tree lock */
+static void zswap_entry_get(struct zswap_entry *entry)
+{
+	WARN_ON_ONCE(!entry->refcount);
+	entry->refcount++;
+}
+
+/* caller must hold the tree lock */
+static void zswap_entry_put(struct zswap_entry *entry)
+{
+	WARN_ON_ONCE(!entry->refcount);
+	if (--entry->refcount == 0) {
+		WARN_ON_ONCE(!RB_EMPTY_NODE(&entry->rbnode));
+		zswap_entry_free(entry);
+	}
+}
+
+/*
+ * If the entry is still valid in the tree, drop the initial ref and remove it
+ * from the tree. This function must be called with an additional ref held,
+ * otherwise it may race with another invalidation freeing the entry.
+ */
+static void zswap_invalidate_entry(struct zswap_tree *tree,
+				   struct zswap_entry *entry)
+{
+	if (zswap_rb_erase(&tree->rbroot, entry))
+		zswap_entry_put(entry);
+}
+
+/*********************************
+* compressed storage functions
+**********************************/
+static int zswap_cpu_comp_prepare(unsigned int cpu, struct hlist_node *node)
+{
+	struct zswap_pool *pool = hlist_entry(node, struct zswap_pool, node);
+	struct crypto_acomp_ctx *acomp_ctx = per_cpu_ptr(pool->acomp_ctx, cpu);
+	struct crypto_acomp *acomp;
+	struct acomp_req *req;
+	int ret;
+
+	mutex_init(&acomp_ctx->mutex);
+
+	acomp_ctx->buffer = kmalloc_node(PAGE_SIZE * 2, GFP_KERNEL, cpu_to_node(cpu));
+	if (!acomp_ctx->buffer)
+		return -ENOMEM;
+
+	acomp = crypto_alloc_acomp_node(pool->tfm_name, 0, 0, cpu_to_node(cpu));
+	if (IS_ERR(acomp)) {
+		pr_err("could not alloc crypto acomp %s : %ld\n",
+				pool->tfm_name, PTR_ERR(acomp));
+		ret = PTR_ERR(acomp);
+		goto acomp_fail;
+	}
+	acomp_ctx->acomp = acomp;
+
+	req = acomp_request_alloc(acomp_ctx->acomp);
+	if (!req) {
+		pr_err("could not alloc crypto acomp_request %s\n",
+		       pool->tfm_name);
+		ret = -ENOMEM;
+		goto req_fail;
+	}
+	acomp_ctx->req = req;
+
+	crypto_init_wait(&acomp_ctx->wait);
+	/*
+	 * if the backend of acomp is async zip, crypto_req_done() will wakeup
+	 * crypto_wait_req(); if the backend of acomp is scomp, the callback
+	 * won't be called, crypto_wait_req() will return without blocking.
+	 */
+	acomp_request_set_callback(req, CRYPTO_TFM_REQ_MAY_BACKLOG,
+				   crypto_req_done, &acomp_ctx->wait);
+
+	return 0;
+
+req_fail:
+	crypto_free_acomp(acomp_ctx->acomp);
+acomp_fail:
+	kfree(acomp_ctx->buffer);
+	return ret;
+}
+
+static int zswap_cpu_comp_dead(unsigned int cpu, struct hlist_node *node)
+{
+	struct zswap_pool *pool = hlist_entry(node, struct zswap_pool, node);
+	struct crypto_acomp_ctx *acomp_ctx = per_cpu_ptr(pool->acomp_ctx, cpu);
+
+	if (!IS_ERR_OR_NULL(acomp_ctx)) {
+		if (!IS_ERR_OR_NULL(acomp_ctx->req))
+			acomp_request_free(acomp_ctx->req);
+		if (!IS_ERR_OR_NULL(acomp_ctx->acomp))
+			crypto_free_acomp(acomp_ctx->acomp);
+		kfree(acomp_ctx->buffer);
+	}
+
+	return 0;
+}
+
+static bool zswap_compress(struct folio *folio, struct zswap_entry *entry)
+{
+	struct crypto_acomp_ctx *acomp_ctx;
+	struct scatterlist input, output;
+	unsigned int dlen = PAGE_SIZE;
+	unsigned long handle;
+	struct zpool *zpool;
+	char *buf;
+	gfp_t gfp;
+	int ret;
+	u8 *dst;
+
+	acomp_ctx = raw_cpu_ptr(entry->pool->acomp_ctx);
+
+	mutex_lock(&acomp_ctx->mutex);
+
+	dst = acomp_ctx->buffer;
+	sg_init_table(&input, 1);
+	sg_set_page(&input, &folio->page, PAGE_SIZE, 0);
+
+	/*
+	 * We need PAGE_SIZE * 2 here since there maybe over-compression case,
+	 * and hardware-accelerators may won't check the dst buffer size, so
+	 * giving the dst buffer with enough length to avoid buffer overflow.
+	 */
+	sg_init_one(&output, dst, PAGE_SIZE * 2);
+	acomp_request_set_params(acomp_ctx->req, &input, &output, PAGE_SIZE, dlen);
+
+	/*
+	 * it maybe looks a little bit silly that we send an asynchronous request,
+	 * then wait for its completion synchronously. This makes the process look
+	 * synchronous in fact.
+	 * Theoretically, acomp supports users send multiple acomp requests in one
+	 * acomp instance, then get those requests done simultaneously. but in this
+	 * case, zswap actually does store and load page by page, there is no
+	 * existing method to send the second page before the first page is done
+	 * in one thread doing zwap.
+	 * but in different threads running on different cpu, we have different
+	 * acomp instance, so multiple threads can do (de)compression in parallel.
+	 */
+	ret = crypto_wait_req(crypto_acomp_compress(acomp_ctx->req), &acomp_ctx->wait);
+	dlen = acomp_ctx->req->dlen;
+	if (ret) {
+		zswap_reject_compress_fail++;
+		goto unlock;
+	}
+
+	zpool = zswap_find_zpool(entry);
+	gfp = __GFP_NORETRY | __GFP_NOWARN | __GFP_KSWAPD_RECLAIM;
+	if (zpool_malloc_support_movable(zpool))
+		gfp |= __GFP_HIGHMEM | __GFP_MOVABLE;
+	ret = zpool_malloc(zpool, dlen, gfp, &handle);
+	if (ret == -ENOSPC) {
+		zswap_reject_compress_poor++;
+		goto unlock;
+	}
+	if (ret) {
+		zswap_reject_alloc_fail++;
+		goto unlock;
+	}
+
+	buf = zpool_map_handle(zpool, handle, ZPOOL_MM_WO);
+	memcpy(buf, dst, dlen);
+	zpool_unmap_handle(zpool, handle);
+
+	entry->handle = handle;
+	entry->length = dlen;
+
+unlock:
+	mutex_unlock(&acomp_ctx->mutex);
+	return ret == 0;
+}
+
+static void zswap_decompress(struct zswap_entry *entry, struct page *page)
 {
 	struct zpool *zpool = zswap_find_zpool(entry);
 	struct scatterlist input, output;
@@ -1428,7 +1228,16 @@ static int zswap_writeback_entry(struct zswap_entry *entry,
 	zswap_entry_get(entry);
 	spin_unlock(&tree->lock);
 
-	__zswap_load(entry, &folio->page);
+	zswap_decompress(entry, &folio->page);
+
+	count_vm_event(ZSWPWB);
+	if (entry->objcg)
+		count_objcg_event(entry->objcg, ZSWPWB);
+
+	spin_lock(&tree->lock);
+	zswap_invalidate_entry(tree, entry);
+	zswap_entry_put(entry);
+	spin_unlock(&tree->lock);
 
 	count_vm_event(ZSWPWB);
 	if (entry->objcg)
@@ -1455,6 +1264,259 @@ static int zswap_writeback_entry(struct zswap_entry *entry,
 	folio_put(folio);
 
 	return 0;
+}
+
+/*********************************
+* shrinker functions
+**********************************/
+static enum lru_status shrink_memcg_cb(struct list_head *item, struct list_lru_one *l,
+				       spinlock_t *lock, void *arg)
+{
+	struct zswap_entry *entry = container_of(item, struct zswap_entry, lru);
+	bool *encountered_page_in_swapcache = (bool *)arg;
+	swp_entry_t swpentry;
+	enum lru_status ret = LRU_REMOVED_RETRY;
+	int writeback_result;
+
+	/*
+	 * Rotate the entry to the tail before unlocking the LRU,
+	 * so that in case of an invalidation race concurrent
+	 * reclaimers don't waste their time on it.
+	 *
+	 * If writeback succeeds, or failure is due to the entry
+	 * being invalidated by the swap subsystem, the invalidation
+	 * will unlink and free it.
+	 *
+	 * Temporary failures, where the same entry should be tried
+	 * again immediately, almost never happen for this shrinker.
+	 * We don't do any trylocking; -ENOMEM comes closest,
+	 * but that's extremely rare and doesn't happen spuriously
+	 * either. Don't bother distinguishing this case.
+	 *
+	 * But since they do exist in theory, the entry cannot just
+	 * be unlinked, or we could leak it. Hence, rotate.
+	 */
+	list_move_tail(item, &l->list);
+
+	/*
+	 * Once the lru lock is dropped, the entry might get freed. The
+	 * swpentry is copied to the stack, and entry isn't deref'd again
+	 * until the entry is verified to still be alive in the tree.
+	 */
+	swpentry = entry->swpentry;
+
+	/*
+	 * It's safe to drop the lock here because we return either
+	 * LRU_REMOVED_RETRY or LRU_RETRY.
+	 */
+	spin_unlock(lock);
+
+	writeback_result = zswap_writeback_entry(entry, swpentry);
+
+	if (writeback_result) {
+		zswap_reject_reclaim_fail++;
+		ret = LRU_RETRY;
+
+		/*
+		 * Encountering a page already in swap cache is a sign that we are shrinking
+		 * into the warmer region. We should terminate shrinking (if we're in the dynamic
+		 * shrinker context).
+		 */
+		if (writeback_result == -EEXIST && encountered_page_in_swapcache)
+			*encountered_page_in_swapcache = true;
+	} else {
+		zswap_written_back_pages++;
+	}
+
+	spin_lock(lock);
+	return ret;
+}
+
+static unsigned long zswap_shrinker_scan(struct shrinker *shrinker,
+		struct shrink_control *sc)
+{
+	struct lruvec *lruvec = mem_cgroup_lruvec(sc->memcg, NODE_DATA(sc->nid));
+	unsigned long shrink_ret, nr_protected, lru_size;
+	struct zswap_pool *pool = shrinker->private_data;
+	bool encountered_page_in_swapcache = false;
+
+	if (!zswap_shrinker_enabled ||
+			!mem_cgroup_zswap_writeback_enabled(sc->memcg)) {
+		sc->nr_scanned = 0;
+		return SHRINK_STOP;
+	}
+
+	nr_protected =
+		atomic_long_read(&lruvec->zswap_lruvec_state.nr_zswap_protected);
+	lru_size = list_lru_shrink_count(&pool->list_lru, sc);
+
+	/*
+	 * Abort if we are shrinking into the protected region.
+	 *
+	 * This short-circuiting is necessary because if we have too many multiple
+	 * concurrent reclaimers getting the freeable zswap object counts at the
+	 * same time (before any of them made reasonable progress), the total
+	 * number of reclaimed objects might be more than the number of unprotected
+	 * objects (i.e the reclaimers will reclaim into the protected area of the
+	 * zswap LRU).
+	 */
+	if (nr_protected >= lru_size - sc->nr_to_scan) {
+		sc->nr_scanned = 0;
+		return SHRINK_STOP;
+	}
+
+	shrink_ret = list_lru_shrink_walk(&pool->list_lru, sc, &shrink_memcg_cb,
+		&encountered_page_in_swapcache);
+
+	if (encountered_page_in_swapcache)
+		return SHRINK_STOP;
+
+	return shrink_ret ? shrink_ret : SHRINK_STOP;
+}
+
+static unsigned long zswap_shrinker_count(struct shrinker *shrinker,
+		struct shrink_control *sc)
+{
+	struct zswap_pool *pool = shrinker->private_data;
+	struct mem_cgroup *memcg = sc->memcg;
+	struct lruvec *lruvec = mem_cgroup_lruvec(memcg, NODE_DATA(sc->nid));
+	unsigned long nr_backing, nr_stored, nr_freeable, nr_protected;
+
+	if (!zswap_shrinker_enabled || !mem_cgroup_zswap_writeback_enabled(memcg))
+		return 0;
+
+#ifdef CONFIG_MEMCG_KMEM
+	mem_cgroup_flush_stats(memcg);
+	nr_backing = memcg_page_state(memcg, MEMCG_ZSWAP_B) >> PAGE_SHIFT;
+	nr_stored = memcg_page_state(memcg, MEMCG_ZSWAPPED);
+#else
+	/* use pool stats instead of memcg stats */
+	nr_backing = get_zswap_pool_size(pool) >> PAGE_SHIFT;
+	nr_stored = atomic_read(&pool->nr_stored);
+#endif
+
+	if (!nr_stored)
+		return 0;
+
+	nr_protected =
+		atomic_long_read(&lruvec->zswap_lruvec_state.nr_zswap_protected);
+	nr_freeable = list_lru_shrink_count(&pool->list_lru, sc);
+	/*
+	 * Subtract the lru size by an estimate of the number of pages
+	 * that should be protected.
+	 */
+	nr_freeable = nr_freeable > nr_protected ? nr_freeable - nr_protected : 0;
+
+	/*
+	 * Scale the number of freeable pages by the memory saving factor.
+	 * This ensures that the better zswap compresses memory, the fewer
+	 * pages we will evict to swap (as it will otherwise incur IO for
+	 * relatively small memory saving).
+	 */
+	return mult_frac(nr_freeable, nr_backing, nr_stored);
+}
+
+static void zswap_alloc_shrinker(struct zswap_pool *pool)
+{
+	pool->shrinker =
+		shrinker_alloc(SHRINKER_NUMA_AWARE | SHRINKER_MEMCG_AWARE, "mm-zswap");
+	if (!pool->shrinker)
+		return;
+
+	pool->shrinker->private_data = pool;
+	pool->shrinker->scan_objects = zswap_shrinker_scan;
+	pool->shrinker->count_objects = zswap_shrinker_count;
+	pool->shrinker->batch = 0;
+	pool->shrinker->seeks = DEFAULT_SEEKS;
+}
+
+static int shrink_memcg(struct mem_cgroup *memcg)
+{
+	struct zswap_pool *pool;
+	int nid, shrunk = 0;
+
+	if (!mem_cgroup_zswap_writeback_enabled(memcg))
+		return -EINVAL;
+
+	/*
+	 * Skip zombies because their LRUs are reparented and we would be
+	 * reclaiming from the parent instead of the dead memcg.
+	 */
+	if (memcg && !mem_cgroup_online(memcg))
+		return -ENOENT;
+
+	pool = zswap_pool_current_get();
+	if (!pool)
+		return -EINVAL;
+
+	for_each_node_state(nid, N_NORMAL_MEMORY) {
+		unsigned long nr_to_walk = 1;
+
+		shrunk += list_lru_walk_one(&pool->list_lru, nid, memcg,
+					    &shrink_memcg_cb, NULL, &nr_to_walk);
+	}
+	zswap_pool_put(pool);
+	return shrunk ? 0 : -EAGAIN;
+}
+
+static void shrink_worker(struct work_struct *w)
+{
+	struct zswap_pool *pool = container_of(w, typeof(*pool),
+						shrink_work);
+	struct mem_cgroup *memcg;
+	int ret, failures = 0;
+
+	/* global reclaim will select cgroup in a round-robin fashion. */
+	do {
+		spin_lock(&zswap_pools_lock);
+		pool->next_shrink = mem_cgroup_iter(NULL, pool->next_shrink, NULL);
+		memcg = pool->next_shrink;
+
+		/*
+		 * We need to retry if we have gone through a full round trip, or if we
+		 * got an offline memcg (or else we risk undoing the effect of the
+		 * zswap memcg offlining cleanup callback). This is not catastrophic
+		 * per se, but it will keep the now offlined memcg hostage for a while.
+		 *
+		 * Note that if we got an online memcg, we will keep the extra
+		 * reference in case the original reference obtained by mem_cgroup_iter
+		 * is dropped by the zswap memcg offlining callback, ensuring that the
+		 * memcg is not killed when we are reclaiming.
+		 */
+		if (!memcg) {
+			spin_unlock(&zswap_pools_lock);
+			if (++failures == MAX_RECLAIM_RETRIES)
+				break;
+
+			goto resched;
+		}
+
+		if (!mem_cgroup_tryget_online(memcg)) {
+			/* drop the reference from mem_cgroup_iter() */
+			mem_cgroup_iter_break(NULL, memcg);
+			pool->next_shrink = NULL;
+			spin_unlock(&zswap_pools_lock);
+
+			if (++failures == MAX_RECLAIM_RETRIES)
+				break;
+
+			goto resched;
+		}
+		spin_unlock(&zswap_pools_lock);
+
+		ret = shrink_memcg(memcg);
+		/* drop the extra reference */
+		mem_cgroup_put(memcg);
+
+		if (ret == -EINVAL)
+			break;
+		if (ret && ++failures == MAX_RECLAIM_RETRIES)
+			break;
+
+resched:
+		cond_resched();
+	} while (!zswap_can_accept());
+	zswap_pool_put(pool);
 }
 
 static int zswap_is_page_same_filled(void *ptr, unsigned long *value)
@@ -1491,24 +1553,11 @@ bool zswap_store(struct folio *folio)
 {
 	swp_entry_t swp = folio->swap;
 	pgoff_t offset = swp_offset(swp);
-	struct page *page = &folio->page;
 	struct zswap_tree *tree = swap_zswap_tree(swp);
 	struct zswap_entry *entry, *dupentry;
-	struct scatterlist input, output;
-	struct crypto_acomp_ctx *acomp_ctx;
 	struct obj_cgroup *objcg = NULL;
 	struct mem_cgroup *memcg = NULL;
-	struct zswap_pool *pool;
-	struct zpool *zpool;
-	int lru_alloc_ret;
-	unsigned int dlen = PAGE_SIZE;
-	unsigned long handle, value;
-	char *buf;
-	u8 *src, *dst;
-	gfp_t gfp;
-	int ret;
-	int cpu;
-	struct mutex *mutex;
+	struct zswap_pool *shrink_pool;
 
 	VM_WARN_ON_ONCE(!folio_test_locked(folio));
 	VM_WARN_ON_ONCE(!folio_test_swapcache(folio));
@@ -1526,10 +1575,10 @@ bool zswap_store(struct folio *folio)
 	 * the tree, and it might be written back overriding the new data.
 	 */
 	spin_lock(&tree->lock);
-	dupentry = zswap_rb_search(&tree->rbroot, offset);
-	if (dupentry) {
+	entry = zswap_rb_search(&tree->rbroot, offset);
+	if (entry) {
+		zswap_invalidate_entry(tree, entry);
 		zswap_duplicate_entry++;
-		zswap_invalidate_entry(tree, dupentry);
 	}
 	spin_unlock(&tree->lock);
 	objcg = get_obj_cgroup_from_folio(folio);
@@ -1561,17 +1610,19 @@ bool zswap_store(struct folio *folio)
 		goto reject;
 	}
 	/* allocate entry */
-	entry = zswap_entry_cache_alloc(GFP_KERNEL, page_to_nid(page));
+	entry = zswap_entry_cache_alloc(GFP_KERNEL, folio_nid(folio));
 	if (!entry) {
 		zswap_reject_kmemcache_fail++;
 		goto reject;
 	}
 
 	if (zswap_same_filled_pages_enabled) {
-		src = kmap_local_page(page);
+		unsigned long value;
+		u8 *src;
+
+		src = kmap_local_folio(folio, 0);
 		if (zswap_is_page_same_filled(src, &value)) {
 			kunmap_local(src);
-			entry->swpentry = swp;
 			entry->length = 0;
 			entry->value = value;
 			atomic_inc(&zswap_same_filled_pages);
@@ -1607,69 +1658,11 @@ bool zswap_store(struct folio *folio)
 		mem_cgroup_put(memcg);
 	}
 
-	/* compress */
-	cpu = raw_smp_processor_id();
-	mutex = per_cpu(zswap_mutex, cpu);
-	mutex_lock(mutex);
-
-	mutex_lock(&acomp_ctx->mutex);
-
-	dst = acomp_ctx->buffer;
-	sg_init_table(&input, 1);
-	sg_set_page(&input, &folio->page, PAGE_SIZE, 0);
-
-	/*
-	 * We need PAGE_SIZE * 2 here since there maybe over-compression case,
-	 * and hardware-accelerators may won't check the dst buffer size, so
-	 * giving the dst buffer with enough length to avoid buffer overflow.
-	 */
-	sg_init_one(&output, dst, PAGE_SIZE * 2);
-	acomp_request_set_params(acomp_ctx->req, &input, &output, PAGE_SIZE, dlen);
-	/*
-	 * it maybe looks a little bit silly that we send an asynchronous request,
-	 * then wait for its completion synchronously. This makes the process look
-	 * synchronous in fact.
-	 * Theoretically, acomp supports users send multiple acomp requests in one
-	 * acomp instance, then get those requests done simultaneously. but in this
-	 * case, zswap actually does store and load page by page, there is no
-	 * existing method to send the second page before the first page is done
-	 * in one thread doing zwap.
-	 * but in different threads running on different cpu, we have different
-	 * acomp instance, so multiple threads can do (de)compression in parallel.
-	 */
-	ret = crypto_wait_req(crypto_acomp_compress(acomp_ctx->req), &acomp_ctx->wait);
-	dlen = acomp_ctx->req->dlen;
-
-	if (ret) {
-		zswap_reject_compress_fail++;
-		goto put_dstmem;
-	}
-
-	/* store */
-	zpool = zswap_find_zpool(entry);
-	gfp = __GFP_NORETRY | __GFP_NOWARN | __GFP_KSWAPD_RECLAIM;
-	if (zpool_malloc_support_movable(zpool))
-		gfp |= __GFP_HIGHMEM | __GFP_MOVABLE;
-	ret = zpool_malloc(zpool, dlen, gfp, &handle);
-	if (ret == -ENOSPC) {
-		zswap_reject_compress_poor++;
-		goto put_dstmem;
-	}
-	if (ret) {
-		zswap_reject_alloc_fail++;
-		goto put_dstmem;
-	}
-	buf = zpool_map_handle(zpool, handle, ZPOOL_MM_WO);
-	memcpy(buf, dst, dlen);
-	zpool_unmap_handle(zpool, handle);
-	mutex_unlock(&acomp_ctx->mutex);
-
-	/* populate entry */
-	entry->swpentry = swp;
-	entry->handle = handle;
-	entry->length = dlen;
+	if (!zswap_compress(folio, entry))
+		goto put_pool;
 
 insert_entry:
+	entry->swpentry = swp;
 	entry->objcg = objcg;
 	entry->nid = page_to_nid(page);
 	if (objcg) {
@@ -1705,8 +1698,6 @@ insert_entry:
 
 	return true;
 
-put_dstmem:
-	mutex_unlock(&acomp_ctx->mutex);
 put_pool:
 	zswap_pool_put(entry->pool);
 freepage:
@@ -1721,9 +1712,9 @@ out_reject:
 	return false;
 
 shrink:
-	pool = zswap_pool_last_get();
-	if (pool && !queue_work(shrink_wq, &pool->shrink_work))
-		zswap_pool_put(pool);
+	shrink_pool = zswap_pool_last_get();
+	if (shrink_pool && !queue_work(shrink_wq, &shrink_pool->shrink_work))
+		zswap_pool_put(shrink_pool);
 	goto reject;
 }
 
@@ -1738,17 +1729,17 @@ bool zswap_load(struct folio *folio)
 
 	VM_WARN_ON_ONCE(!folio_test_locked(folio));
 
-	/* find */
 	spin_lock(&tree->lock);
-	entry = zswap_entry_find_get(&tree->rbroot, offset);
+	entry = zswap_rb_search(&tree->rbroot, offset);
 	if (!entry) {
 		spin_unlock(&tree->lock);
 		return false;
 	}
+	zswap_entry_get(entry);
 	spin_unlock(&tree->lock);
 
 	if (entry->length)
-		__zswap_load(entry, page);
+		zswap_decompress(entry, page);
 	else {
 		dst = kmap_local_page(page);
 		zswap_fill_page(dst, entry->value);
@@ -1778,15 +1769,10 @@ void zswap_invalidate(int type, pgoff_t offset)
 	struct zswap_tree *tree = swap_zswap_tree(swp_entry(type, offset));
 	struct zswap_entry *entry;
 
-	/* find */
 	spin_lock(&tree->lock);
 	entry = zswap_rb_search(&tree->rbroot, offset);
-	if (!entry) {
-		/* entry was written back */
-		spin_unlock(&tree->lock);
-		return;
-	}
-	zswap_invalidate_entry(tree, entry);
+	if (entry)
+		zswap_invalidate_entry(tree, entry);
 	spin_unlock(&tree->lock);
 }
 

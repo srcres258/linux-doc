@@ -689,8 +689,6 @@ void mark_rodata_ro(void)
 	WRITE_ONCE(rodata_is_rw, false);
 	update_mapping_prot(__pa_symbol(__start_rodata), (unsigned long)__start_rodata,
 			    section_size, PAGE_KERNEL_RO);
-
-	debug_checkwx();
 }
 
 static void __init declare_vma(struct vm_struct *vma,

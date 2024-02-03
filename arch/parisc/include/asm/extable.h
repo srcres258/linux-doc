@@ -15,7 +15,7 @@
  *   the fixup address is set.
  *
  * Note: The register specified in the err_opcode instruction will be
- * modified at runtime if a fault happens. Register %r0 will not be written,
+ * modified at runtime if a fault happens. Register %r0 will be ignored.
  *
  * Since relative addresses are used, 32bit values are sufficient even on
  * 64bit kernel.
@@ -47,7 +47,7 @@ struct exception_table_entry {
 #define ASM_EXCEPTIONTABLE_VAR(__err_var)		\
 	int __err_var = 0
 #define ASM_EXCEPTIONTABLE_ENTRY_EFAULT( fault_addr, except_addr, register )\
-	ASM_EXCEPTIONTABLE_ENTRY( fault_addr, except_addr + 1, "ldi 0," register)
+	ASM_EXCEPTIONTABLE_ENTRY( fault_addr, except_addr + 1, "or %%r0,%%r0," register)
 
 static inline void swap_ex_entry_fixup(struct exception_table_entry *a,
 				       struct exception_table_entry *b,

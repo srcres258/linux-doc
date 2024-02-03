@@ -144,19 +144,21 @@ fsck_err:
 	return ret;
 }
 
-void bch2_dirent_to_text(struct printbuf *out, struct bch_fs *c,
-			 struct bkey_s_c k)
+void bch2_dirent_to_text(struct printbuf *out, struct bch_fs *c, struct bkey_s_c k)
 {
 	struct bkey_s_c_dirent d = bkey_s_c_to_dirent(k);
 	struct qstr d_name = bch2_dirent_get_name(d);
 
-	prt_printf(out, "%.*s -> %llu type %s",
-	       d_name.len,
-	       d_name.name,
-	       d.v->d_type != DT_SUBVOL
-	       ? le64_to_cpu(d.v->d_inum)
-	       : le32_to_cpu(d.v->d_child_subvol),
-	       bch2_d_type_str(d.v->d_type));
+	prt_printf(out, "%.*s -> ", d_name.len, d_name.name);
+
+	if (d.v->d_type != DT_SUBVOL)
+		prt_printf(out, "%llu", le64_to_cpu(d.v->d_inum));
+	else
+		prt_printf(out, "%u -> %u",
+			   le32_to_cpu(d.v->d_parent_subvol),
+			   le32_to_cpu(d.v->d_child_subvol));
+
+	prt_printf(out, " type %s", bch2_d_type_str(d.v->d_type));
 }
 
 static struct bkey_i_dirent *dirent_create_key(struct btree_trans *trans,
@@ -217,10 +219,10 @@ int bch2_dirent_create_snapshot(struct btree_trans *trans,
 	dirent->k.p.inode	= dir;
 	dirent->k.p.snapshot	= snapshot;
 
-	ret = bch2_hash_set_snapshot(trans, bch2_dirent_hash_desc, hash_info,
-				     zero_inum, snapshot,
-				     &dirent->k_i, str_hash_flags,
-				     BTREE_UPDATE_INTERNAL_SNAPSHOT_NODE);
+	ret = bch2_hash_set_in_snapshot(trans, bch2_dirent_hash_desc, hash_info,
+					zero_inum, snapshot,
+					&dirent->k_i, str_hash_flags,
+					BTREE_UPDATE_INTERNAL_SNAPSHOT_NODE);
 	*dir_offset = dirent->k.p.offset;
 
 	return ret;
@@ -456,41 +458,29 @@ out:
 	return ret;
 }
 
-int __bch2_dirent_lookup_trans(struct btree_trans *trans,
-			       struct btree_iter *iter,
-			       subvol_inum dir,
-			       const struct bch_hash_info *hash_info,
-			       const struct qstr *name, subvol_inum *inum,
-			       unsigned flags)
+int bch2_dirent_lookup_trans(struct btree_trans *trans,
+			     struct btree_iter *iter,
+			     subvol_inum dir,
+			     const struct bch_hash_info *hash_info,
+			     const struct qstr *name, subvol_inum *inum,
+			     unsigned flags)
 {
-	struct bkey_s_c k;
-	struct bkey_s_c_dirent d;
-	u32 snapshot;
-	int ret;
-
-	ret = bch2_subvolume_get_snapshot(trans, dir.subvol, &snapshot);
+	int ret = bch2_hash_lookup(trans, iter, bch2_dirent_hash_desc,
+				   hash_info, dir, name, flags);
 	if (ret)
 		return ret;
 
-	ret = bch2_hash_lookup(trans, iter, bch2_dirent_hash_desc,
-			       hash_info, dir, name, flags);
-	if (ret)
-		return ret;
-
-	k = bch2_btree_iter_peek_slot(iter);
+	struct bkey_s_c k = bch2_btree_iter_peek_slot(iter);
 	ret = bkey_err(k);
 	if (ret)
 		goto err;
 
-	d = bkey_s_c_to_dirent(k);
-
-	ret = bch2_dirent_read_target(trans, dir, d, inum);
+	ret = bch2_dirent_read_target(trans, dir, bkey_s_c_to_dirent(k), inum);
 	if (ret > 0)
 		ret = -ENOENT;
 err:
 	if (ret)
 		bch2_trans_iter_exit(trans, iter);
-
 	return ret;
 }
 
@@ -502,7 +492,7 @@ u64 bch2_dirent_lookup(struct bch_fs *c, subvol_inum dir,
 	struct btree_iter iter = { NULL };
 
 	int ret = lockrestart_do(trans,
-		__bch2_dirent_lookup_trans(trans, &iter, dir, hash_info, name, inum, 0));
+		bch2_dirent_lookup_trans(trans, &iter, dir, hash_info, name, inum, 0));
 	bch2_trans_iter_exit(trans, &iter);
 	bch2_trans_put(trans);
 	return ret;

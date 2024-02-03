@@ -576,7 +576,7 @@
 	.section __ex_table,"aw"			!	\
 	.align 4					!	\
 	.word (fault_addr - .), (except_addr - .)	!	\
-	ldi 0,%r0					!	\
+	or %r0,%r0,%r0					!	\
 	.previous
 
 

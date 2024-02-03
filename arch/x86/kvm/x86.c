@@ -1782,6 +1782,10 @@ static int set_efer(struct kvm_vcpu *vcpu, struct msr_data *msr_info)
 	if ((efer ^ old_efer) & KVM_MMU_EFER_ROLE_BITS)
 		kvm_mmu_reset_context(vcpu);
 
+	if (!static_cpu_has(X86_FEATURE_XSAVES) &&
+	    (efer & EFER_SVME))
+		kvm_hv_xsaves_xsavec_maybe_warn(vcpu);
+
 	return 0;
 }
 
@@ -2507,7 +2511,7 @@ static u64 compute_guest_tsc(struct kvm_vcpu *vcpu, s64 kernel_ns)
 }
 
 #ifdef CONFIG_X86_64
-static inline int gtod_is_based_on_tsc(int mode)
+static inline bool gtod_is_based_on_tsc(int mode)
 {
 	return mode == VDSO_CLOCKMODE_TSC || mode == VDSO_CLOCKMODE_HVCLOCK;
 }
@@ -7016,6 +7020,9 @@ set_identity_unlock:
 		r = -EEXIST;
 		if (kvm->arch.vpit)
 			goto create_pit_unlock;
+		r = -ENOENT;
+		if (!pic_in_kernel(kvm))
+			goto create_pit_unlock;
 		r = -ENOMEM;
 		kvm->arch.vpit = kvm_create_pit(kvm, u.pit_config.flags);
 		if (kvm->arch.vpit)
@@ -8389,12 +8396,9 @@ static int emulator_get_msr(struct x86_emulate_ctxt *ctxt,
 	return kvm_get_msr(emul_to_vcpu(ctxt), msr_index, pdata);
 }
 
-static int emulator_check_pmc(struct x86_emulate_ctxt *ctxt,
-			      u32 pmc)
+static int emulator_check_rdpmc_early(struct x86_emulate_ctxt *ctxt, u32 pmc)
 {
-	if (kvm_pmu_is_valid_rdpmc_ecx(emul_to_vcpu(ctxt), pmc))
-		return 0;
-	return -EINVAL;
+	return kvm_pmu_check_rdpmc_early(emul_to_vcpu(ctxt), pmc);
 }
 
 static int emulator_read_pmc(struct x86_emulate_ctxt *ctxt,
@@ -8526,7 +8530,7 @@ static const struct x86_emulate_ops emulate_ops = {
 	.set_msr_with_filter = emulator_set_msr_with_filter,
 	.get_msr_with_filter = emulator_get_msr_with_filter,
 	.get_msr             = emulator_get_msr,
-	.check_pmc	     = emulator_check_pmc,
+	.check_rdpmc_early   = emulator_check_rdpmc_early,
 	.read_pmc            = emulator_read_pmc,
 	.halt                = emulator_halt,
 	.wbinvd              = emulator_wbinvd,
@@ -9632,10 +9636,12 @@ static void kvm_x86_check_cpu_compat(void *ret)
 	*(int *)ret = kvm_x86_check_processor_compatibility();
 }
 
-static int __kvm_x86_vendor_init(struct kvm_x86_init_ops *ops)
+int kvm_x86_vendor_init(struct kvm_x86_init_ops *ops)
 {
 	u64 host_pat;
 	int r, cpu;
+
+	guard(mutex)(&vendor_module_lock);
 
 	if (kvm_x86_ops.hardware_enable) {
 		pr_err("already loaded vendor module '%s'\n", kvm_x86_ops.name);
@@ -9764,17 +9770,6 @@ out_free_percpu:
 	free_percpu(user_return_msrs);
 out_free_x86_emulator_cache:
 	kmem_cache_destroy(x86_emulator_cache);
-	return r;
-}
-
-int kvm_x86_vendor_init(struct kvm_x86_init_ops *ops)
-{
-	int r;
-
-	mutex_lock(&vendor_module_lock);
-	r = __kvm_x86_vendor_init(ops);
-	mutex_unlock(&vendor_module_lock);
-
 	return r;
 }
 EXPORT_SYMBOL_GPL(kvm_x86_vendor_init);

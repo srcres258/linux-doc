@@ -87,6 +87,7 @@
 #include <linux/sched/task.h>
 #include <linux/sched/task_stack.h>
 #include <linux/context_tracking.h>
+#include <linux/moduleloader.h>
 #include <linux/random.h>
 #include <linux/list.h>
 #include <linux/integrity.h>
@@ -99,7 +100,7 @@
 #include <linux/init_syscalls.h>
 #include <linux/stackdepot.h>
 #include <linux/randomize_kstack.h>
-#include <linux/moduleloader.h>
+#include <linux/ptdump.h>
 #include <net/net_namespace.h>
 
 #include <asm/io.h>
@@ -1403,6 +1404,7 @@ static void mark_readonly(void)
 		 */
 		flush_module_init_free_work();
 		mark_rodata_ro();
+		debug_checkwx();
 		rodata_test();
 	} else if (IS_ENABLED(CONFIG_STRICT_KERNEL_RWX)) {
 		pr_info("Kernel memory protection disabled.\n");
