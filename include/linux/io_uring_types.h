@@ -463,6 +463,8 @@ enum {
 	REQ_F_SUPPORT_NOWAIT_BIT,
 	REQ_F_ISREG_BIT,
 	REQ_F_POLL_NO_LAZY_BIT,
+	REQ_F_CAN_POLL_BIT,
+	REQ_F_CANCEL_SEQ_BIT,
 
 	/* not a real bit, just to check we're not overflowing the space */
 	__REQ_F_LAST_BIT,
@@ -532,6 +534,10 @@ enum {
 	REQ_F_HASH_LOCKED	= BIT(REQ_F_HASH_LOCKED_BIT),
 	/* don't use lazy poll wake for this request */
 	REQ_F_POLL_NO_LAZY	= BIT(REQ_F_POLL_NO_LAZY_BIT),
+	/* file is pollable */
+	REQ_F_CAN_POLL		= BIT(REQ_F_CAN_POLL_BIT),
+	/* cancel sequence is set and valid */
+	REQ_F_CANCEL_SEQ	= BIT(REQ_F_CANCEL_SEQ_BIT),
 };
 
 typedef void (*io_req_tw_func_t)(struct io_kiocb *req, struct io_tw_state *ts);
@@ -592,14 +598,11 @@ struct io_kiocb {
 	 * and after selection it points to the buffer ID itself.
 	 */
 	u16				buf_index;
-	unsigned int			flags;
 
-	struct io_cqe			cqe;
+	u64				flags;
 
 	struct io_ring_ctx		*ctx;
 	struct task_struct		*task;
-
-	struct io_rsrc_node		*rsrc_node;
 
 	union {
 		/* store used ubuf, so we can prevent reloading */
@@ -615,18 +618,26 @@ struct io_kiocb {
 		struct io_buffer_list	*buf_list;
 	};
 
+	/* for polled requests, i.e. IORING_OP_POLL_ADD and async armed poll */
+	struct hlist_node		hash_node;
+
 	union {
 		/* used by request caches, completion batching and iopoll */
 		struct io_wq_work_node	comp_list;
-		/* cache ->apoll->events */
-		__poll_t apoll_events;
+		struct {
+			/* cache ->apoll->events */
+			__poll_t apoll_events;
+			unsigned nr_tw;
+		};
 	};
-	atomic_t			refs;
-	atomic_t			poll_refs;
+
+	struct io_rsrc_node		*rsrc_node;
+
+	struct io_cqe			cqe;
+
 	struct io_task_work		io_task_work;
-	unsigned			nr_tw;
-	/* for polled requests, i.e. IORING_OP_POLL_ADD and async armed poll */
-	struct hlist_node		hash_node;
+	atomic_t			poll_refs;
+	atomic_t			refs;
 	/* internal polling, see IORING_FEAT_FAST_POLL */
 	struct async_poll		*apoll;
 	/* opcode allocated if it needs to store data for async defer */
