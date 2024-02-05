@@ -351,7 +351,7 @@ static void __change_pid(struct task_struct *task, enum pid_type type,
 
 	if (type == PIDTYPE_PID) {
 		WARN_ON_ONCE(pid_has_task(pid, PIDTYPE_PID));
-		pidfd_wake_up_poll(task, EPOLLIN | EPOLLRDNORM | EPOLLHUP);
+		wake_up_all(&pid->wait_pidfd);
 	}
 
 	for (tmp = PIDTYPE_MAX; --tmp >= 0; )

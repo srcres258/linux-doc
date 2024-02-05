@@ -2076,14 +2076,14 @@ static void pidfd_show_fdinfo(struct seq_file *m, struct file *f)
 /*
  * Poll support for process exit notification.
  */
-static __poll_t pidfd_poll(struct file *file, poll_table *wait)
+static __poll_t pidfd_poll(struct file *file, struct poll_table_struct *pts)
 {
 	struct pid *pid = file->private_data;
 	bool thread = file->f_flags & PIDFD_THREAD;
 	struct task_struct *task;
 	__poll_t poll_flags = 0;
 
-	poll_wait(file, &pid->wait_pidfd, wait);
+	poll_wait(file, &pid->wait_pidfd, pts);
 	/*
 	 * Depending on PIDFD_THREAD, inform pollers when the thread
 	 * or the whole thread-group exits.

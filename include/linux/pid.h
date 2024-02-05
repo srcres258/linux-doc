@@ -74,7 +74,7 @@ struct pid *pidfd_pid(const struct file *file);
 struct pid *pidfd_get_pid(unsigned int fd, unsigned int *flags);
 struct task_struct *pidfd_get_task(int pidfd, unsigned int *flags);
 int pidfd_prepare(struct pid *pid, unsigned int flags, struct file **ret);
-void pidfd_wake_up_poll(struct task_struct *task, __poll_t mask);
+void do_notify_pidfd(struct task_struct *task);
 
 static inline struct pid *get_pid(struct pid *pid)
 {
