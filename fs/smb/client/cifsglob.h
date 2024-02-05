@@ -153,6 +153,12 @@ enum securityEnum {
 	Kerberos,		/* Kerberos via SPNEGO */
 };
 
+enum cifs_reparse_type {
+	CIFS_REPARSE_TYPE_NFS,
+	CIFS_REPARSE_TYPE_WSL,
+	CIFS_REPARSE_TYPE_DEFAULT = CIFS_REPARSE_TYPE_NFS,
+};
+
 struct session_key {
 	unsigned int len;
 	char *response;
@@ -208,6 +214,10 @@ struct cifs_open_info_data {
 			struct reparse_posix_data *posix;
 		};
 	} reparse;
+	struct {
+		__u8		eas[SMB2_WSL_MAX_QUERY_EA_RESP_SIZE];
+		unsigned int	eas_len;
+	} wsl;
 	char *symlink_target;
 	struct cifs_sid posix_owner;
 	struct cifs_sid posix_group;
@@ -216,19 +226,6 @@ struct cifs_open_info_data {
 		struct smb311_posix_qinfo posix_fi;
 	};
 };
-
-static inline bool cifs_open_data_reparse(struct cifs_open_info_data *data)
-{
-	struct smb2_file_all_info *fi = &data->fi;
-	u32 attrs = le32_to_cpu(fi->Attributes);
-	bool ret;
-
-	ret = data->reparse_point || (attrs & ATTR_REPARSE);
-	if (ret)
-		attrs |= ATTR_REPARSE;
-	fi->Attributes = cpu_to_le32(attrs);
-	return ret;
-}
 
 /*
  *****************************************************************
@@ -259,8 +256,7 @@ struct dfs_info3_param;
 struct cifs_fattr;
 struct smb3_fs_context;
 struct cifs_fid;
-struct cifs_readdata;
-struct cifs_writedata;
+struct cifs_io_subrequest;
 struct cifs_io_parms;
 struct cifs_search_info;
 struct cifsInodeInfo;
@@ -437,10 +433,9 @@ struct smb_version_operations {
 	/* send a flush request to the server */
 	int (*flush)(const unsigned int, struct cifs_tcon *, struct cifs_fid *);
 	/* async read from the server */
-	int (*async_readv)(struct cifs_readdata *);
+	int (*async_readv)(struct cifs_io_subrequest *);
 	/* async write to the server */
-	int (*async_writev)(struct cifs_writedata *,
-			    void (*release)(struct kref *));
+	int (*async_writev)(struct cifs_io_subrequest *);
 	/* sync read from the server */
 	int (*sync_read)(const unsigned int, struct cifs_fid *,
 			 struct cifs_io_parms *, unsigned int *, char **,
@@ -535,8 +530,8 @@ struct smb_version_operations {
 	/* writepages retry size */
 	unsigned int (*wp_retry_size)(struct inode *);
 	/* get mtu credits */
-	int (*wait_mtu_credits)(struct TCP_Server_Info *, unsigned int,
-				unsigned int *, struct cifs_credits *);
+	int (*wait_mtu_credits)(struct TCP_Server_Info *, size_t,
+				size_t *, struct cifs_credits *);
 	/* adjust previously taken mtu credits to request size */
 	int (*adjust_credits)(struct TCP_Server_Info *server,
 			      struct cifs_credits *credits,
@@ -1378,6 +1373,7 @@ struct cifs_open_parms {
 	struct cifs_fid *fid;
 	umode_t mode;
 	bool reconnect:1;
+	struct kvec *ea_cctx;
 };
 
 struct cifs_fid {
@@ -1466,50 +1462,40 @@ struct cifs_aio_ctx {
 	bool			direct_io;
 };
 
-/* asynchronous read support */
-struct cifs_readdata {
-	struct kref			refcount;
-	struct list_head		list;
-	struct completion		done;
+struct cifs_io_request {
+	struct netfs_io_request		rreq;
 	struct cifsFileInfo		*cfile;
-	struct address_space		*mapping;
-	struct cifs_aio_ctx		*ctx;
-	__u64				offset;
+};
+
+/* asynchronous read support */
+struct cifs_io_subrequest {
+	union {
+		struct netfs_io_subrequest subreq;
+		struct netfs_io_request *rreq;
+		struct cifs_io_request *req;
+	};
 	ssize_t				got_bytes;
-	unsigned int			bytes;
 	pid_t				pid;
+	unsigned int			xid;
 	int				result;
-	struct work_struct		work;
-	struct iov_iter			iter;
+	bool				have_credits;
 	struct kvec			iov[2];
 	struct TCP_Server_Info		*server;
 #ifdef CONFIG_CIFS_SMB_DIRECT
 	struct smbd_mr			*mr;
 #endif
 	struct cifs_credits		credits;
-};
 
-/* asynchronous write support */
-struct cifs_writedata {
-	struct kref			refcount;
+	// TODO: Remove following elements
 	struct list_head		list;
 	struct completion		done;
-	enum writeback_sync_modes	sync_mode;
 	struct work_struct		work;
 	struct cifsFileInfo		*cfile;
+	struct address_space		*mapping;
 	struct cifs_aio_ctx		*ctx;
-	struct iov_iter			iter;
+	enum writeback_sync_modes	sync_mode;
+	bool				uncached;
 	struct bio_vec			*bv;
-	__u64				offset;
-	pid_t				pid;
-	unsigned int			bytes;
-	int				result;
-	struct TCP_Server_Info		*server;
-#ifdef CONFIG_CIFS_SMB_DIRECT
-	struct smbd_mr			*mr;
-#endif
-	struct cifs_credits		credits;
-	bool				replay;
 };
 
 /*
@@ -2276,6 +2262,17 @@ static inline void cifs_sg_set_buf(struct sg_table *sgtable,
 	}
 }
 
+#define CIFS_OPARMS(_cifs_sb, _tcon, _path, _da, _cd, _co, _mode) \
+	((struct cifs_open_parms) { \
+		.tcon = _tcon, \
+		.path = _path, \
+		.desired_access = (_da), \
+		.disposition = (_cd), \
+		.create_options = cifs_create_options(_cifs_sb, (_co)), \
+		.mode = (_mode), \
+		.cifs_sb = _cifs_sb, \
+	})
+
 struct smb2_compound_vars {
 	struct cifs_open_parms oparms;
 	struct kvec rsp_iov[MAX_COMPOUND];
@@ -2287,6 +2284,7 @@ struct smb2_compound_vars {
 	struct kvec close_iov;
 	struct smb2_file_rename_info rename_info;
 	struct smb2_file_link_info link_info;
+	struct kvec ea_iov;
 };
 
 #endif	/* _CIFS_GLOB_H */
