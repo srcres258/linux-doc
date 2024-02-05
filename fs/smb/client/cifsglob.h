@@ -1479,7 +1479,6 @@ struct cifs_io_subrequest {
 	unsigned int			xid;
 	int				result;
 	bool				have_credits;
-	bool				replay;
 	struct kvec			iov[2];
 	struct TCP_Server_Info		*server;
 #ifdef CONFIG_CIFS_SMB_DIRECT
