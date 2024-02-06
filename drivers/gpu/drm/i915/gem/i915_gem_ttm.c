@@ -834,7 +834,7 @@ static int __i915_ttm_get_pages(struct drm_i915_gem_object *obj,
 
 static int i915_ttm_get_pages(struct drm_i915_gem_object *obj)
 {
-	struct ttm_place places[I915_TTM_MAX_PLACEMENTS + 1];
+	struct ttm_place places[I915_TTM_MAX_PLACEMENTS + 1] = {};
 	struct ttm_placement placement;
 
 	/* restricted by sg_alloc_table */
