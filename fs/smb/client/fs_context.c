@@ -1111,6 +1111,8 @@ static int smb3_fs_context_parse_param(struct fs_context *fc,
 	case Opt_wsize:
 		ctx->wsize = result.uint_32;
 		ctx->got_wsize = true;
+		if (round_up(ctx->wsize, PAGE_SIZE) != ctx->wsize)
+			cifs_dbg(VFS, "wsize should be a multiple of 4096 (PAGE_SIZE)\n");
 		break;
 	case Opt_acregmax:
 		ctx->acregmax = HZ * result.uint_32;
