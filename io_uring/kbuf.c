@@ -102,8 +102,10 @@ bool io_kbuf_recycle_legacy(struct io_kiocb *req, unsigned issue_flags)
 	return true;
 }
 
-void __io_put_kbuf(struct io_kiocb *req, unsigned issue_flags)
+unsigned int __io_put_kbuf(struct io_kiocb *req, unsigned issue_flags)
 {
+	unsigned int cflags;
+
 	/*
 	 * We can add this buffer back to two lists:
 	 *
@@ -116,17 +118,21 @@ void __io_put_kbuf(struct io_kiocb *req, unsigned issue_flags)
 	 * We migrate buffers from the comp_list to the issue cache list
 	 * when we need one.
 	 */
-	if (issue_flags & IO_URING_F_UNLOCKED) {
+	if (req->flags & REQ_F_BUFFER_RING) {
+		/* no buffers to recycle for this case */
+		cflags = __io_put_kbuf_list(req, NULL);
+	} else if (issue_flags & IO_URING_F_UNLOCKED) {
 		struct io_ring_ctx *ctx = req->ctx;
 
 		spin_lock(&ctx->completion_lock);
-		__io_put_kbuf_list(req, &ctx->io_buffers_comp);
+		cflags = __io_put_kbuf_list(req, &ctx->io_buffers_comp);
 		spin_unlock(&ctx->completion_lock);
 	} else {
 		lockdep_assert_held(&req->ctx->uring_lock);
 
-		__io_put_kbuf_list(req, &req->ctx->io_buffers_cache);
+		cflags = __io_put_kbuf_list(req, &req->ctx->io_buffers_cache);
 	}
+	return cflags;
 }
 
 static void __user *io_provided_buffer_select(struct io_kiocb *req, size_t *len,
@@ -174,7 +180,7 @@ static void __user *io_ring_buffer_select(struct io_kiocb *req, size_t *len,
 	req->buf_list = bl;
 	req->buf_index = buf->bid;
 
-	if (issue_flags & IO_URING_F_UNLOCKED || !io_file_can_poll(req)) {
+	if (issue_flags & IO_URING_F_UNLOCKED || !file_can_poll(req->file)) {
 		/*
 		 * If we came in unlocked, we have no choice but to consume the
 		 * buffer here, otherwise nothing ensures that the buffer won't
