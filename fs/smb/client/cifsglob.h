@@ -1463,23 +1463,16 @@ struct cifs_aio_ctx {
 	bool			direct_io;
 };
 
-struct cifs_io_request {
-	struct netfs_io_request		rreq;
-	struct cifsFileInfo		*cfile;
-};
-
 /* asynchronous read support */
 struct cifs_io_subrequest {
-	union {
-		struct netfs_io_subrequest subreq;
-		struct netfs_io_request *rreq;
-		struct cifs_io_request *req;
-	};
+	struct netfs_io_subrequest	subreq;
+	struct cifsFileInfo		*cfile;
+	struct address_space		*mapping;
+	struct cifs_aio_ctx		*ctx;
 	ssize_t				got_bytes;
 	pid_t				pid;
 	unsigned int			xid;
 	int				result;
-	bool				have_credits;
 	struct kvec			iov[2];
 	struct TCP_Server_Info		*server;
 #ifdef CONFIG_CIFS_SMB_DIRECT
@@ -1487,16 +1480,15 @@ struct cifs_io_subrequest {
 #endif
 	struct cifs_credits		credits;
 
+	enum writeback_sync_modes	sync_mode;
+	bool				uncached;
+	bool				replay;
+	struct bio_vec			*bv;
+
 	// TODO: Remove following elements
 	struct list_head		list;
 	struct completion		done;
 	struct work_struct		work;
-	struct cifsFileInfo		*cfile;
-	struct address_space		*mapping;
-	struct cifs_aio_ctx		*ctx;
-	enum writeback_sync_modes	sync_mode;
-	bool				uncached;
-	struct bio_vec			*bv;
 };
 
 /*

@@ -7,12 +7,32 @@
 #include <linux/refcount.h>
 #include <linux/fiemap.h>
 #include <linux/btrfs_tree.h>
+#include <linux/spinlock.h>
+#include <linux/atomic.h>
+#include <linux/rwsem.h>
+#include <linux/list.h>
+#include <linux/slab.h>
 #include "compression.h"
 #include "messages.h"
 #include "ulist.h"
 #include "misc.h"
 
+struct page;
+struct file;
+struct folio;
+struct inode;
+struct fiemap_extent_info;
+struct readahead_control;
+struct address_space;
+struct writeback_control;
+struct extent_io_tree;
+struct extent_map_tree;
+struct btrfs_block_group;
+struct btrfs_fs_info;
+struct btrfs_inode;
+struct btrfs_root;
 struct btrfs_trans_handle;
+struct btrfs_tree_parent_check;
 
 enum {
 	EXTENT_BUFFER_UPTODATE,
@@ -64,11 +84,6 @@ enum {
 #define BITMAP_LAST_BYTE_MASK(nbits) \
 	(BYTE_MASK >> (-(nbits) & (BITS_PER_BYTE - 1)))
 
-struct btrfs_root;
-struct btrfs_inode;
-struct btrfs_fs_info;
-struct extent_io_tree;
-struct btrfs_tree_parent_check;
 
 int __init extent_buffer_init_cachep(void);
 void __cold extent_buffer_free_cachep(void);
@@ -215,8 +230,6 @@ static inline void extent_changeset_free(struct extent_changeset *changeset)
 	kfree(changeset);
 }
 
-struct extent_map_tree;
-
 int try_release_extent_mapping(struct page *page, gfp_t mask);
 int try_release_extent_buffer(struct page *page);
 
@@ -231,6 +244,7 @@ int btree_write_cache_pages(struct address_space *mapping,
 void extent_readahead(struct readahead_control *rac);
 int extent_fiemap(struct btrfs_inode *inode, struct fiemap_extent_info *fieinfo,
 		  u64 start, u64 len);
+int set_folio_extent_mapped(struct folio *folio);
 int set_page_extent_mapped(struct page *page);
 void clear_page_extent_mapped(struct page *page);
 
@@ -347,6 +361,8 @@ void btrfs_clear_buffer_dirty(struct btrfs_trans_handle *trans,
 
 int btrfs_alloc_page_array(unsigned int nr_pages, struct page **page_array,
 			   gfp_t extra_gfp);
+int btrfs_alloc_folio_array(unsigned int nr_folios, struct folio **folio_array,
+			    gfp_t extra_gfp);
 
 #ifdef CONFIG_BTRFS_FS_RUN_SANITY_TESTS
 bool find_lock_delalloc_range(struct inode *inode,

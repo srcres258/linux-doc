@@ -230,6 +230,10 @@ struct rtw89_fw_hdr_section_info {
 	u32 dladdr;
 	u32 mssc;
 	u8 type;
+	bool ignore;
+	const u8 *key_addr;
+	u32 key_len;
+	u32 key_idx;
 };
 
 struct rtw89_fw_bin_info {
@@ -237,6 +241,8 @@ struct rtw89_fw_bin_info {
 	u32 hdr_len;
 	bool dynamic_hdr_en;
 	u32 dynamic_hdr_len;
+	bool dsp_checksum;
+	bool secure_section_exist;
 	struct rtw89_fw_hdr_section_info section_info[FWDL_SECTION_MAX_NUM];
 };
 
@@ -466,6 +472,7 @@ static inline void RTW89_SET_EDCA_PARAM(void *cmd, u32 val)
 
 #define FWDL_SECURITY_SECTION_TYPE 9
 #define FWDL_SECURITY_SIGLEN 512
+#define FWDL_SECURITY_CHKSUM_LEN 8
 
 struct rtw89_fw_dynhdr_sec {
 	__le32 w0;
@@ -519,6 +526,7 @@ struct rtw89_fw_hdr {
 #define FW_HDR_W4_MIN GENMASK(31, 24)
 #define FW_HDR_W5_YEAR GENMASK(31, 0)
 #define FW_HDR_W6_SEC_NUM GENMASK(15, 8)
+#define FW_HDR_W7_PART_SIZE GENMASK(15, 0)
 #define FW_HDR_W7_DYN_HDR BIT(16)
 #define FW_HDR_W7_CMD_VERSERION GENMASK(31, 24)
 
@@ -536,6 +544,7 @@ struct rtw89_fw_hdr_section_v1 {
 #define FWSECTION_HDR_V1_W1_CHECKSUM BIT(28)
 #define FWSECTION_HDR_V1_W1_REDL BIT(29)
 #define FWSECTION_HDR_V1_W2_MSSC GENMASK(7, 0)
+#define FORMATTED_MSSC 0xFF
 #define FWSECTION_HDR_V1_W2_BBMCU_IDX GENMASK(27, 24)
 
 struct rtw89_fw_hdr_v1 {
@@ -568,12 +577,42 @@ struct rtw89_fw_hdr_v1 {
 #define FW_HDR_V1_W5_YEAR GENMASK(15, 0)
 #define FW_HDR_V1_W5_HDR_SIZE GENMASK(31, 16)
 #define FW_HDR_V1_W6_SEC_NUM GENMASK(15, 8)
+#define FW_HDR_V1_W6_DSP_CHKSUM BIT(24)
+#define FW_HDR_V1_W7_PART_SIZE GENMASK(15, 0)
 #define FW_HDR_V1_W7_DYN_HDR BIT(16)
 
-static inline void SET_FW_HDR_PART_SIZE(void *fwhdr, u32 val)
-{
-	le32p_replace_bits((__le32 *)fwhdr + 7, val, GENMASK(15, 0));
-}
+enum rtw89_fw_mss_pool_rmp_tbl_type {
+	MSS_POOL_RMP_TBL_BITMASK = 0x0,
+	MSS_POOL_RMP_TBL_RECORD = 0x1,
+};
+
+#define FWDL_MSS_POOL_DEFKEYSETS_SIZE 8
+
+struct rtw89_fw_mss_pool_hdr {
+	u8 signature[8]; /* equal to mss_signature[] */
+	__le32 rmp_tbl_offset;
+	__le32 key_raw_offset;
+	u8 defen;
+	u8 rsvd[3];
+	u8 rmpfmt; /* enum rtw89_fw_mss_pool_rmp_tbl_type */
+	u8 mssdev_max;
+	__le16 keypair_num;
+	__le16 msscust_max;
+	__le16 msskey_num_max;
+	__le32 rsvd3;
+	u8 rmp_tbl[];
+} __packed;
+
+union rtw89_fw_section_mssc_content {
+	struct {
+		u8 pad[58];
+		__le32 v;
+	} __packed sb_sel_ver;
+	struct {
+		u8 pad[60];
+		__le16 v;
+	} __packed key_sign_len;
+} __packed;
 
 static inline void SET_CTRL_INFO_MACID(void *table, u32 val)
 {
@@ -3932,6 +3971,17 @@ enum rtw89_mcc_h2c_func {
 #define H2C_CL_OUTSRC_RF_REG_B		0x9
 #define H2C_CL_OUTSRC_RF_FW_NOTIFY	0xa
 #define H2C_FUNC_OUTSRC_RF_GET_MCCCH	0x2
+#define H2C_CL_OUTSRC_RF_FW_RFK		0xb
+
+enum rtw89_rfk_offload_h2c_func {
+	H2C_FUNC_RFK_TSSI_OFFLOAD = 0x0,
+	H2C_FUNC_RFK_IQK_OFFLOAD = 0x1,
+	H2C_FUNC_RFK_DPK_OFFLOAD = 0x3,
+	H2C_FUNC_RFK_TXGAPK_OFFLOAD = 0x4,
+	H2C_FUNC_RFK_DACK_OFFLOAD = 0x5,
+	H2C_FUNC_RFK_RXDCK_OFFLOAD = 0x6,
+	H2C_FUNC_RFK_PRE_NOTIFY = 0x8,
+};
 
 struct rtw89_fw_h2c_rf_get_mccch {
 	__le32 ch_0;
@@ -3940,6 +3990,114 @@ struct rtw89_fw_h2c_rf_get_mccch {
 	__le32 band_1;
 	__le32 current_channel;
 	__le32 current_band_type;
+} __packed;
+
+#define NUM_OF_RTW89_FW_RFK_PATH 2
+#define NUM_OF_RTW89_FW_RFK_TBL 3
+
+struct rtw89_fw_h2c_rfk_pre_info {
+	struct {
+		__le32 ch[NUM_OF_RTW89_FW_RFK_PATH][NUM_OF_RTW89_FW_RFK_TBL];
+		__le32 band[NUM_OF_RTW89_FW_RFK_PATH][NUM_OF_RTW89_FW_RFK_TBL];
+	} __packed dbcc;
+
+	__le32 mlo_mode;
+	struct {
+		__le32 cur_ch[NUM_OF_RTW89_FW_RFK_PATH];
+		__le32 cur_band[NUM_OF_RTW89_FW_RFK_PATH];
+	} __packed tbl;
+
+	__le32 phy_idx;
+	__le32 cur_band;
+	__le32 cur_bw;
+	__le32 cur_center_ch;
+
+	__le32 ktbl_sel0;
+	__le32 ktbl_sel1;
+	__le32 rfmod0;
+	__le32 rfmod1;
+
+	__le32 mlo_1_1;
+	__le32 rfe_type;
+	__le32 drv_mode;
+
+	struct {
+		__le32 ch[NUM_OF_RTW89_FW_RFK_PATH];
+		__le32 band[NUM_OF_RTW89_FW_RFK_PATH];
+	} __packed mlo;
+} __packed;
+
+struct rtw89_h2c_rf_tssi {
+	__le16 len;
+	u8 phy;
+	u8 ch;
+	u8 bw;
+	u8 band;
+	u8 hwtx_en;
+	u8 cv;
+	s8 curr_tssi_cck_de[2];
+	s8 curr_tssi_cck_de_20m[2];
+	s8 curr_tssi_cck_de_40m[2];
+	s8 curr_tssi_efuse_cck_de[2];
+	s8 curr_tssi_ofdm_de[2];
+	s8 curr_tssi_ofdm_de_20m[2];
+	s8 curr_tssi_ofdm_de_40m[2];
+	s8 curr_tssi_ofdm_de_80m[2];
+	s8 curr_tssi_ofdm_de_160m[2];
+	s8 curr_tssi_ofdm_de_320m[2];
+	s8 curr_tssi_efuse_ofdm_de[2];
+	s8 curr_tssi_ofdm_de_diff_20m[2];
+	s8 curr_tssi_ofdm_de_diff_80m[2];
+	s8 curr_tssi_ofdm_de_diff_160m[2];
+	s8 curr_tssi_ofdm_de_diff_320m[2];
+	s8 curr_tssi_trim_de[2];
+	u8 pg_thermal[2];
+	u8 ftable[2][128];
+	u8 tssi_mode;
+} __packed;
+
+struct rtw89_h2c_rf_iqk {
+	__le32 phy_idx;
+	__le32 dbcc;
+} __packed;
+
+struct rtw89_h2c_rf_dpk {
+	u8 len;
+	u8 phy;
+	u8 dpk_enable;
+	u8 kpath;
+	u8 cur_band;
+	u8 cur_bw;
+	u8 cur_ch;
+	u8 dpk_dbg_en;
+} __packed;
+
+struct rtw89_h2c_rf_txgapk {
+	u8 len;
+	u8 ktype;
+	u8 phy;
+	u8 kpath;
+	u8 band;
+	u8 bw;
+	u8 ch;
+	u8 cv;
+} __packed;
+
+struct rtw89_h2c_rf_dack {
+	__le32 len;
+	__le32 phy;
+	__le32 type;
+} __packed;
+
+struct rtw89_h2c_rf_rxdck {
+	u8 len;
+	u8 phy;
+	u8 is_afe;
+	u8 kpath;
+	u8 cur_band;
+	u8 cur_bw;
+	u8 cur_ch;
+	u8 rxdck_dbg_en;
 } __packed;
 
 enum rtw89_rf_log_type {
@@ -4011,6 +4169,12 @@ struct rtw89_c2h_rf_txgapk_rpt_log {
 	u8 chk_id;
 	u8 ver;
 	u8 rsv1;
+} __packed;
+
+struct rtw89_c2h_rfk_report {
+	struct rtw89_c2h_hdr hdr;
+	u8 state; /* enum rtw89_rfk_report_state */
+	u8 version;
 } __packed;
 
 #define RTW89_FW_RSVD_PLE_SIZE 0x800
@@ -4121,6 +4285,15 @@ int rtw89_fw_h2c_rf_reg(struct rtw89_dev *rtwdev,
 			struct rtw89_fw_h2c_rf_reg_info *info,
 			u16 len, u8 page);
 int rtw89_fw_h2c_rf_ntfy_mcc(struct rtw89_dev *rtwdev);
+int rtw89_fw_h2c_rf_pre_ntfy(struct rtw89_dev *rtwdev,
+			     enum rtw89_phy_idx phy_idx);
+int rtw89_fw_h2c_rf_tssi(struct rtw89_dev *rtwdev, enum rtw89_phy_idx phy_idx,
+			 enum rtw89_tssi_mode tssi_mode);
+int rtw89_fw_h2c_rf_iqk(struct rtw89_dev *rtwdev, enum rtw89_phy_idx phy_idx);
+int rtw89_fw_h2c_rf_dpk(struct rtw89_dev *rtwdev, enum rtw89_phy_idx phy_idx);
+int rtw89_fw_h2c_rf_txgapk(struct rtw89_dev *rtwdev, enum rtw89_phy_idx phy_idx);
+int rtw89_fw_h2c_rf_dack(struct rtw89_dev *rtwdev, enum rtw89_phy_idx phy_idx);
+int rtw89_fw_h2c_rf_rxdck(struct rtw89_dev *rtwdev, enum rtw89_phy_idx phy_idx);
 int rtw89_fw_h2c_raw_with_hdr(struct rtw89_dev *rtwdev,
 			      u8 h2c_class, u8 h2c_func, u8 *buf, u16 len,
 			      bool rack, bool dack);
