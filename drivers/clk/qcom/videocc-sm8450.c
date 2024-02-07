@@ -373,8 +373,8 @@ static const struct qcom_reset_map video_cc_sm8450_resets[] = {
 	[CVP_VIDEO_CC_MVS0C_BCR] = { 0x8048 },
 	[CVP_VIDEO_CC_MVS1_BCR] = { 0x80bc },
 	[CVP_VIDEO_CC_MVS1C_BCR] = { 0x8070 },
-	[VIDEO_CC_MVS0C_CLK_ARES] = { 0x8064, 2 },
-	[VIDEO_CC_MVS1C_CLK_ARES] = { 0x808c, 2 },
+	[VIDEO_CC_MVS0C_CLK_ARES] = { .reg = 0x8064, .bit = 2, .udelay = 1000 },
+	[VIDEO_CC_MVS1C_CLK_ARES] = { .reg = 0x808c, .bit = 2, .udelay = 1000 },
 };
 
 static const struct regmap_config video_cc_sm8450_regmap_config = {
@@ -448,17 +448,7 @@ static struct platform_driver video_cc_sm8450_driver = {
 	},
 };
 
-static int __init video_cc_sm8450_init(void)
-{
-	return platform_driver_register(&video_cc_sm8450_driver);
-}
-subsys_initcall(video_cc_sm8450_init);
-
-static void __exit video_cc_sm8450_exit(void)
-{
-	platform_driver_unregister(&video_cc_sm8450_driver);
-}
-module_exit(video_cc_sm8450_exit);
+module_platform_driver(video_cc_sm8450_driver);
 
 MODULE_DESCRIPTION("QTI VIDEOCC SM8450 Driver");
 MODULE_LICENSE("GPL");
