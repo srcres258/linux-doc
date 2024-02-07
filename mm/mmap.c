@@ -869,7 +869,7 @@ static struct vm_area_struct
 	struct mm_struct *mm = src->vm_mm;
 	struct anon_vma *anon_vma = src->anon_vma;
 	struct file *file = src->vm_file;
-	struct vm_area_struct *curr = src, *next = NULL, *res;
+	struct vm_area_struct *curr, *next, *res;
 	struct vm_area_struct *vma, *adjust, *remove, *remove2;
 	struct vm_area_struct *anon_dup = NULL;
 	struct vma_prepare vp;

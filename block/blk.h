@@ -517,6 +517,11 @@ static inline int req_ref_read(struct request *req)
 	return atomic_read(&req->ref);
 }
 
+void bdev_release(struct file *bdev_file);
+int bdev_open(struct block_device *bdev, blk_mode_t mode, void *holder,
+	      const struct blk_holder_ops *hops, struct file *bdev_file);
+int bdev_permission(dev_t dev, blk_mode_t mode, void *holder);
+
 static inline u64 blk_time_get_ns(void)
 {
 	struct blk_plug *plug = current->plug;

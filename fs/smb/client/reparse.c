@@ -38,7 +38,8 @@ int smb2_create_reparse_symlink(const unsigned int xid, struct inode *inode,
 		.symlink_target = sym,
 	};
 
-	path = cifs_convert_path_to_utf16(symname, cifs_sb);
+	convert_delimiter(sym, CIFS_DIR_SEP(cifs_sb));
+	path = cifs_convert_path_to_utf16(sym, cifs_sb);
 	if (!path) {
 		rc = -ENOMEM;
 		goto out;
@@ -60,8 +61,10 @@ int smb2_create_reparse_symlink(const unsigned int xid, struct inode *inode,
 	buf->PrintNameOffset = 0;
 	buf->PrintNameLength = cpu_to_le16(plen);
 	memcpy(buf->PathBuffer, path, plen);
-	buf->Flags = cpu_to_le32(*symname != '/' ? SYMLINK_FLAG_RELATIVE : 0);
+	if (*sym != CIFS_DIR_SEP(cifs_sb))
+		buf->Flags = cpu_to_le32(SYMLINK_FLAG_RELATIVE);
 
+	convert_delimiter(sym, '/');
 	iov.iov_base = buf;
 	iov.iov_len = len;
 	new = smb2_get_reparse_inode(&data, inode->i_sb, xid,
@@ -478,34 +481,35 @@ bool cifs_reparse_point_to_fattr(struct cifs_sb_info *cifs_sb,
 		switch (le64_to_cpu(buf->InodeType)) {
 		case NFS_SPECFILE_CHR:
 			fattr->cf_mode |= S_IFCHR;
-			fattr->cf_dtype = DT_CHR;
 			fattr->cf_rdev = reparse_nfs_mkdev(buf);
 			break;
 		case NFS_SPECFILE_BLK:
 			fattr->cf_mode |= S_IFBLK;
-			fattr->cf_dtype = DT_BLK;
 			fattr->cf_rdev = reparse_nfs_mkdev(buf);
 			break;
 		case NFS_SPECFILE_FIFO:
 			fattr->cf_mode |= S_IFIFO;
-			fattr->cf_dtype = DT_FIFO;
 			break;
 		case NFS_SPECFILE_SOCK:
 			fattr->cf_mode |= S_IFSOCK;
-			fattr->cf_dtype = DT_SOCK;
 			break;
 		case NFS_SPECFILE_LNK:
 			fattr->cf_mode |= S_IFLNK;
-			fattr->cf_dtype = DT_LNK;
 			break;
 		default:
 			WARN_ON_ONCE(1);
 			return false;
 		}
-		return true;
+		goto out;
 	}
 
 	switch (tag) {
+	case IO_REPARSE_TAG_DFS:
+	case IO_REPARSE_TAG_DFSR:
+	case IO_REPARSE_TAG_MOUNT_POINT:
+		/* See cifs_create_junction_fattr() */
+		fattr->cf_mode = S_IFDIR | 0711;
+		break;
 	case IO_REPARSE_TAG_LX_SYMLINK:
 	case IO_REPARSE_TAG_LX_FIFO:
 	case IO_REPARSE_TAG_AF_UNIX:
@@ -517,10 +521,11 @@ bool cifs_reparse_point_to_fattr(struct cifs_sb_info *cifs_sb,
 	case IO_REPARSE_TAG_SYMLINK:
 	case IO_REPARSE_TAG_NFS:
 		fattr->cf_mode |= S_IFLNK;
-		fattr->cf_dtype = DT_LNK;
 		break;
 	default:
 		return false;
 	}
+out:
+	fattr->cf_dtype = S_DT(fattr->cf_mode);
 	return true;
 }

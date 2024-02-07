@@ -971,8 +971,10 @@ static int move_zeropage_pte(struct mm_struct *mm,
 
 	double_pt_lock(dst_ptl, src_ptl);
 	if (!pte_same(ptep_get(src_pte), orig_src_pte) ||
-	    !pte_same(ptep_get(dst_pte), orig_dst_pte))
+	    !pte_same(ptep_get(dst_pte), orig_dst_pte)) {
+		double_pt_unlock(dst_ptl, src_ptl);
 		return -EAGAIN;
+	}
 
 	zero_pte = pte_mkspecial(pfn_pte(my_zero_pfn(dst_addr),
 					 dst_vma->vm_page_prot));

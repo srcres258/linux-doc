@@ -122,6 +122,10 @@ static void _init_caps(struct __test_metadata *const _metadata, bool drop_all)
 		CAP_SYS_CHROOT,
 		/* clang-format on */
 	};
+	const unsigned int noroot = SECBIT_NOROOT | SECBIT_NOROOT_LOCKED;
+
+	if ((cap_get_secbits() & noroot) != noroot)
+		EXPECT_EQ(0, cap_set_secbits(noroot));
 
 	/*
 	 * As a safety guard, this should be called each time, but it will fail

@@ -1239,15 +1239,6 @@ static int zswap_writeback_entry(struct zswap_entry *entry,
 	zswap_entry_put(entry);
 	spin_unlock(&tree->lock);
 
-	count_vm_event(ZSWPWB);
-	if (entry->objcg)
-		count_objcg_event(entry->objcg, ZSWPWB);
-
-	spin_lock(&tree->lock);
-	zswap_invalidate_entry(tree, entry);
-	zswap_entry_put(entry);
-	spin_unlock(&tree->lock);
-
 	/* folio is up to date */
 	folio_mark_uptodate(folio);
 

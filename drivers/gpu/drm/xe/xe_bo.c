@@ -38,8 +38,6 @@ static const struct ttm_place sys_placement_flags = {
 static struct ttm_placement sys_placement = {
 	.num_placement = 1,
 	.placement = &sys_placement_flags,
-	.num_busy_placement = 1,
-	.busy_placement = &sys_placement_flags,
 };
 
 static const struct ttm_place tt_placement_flags = {
@@ -52,8 +50,6 @@ static const struct ttm_place tt_placement_flags = {
 static struct ttm_placement tt_placement = {
 	.num_placement = 1,
 	.placement = &tt_placement_flags,
-	.num_busy_placement = 1,
-	.busy_placement = &sys_placement_flags,
 };
 
 bool mem_type_is_vram(u32 mem_type)
@@ -230,8 +226,6 @@ static int __xe_bo_placement_for_flags(struct xe_device *xe, struct xe_bo *bo,
 	bo->placement = (struct ttm_placement) {
 		.num_placement = c,
 		.placement = bo->placements,
-		.num_busy_placement = c,
-		.busy_placement = bo->placements,
 	};
 
 	return 0;
@@ -251,7 +245,6 @@ static void xe_evict_flags(struct ttm_buffer_object *tbo,
 		/* Don't handle scatter gather BOs */
 		if (tbo->type == ttm_bo_type_sg) {
 			placement->num_placement = 0;
-			placement->num_busy_placement = 0;
 			return;
 		}
 
@@ -1353,8 +1346,6 @@ static int __xe_bo_fixed_placement(struct xe_device *xe,
 	bo->placement = (struct ttm_placement) {
 		.num_placement = 1,
 		.placement = place,
-		.num_busy_placement = 1,
-		.busy_placement = place,
 	};
 
 	return 0;
@@ -2112,9 +2103,7 @@ int xe_bo_migrate(struct xe_bo *bo, u32 mem_type)
 
 	xe_place_from_ttm_type(mem_type, &requested);
 	placement.num_placement = 1;
-	placement.num_busy_placement = 1;
 	placement.placement = &requested;
-	placement.busy_placement = &requested;
 
 	/*
 	 * Stolen needs to be handled like below VRAM handling if we ever need

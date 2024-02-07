@@ -1546,6 +1546,22 @@ static void ieee80211_iface_process_skb(struct ieee80211_local *local,
 		default:
 			break;
 		}
+	} else if (ieee80211_is_action(mgmt->frame_control) &&
+		   mgmt->u.action.category == WLAN_CATEGORY_PROTECTED_EHT) {
+		if (sdata->vif.type == NL80211_IFTYPE_STATION) {
+			switch (mgmt->u.action.u.ttlm_req.action_code) {
+			case WLAN_PROTECTED_EHT_ACTION_TTLM_REQ:
+				ieee80211_process_neg_ttlm_req(sdata, mgmt,
+							       skb->len);
+				break;
+			case WLAN_PROTECTED_EHT_ACTION_TTLM_RES:
+				ieee80211_process_neg_ttlm_res(sdata, mgmt,
+							       skb->len);
+				break;
+			default:
+				break;
+			}
+		}
 	} else if (ieee80211_is_ext(mgmt->frame_control)) {
 		if (sdata->vif.type == NL80211_IFTYPE_STATION)
 			ieee80211_sta_rx_queued_ext(sdata, skb);
@@ -1783,7 +1799,7 @@ static void ieee80211_setup_sdata(struct ieee80211_sub_if_data *sdata,
 	/* need to do this after the switch so vif.type is correct */
 	ieee80211_link_setup(&sdata->deflink);
 
-	ieee80211_debugfs_add_netdev(sdata, false);
+	ieee80211_debugfs_recreate_netdev(sdata, false);
 }
 
 static int ieee80211_runtime_change_iftype(struct ieee80211_sub_if_data *sdata,

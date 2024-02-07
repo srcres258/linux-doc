@@ -2695,19 +2695,11 @@ static inline void get_random_mask_addr(u8 *buf, const u8 *addr, const u8 *mask)
  * @bssid: BSSID to be matched; may be all-zero BSSID in case of SSID match
  *	or no match (RSSI only)
  * @rssi_thold: don't report scan results below this threshold (in s32 dBm)
- * @per_band_rssi_thold: Minimum rssi threshold for each band to be applied
- *	for filtering out scan results received. Drivers advertise this support
- *	of band specific rssi based filtering through the feature capability
- *	%NL80211_EXT_FEATURE_SCHED_SCAN_BAND_SPECIFIC_RSSI_THOLD. These band
- *	specific rssi thresholds take precedence over rssi_thold, if specified.
- *	If not specified for any band, it will be assigned with rssi_thold of
- *	corresponding matchset.
  */
 struct cfg80211_match_set {
 	struct cfg80211_ssid ssid;
 	u8 bssid[ETH_ALEN];
 	s32 rssi_thold;
-	s32 per_band_rssi_thold[NUM_NL80211_BANDS];
 };
 
 /**
@@ -2910,6 +2902,8 @@ struct cfg80211_bss_ies {
  *	own the beacon_ies, but they're just pointers to the ones from the
  *	@hidden_beacon_bss struct)
  * @proberesp_ies: the information elements from the last Probe Response frame
+ * @proberesp_ecsa_stuck: ECSA element is stuck in the Probe Response frame,
+ *	cannot rely on it having valid data
  * @hidden_beacon_bss: in case this BSS struct represents a probe response from
  *	a BSS that hides the SSID in its beacon, this points to the BSS struct
  *	that holds the beacon data. @beacon_ies is still valid, of course, and
@@ -2949,6 +2943,8 @@ struct cfg80211_bss {
 	u8 bssid[ETH_ALEN];
 	u8 chains;
 	s8 chain_signal[IEEE80211_MAX_CHAINS];
+
+	u8 proberesp_ecsa_stuck:1;
 
 	u8 bssid_index;
 	u8 max_bssid_indicator;
@@ -3059,6 +3055,7 @@ struct cfg80211_assoc_link {
  * @CONNECT_REQ_MLO_SUPPORT: Userspace indicates support for handling MLD links.
  *	Drivers shall disable MLO features for the current association if this
  *	flag is not set.
+ * @ASSOC_REQ_SPP_AMSDU: SPP A-MSDUs will be used on this connection (if any)
  */
 enum cfg80211_assoc_req_flags {
 	ASSOC_REQ_DISABLE_HT			= BIT(0),
@@ -3068,6 +3065,7 @@ enum cfg80211_assoc_req_flags {
 	ASSOC_REQ_DISABLE_HE			= BIT(4),
 	ASSOC_REQ_DISABLE_EHT			= BIT(5),
 	CONNECT_REQ_MLO_SUPPORT			= BIT(6),
+	ASSOC_REQ_SPP_AMSDU			= BIT(7),
 };
 
 /**

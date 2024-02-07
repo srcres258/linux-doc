@@ -1486,29 +1486,17 @@ struct cifs_io_subrequest {
 	struct smbd_mr			*mr;
 #endif
 	struct cifs_credits		credits;
-};
 
-/* asynchronous write support */
-struct cifs_writedata {
-	struct kref			refcount;
+	// TODO: Remove following elements
 	struct list_head		list;
 	struct completion		done;
-	enum writeback_sync_modes	sync_mode;
 	struct work_struct		work;
 	struct cifsFileInfo		*cfile;
+	struct address_space		*mapping;
 	struct cifs_aio_ctx		*ctx;
-	struct iov_iter			iter;
+	enum writeback_sync_modes	sync_mode;
+	bool				uncached;
 	struct bio_vec			*bv;
-	__u64				offset;
-	pid_t				pid;
-	unsigned int			bytes;
-	int				result;
-	struct TCP_Server_Info		*server;
-#ifdef CONFIG_CIFS_SMB_DIRECT
-	struct smbd_mr			*mr;
-#endif
-	struct cifs_credits		credits;
-	bool				replay;
 };
 
 /*

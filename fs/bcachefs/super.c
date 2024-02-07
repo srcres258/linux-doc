@@ -56,6 +56,7 @@
 #include "super.h"
 #include "super-io.h"
 #include "sysfs.h"
+#include "thread_with_file.h"
 #include "trace.h"
 
 #include <linux/backing-dev.h>
@@ -95,16 +96,10 @@ void __bch2_print(struct bch_fs *c, const char *fmt, ...)
 	if (likely(!stdio)) {
 		vprintk(fmt, args);
 	} else {
-		unsigned long flags;
-
 		if (fmt[0] == KERN_SOH[0])
 			fmt += 2;
 
-		spin_lock_irqsave(&stdio->output_lock, flags);
-		prt_vprintf(&stdio->output_buf, fmt, args);
-		spin_unlock_irqrestore(&stdio->output_lock, flags);
-
-		wake_up(&stdio->output_wait);
+		bch2_stdio_redirect_vprintf(stdio, true, fmt, args);
 	}
 	va_end(args);
 }
@@ -520,7 +515,7 @@ static void __bch2_fs_free(struct bch_fs *c)
 	unsigned i;
 
 	for (i = 0; i < BCH_TIME_STAT_NR; i++)
-		bch2_time_stats_exit(&c->times[i]);
+		time_stats_exit(&c->times[i]);
 
 	bch2_free_pending_node_rewrites(c);
 	bch2_fs_sb_errors_exit(c);
@@ -576,7 +571,7 @@ static void __bch2_fs_free(struct bch_fs *c)
 		destroy_workqueue(c->btree_update_wq);
 
 	bch2_free_super(&c->disk_sb);
-	kvpfree(c, sizeof(*c));
+	kvfree(c);
 	module_put(THIS_MODULE);
 }
 
@@ -715,7 +710,7 @@ static struct bch_fs *bch2_fs_alloc(struct bch_sb *sb, struct bch_opts opts)
 	unsigned i, iter_size;
 	int ret = 0;
 
-	c = kvpmalloc(sizeof(struct bch_fs), GFP_KERNEL|__GFP_ZERO);
+	c = kvmalloc(sizeof(struct bch_fs), GFP_KERNEL|__GFP_ZERO);
 	if (!c) {
 		c = ERR_PTR(-BCH_ERR_ENOMEM_fs_alloc);
 		goto out;
@@ -753,7 +748,7 @@ static struct bch_fs *bch2_fs_alloc(struct bch_sb *sb, struct bch_opts opts)
 	c->journal_keys.initial_ref_held = true;
 
 	for (i = 0; i < BCH_TIME_STAT_NR; i++)
-		bch2_time_stats_init(&c->times[i]);
+		time_stats_init(&c->times[i]);
 
 	bch2_fs_copygc_init(c);
 	bch2_fs_btree_key_cache_init_early(&c->btree_key_cache);
@@ -882,8 +877,8 @@ static struct bch_fs *bch2_fs_alloc(struct bch_sb *sb, struct bch_opts opts)
 			BIOSET_NEED_BVECS) ||
 	    !(c->pcpu = alloc_percpu(struct bch_fs_pcpu)) ||
 	    !(c->online_reserved = alloc_percpu(u64)) ||
-	    mempool_init_kvpmalloc_pool(&c->btree_bounce_pool, 1,
-					c->opts.btree_node_size) ||
+	    mempool_init_kvmalloc_pool(&c->btree_bounce_pool, 1,
+				       c->opts.btree_node_size) ||
 	    mempool_init_kmalloc_pool(&c->large_bkey_pool, 1, 2048) ||
 	    !(c->unused_inode_hints = kcalloc(1U << c->inode_shard_bits,
 					      sizeof(u64), GFP_KERNEL))) {
@@ -1168,8 +1163,8 @@ static void bch2_dev_free(struct bch_dev *ca)
 	bch2_dev_buckets_free(ca);
 	free_page((unsigned long) ca->sb_read_scratch);
 
-	bch2_time_stats_exit(&ca->io_latency[WRITE]);
-	bch2_time_stats_exit(&ca->io_latency[READ]);
+	time_stats_exit(&ca->io_latency[WRITE]);
+	time_stats_exit(&ca->io_latency[READ]);
 
 	percpu_ref_exit(&ca->io_ref);
 	percpu_ref_exit(&ca->ref);
@@ -1260,8 +1255,10 @@ static struct bch_dev *__bch2_dev_alloc(struct bch_fs *c,
 
 	INIT_WORK(&ca->io_error_work, bch2_io_error_work);
 
-	bch2_time_stats_init(&ca->io_latency[READ]);
-	bch2_time_stats_init(&ca->io_latency[WRITE]);
+	time_stats_init(&ca->io_latency[READ]);
+	time_stats_init(&ca->io_latency[WRITE]);
+	ca->io_latency[READ].quantiles_enabled = true;
+	ca->io_latency[WRITE].quantiles_enabled = true;
 
 	ca->mi = bch2_mi_to_cpu(member);
 

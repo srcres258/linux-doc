@@ -349,6 +349,11 @@ static void __change_pid(struct task_struct *task, enum pid_type type,
 	hlist_del_rcu(&task->pid_links[type]);
 	*pid_ptr = new;
 
+	if (type == PIDTYPE_PID) {
+		WARN_ON_ONCE(pid_has_task(pid, PIDTYPE_PID));
+		wake_up_all(&pid->wait_pidfd);
+	}
+
 	for (tmp = PIDTYPE_MAX; --tmp >= 0; )
 		if (pid_has_task(pid, tmp))
 			return;
@@ -391,8 +396,7 @@ void exchange_tids(struct task_struct *left, struct task_struct *right)
 void transfer_pid(struct task_struct *old, struct task_struct *new,
 			   enum pid_type type)
 {
-	if (type == PIDTYPE_PID)
-		new->thread_pid = old->thread_pid;
+	WARN_ON_ONCE(type == PIDTYPE_PID);
 	hlist_replace_rcu(&old->pid_links[type], &new->pid_links[type]);
 }
 

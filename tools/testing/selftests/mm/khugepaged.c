@@ -149,12 +149,12 @@ static void get_finfo(const char *dir)
 
 	/* Find owning device's queue/read_ahead_kb control */
 	if (snprintf(path, sizeof(path), "/sys/dev/block/%d:%d/uevent",
-		     major(path_stat.st_dev), minor(path_stat.st_dev)) >= sizeof(path))
-		ksft_exit_fail_msg("%s: Pathname is too long\n", __func__);
-
-	if (read_file(path, buf, sizeof(buf)) < 0)
-		ksft_exit_fail_msg("read_file(read_num): %s\n", strerror(errno));
-
+		     major(path_stat.st_dev), minor(path_stat.st_dev))
+	    >= sizeof(path)) {
+		printf("%s: Pathname is too long\n", __func__);
+		exit(EXIT_FAILURE);
+	}
+	read_file(path, buf, sizeof(buf));
 	if (strstr(buf, "DEVTYPE=disk")) {
 		/* Found it */
 		if (snprintf(finfo.dev_queue_read_ahead_path,

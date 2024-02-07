@@ -555,8 +555,7 @@ out:
 		ret = -BCH_ERR_journal_res_get_blocked;
 
 	if (ret == JOURNAL_ERR_max_in_flight &&
-	    track_event_change(&c->times[BCH_TIME_blocked_journal_max_in_flight],
-			       &j->max_in_flight_start, true)) {
+	    track_event_change(&c->times[BCH_TIME_blocked_journal_max_in_flight], true)) {
 
 		struct printbuf buf = PRINTBUF;
 		prt_printf(&buf, "seq %llu\n", journal_cur_seq(j));
@@ -754,7 +753,7 @@ int bch2_journal_flush_seq(struct journal *j, u64 seq)
 	ret = wait_event_interruptible(j->wait, (ret2 = bch2_journal_flush_seq_async(j, seq, NULL)));
 
 	if (!ret)
-		bch2_time_stats_update(j->flush_seq_time, start_time);
+		time_stats_update(j->flush_seq_time, start_time);
 
 	return ret ?: ret2 < 0 ? ret2 : 0;
 }
@@ -1343,7 +1342,7 @@ void bch2_fs_journal_exit(struct journal *j)
 	darray_exit(&j->early_journal_entries);
 
 	for (unsigned i = 0; i < ARRAY_SIZE(j->buf); i++)
-		kvpfree(j->buf[i].data, j->buf[i].buf_size);
+		kvfree(j->buf[i].data);
 	free_fifo(&j->pin);
 }
 
@@ -1372,7 +1371,7 @@ int bch2_fs_journal_init(struct journal *j)
 
 	for (unsigned i = 0; i < ARRAY_SIZE(j->buf); i++) {
 		j->buf[i].buf_size = JOURNAL_ENTRY_SIZE_MIN;
-		j->buf[i].data = kvpmalloc(j->buf[i].buf_size, GFP_KERNEL);
+		j->buf[i].data = kvmalloc(j->buf[i].buf_size, GFP_KERNEL);
 		if (!j->buf[i].data)
 			return -BCH_ERR_ENOMEM_journal_buf;
 		j->buf[i].idx = i;

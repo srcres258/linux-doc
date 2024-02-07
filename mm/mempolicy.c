@@ -151,7 +151,7 @@ static DEFINE_MUTEX(iw_table_lock);
 
 static u8 get_il_weight(int node)
 {
-	u8 __rcu *table;
+	u8 *table;
 	u8 weight;
 
 	rcu_read_lock();
@@ -1876,11 +1876,17 @@ bool apply_policy_zone(struct mempolicy *policy, enum zone_type zone)
 
 static unsigned int weighted_interleave_nodes(struct mempolicy *policy)
 {
-	unsigned int node = current->il_prev;
+	unsigned int node;
+	unsigned int cpuset_mems_cookie;
 
-	if (!current->il_weight || !node_isset(node, policy->nodes)) {
+retry:
+	/* to prevent miscount use tsk->mems_allowed_seq to detect rebind */
+	cpuset_mems_cookie = read_mems_allowed_begin();
+	node = current->il_prev;
+	if (!node || !node_isset(node, policy->nodes)) {
 		node = next_node_in(node, policy->nodes);
-		/* can only happen if nodemask is being rebound */
+		if (read_mems_allowed_retry(cpuset_mems_cookie))
+			goto retry;
 		if (node == MAX_NUMNODES)
 			return node;
 		current->il_prev = node;
@@ -1894,8 +1900,14 @@ static unsigned int weighted_interleave_nodes(struct mempolicy *policy)
 static unsigned int interleave_nodes(struct mempolicy *policy)
 {
 	unsigned int nid;
+	unsigned int cpuset_mems_cookie;
 
-	nid = next_node_in(current->il_prev, policy->nodes);
+	/* to prevent miscount, use tsk->mems_allowed_seq to detect rebind */
+	do {
+		cpuset_mems_cookie = read_mems_allowed_begin();
+		nid = next_node_in(current->il_prev, policy->nodes);
+	} while (read_mems_allowed_retry(cpuset_mems_cookie));
+
 	if (nid < MAX_NUMNODES)
 		current->il_prev = nid;
 	return nid;
@@ -1969,7 +1981,7 @@ static unsigned int weighted_interleave_nid(struct mempolicy *pol, pgoff_t ilx)
 {
 	nodemask_t nodemask;
 	unsigned int target, nr_nodes;
-	u8 __rcu *table;
+	u8 *table;
 	unsigned int weight_total = 0;
 	u8 weight;
 	int nid;
@@ -2372,11 +2384,12 @@ static unsigned long alloc_pages_bulk_array_weighted_interleave(gfp_t gfp,
 		struct page **page_array)
 {
 	struct task_struct *me = current;
+	unsigned int cpuset_mems_cookie;
 	unsigned long total_allocated = 0;
 	unsigned long nr_allocated = 0;
 	unsigned long rounds;
 	unsigned long node_pages, delta;
-	u8 __rcu *table, *weights, weight;
+	u8 *table, *weights, weight;
 	unsigned int weight_total = 0;
 	unsigned long rem_pages = nr_pages;
 	nodemask_t nodes;
@@ -2389,7 +2402,13 @@ static unsigned long alloc_pages_bulk_array_weighted_interleave(gfp_t gfp,
 	if (!nr_pages)
 		return 0;
 
-	nnodes = read_once_policy_nodemask(pol, &nodes);
+	/* read the nodes onto the stack, retry if done during rebind */
+	do {
+		cpuset_mems_cookie = read_mems_allowed_begin();
+		nnodes = read_once_policy_nodemask(pol, &nodes);
+	} while (read_mems_allowed_retry(cpuset_mems_cookie));
+
+	/* if the nodemask has become invalid, we cannot do anything */
 	if (!nnodes)
 		return 0;
 
@@ -2403,14 +2422,8 @@ static unsigned long alloc_pages_bulk_array_weighted_interleave(gfp_t gfp,
 		page_array += nr_allocated;
 		total_allocated += nr_allocated;
 		/* if that's all the pages, no need to interleave */
-		if (rem_pages < weight) {
-			/* stay on current node, adjust il_weight */
+		if (rem_pages <= weight) {
 			me->il_weight -= rem_pages;
-			return total_allocated;
-		} else if (rem_pages == weight) {
-			/* move to next node / weight */
-			me->il_prev = next_node_in(node, nodes);
-			me->il_weight = get_il_weight(me->il_prev);
 			return total_allocated;
 		}
 		/* Otherwise we adjust remaining pages, continue from there */
@@ -2458,17 +2471,10 @@ static unsigned long alloc_pages_bulk_array_weighted_interleave(gfp_t gfp,
 			node_pages += weight;
 			delta -= weight;
 		} else if (delta) {
+			/* when delta is depleted, resume from that node */
 			node_pages += delta;
-			/* delta may deplete on a boundary or w/ a remainder */
-			if (delta == weight) {
-				/* boundary: resume from next node/weight */
-				resume_node = next_node_in(node, nodes);
-				resume_weight = weights[resume_node];
-			} else {
-				/* remainder: resume this node w/ remainder */
-				resume_node = node;
-				resume_weight = weight - delta;
-			}
+			resume_node = node;
+			resume_weight = weight - delta;
 			delta = 0;
 		}
 		/* node_pages can be 0 if an allocation fails and rounds == 0 */
@@ -3342,8 +3348,8 @@ static ssize_t node_store(struct kobject *kobj, struct kobj_attribute *attr,
 			  const char *buf, size_t count)
 {
 	struct iw_node_attr *node_attr;
-	u8 __rcu *new;
-	u8 __rcu *old;
+	u8 *new;
+	u8 *old;
 	u8 weight = 0;
 
 	node_attr = container_of(attr, struct iw_node_attr, kobj_attr);
@@ -3458,7 +3464,7 @@ static int add_weighted_interleave_group(struct kobject *root_kobj)
 
 static void mempolicy_kobj_release(struct kobject *kobj)
 {
-	u8 __rcu *old;
+	u8 *old;
 
 	mutex_lock(&iw_table_lock);
 	old = rcu_dereference_protected(iw_table,

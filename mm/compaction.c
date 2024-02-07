@@ -1640,6 +1640,7 @@ static void fast_isolate_freepages(struct compact_control *cc)
 				total_isolated += nr_isolated;
 				cc->nr_freepages += nr_isolated;
 				list_add_tail(&page->lru, &cc->freepages[order].pages);
+				cc->freepages[order].nr_pages++;
 				count_compact_events(COMPACTISOLATED, nr_isolated);
 			} else {
 				/* If isolation fails, abort the search */
@@ -1882,6 +1883,7 @@ done:
 	if (order)
 		prep_compound_page(&dst->page, order);
 	cc->nr_freepages -= 1 << order;
+	cc->nr_migratepages -= 1 << order;
 	return page_rmappable_folio(&dst->page);
 }
 
@@ -1904,6 +1906,7 @@ static void compaction_free(struct folio *dst, unsigned long data)
 	list_add(&dst->lru, &cc->freepages[order].pages);
 	cc->freepages[order].nr_pages++;
 	cc->nr_freepages += 1 << order;
+	cc->nr_migratepages += 1 << order;
 }
 
 /* possible outcome of isolate_migratepages */

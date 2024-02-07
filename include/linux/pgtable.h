@@ -212,6 +212,7 @@ static inline int pmd_dirty(pmd_t pmd)
 #define arch_flush_lazy_mmu_mode()	do {} while (0)
 #endif
 
+
 #ifndef pte_next_pfn
 static inline pte_t pte_next_pfn(pte_t pte)
 {
@@ -663,6 +664,23 @@ static inline void ptep_set_wrprotect(struct mm_struct *mm, unsigned long addres
 #endif
 
 #ifndef wrprotect_ptes
+/**
+ * wrprotect_ptes - Write-protect PTEs that map consecutive pages of the same
+ *		    folio.
+ * @mm: Address space the pages are mapped into.
+ * @addr: Address the first page is mapped at.
+ * @ptep: Page table pointer for the first entry.
+ * @nr: Number of entries to write-protect.
+ *
+ * May be overridden by the architecture; otherwise, implemented as a simple
+ * loop over ptep_set_wrprotect().
+ *
+ * Note that PTE bits in the PTE range besides the PFN can differ. For example,
+ * some PTEs might be write-protected.
+ *
+ * Context: The caller holds the page table lock.  The PTEs map consecutive
+ * pages that belong to the same folio.  The PTEs are all in the same PMD.
+ */
 static inline void wrprotect_ptes(struct mm_struct *mm, unsigned long addr,
 		pte_t *ptep, unsigned int nr)
 {
