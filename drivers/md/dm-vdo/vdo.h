@@ -22,7 +22,7 @@
 #include "statistics.h"
 #include "thread-registry.h"
 #include "types.h"
-#include "uds.h"
+#include "indexer/uds.h"
 
 enum notifier_state {
 	/* Notifications are allowed but not in progress */

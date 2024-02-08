@@ -5,11 +5,11 @@
 
 #include "config.h"
 
-#include "logger.h"
-#include "memory-alloc.h"
-#include "numeric.h"
-#include "string-utils.h"
-#include "uds-threads.h"
+#include "../logger.h"
+#include "../memory-alloc.h"
+#include "../numeric.h"
+#include "../string-utils.h"
+#include "../uds-threads.h"
 
 static const u8 INDEX_CONFIG_MAGIC[] = "ALBIC";
 static const u8 INDEX_CONFIG_VERSION_6_02[] = "06.02";

@@ -10,16 +10,17 @@
 #include <linux/compiler.h>
 #include <linux/log2.h>
 
+#include "../errors.h"
+#include "../logger.h"
+#include "../memory-alloc.h"
+#include "../numeric.h"
+#include "../permassert.h"
+#include "../uds-threads.h"
+
 #include "config.h"
-#include "errors.h"
 #include "geometry.h"
 #include "hash-utils.h"
-#include "logger.h"
-#include "memory-alloc.h"
-#include "numeric.h"
-#include "permassert.h"
 #include "uds.h"
-#include "uds-threads.h"
 
 /*
  * The volume index is a combination of two separate subindexes, one containing sparse hook entries

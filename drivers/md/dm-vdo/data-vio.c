@@ -21,8 +21,9 @@
 
 #include "logger.h"
 #include "memory-alloc.h"
-#include "murmurhash3.h"
 #include "permassert.h"
+
+#include "indexer/murmurhash3.h"
 
 #include "block-map.h"
 #include "dump.h"

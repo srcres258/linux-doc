@@ -8,7 +8,7 @@
 #include "cpu.h"
 #include "memory-alloc.h"
 #include "permassert.h"
-#include "uds.h"
+#include "indexer/uds.h"
 
 int uds_make_funnel_queue(struct funnel_queue **queue_ptr)
 {

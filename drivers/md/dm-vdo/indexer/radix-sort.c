@@ -8,8 +8,8 @@
 #include <linux/limits.h>
 #include <linux/types.h>
 
-#include "memory-alloc.h"
-#include "string-utils.h"
+#include "../memory-alloc.h"
+#include "../string-utils.h"
 
 /*
  * This implementation allocates one large object to do the sorting, which can be reused as many

@@ -10,9 +10,9 @@
 #include <linux/err.h>
 #include <linux/mount.h>
 
-#include "logger.h"
-#include "memory-alloc.h"
-#include "numeric.h"
+#include "../logger.h"
+#include "../memory-alloc.h"
+#include "../numeric.h"
 
 /*
  * The I/O factory object manages access to index storage, which is a contiguous range of blocks on

@@ -9,10 +9,11 @@
 
 #include "config.h"
 #include "hash-utils.h"
-#include "logger.h"
-#include "memory-alloc.h"
-#include "numeric.h"
-#include "permassert.h"
+
+#include "../logger.h"
+#include "../memory-alloc.h"
+#include "../numeric.h"
+#include "../permassert.h"
 
 /*
  * Each index zone has a dedicated open chapter zone structure which gets an equal share of the

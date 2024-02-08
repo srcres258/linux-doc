@@ -9,8 +9,9 @@
 #include <linux/atomic.h>
 #include <linux/cache.h>
 
+#include "../uds-threads.h"
+
 #include "config.h"
-#include "uds-threads.h"
 #include "uds.h"
 
 /*
