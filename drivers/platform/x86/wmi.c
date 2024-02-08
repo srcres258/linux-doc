@@ -232,7 +232,7 @@ static int wmidev_match_notify_id(struct device *dev, const void *data)
 	return 0;
 }
 
-static struct bus_type wmi_bus_type;
+static const struct bus_type wmi_bus_type;
 
 static struct wmi_device *wmi_find_device_by_guid(const char *guid_string)
 {
@@ -931,7 +931,7 @@ static struct class wmi_bus_class = {
 	.name = "wmi_bus",
 };
 
-static struct bus_type wmi_bus_type = {
+static const struct bus_type wmi_bus_type = {
 	.name = "wmi",
 	.dev_groups = wmi_groups,
 	.match = wmi_dev_match,
@@ -1245,8 +1245,7 @@ static int wmi_notify_device(struct device *dev, void *data)
 	}
 	up_read(&wblock->notify_lock);
 
-	acpi_bus_generate_netlink_event(wblock->acpi_device->pnp.device_class,
-					dev_name(&wblock->dev.dev), *event, 0);
+	acpi_bus_generate_netlink_event("wmi", acpi_dev_name(wblock->acpi_device), *event, 0);
 
 	return -EBUSY;
 }
