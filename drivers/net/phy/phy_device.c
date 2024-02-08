@@ -780,7 +780,7 @@ static int get_phy_c45_devs_in_pkg(struct mii_bus *bus, int addr, int dev_addr,
  * and identifiers in @c45_ids.
  *
  * Returns zero on success, %-EIO on bus access error, or %-ENODEV if
- * the "devices in package" is invalid.
+ * the "devices in package" is invalid or no device responds.
  */
 static int get_phy_c45_ids(struct mii_bus *bus, int addr,
 			   struct phy_c45_device_ids *c45_ids)
@@ -803,7 +803,11 @@ static int get_phy_c45_ids(struct mii_bus *bus, int addr,
 			 */
 			ret = phy_c45_probe_present(bus, addr, i);
 			if (ret < 0)
-				return -EIO;
+				/* returning -ENODEV doesn't stop bus
+				 * scanning
+				 */
+				return (phy_reg == -EIO ||
+					phy_reg == -ENODEV) ? -ENODEV : -EIO;
 
 			if (!ret)
 				continue;
@@ -1413,6 +1417,11 @@ int phy_sfp_probe(struct phy_device *phydev,
 }
 EXPORT_SYMBOL(phy_sfp_probe);
 
+static bool phy_drv_supports_irq(const struct phy_driver *phydrv)
+{
+	return phydrv->config_intr && phydrv->handle_interrupt;
+}
+
 /**
  * phy_attach_direct - attach a network device to a given PHY device pointer
  * @dev: network device to attach
@@ -1525,6 +1534,9 @@ int phy_attach_direct(struct net_device *dev, struct phy_device *phydev,
 	 * detect a broken interrupt handling.
 	 */
 	if (phydev->dev_flags & PHY_F_NO_IRQ)
+		phydev->irq = PHY_POLL;
+
+	if (!phy_drv_supports_irq(phydev->drv) && phy_interrupt_is_valid(phydev))
 		phydev->irq = PHY_POLL;
 
 	/* Port is set to PORT_TP by default and the actual PHY driver will set
@@ -1859,7 +1871,7 @@ int phy_suspend(struct phy_device *phydev)
 {
 	struct ethtool_wolinfo wol = { .cmd = ETHTOOL_GWOL };
 	struct net_device *netdev = phydev->attached_dev;
-	struct phy_driver *phydrv = phydev->drv;
+	const struct phy_driver *phydrv = phydev->drv;
 	int ret;
 
 	if (phydev->suspended)
@@ -1884,7 +1896,7 @@ EXPORT_SYMBOL(phy_suspend);
 
 int __phy_resume(struct phy_device *phydev)
 {
-	struct phy_driver *phydrv = phydev->drv;
+	const struct phy_driver *phydrv = phydev->drv;
 	int ret;
 
 	lockdep_assert_held(&phydev->lock);
@@ -2770,6 +2782,22 @@ void phy_advertise_supported(struct phy_device *phydev)
 EXPORT_SYMBOL(phy_advertise_supported);
 
 /**
+ * phy_advertise_eee_all - Advertise all supported EEE modes
+ * @phydev: target phy_device struct
+ *
+ * Description: Per default phylib preserves the EEE advertising at the time of
+ * phy probing, which might be a subset of the supported EEE modes. Use this
+ * function when all supported EEE modes should be advertised. This does not
+ * trigger auto-negotiation, so must be called before phy_start()/
+ * phylink_start() which will start auto-negotiation.
+ */
+void phy_advertise_eee_all(struct phy_device *phydev)
+{
+	linkmode_copy(phydev->advertising_eee, phydev->supported_eee);
+}
+EXPORT_SYMBOL_GPL(phy_advertise_eee_all);
+
+/**
  * phy_support_sym_pause - Enable support of symmetrical pause
  * @phydev: target phy_device struct
  *
@@ -2992,11 +3020,6 @@ s32 phy_get_internal_delay(struct phy_device *phydev, struct device *dev,
 }
 EXPORT_SYMBOL(phy_get_internal_delay);
 
-static bool phy_drv_supports_irq(struct phy_driver *phydrv)
-{
-	return phydrv->config_intr && phydrv->handle_interrupt;
-}
-
 static int phy_led_set_brightness(struct led_classdev *led_cdev,
 				  enum led_brightness value)
 {
@@ -3097,6 +3120,7 @@ static int of_phy_led(struct phy_device *phydev,
 	struct device *dev = &phydev->mdio.dev;
 	struct led_init_data init_data = {};
 	struct led_classdev *cdev;
+	unsigned long modes = 0;
 	struct phy_led *phyled;
 	u32 index;
 	int err;
@@ -3113,6 +3137,21 @@ static int of_phy_led(struct phy_device *phydev,
 		return err;
 	if (index > U8_MAX)
 		return -EINVAL;
+
+	if (of_property_read_bool(led, "active-low"))
+		set_bit(PHY_LED_ACTIVE_LOW, &modes);
+	if (of_property_read_bool(led, "inactive-high-impedance"))
+		set_bit(PHY_LED_INACTIVE_HIGH_IMPEDANCE, &modes);
+
+	if (modes) {
+		/* Return error if asked to set polarity modes but not supported */
+		if (!phydev->drv->led_polarity_set)
+			return -EINVAL;
+
+		err = phydev->drv->led_polarity_set(phydev, index, modes);
+		if (err)
+			return err;
+	}
 
 	phyled->index = index;
 	if (phydev->drv->led_brightness_set)

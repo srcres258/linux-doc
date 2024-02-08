@@ -1257,7 +1257,7 @@ static void b53_adjust_link(struct dsa_switch *ds, int port,
 			    struct phy_device *phydev)
 {
 	struct b53_device *dev = ds->priv;
-	struct ethtool_eee *p = &dev->ports[port].eee;
+	struct ethtool_keee *p = &dev->ports[port].eee;
 	u8 rgmii_ctrl = 0, reg = 0, off;
 	bool tx_pause = false;
 	bool rx_pause = false;
@@ -2224,27 +2224,21 @@ int b53_eee_init(struct dsa_switch *ds, int port, struct phy_device *phy)
 }
 EXPORT_SYMBOL(b53_eee_init);
 
-int b53_get_mac_eee(struct dsa_switch *ds, int port, struct ethtool_eee *e)
+int b53_get_mac_eee(struct dsa_switch *ds, int port, struct ethtool_keee *e)
 {
 	struct b53_device *dev = ds->priv;
-	struct ethtool_eee *p = &dev->ports[port].eee;
-	u16 reg;
 
 	if (is5325(dev) || is5365(dev))
 		return -EOPNOTSUPP;
-
-	b53_read16(dev, B53_EEE_PAGE, B53_EEE_LPI_INDICATE, &reg);
-	e->eee_enabled = p->eee_enabled;
-	e->eee_active = !!(reg & BIT(port));
 
 	return 0;
 }
 EXPORT_SYMBOL(b53_get_mac_eee);
 
-int b53_set_mac_eee(struct dsa_switch *ds, int port, struct ethtool_eee *e)
+int b53_set_mac_eee(struct dsa_switch *ds, int port, struct ethtool_keee *e)
 {
 	struct b53_device *dev = ds->priv;
-	struct ethtool_eee *p = &dev->ports[port].eee;
+	struct ethtool_keee *p = &dev->ports[port].eee;
 
 	if (is5325(dev) || is5365(dev))
 		return -EOPNOTSUPP;
