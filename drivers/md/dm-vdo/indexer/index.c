@@ -3,14 +3,13 @@
  * Copyright 2023 Red Hat
  */
 
-
 #include "index.h"
-
-#include "funnel-requestqueue.h"
 #include "hash-utils.h"
-#include "logger.h"
-#include "memory-alloc.h"
 #include "sparse-cache.h"
+
+#include "../funnel-requestqueue.h"
+#include "../logger.h"
+#include "../memory-alloc.h"
 
 static const u64 NO_LAST_SAVE = U64_MAX;
 

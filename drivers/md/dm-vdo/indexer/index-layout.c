@@ -8,13 +8,14 @@
 #include <linux/random.h>
 
 #include "config.h"
-#include "logger.h"
-#include "memory-alloc.h"
 #include "murmurhash3.h"
-#include "numeric.h"
 #include "open-chapter.h"
-#include "time-utils.h"
 #include "volume-index.h"
+
+#include "../logger.h"
+#include "../memory-alloc.h"
+#include "../numeric.h"
+#include "../time-utils.h"
 
 /*
  * The UDS layout on storage media is divided into a number of fixed-size regions, the sizes of

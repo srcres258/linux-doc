@@ -7,8 +7,9 @@
 #define UDS_HASH_UTILS_H
 
 #include "geometry.h"
-#include "numeric.h"
 #include "uds.h"
+
+#include "../numeric.h"
 
 /* Utilities for extracting portions of a request name for various uses. */
 

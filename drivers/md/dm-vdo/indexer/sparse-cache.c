@@ -11,10 +11,11 @@
 #include "chapter-index.h"
 #include "config.h"
 #include "index.h"
-#include "logger.h"
-#include "memory-alloc.h"
-#include "permassert.h"
-#include "uds-threads.h"
+
+#include "../logger.h"
+#include "../memory-alloc.h"
+#include "../permassert.h"
+#include "../uds-threads.h"
 
 /*
  * Since the cache is small, it is implemented as a simple array of cache entries. Searching for a

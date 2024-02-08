@@ -11,7 +11,7 @@
 #include <linux/list.h>
 
 #include "permassert.h"
-#include "uds.h"
+#include "indexer/uds.h"
 
 #include "block-map.h"
 #include "completion.h"

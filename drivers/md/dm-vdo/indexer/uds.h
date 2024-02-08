@@ -8,7 +8,7 @@
 
 #include <linux/types.h>
 
-#include "funnel-queue.h"
+#include "../funnel-queue.h"
 
 /*
  * UDS public API

@@ -131,7 +131,8 @@
 #include "numeric.h"
 #include "permassert.h"
 #include "string-utils.h"
-#include "uds.h"
+
+#include "indexer/uds.h"
 
 #include "action-manager.h"
 #include "admin-state.h"

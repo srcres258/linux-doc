@@ -10,15 +10,16 @@
 #include <linux/limits.h>
 #include <linux/log2.h>
 
+#include "../cpu.h"
+#include "../errors.h"
+#include "../logger.h"
+#include "../memory-alloc.h"
+#include "../numeric.h"
+#include "../permassert.h"
+#include "../string-utils.h"
+#include "../time-utils.h"
+
 #include "config.h"
-#include "cpu.h"
-#include "errors.h"
-#include "logger.h"
-#include "memory-alloc.h"
-#include "numeric.h"
-#include "permassert.h"
-#include "string-utils.h"
-#include "time-utils.h"
 #include "uds.h"
 
 /*
