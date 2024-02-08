@@ -214,6 +214,10 @@ enum node_stat_item {
 	PGDEMOTE_KSWAPD,
 	PGDEMOTE_DIRECT,
 	PGDEMOTE_KHUGEPAGED,
+	NR_PAGE_METADATA,	/* Page metadata size (struct page and page_ext)
+				 * in pages
+				 */
+	NR_PAGE_METADATA_BOOT,	/* NR_PAGE_METADATA for bootmem */
 	NR_VM_NODE_STAT_ITEMS
 };
 

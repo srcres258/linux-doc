@@ -20,6 +20,7 @@
 #include <linux/nmi.h>
 #include <linux/buffer_head.h>
 #include <linux/kmemleak.h>
+#include <linux/vmstat.h>
 #include <linux/kfence.h>
 #include <linux/page_ext.h>
 #include <linux/pti.h>
@@ -1644,7 +1645,7 @@ static void __init alloc_node_mem_map(struct pglist_data *pgdat)
 	start = pgdat->node_start_pfn & ~(MAX_ORDER_NR_PAGES - 1);
 	offset = pgdat->node_start_pfn - start;
 	/*
-		 * The zone's endpoints aren't required to be MAX_PAGE_ORDER
+	 * The zone's endpoints aren't required to be MAX_PAGE_ORDER
 	 * aligned but the node_mem_map endpoints must be in order
 	 * for the buddy allocator to function correctly.
 	 */
@@ -1656,6 +1657,8 @@ static void __init alloc_node_mem_map(struct pglist_data *pgdat)
 		panic("Failed to allocate %ld bytes for node %d memory map\n",
 		      size, pgdat->node_id);
 	pgdat->node_mem_map = map + offset;
+		mod_node_early_perpage_metadata(pgdat->node_id,
+						DIV_ROUND_UP(size, PAGE_SIZE));
 	pr_debug("%s: node %d, pgdat %08lx, node_mem_map %08lx\n",
 		 __func__, pgdat->node_id, (unsigned long)pgdat,
 		 (unsigned long)pgdat->node_mem_map);
@@ -2231,6 +2234,7 @@ static int __init deferred_init_memmap(void *data)
 			.align       = PAGES_PER_SECTION,
 			.min_chunk   = PAGES_PER_SECTION,
 			.max_threads = max_threads,
+			.numa_aware  = false,
 		};
 
 		padata_do_multithreaded(&job);

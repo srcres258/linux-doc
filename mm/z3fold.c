@@ -442,8 +442,6 @@ static void __release_z3fold_page(struct z3fold_header *zhdr, bool locked)
 	WARN_ON(!list_empty(&zhdr->buddy));
 	set_bit(PAGE_STALE, &page->private);
 	clear_bit(NEEDS_COMPACTING, &page->private);
-	spin_lock(&pool->lock);
-	spin_unlock(&pool->lock);
 
 	if (locked)
 		z3fold_page_unlock(zhdr);
@@ -1070,9 +1068,7 @@ found:
 	add_to_unbuddied(pool, zhdr);
 
 headless:
-	spin_lock(&pool->lock);
 	*handle = encode_handle(zhdr, bud);
-	spin_unlock(&pool->lock);
 	if (bud != HEADLESS)
 		z3fold_page_unlock(zhdr);
 
