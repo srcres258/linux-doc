@@ -174,6 +174,7 @@ const struct fs_parameter_spec smb3_fs_parameters[] = {
 	fsparam_string("vers", Opt_vers),
 	fsparam_string("sec", Opt_sec),
 	fsparam_string("cache", Opt_cache),
+	fsparam_string("reparse", Opt_reparse),
 
 	/* Arguments that should be ignored */
 	fsparam_flag("guest", Opt_ignore),
@@ -211,7 +212,7 @@ cifs_parse_security_flavors(struct fs_context *fc, char *value, struct smb3_fs_c
 
 	switch (match_token(value, cifs_secflavor_tokens, args)) {
 	case Opt_sec_krb5p:
-		cifs_errorf(fc, "sec=krb5p is not supported!\n");
+		cifs_errorf(fc, "sec=krb5p is not supported. Use sec=krb5,seal instead\n");
 		return 1;
 	case Opt_sec_krb5i:
 		ctx->sign = true;
@@ -291,6 +292,35 @@ cifs_parse_cache_flavor(struct fs_context *fc, char *value, struct smb3_fs_conte
 		break;
 	default:
 		cifs_errorf(fc, "bad cache= option: %s\n", value);
+		return 1;
+	}
+	return 0;
+}
+
+static const match_table_t reparse_flavor_tokens = {
+	{ Opt_reparse_default,	"default" },
+	{ Opt_reparse_nfs,	"nfs" },
+	{ Opt_reparse_wsl,	"wsl" },
+	{ Opt_reparse_err,	NULL },
+};
+
+static int parse_reparse_flavor(struct fs_context *fc, char *value,
+				struct smb3_fs_context *ctx)
+{
+	substring_t args[MAX_OPT_ARGS];
+
+	switch (match_token(value, reparse_flavor_tokens, args)) {
+	case Opt_reparse_default:
+		ctx->reparse_type = CIFS_REPARSE_TYPE_DEFAULT;
+		break;
+	case Opt_reparse_nfs:
+		ctx->reparse_type = CIFS_REPARSE_TYPE_NFS;
+		break;
+	case Opt_reparse_wsl:
+		ctx->reparse_type = CIFS_REPARSE_TYPE_WSL;
+		break;
+	default:
+		cifs_errorf(fc, "bad reparse= option: %s\n", value);
 		return 1;
 	}
 	return 0;
@@ -1111,6 +1141,8 @@ static int smb3_fs_context_parse_param(struct fs_context *fc,
 	case Opt_wsize:
 		ctx->wsize = result.uint_32;
 		ctx->got_wsize = true;
+		if (round_up(ctx->wsize, PAGE_SIZE) != ctx->wsize)
+			cifs_dbg(VFS, "wsize should be a multiple of 4096 (PAGE_SIZE)\n");
 		break;
 	case Opt_acregmax:
 		ctx->acregmax = HZ * result.uint_32;
@@ -1538,6 +1570,10 @@ static int smb3_fs_context_parse_param(struct fs_context *fc,
 	case Opt_rdma:
 		ctx->rdma = true;
 		break;
+	case Opt_reparse:
+		if (parse_reparse_flavor(fc, param->string, ctx))
+			goto cifs_parse_mount_err;
+		break;
 	}
 	/* case Opt_ignore: - is ignored as expected ... */
 
@@ -1624,6 +1660,7 @@ int smb3_init_fs_context(struct fs_context *fc)
 	ctx->backupgid_specified = false; /* no backup intent for a group */
 
 	ctx->retrans = 1;
+	ctx->reparse_type = CIFS_REPARSE_TYPE_DEFAULT;
 
 /*
  *	short int override_uid = -1;
