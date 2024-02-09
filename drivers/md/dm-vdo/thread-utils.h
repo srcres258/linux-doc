@@ -23,28 +23,12 @@ struct cond_var {
 
 struct thread;
 
-struct barrier {
-	/* Lock for this barrier object */
-	struct semaphore lock;
-	/* Semaphore for threads waiting at the barrier */
-	struct semaphore wait;
-	/* Number of threads which have arrived */
-	int arrived;
-	/* Total number of threads using this barrier */
-	int thread_count;
-};
-
 int __must_check uds_create_thread(void (*thread_function)(void *), void *thread_data,
 				   const char *name, struct thread **new_thread);
 
 void uds_perform_once(atomic_t *once_state, void (*function) (void));
 
 int uds_join_threads(struct thread *thread);
-
-int __must_check uds_initialize_barrier(struct barrier *barrier,
-					unsigned int thread_count);
-int uds_destroy_barrier(struct barrier *barrier);
-int uds_enter_barrier(struct barrier *barrier);
 
 static inline int __must_check uds_init_cond(struct cond_var *cv)
 {
