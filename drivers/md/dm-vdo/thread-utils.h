@@ -15,20 +15,19 @@
 
 #include "errors.h"
 
-/* Thread and synchronization utilities for UDS */
+/* Thread and synchronization utilities */
+
+struct thread;
+
+int __must_check vdo_create_thread(void (*thread_function)(void *), void *thread_data,
+				   const char *name, struct thread **new_thread);
+void vdo_join_threads(struct thread *thread);
+
+void vdo_perform_once(atomic_t *once_state, void (*function) (void));
 
 struct cond_var {
 	wait_queue_head_t wait_queue;
 };
-
-struct thread;
-
-int __must_check uds_create_thread(void (*thread_function)(void *), void *thread_data,
-				   const char *name, struct thread **new_thread);
-
-void uds_perform_once(atomic_t *once_state, void (*function) (void));
-
-int uds_join_threads(struct thread *thread);
 
 static inline int __must_check uds_init_cond(struct cond_var *cv)
 {
