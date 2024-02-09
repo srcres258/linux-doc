@@ -140,8 +140,8 @@ void uds_wait_cond(struct cond_var *cv, struct mutex *mutex)
 	DEFINE_WAIT(__wait);
 
 	prepare_to_wait(&cv->wait_queue, &__wait, TASK_IDLE);
-	uds_unlock_mutex(mutex);
+	mutex_unlock(mutex);
 	schedule();
 	finish_wait(&cv->wait_queue, &__wait);
-	uds_lock_mutex(mutex);
+	mutex_lock(mutex);
 }

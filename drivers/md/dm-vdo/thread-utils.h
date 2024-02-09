@@ -47,30 +47,8 @@ static inline void uds_broadcast_cond(struct cond_var *cv)
 
 void uds_wait_cond(struct cond_var *cond, struct mutex *mutex);
 
-/* FIXME: all below wrappers should be removed! */
-
 static inline void uds_destroy_cond(struct cond_var *cv)
 {
-}
-
-static inline int __must_check uds_init_mutex(struct mutex *mutex)
-{
-	mutex_init(mutex);
-	return UDS_SUCCESS;
-}
-
-static inline void uds_destroy_mutex(struct mutex *mutex)
-{
-}
-
-static inline void uds_lock_mutex(struct mutex *mutex)
-{
-	mutex_lock(mutex);
-}
-
-static inline void uds_unlock_mutex(struct mutex *mutex)
-{
-	mutex_unlock(mutex);
 }
 
 #endif /* THREAD_UTILS_H */
