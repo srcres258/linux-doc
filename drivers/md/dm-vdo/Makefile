@@ -37,8 +37,8 @@ dm-vdo-objs := \
 	sysfs.o \
 	thread-device.o \
 	thread-registry.o \
+	thread-utils.o \
 	uds-sysfs.o \
-	uds-threads.o \
 	vdo.o \
 	vio.o \
 	wait-queue.o \
