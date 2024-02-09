@@ -35,7 +35,6 @@ dm-vdo-objs := \
 	status-codes.o \
 	string-utils.o \
 	sysfs.o \
-	thread-cond-var.o \
 	thread-device.o \
 	thread-registry.o \
 	uds-sysfs.o \
