@@ -9,7 +9,7 @@
  * Copyright (c) 2006, Michael Wu <flamingice@sourmilk.net>
  * Copyright (c) 2013 - 2014 Intel Mobile Communications GmbH
  * Copyright (c) 2016 - 2017 Intel Deutschland GmbH
- * Copyright (c) 2018 - 2023 Intel Corporation
+ * Copyright (c) 2018 - 2024 Intel Corporation
  */
 
 #ifndef LINUX_IEEE80211_H
@@ -189,6 +189,11 @@
 static inline bool ieee80211_sn_less(u16 sn1, u16 sn2)
 {
 	return ((sn1 - sn2) & IEEE80211_SN_MASK) > (IEEE80211_SN_MODULO >> 1);
+}
+
+static inline bool ieee80211_sn_less_eq(u16 sn1, u16 sn2)
+{
+	return ((sn2 - sn1) & IEEE80211_SN_MASK) <= (IEEE80211_SN_MODULO >> 1);
 }
 
 static inline u16 ieee80211_sn_add(u16 sn1, u16 sn2)
@@ -806,6 +811,11 @@ static inline bool ieee80211_is_frag(struct ieee80211_hdr *hdr)
 {
 	return ieee80211_has_morefrags(hdr->frame_control) ||
 	       hdr->seq_ctrl & cpu_to_le16(IEEE80211_SCTL_FRAG);
+}
+
+static inline u16 ieee80211_get_sn(struct ieee80211_hdr *hdr)
+{
+	return le16_get_bits(hdr->seq_ctrl, IEEE80211_SCTL_SEQ);
 }
 
 struct ieee80211s_hdr {
@@ -3050,6 +3060,9 @@ ieee80211_he_spr_size(const u8 *he_spr_ie)
 #define IEEE80211_EHT_PHY_CAP5_SUPP_EXTRA_EHT_LTF		0x40
 #define IEEE80211_EHT_PHY_CAP6_MAX_NUM_SUPP_EHT_LTF_MASK	0x07
 
+#define IEEE80211_EHT_PHY_CAP6_MCS15_SUPP_80MHZ			0x08
+#define IEEE80211_EHT_PHY_CAP6_MCS15_SUPP_160MHZ		0x30
+#define IEEE80211_EHT_PHY_CAP6_MCS15_SUPP_320MHZ		0x40
 #define IEEE80211_EHT_PHY_CAP6_MCS15_SUPP_MASK			0x78
 #define IEEE80211_EHT_PHY_CAP6_EHT_DUP_6GHZ_SUPP		0x80
 
@@ -3187,6 +3200,22 @@ ieee80211_eht_oper_size_ok(const u8 *data, u8 len)
 	}
 
 	return len >= needed;
+}
+
+/* must validate ieee80211_eht_oper_size_ok() first */
+static inline u16
+ieee80211_eht_oper_dis_subchan_bitmap(const struct ieee80211_eht_operation *eht_oper)
+{
+	const struct ieee80211_eht_operation_info *info =
+		(const void *)eht_oper->optional;
+
+	if (!(eht_oper->params & IEEE80211_EHT_OPER_INFO_PRESENT))
+		return 0;
+
+	if (!(eht_oper->params & IEEE80211_EHT_OPER_DISABLED_SUBCHANNEL_BITMAP_PRESENT))
+		return 0;
+
+	return get_unaligned_le16(info->optional);
 }
 
 #define IEEE80211_BW_IND_DIS_SUBCH_PRESENT	BIT(1)

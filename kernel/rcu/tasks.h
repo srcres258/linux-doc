@@ -1185,6 +1185,11 @@ EXPORT_SYMBOL_GPL(get_rcu_tasks_gp_kthread);
  * Protect against tasklist scan blind spot while the task is exiting and
  * may be removed from the tasklist.  Do this by adding the task to yet
  * another list.
+ *
+ * Note that the task will remove itself from this list, so there is no
+ * need for get_task_struct(), except in the case where rcu_tasks_pertask()
+ * adds it to the holdout list, in which case rcu_tasks_pertask() supplies
+ * the needed get_task_struct().
  */
 void exit_tasks_rcu_start(void)
 {
@@ -1193,7 +1198,6 @@ void exit_tasks_rcu_start(void)
 	struct task_struct *t = current;
 
 	WARN_ON_ONCE(!list_empty(&t->rcu_tasks_exit_list));
-	get_task_struct(t);
 	preempt_disable();
 	rtpcp = this_cpu_ptr(rcu_tasks.rtpcpu);
 	t->rcu_tasks_exit_cpu = smp_processor_id();
@@ -1220,7 +1224,6 @@ void exit_tasks_rcu_stop(void)
 	raw_spin_lock_irqsave_rcu_node(rtpcp, flags);
 	list_del_init(&t->rcu_tasks_exit_list);
 	raw_spin_unlock_irqrestore_rcu_node(rtpcp, flags);
-	put_task_struct(t);
 }
 
 /*

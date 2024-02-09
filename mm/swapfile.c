@@ -3380,9 +3380,6 @@ int swapcache_prepare(swp_entry_t entry)
 	return __swap_duplicate(entry, SWAP_HAS_CACHE);
 }
 
-/*
- * Clear the cache flag and release pinned entry.
- */
 void swapcache_clear(struct swap_info_struct *si, swp_entry_t entry)
 {
 	struct swap_cluster_info *ci;

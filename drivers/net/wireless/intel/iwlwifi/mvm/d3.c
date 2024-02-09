@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0 OR BSD-3-Clause
 /*
- * Copyright (C) 2012-2014, 2018-2023 Intel Corporation
+ * Copyright (C) 2012-2014, 2018-2024 Intel Corporation
  * Copyright (C) 2013-2015 Intel Mobile Communications GmbH
  * Copyright (C) 2016-2017 Intel Deutschland GmbH
  */
@@ -461,11 +461,9 @@ static int iwl_mvm_wowlan_config_rsc_tsc(struct iwl_mvm *mvm,
 		struct wowlan_key_rsc_v5_data data = {};
 		int i;
 
-		data.rsc = kmalloc(sizeof(*data.rsc), GFP_KERNEL);
+		data.rsc = kzalloc(sizeof(*data.rsc), GFP_KERNEL);
 		if (!data.rsc)
 			return -ENOMEM;
-
-		memset(data.rsc, 0xff, sizeof(*data.rsc));
 
 		for (i = 0; i < ARRAY_SIZE(data.rsc->mcast_key_id_map); i++)
 			data.rsc->mcast_key_id_map[i] =
@@ -1866,9 +1864,12 @@ iwl_mvm_d3_set_igtk_bigtk_ipn(const struct iwl_multicast_key_data *key,
 		memcpy(seq->aes_gmac.pn, key->ipn, sizeof(seq->aes_gmac.pn));
 		break;
 	case WLAN_CIPHER_SUITE_BIP_CMAC_256:
+	case WLAN_CIPHER_SUITE_AES_CMAC:
 		BUILD_BUG_ON(sizeof(seq->aes_cmac.pn) != sizeof(key->ipn));
 		memcpy(seq->aes_cmac.pn, key->ipn, sizeof(seq->aes_cmac.pn));
 		break;
+	default:
+		WARN_ON(1);
 	}
 }
 
@@ -1958,7 +1959,7 @@ static bool iwl_mvm_gtk_rekey(struct iwl_wowlan_status_data *status,
 			      struct ieee80211_vif *vif,
 			      struct iwl_mvm *mvm, u32 gtk_cipher)
 {
-	int i;
+	int i, j;
 	struct ieee80211_key_conf *key;
 	struct {
 		struct ieee80211_key_conf conf;
@@ -2002,7 +2003,15 @@ static bool iwl_mvm_gtk_rekey(struct iwl_wowlan_status_data *status,
 		key = ieee80211_gtk_rekey_add(vif, &conf.conf);
 		if (IS_ERR(key))
 			return false;
-		iwl_mvm_set_key_rx_seq_idx(key, status, i);
+
+		for (j = 0; j < ARRAY_SIZE(status->gtk_seq); j++) {
+			if (!status->gtk_seq[j].valid ||
+			    status->gtk_seq[j].key_id != key->keyidx)
+				continue;
+			iwl_mvm_set_key_rx_seq_idx(key, status, j);
+			break;
+		}
+		WARN_ON(j == ARRAY_SIZE(status->gtk_seq));
 	}
 
 	return true;
@@ -2092,15 +2101,11 @@ static bool iwl_mvm_setup_connection_keep(struct iwl_mvm *mvm,
 		.status = status,
 	};
 	int i;
-
 	u32 disconnection_reasons =
 		IWL_WOWLAN_WAKEUP_BY_DISCONNECTION_ON_MISSED_BEACON |
 		IWL_WOWLAN_WAKEUP_BY_DISCONNECTION_ON_DEAUTH;
 
 	if (!status || !vif->bss_conf.bssid)
-		return false;
-
-	if (status->wakeup_reasons & disconnection_reasons)
 		return false;
 
 	if (iwl_mvm_lookup_wowlan_status_ver(mvm) > 6 ||
@@ -2162,6 +2167,9 @@ out:
 		/* +0x10 because the set API expects next-to-use, not last-used */
 		mvmvif->seqno = status->non_qos_seq_ctr + 0x10;
 	}
+
+	if (status->wakeup_reasons & disconnection_reasons)
+		return false;
 
 	return true;
 }
@@ -3381,6 +3389,7 @@ static ssize_t iwl_mvm_d3_test_read(struct file *file, char __user *user_buf,
 				    size_t count, loff_t *ppos)
 {
 	struct iwl_mvm *mvm = file->private_data;
+	unsigned long end = jiffies + 60 * HZ;
 	u32 pme_asserted;
 
 	while (true) {
@@ -3394,6 +3403,12 @@ static ssize_t iwl_mvm_d3_test_read(struct file *file, char __user *user_buf,
 
 		if (msleep_interruptible(100))
 			break;
+
+		if (time_is_before_jiffies(end)) {
+			IWL_ERR(mvm,
+				"ending pseudo-D3 with timeout after ~60 seconds\n");
+			return -ETIMEDOUT;
+		}
 	}
 
 	return 0;

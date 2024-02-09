@@ -726,10 +726,8 @@ static int ltc4282_write_voltage_byte_cached(const struct ltc4282_state *st,
 {
 	u32 in;
 
-	if (val >= fs)
-		in = U8_MAX;
-	else
-		in = DIV_ROUND_CLOSEST(val * U8_MAX, fs);
+	val = clamp_val(val, 0, fs);
+	in = DIV_ROUND_CLOSEST(val * U8_MAX, fs);
 
 	if (cache_raw) {
 		*cache_raw = in;

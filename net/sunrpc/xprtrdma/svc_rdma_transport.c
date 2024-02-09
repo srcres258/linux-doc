@@ -422,8 +422,13 @@ static struct svc_xprt *svc_rdma_accept(struct svc_xprt *xprt)
 		newxprt->sc_max_requests = rq_depth - 2;
 		newxprt->sc_max_bc_requests = 2;
 	}
-	ctxts = rdma_rw_mr_factor(dev, newxprt->sc_port_num, RPCSVC_MAXPAGES);
-	ctxts *= newxprt->sc_max_requests;
+
+	/* Arbitrarily estimate the number of rw_ctxs needed for
+	 * this transport. This is enough rw_ctxs to make forward
+	 * progress even if the client is using one rkey per page
+	 * in each Read chunk.
+	 */
+	ctxts = 3 * RPCSVC_MAXPAGES;
 	newxprt->sc_sq_depth = rq_depth + ctxts;
 	if (newxprt->sc_sq_depth > dev->attrs.max_qp_wr)
 		newxprt->sc_sq_depth = dev->attrs.max_qp_wr;
@@ -467,18 +472,14 @@ static struct svc_xprt *svc_rdma_accept(struct svc_xprt *xprt)
 		qp_attr.cap.max_send_wr, qp_attr.cap.max_recv_wr);
 	dprintk("    cap.max_send_sge = %d, cap.max_recv_sge = %d\n",
 		qp_attr.cap.max_send_sge, qp_attr.cap.max_recv_sge);
-
+	dprintk("    send CQ depth = %u, recv CQ depth = %u\n",
+		newxprt->sc_sq_depth, rq_depth);
 	ret = rdma_create_qp(newxprt->sc_cm_id, newxprt->sc_pd, &qp_attr);
 	if (ret) {
 		trace_svcrdma_qp_err(newxprt, ret);
 		goto errout;
 	}
-	dprintk("svcrdma: cap.max_send_wr = %d, cap.max_recv_wr = %d\n",
-		qp_attr.cap.max_send_wr, qp_attr.cap.max_recv_wr);
-	dprintk("    cap.max_send_sge = %d, cap.max_recv_sge = %d\n",
-		qp_attr.cap.max_send_sge, qp_attr.cap.max_recv_sge);
-	dprintk("    send CQ depth = %d, recv CQ depth = %d\n",
-		sq_depth, rq_depth);
+	newxprt->sc_max_send_sges = qp_attr.cap.max_send_sge;
 	newxprt->sc_qp = newxprt->sc_cm_id->qp;
 	newxprt->sc_sq_depth = qp_attr.cap.max_send_wr;
 	atomic_set(&newxprt->sc_sq_avail, qp_attr.cap.max_send_wr);

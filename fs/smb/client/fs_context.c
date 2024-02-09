@@ -212,7 +212,7 @@ cifs_parse_security_flavors(struct fs_context *fc, char *value, struct smb3_fs_c
 
 	switch (match_token(value, cifs_secflavor_tokens, args)) {
 	case Opt_sec_krb5p:
-		cifs_errorf(fc, "sec=krb5p is not supported!\n");
+		cifs_errorf(fc, "sec=krb5p is not supported. Use sec=krb5,seal instead\n");
 		return 1;
 	case Opt_sec_krb5i:
 		ctx->sign = true;
@@ -1141,6 +1141,8 @@ static int smb3_fs_context_parse_param(struct fs_context *fc,
 	case Opt_wsize:
 		ctx->wsize = result.uint_32;
 		ctx->got_wsize = true;
+		if (round_up(ctx->wsize, PAGE_SIZE) != ctx->wsize)
+			cifs_dbg(VFS, "wsize should be a multiple of 4096 (PAGE_SIZE)\n");
 		break;
 	case Opt_acregmax:
 		ctx->acregmax = HZ * result.uint_32;

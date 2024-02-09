@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0 OR BSD-3-Clause
 /*
- * Copyright (C) 2012-2014, 2018-2023 Intel Corporation
+ * Copyright (C) 2012-2014, 2018-2024 Intel Corporation
  * Copyright (C) 2013-2015 Intel Mobile Communications GmbH
  * Copyright (C) 2016-2017 Intel Deutschland GmbH
  */
@@ -161,9 +161,9 @@ static void iwl_mvm_rx_monitor_notif(struct iwl_mvm *mvm,
 	if (!vif || vif->type != NL80211_IFTYPE_STATION)
 		return;
 
-	if (!vif->bss_conf.chandef.chan ||
-	    vif->bss_conf.chandef.chan->band != NL80211_BAND_2GHZ ||
-	    vif->bss_conf.chandef.width < NL80211_CHAN_WIDTH_40)
+	if (!vif->bss_conf.chanreq.oper.chan ||
+	    vif->bss_conf.chanreq.oper.chan->band != NL80211_BAND_2GHZ ||
+	    vif->bss_conf.chanreq.oper.width < NL80211_CHAN_WIDTH_40)
 		return;
 
 	if (!vif->cfg.assoc)
@@ -219,7 +219,7 @@ void iwl_mvm_update_link_smps(struct ieee80211_vif *vif,
 		return;
 
 	if (mvm->fw_static_smps_request &&
-	    link_conf->chandef.width == NL80211_CHAN_WIDTH_160 &&
+	    link_conf->chanreq.oper.width == NL80211_CHAN_WIDTH_160 &&
 	    link_conf->he_support)
 		mode = IEEE80211_SMPS_STATIC;
 
@@ -1828,12 +1828,8 @@ static void iwl_mvm_wake_sw_queue(struct iwl_op_mode *op_mode, int hw_queue)
 
 static void iwl_mvm_set_rfkill_state(struct iwl_mvm *mvm)
 {
-	bool state = iwl_mvm_is_radio_killed(mvm);
-
-	if (state)
-		wake_up(&mvm->rx_sync_waitq);
-
-	wiphy_rfkill_set_hw_state(mvm->hw->wiphy, state);
+	wiphy_rfkill_set_hw_state(mvm->hw->wiphy,
+				  iwl_mvm_is_radio_killed(mvm));
 }
 
 void iwl_mvm_set_hw_ctkill_state(struct iwl_mvm *mvm, bool state)
@@ -1858,10 +1854,12 @@ static bool iwl_mvm_set_hw_rfkill_state(struct iwl_op_mode *op_mode, bool state)
 	bool rfkill_safe_init_done = READ_ONCE(mvm->rfkill_safe_init_done);
 	bool unified = iwl_mvm_has_unified_ucode(mvm);
 
-	if (state)
+	if (state) {
 		set_bit(IWL_MVM_STATUS_HW_RFKILL, &mvm->status);
-	else
+		wake_up(&mvm->rx_sync_waitq);
+	} else {
 		clear_bit(IWL_MVM_STATUS_HW_RFKILL, &mvm->status);
+	}
 
 	iwl_mvm_set_rfkill_state(mvm);
 

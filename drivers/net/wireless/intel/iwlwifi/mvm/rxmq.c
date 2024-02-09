@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0 OR BSD-3-Clause
 /*
- * Copyright (C) 2012-2014, 2018-2023 Intel Corporation
+ * Copyright (C) 2012-2014, 2018-2024 Intel Corporation
  * Copyright (C) 2013-2015 Intel Mobile Communications GmbH
  * Copyright (C) 2015-2017 Intel Deutschland GmbH
  */
@@ -512,6 +512,10 @@ static bool iwl_mvm_is_dup(struct ieee80211_sta *sta, int queue,
 		return false;
 
 	mvm_sta = iwl_mvm_sta_from_mac80211(sta);
+
+	if (WARN_ON_ONCE(!mvm_sta->dup_data))
+		return false;
+
 	dup_data = &mvm_sta->dup_data[queue];
 
 	/*
@@ -519,11 +523,9 @@ static bool iwl_mvm_is_dup(struct ieee80211_sta *sta, int queue,
 	 * (IEEE 802.11-2012: 9.3.2.10 "Duplicate detection and recovery")
 	 */
 	if (ieee80211_is_ctl(hdr->frame_control) ||
-	    ieee80211_is_qos_nullfunc(hdr->frame_control) ||
-	    is_multicast_ether_addr(hdr->addr1)) {
-		rx_status->flag |= RX_FLAG_DUP_VALIDATED;
+	    ieee80211_is_any_nullfunc(hdr->frame_control) ||
+	    is_multicast_ether_addr(hdr->addr1))
 		return false;
-	}
 
 	if (ieee80211_is_data_qos(hdr->frame_control)) {
 		/* frame has qos control */
@@ -649,10 +651,8 @@ static void iwl_mvm_release_frames_from_notif(struct iwl_mvm *mvm,
 	rcu_read_lock();
 
 	ba_data = rcu_dereference(mvm->baid_map[baid]);
-	if (!ba_data) {
-		WARN(true, "BAID %d not found in map\n", baid);
+	if (WARN(!ba_data, "BAID %d not found in map\n", baid))
 		goto out;
-	}
 
 	/* pick any STA ID to find the pointer */
 	sta_id = ffs(ba_data->sta_mask) - 1;
@@ -688,11 +688,11 @@ void iwl_mvm_rx_queue_notif(struct iwl_mvm *mvm, struct napi_struct *napi,
 		return;
 	len -= sizeof(*notif) + sizeof(*internal_notif);
 
-	if (internal_notif->sync &&
-	    mvm->queue_sync_cookie != internal_notif->cookie) {
-		WARN_ONCE(1, "Received expired RX queue sync message\n");
+	if (WARN_ONCE(internal_notif->sync &&
+		      mvm->queue_sync_cookie != internal_notif->cookie,
+		      "Received expired RX queue sync message (cookie %d but wanted %d, queue %d)\n",
+		      internal_notif->cookie, mvm->queue_sync_cookie, queue))
 		return;
-	}
 
 	switch (internal_notif->type) {
 	case IWL_MVM_RXQ_EMPTY:

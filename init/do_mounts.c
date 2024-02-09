@@ -210,8 +210,7 @@ retry:
 			case -EACCES:
 			case -EINVAL:
 #ifdef CONFIG_BLOCK
-				flush_delayed_fput();
-				task_work_run();
+				init_flush_fput();
 #endif
 				continue;
 		}

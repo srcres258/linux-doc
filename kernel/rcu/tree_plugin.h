@@ -1232,7 +1232,7 @@ static void rcu_spawn_one_boost_kthread(struct rcu_node *rnp)
 {
 }
 
-static struct task_struct * rcu_boost_task(struct rcu_node *rnp)
+static struct task_struct *rcu_boost_task(struct rcu_node *rnp)
 {
 	return NULL;
 }

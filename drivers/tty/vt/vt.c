@@ -1588,7 +1588,7 @@ static void default_attr(struct vc_data *vc)
 
 struct rgb { u8 r; u8 g; u8 b; };
 
-static void rgb_from_256(int i, struct rgb *c)
+static void rgb_from_256(unsigned int i, struct rgb *c)
 {
 	if (i < 8) {            /* Standard colours. */
 		c->r = i&1 ? 0xaa : 0x00;
@@ -1599,9 +1599,12 @@ static void rgb_from_256(int i, struct rgb *c)
 		c->g = i&2 ? 0xff : 0x55;
 		c->b = i&4 ? 0xff : 0x55;
 	} else if (i < 232) {   /* 6x6x6 colour cube. */
-		c->r = (i - 16) / 36 * 85 / 2;
-		c->g = (i - 16) / 6 % 6 * 85 / 2;
-		c->b = (i - 16) % 6 * 85 / 2;
+		i -= 16;
+		c->b = i % 6 * 255 / 6;
+		i /= 6;
+		c->g = i % 6 * 255 / 6;
+		i /= 6;
+		c->r = i     * 255 / 6;
 	} else                  /* Grayscale ramp. */
 		c->r = c->g = c->b = i * 10 - 2312;
 }
@@ -1859,133 +1862,175 @@ int mouse_reporting(void)
 	return vc_cons[fg_console].d->vc_report_mouse;
 }
 
+enum {
+	CSI_DEC_hl_CURSOR_KEYS	= 1,	/* CKM: cursor keys send ^[Ox/^[[x */
+	CSI_DEC_hl_132_COLUMNS	= 3,	/* COLM: 80/132 mode switch */
+	CSI_DEC_hl_REVERSE_VIDEO = 5,	/* SCNM */
+	CSI_DEC_hl_ORIGIN_MODE	= 6,	/* OM: origin relative/absolute */
+	CSI_DEC_hl_AUTOWRAP	= 7,	/* AWM */
+	CSI_DEC_hl_AUTOREPEAT	= 8,	/* ARM */
+	CSI_DEC_hl_MOUSE_X10	= 9,
+	CSI_DEC_hl_SHOW_CURSOR	= 25,	/* TCEM */
+	CSI_DEC_hl_MOUSE_VT200	= 1000,
+};
+
 /* console_lock is held */
-static void set_mode(struct vc_data *vc, int on_off)
+static void csi_DEC_hl(struct vc_data *vc, bool on_off)
 {
-	int i;
+	unsigned int i;
 
 	for (i = 0; i <= vc->vc_npar; i++)
-		if (vc->vc_priv == EPdec) {
-			switch(vc->vc_par[i]) {	/* DEC private modes set/reset */
-			case 1:			/* Cursor keys send ^[Ox/^[[x */
-				if (on_off)
-					set_kbd(vc, decckm);
-				else
-					clr_kbd(vc, decckm);
-				break;
-			case 3:	/* 80/132 mode switch unimplemented */
+		switch (vc->vc_par[i]) {
+		case CSI_DEC_hl_CURSOR_KEYS:
+			if (on_off)
+				set_kbd(vc, decckm);
+			else
+				clr_kbd(vc, decckm);
+			break;
+		case CSI_DEC_hl_132_COLUMNS:	/* unimplemented */
 #if 0
-				vc_resize(deccolm ? 132 : 80, vc->vc_rows);
-				/* this alone does not suffice; some user mode
-				   utility has to change the hardware regs */
+			vc_resize(deccolm ? 132 : 80, vc->vc_rows);
+			/* this alone does not suffice; some user mode
+			   utility has to change the hardware regs */
 #endif
-				break;
-			case 5:			/* Inverted screen on/off */
-				if (vc->vc_decscnm != on_off) {
-					vc->vc_decscnm = on_off;
-					invert_screen(vc, 0,
-							vc->vc_screenbuf_size,
-							false);
-					update_attr(vc);
-				}
-				break;
-			case 6:			/* Origin relative/absolute */
-				vc->vc_decom = on_off;
-				gotoxay(vc, 0, 0);
-				break;
-			case 7:			/* Autowrap on/off */
-				vc->vc_decawm = on_off;
-				break;
-			case 8:			/* Autorepeat on/off */
-				if (on_off)
-					set_kbd(vc, decarm);
-				else
-					clr_kbd(vc, decarm);
-				break;
-			case 9:
-				vc->vc_report_mouse = on_off ? 1 : 0;
-				break;
-			case 25:		/* Cursor on/off */
-				vc->vc_deccm = on_off;
-				break;
-			case 1000:
-				vc->vc_report_mouse = on_off ? 2 : 0;
-				break;
+			break;
+		case CSI_DEC_hl_REVERSE_VIDEO:
+			if (vc->vc_decscnm != on_off) {
+				vc->vc_decscnm = on_off;
+				invert_screen(vc, 0, vc->vc_screenbuf_size,
+					      false);
+				update_attr(vc);
 			}
-		} else {
-			switch(vc->vc_par[i]) {	/* ANSI modes set/reset */
-			case 3:			/* Monitor (display ctrls) */
-				vc->vc_disp_ctrl = on_off;
-				break;
-			case 4:			/* Insert Mode on/off */
-				vc->vc_decim = on_off;
-				break;
-			case 20:		/* Lf, Enter == CrLf/Lf */
-				if (on_off)
-					set_kbd(vc, lnm);
-				else
-					clr_kbd(vc, lnm);
-				break;
-			}
+			break;
+		case CSI_DEC_hl_ORIGIN_MODE:
+			vc->vc_decom = on_off;
+			gotoxay(vc, 0, 0);
+			break;
+		case CSI_DEC_hl_AUTOWRAP:
+			vc->vc_decawm = on_off;
+			break;
+		case CSI_DEC_hl_AUTOREPEAT:
+			if (on_off)
+				set_kbd(vc, decarm);
+			else
+				clr_kbd(vc, decarm);
+			break;
+		case CSI_DEC_hl_MOUSE_X10:
+			vc->vc_report_mouse = on_off ? 1 : 0;
+			break;
+		case CSI_DEC_hl_SHOW_CURSOR:
+			vc->vc_deccm = on_off;
+			break;
+		case CSI_DEC_hl_MOUSE_VT200:
+			vc->vc_report_mouse = on_off ? 2 : 0;
+			break;
 		}
 }
 
+enum {
+	CSI_hl_DISPLAY_CTRL	= 3,	/* handle ansi control chars */
+	CSI_hl_INSERT		= 4,	/* IRM: insert/replace */
+	CSI_hl_AUTO_NL		= 20,	/* LNM: Enter == CrLf/Lf */
+};
+
 /* console_lock is held */
-static void setterm_command(struct vc_data *vc)
+static void csi_hl(struct vc_data *vc, bool on_off)
+{
+	unsigned int i;
+
+	for (i = 0; i <= vc->vc_npar; i++)
+		switch (vc->vc_par[i]) {	/* ANSI modes set/reset */
+		case CSI_hl_DISPLAY_CTRL:
+			vc->vc_disp_ctrl = on_off;
+			break;
+		case CSI_hl_INSERT:
+			vc->vc_decim = on_off;
+			break;
+		case CSI_hl_AUTO_NL:
+			if (on_off)
+				set_kbd(vc, lnm);
+			else
+				clr_kbd(vc, lnm);
+			break;
+		}
+}
+
+enum CSI_right_square_bracket {
+	CSI_RSB_COLOR_FOR_UNDERLINE		= 1,
+	CSI_RSB_COLOR_FOR_HALF_BRIGHT		= 2,
+	CSI_RSB_MAKE_CUR_COLOR_DEFAULT		= 8,
+	CSI_RSB_BLANKING_INTERVAL		= 9,
+	CSI_RSB_BELL_FREQUENCY			= 10,
+	CSI_RSB_BELL_DURATION			= 11,
+	CSI_RSB_BRING_CONSOLE_TO_FRONT		= 12,
+	CSI_RSB_UNBLANK				= 13,
+	CSI_RSB_VESA_OFF_INTERVAL		= 14,
+	CSI_RSB_BRING_PREV_CONSOLE_TO_FRONT	= 15,
+	CSI_RSB_CURSOR_BLINK_INTERVAL		= 16,
+};
+
+/*
+ * csi_RSB - csi+] (Right Square Bracket) handler
+ *
+ * These are linux console private sequences.
+ *
+ * console_lock is held
+ */
+static void csi_RSB(struct vc_data *vc)
 {
 	switch (vc->vc_par[0]) {
-	case 1:	/* set color for underline mode */
+	case CSI_RSB_COLOR_FOR_UNDERLINE:
 		if (vc->vc_can_do_color && vc->vc_par[1] < 16) {
 			vc->vc_ulcolor = color_table[vc->vc_par[1]];
 			if (vc->state.underline)
 				update_attr(vc);
 		}
 		break;
-	case 2:	/* set color for half intensity mode */
+	case CSI_RSB_COLOR_FOR_HALF_BRIGHT:
 		if (vc->vc_can_do_color && vc->vc_par[1] < 16) {
 			vc->vc_halfcolor = color_table[vc->vc_par[1]];
 			if (vc->state.intensity == VCI_HALF_BRIGHT)
 				update_attr(vc);
 		}
 		break;
-	case 8:	/* store colors as defaults */
+	case CSI_RSB_MAKE_CUR_COLOR_DEFAULT:
 		vc->vc_def_color = vc->vc_attr;
 		if (vc->vc_hi_font_mask == 0x100)
 			vc->vc_def_color >>= 1;
 		default_attr(vc);
 		update_attr(vc);
 		break;
-	case 9:	/* set blanking interval */
+	case CSI_RSB_BLANKING_INTERVAL:
 		blankinterval = min(vc->vc_par[1], 60U) * 60;
 		poke_blanked_console();
 		break;
-	case 10: /* set bell frequency in Hz */
+	case CSI_RSB_BELL_FREQUENCY:
 		if (vc->vc_npar >= 1)
 			vc->vc_bell_pitch = vc->vc_par[1];
 		else
 			vc->vc_bell_pitch = DEFAULT_BELL_PITCH;
 		break;
-	case 11: /* set bell duration in msec */
+	case CSI_RSB_BELL_DURATION:
 		if (vc->vc_npar >= 1)
 			vc->vc_bell_duration = (vc->vc_par[1] < 2000) ?
 				msecs_to_jiffies(vc->vc_par[1]) : 0;
 		else
 			vc->vc_bell_duration = DEFAULT_BELL_DURATION;
 		break;
-	case 12: /* bring specified console to the front */
+	case CSI_RSB_BRING_CONSOLE_TO_FRONT:
 		if (vc->vc_par[1] >= 1 && vc_cons_allocated(vc->vc_par[1] - 1))
 			set_console(vc->vc_par[1] - 1);
 		break;
-	case 13: /* unblank the screen */
+	case CSI_RSB_UNBLANK:
 		poke_blanked_console();
 		break;
-	case 14: /* set vesa powerdown interval */
+	case CSI_RSB_VESA_OFF_INTERVAL:
 		vesa_off_interval = min(vc->vc_par[1], 60U) * 60 * HZ;
 		break;
-	case 15: /* activate the previous console */
+	case CSI_RSB_BRING_PREV_CONSOLE_TO_FRONT:
 		set_console(last_console);
 		break;
-	case 16: /* set cursor blink duration in msec */
+	case CSI_RSB_CURSOR_BLINK_INTERVAL:
 		if (vc->vc_npar >= 1 && vc->vc_par[1] >= 50 &&
 				vc->vc_par[1] <= USHRT_MAX)
 			vc->vc_cur_blink_ms = vc->vc_par[1];
@@ -2046,9 +2091,48 @@ static void restore_cur(struct vc_data *vc)
 	vc->vc_need_wrap = 0;
 }
 
-enum { ESnormal, ESesc, ESsquare, ESgetpars, ESfunckey,
-	EShash, ESsetG0, ESsetG1, ESpercent, EScsiignore, ESnonstd,
-	ESpalette, ESosc, ESapc, ESpm, ESdcs };
+/**
+ * enum vc_ctl_state - control characters state of a vt
+ *
+ * @ESnormal:		initial state, no control characters parsed
+ * @ESesc:		ESC parsed
+ * @ESsquare:		CSI parsed -- modifiers/parameters/ctrl chars expected
+ * @ESgetpars:		CSI parsed -- parameters/ctrl chars expected
+ * @ESfunckey:		CSI [ parsed
+ * @EShash:		ESC # parsed
+ * @ESsetG0:		ESC ( parsed
+ * @ESsetG1:		ESC ) parsed
+ * @ESpercent:		ESC % parsed
+ * @EScsiignore:	CSI [0x20-0x3f] parsed
+ * @ESnonstd:		OSC parsed
+ * @ESpalette:		OSC P parsed
+ * @ESosc:		OSC [0-9] parsed
+ * @ESANSI_first:	first state for ignoring ansi control sequences
+ * @ESapc:		ESC _ parsed
+ * @ESpm:		ESC ^ parsed
+ * @ESdcs:		ESC P parsed
+ * @ESANSI_last:	last state for ignoring ansi control sequences
+ */
+enum vc_ctl_state {
+	ESnormal,
+	ESesc,
+	ESsquare,
+	ESgetpars,
+	ESfunckey,
+	EShash,
+	ESsetG0,
+	ESsetG1,
+	ESpercent,
+	EScsiignore,
+	ESnonstd,
+	ESpalette,
+	ESosc,
+	ESANSI_first = ESosc,
+	ESapc,
+	ESpm,
+	ESdcs,
+	ESANSI_last = ESdcs,
+};
 
 /* console_lock is held (except via vc_init()) */
 static void reset_terminal(struct vc_data *vc, int do_clear)
@@ -2099,7 +2183,7 @@ static void reset_terminal(struct vc_data *vc, int do_clear)
 	    csi_J(vc, CSI_J_VISIBLE);
 }
 
-static void vc_setGx(struct vc_data *vc, unsigned int which, int c)
+static void vc_setGx(struct vc_data *vc, unsigned int which, u8 c)
 {
 	unsigned char *charset = &vc->state.Gx_charset[which];
 
@@ -2122,12 +2206,9 @@ static void vc_setGx(struct vc_data *vc, unsigned int which, int c)
 		vc->vc_translate = set_translate(*charset, vc);
 }
 
-/* is this state an ANSI control string? */
-static bool ansi_control_string(unsigned int state)
+static bool ansi_control_string(enum vc_ctl_state state)
 {
-	if (state == ESosc || state == ESapc || state == ESpm || state == ESdcs)
-		return true;
-	return false;
+	return state >= ESANSI_first && state <= ESANSI_last;
 }
 
 enum {
@@ -2152,28 +2233,26 @@ enum {
 	ASCII_EXT_CSI		= 128 + ASCII_ESCAPE,
 };
 
-/* console_lock is held */
-static void do_con_trol(struct tty_struct *tty, struct vc_data *vc, int c)
+/*
+ * Handle ascii characters in control sequences and change states accordingly.
+ * E.g. ESC sets the state of vc to ESesc.
+ *
+ * Returns: true if @c handled.
+ */
+static bool handle_ascii(struct tty_struct *tty, struct vc_data *vc, u8 c)
 {
-	/*
-	 *  Control characters can be used in the _middle_
-	 *  of an escape sequence, aside from ANSI control strings.
-	 */
-	if (ansi_control_string(vc->vc_state) && c >= ASCII_IGNORE_FIRST &&
-	    c <= ASCII_IGNORE_LAST)
-		return;
 	switch (c) {
 	case ASCII_NULL:
-		return;
+		return true;
 	case ASCII_BELL:
 		if (ansi_control_string(vc->vc_state))
 			vc->vc_state = ESnormal;
 		else if (vc->vc_bell_duration)
 			kd_mksound(vc->vc_bell_pitch, vc->vc_bell_duration);
-		return;
+		return true;
 	case ASCII_BACKSPACE:
 		bs(vc);
-		return;
+		return true;
 	case ASCII_HTAB:
 		vc->vc_pos -= (vc->state.x << 1);
 
@@ -2185,122 +2264,330 @@ static void do_con_trol(struct tty_struct *tty, struct vc_data *vc, int c)
 
 		vc->vc_pos += (vc->state.x << 1);
 		notify_write(vc, '\t');
-		return;
+		return true;
 	case ASCII_LINEFEED:
 	case ASCII_VTAB:
 	case ASCII_FORMFEED:
 		lf(vc);
 		if (!is_kbd(vc, lnm))
-			return;
+			return true;
 		fallthrough;
 	case ASCII_CAR_RET:
 		cr(vc);
-		return;
+		return true;
 	case ASCII_SHIFTOUT:
 		vc->state.charset = 1;
 		vc->vc_translate = set_translate(vc->state.Gx_charset[1], vc);
 		vc->vc_disp_ctrl = 1;
-		return;
+		return true;
 	case ASCII_SHIFTIN:
 		vc->state.charset = 0;
 		vc->vc_translate = set_translate(vc->state.Gx_charset[0], vc);
 		vc->vc_disp_ctrl = 0;
-		return;
+		return true;
 	case ASCII_CANCEL:
 	case ASCII_SUBSTITUTE:
 		vc->vc_state = ESnormal;
-		return;
+		return true;
 	case ASCII_ESCAPE:
 		vc->vc_state = ESesc;
-		return;
+		return true;
 	case ASCII_DEL:
 		del(vc);
-		return;
+		return true;
 	case ASCII_EXT_CSI:
 		vc->vc_state = ESsquare;
-		return;
+		return true;
 	}
-	switch(vc->vc_state) {
-	case ESesc:
-		vc->vc_state = ESnormal;
-		switch (c) {
-		case '[':
-			vc->vc_state = ESsquare;
-			return;
-		case ']':
-			vc->vc_state = ESnonstd;
-			return;
-		case '_':
-			vc->vc_state = ESapc;
-			return;
-		case '^':
-			vc->vc_state = ESpm;
-			return;
-		case '%':
-			vc->vc_state = ESpercent;
-			return;
-		case 'E':
-			cr(vc);
-			lf(vc);
-			return;
-		case 'M':
-			ri(vc);
-			return;
-		case 'D':
-			lf(vc);
-			return;
-		case 'H':
-			if (vc->state.x < VC_TABSTOPS_COUNT)
-				set_bit(vc->state.x, vc->vc_tab_stop);
-			return;
-		case 'P':
-			vc->vc_state = ESdcs;
-			return;
-		case 'Z':
+
+	return false;
+}
+
+/*
+ * Handle a character (@c) following an ESC (when @vc is in the ESesc state).
+ * E.g. previous ESC with @c == '[' here yields the ESsquare state (that is:
+ * CSI).
+ */
+static void handle_esc(struct tty_struct *tty, struct vc_data *vc, u8 c)
+{
+	vc->vc_state = ESnormal;
+	switch (c) {
+	case '[':
+		vc->vc_state = ESsquare;
+		break;
+	case ']':
+		vc->vc_state = ESnonstd;
+		break;
+	case '_':
+		vc->vc_state = ESapc;
+		break;
+	case '^':
+		vc->vc_state = ESpm;
+		break;
+	case '%':
+		vc->vc_state = ESpercent;
+		break;
+	case 'E':
+		cr(vc);
+		lf(vc);
+		break;
+	case 'M':
+		ri(vc);
+		break;
+	case 'D':
+		lf(vc);
+		break;
+	case 'H':
+		if (vc->state.x < VC_TABSTOPS_COUNT)
+			set_bit(vc->state.x, vc->vc_tab_stop);
+		break;
+	case 'P':
+		vc->vc_state = ESdcs;
+		break;
+	case 'Z':
+		respond_ID(tty);
+		break;
+	case '7':
+		save_cur(vc);
+		break;
+	case '8':
+		restore_cur(vc);
+		break;
+	case '(':
+		vc->vc_state = ESsetG0;
+		break;
+	case ')':
+		vc->vc_state = ESsetG1;
+		break;
+	case '#':
+		vc->vc_state = EShash;
+		break;
+	case 'c':
+		reset_terminal(vc, 1);
+		break;
+	case '>':  /* Numeric keypad */
+		clr_kbd(vc, kbdapplic);
+		break;
+	case '=':  /* Appl. keypad */
+		set_kbd(vc, kbdapplic);
+		break;
+	}
+}
+
+/*
+ * Handle special DEC control sequences ("ESC [ ? parameters char"). Parameters
+ * are in @vc->vc_par and the char is in @c here.
+ */
+static void csi_DEC(struct tty_struct *tty, struct vc_data *vc, u8 c)
+{
+	switch (c) {
+	case 'h':
+		csi_DEC_hl(vc, true);
+		break;
+	case 'l':
+		csi_DEC_hl(vc, false);
+		break;
+	case 'c':
+		if (vc->vc_par[0])
+			vc->vc_cursor_type = CUR_MAKE(vc->vc_par[0],
+						      vc->vc_par[1],
+						      vc->vc_par[2]);
+		else
+			vc->vc_cursor_type = cur_default;
+		break;
+	case 'm':
+		clear_selection();
+		if (vc->vc_par[0])
+			vc->vc_complement_mask = vc->vc_par[0] << 8 | vc->vc_par[1];
+		else
+			vc->vc_complement_mask = vc->vc_s_complement_mask;
+		break;
+	case 'n':
+		if (vc->vc_par[0] == 5)
+			status_report(tty);
+		else if (vc->vc_par[0] == 6)
+			cursor_report(vc, tty);
+		break;
+	}
+}
+
+/*
+ * Handle Control Sequence Introducer control characters. That is
+ * "ESC [ parameters char". Parameters are in @vc->vc_par and the char is in
+ * @c here.
+ */
+static void csi_ECMA(struct tty_struct *tty, struct vc_data *vc, u8 c)
+{
+	switch (c) {
+	case 'G':
+	case '`':
+		if (vc->vc_par[0])
+			vc->vc_par[0]--;
+		gotoxy(vc, vc->vc_par[0], vc->state.y);
+		break;
+	case 'A':
+		if (!vc->vc_par[0])
+			vc->vc_par[0]++;
+		gotoxy(vc, vc->state.x, vc->state.y - vc->vc_par[0]);
+		break;
+	case 'B':
+	case 'e':
+		if (!vc->vc_par[0])
+			vc->vc_par[0]++;
+		gotoxy(vc, vc->state.x, vc->state.y + vc->vc_par[0]);
+		break;
+	case 'C':
+	case 'a':
+		if (!vc->vc_par[0])
+			vc->vc_par[0]++;
+		gotoxy(vc, vc->state.x + vc->vc_par[0], vc->state.y);
+		break;
+	case 'D':
+		if (!vc->vc_par[0])
+			vc->vc_par[0]++;
+		gotoxy(vc, vc->state.x - vc->vc_par[0], vc->state.y);
+		break;
+	case 'E':
+		if (!vc->vc_par[0])
+			vc->vc_par[0]++;
+		gotoxy(vc, 0, vc->state.y + vc->vc_par[0]);
+		break;
+	case 'F':
+		if (!vc->vc_par[0])
+			vc->vc_par[0]++;
+		gotoxy(vc, 0, vc->state.y - vc->vc_par[0]);
+		break;
+	case 'd':
+		if (vc->vc_par[0])
+			vc->vc_par[0]--;
+		gotoxay(vc, vc->state.x ,vc->vc_par[0]);
+		break;
+	case 'H':
+	case 'f':
+		if (vc->vc_par[0])
+			vc->vc_par[0]--;
+		if (vc->vc_par[1])
+			vc->vc_par[1]--;
+		gotoxay(vc, vc->vc_par[1], vc->vc_par[0]);
+		break;
+	case 'J':
+		csi_J(vc, vc->vc_par[0]);
+		break;
+	case 'K':
+		csi_K(vc);
+		break;
+	case 'L':
+		csi_L(vc);
+		break;
+	case 'M':
+		csi_M(vc);
+		break;
+	case 'P':
+		csi_P(vc);
+		break;
+	case 'c':
+		if (!vc->vc_par[0])
 			respond_ID(tty);
-			return;
-		case '7':
-			save_cur(vc);
-			return;
-		case '8':
-			restore_cur(vc);
-			return;
-		case '(':
-			vc->vc_state = ESsetG0;
-			return;
-		case ')':
-			vc->vc_state = ESsetG1;
-			return;
-		case '#':
-			vc->vc_state = EShash;
-			return;
-		case 'c':
-			reset_terminal(vc, 1);
-			return;
-		case '>':  /* Numeric keypad */
-			clr_kbd(vc, kbdapplic);
-			return;
-		case '=':  /* Appl. keypad */
-			set_kbd(vc, kbdapplic);
-			return;
+		break;
+	case 'g':
+		if (!vc->vc_par[0] && vc->state.x < VC_TABSTOPS_COUNT)
+			set_bit(vc->state.x, vc->vc_tab_stop);
+		else if (vc->vc_par[0] == 3)
+			bitmap_zero(vc->vc_tab_stop, VC_TABSTOPS_COUNT);
+		break;
+	case 'h':
+		csi_hl(vc, true);
+		break;
+	case 'l':
+		csi_hl(vc, false);
+		break;
+	case 'm':
+		csi_m(vc);
+		break;
+	case 'n':
+		if (vc->vc_par[0] == 5)
+			status_report(tty);
+		else if (vc->vc_par[0] == 6)
+			cursor_report(vc, tty);
+		break;
+	case 'q': /* DECLL - but only 3 leds */
+		/* map 0,1,2,3 to 0,1,2,4 */
+		if (vc->vc_par[0] < 4)
+			vt_set_led_state(vc->vc_num,
+				    (vc->vc_par[0] < 3) ? vc->vc_par[0] : 4);
+		break;
+	case 'r':
+		if (!vc->vc_par[0])
+			vc->vc_par[0]++;
+		if (!vc->vc_par[1])
+			vc->vc_par[1] = vc->vc_rows;
+		/* Minimum allowed region is 2 lines */
+		if (vc->vc_par[0] < vc->vc_par[1] &&
+		    vc->vc_par[1] <= vc->vc_rows) {
+			vc->vc_top = vc->vc_par[0] - 1;
+			vc->vc_bottom = vc->vc_par[1];
+			gotoxay(vc, 0, 0);
 		}
+		break;
+	case 's':
+		save_cur(vc);
+		break;
+	case 'u':
+		restore_cur(vc);
+		break;
+	case 'X':
+		csi_X(vc);
+		break;
+	case '@':
+		csi_at(vc, vc->vc_par[0]);
+		break;
+	case ']':
+		csi_RSB(vc);
+		break;
+	}
+
+}
+
+static void vc_reset_params(struct vc_data *vc)
+{
+	memset(vc->vc_par, 0, sizeof(vc->vc_par));
+	vc->vc_npar = 0;
+}
+
+/* console_lock is held */
+static void do_con_trol(struct tty_struct *tty, struct vc_data *vc, u8 c)
+{
+	/*
+	 *  Control characters can be used in the _middle_
+	 *  of an escape sequence, aside from ANSI control strings.
+	 */
+	if (ansi_control_string(vc->vc_state) && c >= ASCII_IGNORE_FIRST &&
+	    c <= ASCII_IGNORE_LAST)
 		return;
-	case ESnonstd:
-		if (c=='P') {   /* palette escape sequence */
-			for (vc->vc_npar = 0; vc->vc_npar < NPAR; vc->vc_npar++)
-				vc->vc_par[vc->vc_npar] = 0;
-			vc->vc_npar = 0;
+
+	if (handle_ascii(tty, vc, c))
+		return;
+
+	switch(vc->vc_state) {
+	case ESesc:	/* ESC */
+		handle_esc(tty, vc, c);
+		return;
+	case ESnonstd:	/* ESC ] aka OSC */
+		switch (c) {
+		case 'P': /* palette escape sequence */
+			vc_reset_params(vc);
 			vc->vc_state = ESpalette;
 			return;
-		} else if (c=='R') {   /* reset palette */
+		case 'R': /* reset palette */
 			reset_palette(vc);
-			vc->vc_state = ESnormal;
-		} else if (c>='0' && c<='9')
+			break;
+		case '0' ... '9':
 			vc->vc_state = ESosc;
-		else
-			vc->vc_state = ESnormal;
+			return;
+		}
+		vc->vc_state = ESnormal;
 		return;
-	case ESpalette:
+	case ESpalette:	/* ESC ] P aka OSC P */
 		if (isxdigit(c)) {
 			vc->vc_par[vc->vc_npar++] = hex_to_bin(c);
 			if (vc->vc_npar == 7) {
@@ -2317,16 +2604,14 @@ static void do_con_trol(struct tty_struct *tty, struct vc_data *vc, int c)
 		} else
 			vc->vc_state = ESnormal;
 		return;
-	case ESsquare:
-		for (vc->vc_npar = 0; vc->vc_npar < NPAR; vc->vc_npar++)
-			vc->vc_par[vc->vc_npar] = 0;
-		vc->vc_npar = 0;
+	case ESsquare:	/* ESC [ aka CSI, parameters or modifiers expected */
+		vc_reset_params(vc);
+
 		vc->vc_state = ESgetpars;
-		if (c == '[') { /* Function key */
-			vc->vc_state=ESfunckey;
-			return;
-		}
 		switch (c) {
+		case '[': /* Function key */
+			vc->vc_state = ESfunckey;
+			return;
 		case '?':
 			vc->vc_priv = EPdec;
 			return;
@@ -2342,11 +2627,15 @@ static void do_con_trol(struct tty_struct *tty, struct vc_data *vc, int c)
 		}
 		vc->vc_priv = EPecma;
 		fallthrough;
-	case ESgetpars:
-		if (c == ';' && vc->vc_npar < NPAR - 1) {
-			vc->vc_npar++;
-			return;
-		} else if (c>='0' && c<='9') {
+	case ESgetpars: /* ESC [ aka CSI, parameters expected */
+		switch (c) {
+		case ';':
+			if (vc->vc_npar < NPAR - 1) {
+				vc->vc_npar++;
+				return;
+			}
+			break;
+		case '0' ... '9':
 			vc->vc_par[vc->vc_npar] *= 10;
 			vc->vc_par[vc->vc_npar] += c - '0';
 			return;
@@ -2355,169 +2644,27 @@ static void do_con_trol(struct tty_struct *tty, struct vc_data *vc, int c)
 			vc->vc_state = EScsiignore;
 			return;
 		}
+
+		/* parameters done, handle the control char @c */
+
 		vc->vc_state = ESnormal;
-		switch(c) {
-		case 'h':
-			if (vc->vc_priv <= EPdec)
-				set_mode(vc, 1);
+
+		switch (vc->vc_priv) {
+		case EPdec:
+			csi_DEC(tty, vc, c);
 			return;
-		case 'l':
-			if (vc->vc_priv <= EPdec)
-				set_mode(vc, 0);
+		case EPecma:
+			csi_ECMA(tty, vc, c);
 			return;
-		case 'c':
-			if (vc->vc_priv == EPdec) {
-				if (vc->vc_par[0])
-					vc->vc_cursor_type =
-						CUR_MAKE(vc->vc_par[0],
-							 vc->vc_par[1],
-							 vc->vc_par[2]);
-				else
-					vc->vc_cursor_type = cur_default;
-				return;
-			}
-			break;
-		case 'm':
-			if (vc->vc_priv == EPdec) {
-				clear_selection();
-				if (vc->vc_par[0])
-					vc->vc_complement_mask = vc->vc_par[0] << 8 | vc->vc_par[1];
-				else
-					vc->vc_complement_mask = vc->vc_s_complement_mask;
-				return;
-			}
-			break;
-		case 'n':
-			if (vc->vc_priv == EPecma) {
-				if (vc->vc_par[0] == 5)
-					status_report(tty);
-				else if (vc->vc_par[0] == 6)
-					cursor_report(vc, tty);
-			}
+		default:
 			return;
 		}
-		if (vc->vc_priv != EPecma) {
-			vc->vc_priv = EPecma;
-			return;
-		}
-		switch(c) {
-		case 'G': case '`':
-			if (vc->vc_par[0])
-				vc->vc_par[0]--;
-			gotoxy(vc, vc->vc_par[0], vc->state.y);
-			return;
-		case 'A':
-			if (!vc->vc_par[0])
-				vc->vc_par[0]++;
-			gotoxy(vc, vc->state.x, vc->state.y - vc->vc_par[0]);
-			return;
-		case 'B': case 'e':
-			if (!vc->vc_par[0])
-				vc->vc_par[0]++;
-			gotoxy(vc, vc->state.x, vc->state.y + vc->vc_par[0]);
-			return;
-		case 'C': case 'a':
-			if (!vc->vc_par[0])
-				vc->vc_par[0]++;
-			gotoxy(vc, vc->state.x + vc->vc_par[0], vc->state.y);
-			return;
-		case 'D':
-			if (!vc->vc_par[0])
-				vc->vc_par[0]++;
-			gotoxy(vc, vc->state.x - vc->vc_par[0], vc->state.y);
-			return;
-		case 'E':
-			if (!vc->vc_par[0])
-				vc->vc_par[0]++;
-			gotoxy(vc, 0, vc->state.y + vc->vc_par[0]);
-			return;
-		case 'F':
-			if (!vc->vc_par[0])
-				vc->vc_par[0]++;
-			gotoxy(vc, 0, vc->state.y - vc->vc_par[0]);
-			return;
-		case 'd':
-			if (vc->vc_par[0])
-				vc->vc_par[0]--;
-			gotoxay(vc, vc->state.x ,vc->vc_par[0]);
-			return;
-		case 'H': case 'f':
-			if (vc->vc_par[0])
-				vc->vc_par[0]--;
-			if (vc->vc_par[1])
-				vc->vc_par[1]--;
-			gotoxay(vc, vc->vc_par[1], vc->vc_par[0]);
-			return;
-		case 'J':
-			csi_J(vc, vc->vc_par[0]);
-			return;
-		case 'K':
-			csi_K(vc);
-			return;
-		case 'L':
-			csi_L(vc);
-			return;
-		case 'M':
-			csi_M(vc);
-			return;
-		case 'P':
-			csi_P(vc);
-			return;
-		case 'c':
-			if (!vc->vc_par[0])
-				respond_ID(tty);
-			return;
-		case 'g':
-			if (!vc->vc_par[0] && vc->state.x < VC_TABSTOPS_COUNT)
-				set_bit(vc->state.x, vc->vc_tab_stop);
-			else if (vc->vc_par[0] == 3)
-				bitmap_zero(vc->vc_tab_stop, VC_TABSTOPS_COUNT);
-			return;
-		case 'm':
-			csi_m(vc);
-			return;
-		case 'q': /* DECLL - but only 3 leds */
-			/* map 0,1,2,3 to 0,1,2,4 */
-			if (vc->vc_par[0] < 4)
-				vt_set_led_state(vc->vc_num,
-					    (vc->vc_par[0] < 3) ? vc->vc_par[0] : 4);
-			return;
-		case 'r':
-			if (!vc->vc_par[0])
-				vc->vc_par[0]++;
-			if (!vc->vc_par[1])
-				vc->vc_par[1] = vc->vc_rows;
-			/* Minimum allowed region is 2 lines */
-			if (vc->vc_par[0] < vc->vc_par[1] &&
-			    vc->vc_par[1] <= vc->vc_rows) {
-				vc->vc_top = vc->vc_par[0] - 1;
-				vc->vc_bottom = vc->vc_par[1];
-				gotoxay(vc, 0, 0);
-			}
-			return;
-		case 's':
-			save_cur(vc);
-			return;
-		case 'u':
-			restore_cur(vc);
-			return;
-		case 'X':
-			csi_X(vc);
-			return;
-		case '@':
-			csi_at(vc, vc->vc_par[0]);
-			return;
-		case ']': /* setterm functions */
-			setterm_command(vc);
-			return;
-		}
-		return;
 	case EScsiignore:
 		if (c >= ASCII_CSI_IGNORE_FIRST && c <= ASCII_CSI_IGNORE_LAST)
 			return;
 		vc->vc_state = ESnormal;
 		return;
-	case ESpercent:
+	case ESpercent:	/* ESC % */
 		vc->vc_state = ESnormal;
 		switch (c) {
 		case '@':  /* defined in ISO 2022 */
@@ -2529,10 +2676,10 @@ static void do_con_trol(struct tty_struct *tty, struct vc_data *vc, int c)
 			return;
 		}
 		return;
-	case ESfunckey:
+	case ESfunckey:	/* ESC [ [ aka CSI [ */
 		vc->vc_state = ESnormal;
 		return;
-	case EShash:
+	case EShash:	/* ESC # */
 		vc->vc_state = ESnormal;
 		if (c == '8') {
 			/* DEC screen alignment test. kludge :-) */
@@ -2544,21 +2691,21 @@ static void do_con_trol(struct tty_struct *tty, struct vc_data *vc, int c)
 			do_update_region(vc, vc->vc_origin, vc->vc_screenbuf_size / 2);
 		}
 		return;
-	case ESsetG0:
+	case ESsetG0:	/* ESC ( */
 		vc_setGx(vc, 0, c);
 		vc->vc_state = ESnormal;
 		return;
-	case ESsetG1:
+	case ESsetG1:	/* ESC ) */
 		vc_setGx(vc, 1, c);
 		vc->vc_state = ESnormal;
 		return;
-	case ESapc:
+	case ESapc:	/* ESC _ */
 		return;
-	case ESosc:
+	case ESosc:	/* ESC ] [0-9] aka OSC [0-9] */
 		return;
-	case ESpm:
+	case ESpm:	/* ESC ^ */
 		return;
-	case ESdcs:
+	case ESdcs:	/* ESC P */
 		return;
 	default:
 		vc->vc_state = ESnormal;
@@ -2746,9 +2893,13 @@ static bool vc_is_control(struct vc_data *vc, int tc, int c)
 	 * as cursor movement) and should not be displayed as a glyph unless
 	 * the disp_ctrl mode is explicitly enabled.
 	 */
-	static const u32 CTRL_ACTION = 0x0d00ff81;
+	static const u32 CTRL_ACTION = BIT(ASCII_NULL) |
+		GENMASK(ASCII_SHIFTIN, ASCII_BELL) | BIT(ASCII_CANCEL) |
+		BIT(ASCII_SUBSTITUTE) | BIT(ASCII_ESCAPE);
 	/* Cannot be overridden by disp_ctrl */
-	static const u32 CTRL_ALWAYS = 0x0800f501;
+	static const u32 CTRL_ALWAYS = BIT(ASCII_NULL) | BIT(ASCII_BACKSPACE) |
+		BIT(ASCII_LINEFEED) | BIT(ASCII_SHIFTIN) | BIT(ASCII_SHIFTOUT) |
+		BIT(ASCII_CAR_RET) | BIT(ASCII_FORMFEED) | BIT(ASCII_ESCAPE);
 
 	if (vc->vc_state != ESnormal)
 		return true;
@@ -2765,7 +2916,7 @@ static bool vc_is_control(struct vc_data *vc, int tc, int c)
 	 * useless without them; to display an arbitrary font position use the
 	 * direct-to-font zone in UTF-8 mode.
 	 */
-	if (c < ' ') {
+	if (c < BITS_PER_TYPE(CTRL_ALWAYS)) {
 		if (vc->vc_disp_ctrl)
 			return CTRL_ALWAYS & BIT(c);
 		else
@@ -2911,7 +3062,7 @@ static int do_con_write(struct tty_struct *tty, const u8 *buf, int count)
 	param.vc = vc;
 
 	while (!tty->flow.stopped && count) {
-		int orig = *buf;
+		u8 orig = *buf;
 		buf++;
 		n++;
 		count--;
@@ -3093,22 +3244,23 @@ static void vt_console_print(struct console *co, const char *b, unsigned count)
 	cnt = 0;
 	while (count--) {
 		c = *b++;
-		if (c == 10 || c == 13 || c == 8 || vc->vc_need_wrap) {
+		if (c == ASCII_LINEFEED || c == ASCII_CAR_RET ||
+		    c == ASCII_BACKSPACE || vc->vc_need_wrap) {
 			if (cnt && con_is_visible(vc))
 				vc->vc_sw->con_putcs(vc, start, cnt, vc->state.y, start_x);
 			cnt = 0;
-			if (c == 8) {		/* backspace */
+			if (c == ASCII_BACKSPACE) {
 				bs(vc);
 				start = (ushort *)vc->vc_pos;
 				start_x = vc->state.x;
 				continue;
 			}
-			if (c != 13)
+			if (c != ASCII_CAR_RET)
 				lf(vc);
 			cr(vc);
 			start = (ushort *)vc->vc_pos;
 			start_x = vc->state.x;
-			if (c == 10 || c == 13)
+			if (c == ASCII_LINEFEED || c == ASCII_CAR_RET)
 				continue;
 		}
 		vc_uniscr_putc(vc, c);

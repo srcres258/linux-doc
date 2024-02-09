@@ -929,10 +929,6 @@ static unsigned blk_to_file_flags(blk_mode_t mode)
 	else /* Neither read nor write for a block device requested? */
 		WARN_ON_ONCE(true);
 
-	/*
-	 * O_EXCL is one of those flags that the VFS clears once it's done with
-	 * the operation. So don't raise it here either.
-	 */
 	if (mode & BLK_OPEN_NDELAY)
 		flags |= O_NDELAY;
 

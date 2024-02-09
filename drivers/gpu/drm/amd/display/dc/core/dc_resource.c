@@ -822,6 +822,16 @@ static struct rect calculate_odm_slice_in_timing_active(struct pipe_ctx *pipe_ct
 			stream->timing.v_border_bottom +
 			stream->timing.v_border_top;
 
+	/* Recout for ODM slices after the first slice need one extra left edge pixel
+	 * for 3-tap chroma subsampling.
+	 */
+	if (odm_slice_idx > 0 &&
+			(pipe_ctx->stream->timing.pixel_encoding == PIXEL_ENCODING_YCBCR422 ||
+				pipe_ctx->stream->timing.pixel_encoding == PIXEL_ENCODING_YCBCR420)) {
+		odm_rec.x -= 1;
+		odm_rec.width += 1;
+	}
+
 	return odm_rec;
 }
 
@@ -1438,6 +1448,7 @@ void resource_build_test_pattern_params(struct resource_context *res_ctx,
 	enum controller_dp_test_pattern controller_test_pattern;
 	enum controller_dp_color_space controller_color_space;
 	enum dc_color_depth color_depth = otg_master->stream->timing.display_color_depth;
+	enum dc_pixel_encoding pixel_encoding = otg_master->stream->timing.pixel_encoding;
 	int h_active = otg_master->stream->timing.h_addressable +
 		otg_master->stream->timing.h_border_left +
 		otg_master->stream->timing.h_border_right;
@@ -1469,7 +1480,33 @@ void resource_build_test_pattern_params(struct resource_context *res_ctx,
 		else
 			params->width = last_odm_slice_width;
 
+		/* Extra left edge pixel is required for 3-tap chroma subsampling. */
+		if (i != 0 && (pixel_encoding == PIXEL_ENCODING_YCBCR422 ||
+				pixel_encoding == PIXEL_ENCODING_YCBCR420)) {
+			params->offset -= 1;
+			params->width += 1;
+		}
+
 		offset += odm_slice_width;
+	}
+}
+
+void resource_build_subsampling_params(struct resource_context *res_ctx,
+	struct pipe_ctx *otg_master)
+{
+	struct pipe_ctx *opp_heads[MAX_PIPES];
+	int odm_cnt = 1;
+	int i;
+
+	odm_cnt = resource_get_opp_heads_for_otg_master(otg_master, res_ctx, opp_heads);
+
+	/* For ODM slices after the first slice, extra left edge pixel is required
+	 * for 3-tap chroma subsampling.
+	 */
+	if (otg_master->stream->timing.pixel_encoding == PIXEL_ENCODING_YCBCR422 ||
+			otg_master->stream->timing.pixel_encoding == PIXEL_ENCODING_YCBCR420) {
+		for (i = 0; i < odm_cnt; i++)
+			opp_heads[i]->stream_res.left_edge_extra_pixel = (i == 0) ? false : true;
 	}
 }
 
@@ -1834,23 +1871,6 @@ int resource_find_any_free_pipe(struct resource_context *new_res_ctx,
 
 bool resource_is_pipe_type(const struct pipe_ctx *pipe_ctx, enum pipe_type type)
 {
-#ifdef DBG
-	if (pipe_ctx->stream == NULL) {
-		/* a free pipe with dangling states */
-		ASSERT(!pipe_ctx->plane_state);
-		ASSERT(!pipe_ctx->prev_odm_pipe);
-		ASSERT(!pipe_ctx->next_odm_pipe);
-		ASSERT(!pipe_ctx->top_pipe);
-		ASSERT(!pipe_ctx->bottom_pipe);
-	} else if (pipe_ctx->top_pipe) {
-		/* a secondary DPP pipe must be signed to a plane */
-		ASSERT(pipe_ctx->plane_state)
-	}
-	/* Add more checks here to prevent corrupted pipe ctx. It is very hard
-	 * to debug this issue afterwards because we can't pinpoint the code
-	 * location causing inconsistent pipe context states.
-	 */
-#endif
 	switch (type) {
 	case OTG_MASTER:
 		return !pipe_ctx->prev_odm_pipe &&
@@ -4988,20 +5008,6 @@ enum dc_status update_dp_encoder_resources_for_test_harness(const struct dc *dc,
 	}
 
 	return DC_OK;
-}
-
-bool resource_subvp_in_use(struct dc *dc,
-		struct dc_state *context)
-{
-	uint32_t i;
-
-	for (i = 0; i < dc->res_pool->pipe_count; i++) {
-		struct pipe_ctx *pipe = &context->res_ctx.pipe_ctx[i];
-
-		if (dc_state_get_pipe_subvp_type(context, pipe) != SUBVP_NONE)
-			return true;
-	}
-	return false;
 }
 
 bool check_subvp_sw_cursor_fallback_req(const struct dc *dc, struct dc_stream_state *stream)

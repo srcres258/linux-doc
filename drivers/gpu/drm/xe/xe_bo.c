@@ -40,16 +40,24 @@ static struct ttm_placement sys_placement = {
 	.placement = &sys_placement_flags,
 };
 
-static const struct ttm_place tt_placement_flags = {
-	.fpfn = 0,
-	.lpfn = 0,
-	.mem_type = XE_PL_TT,
-	.flags = 0,
+static const struct ttm_place tt_placement_flags[] = {
+	{
+		.fpfn = 0,
+		.lpfn = 0,
+		.mem_type = XE_PL_TT,
+		.flags = TTM_PL_FLAG_DESIRED,
+	},
+	{
+		.fpfn = 0,
+		.lpfn = 0,
+		.mem_type = XE_PL_SYSTEM,
+		.flags = TTM_PL_FLAG_FALLBACK,
+	}
 };
 
 static struct ttm_placement tt_placement = {
-	.num_placement = 1,
-	.placement = &tt_placement_flags,
+	.num_placement = 2,
+	.placement = tt_placement_flags,
 };
 
 bool mem_type_is_vram(u32 mem_type)

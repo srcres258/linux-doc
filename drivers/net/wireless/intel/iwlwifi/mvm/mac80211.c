@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0 OR BSD-3-Clause
 /*
- * Copyright (C) 2012-2014, 2018-2023 Intel Corporation
+ * Copyright (C) 2012-2014, 2018-2024 Intel Corporation
  * Copyright (C) 2013-2015 Intel Mobile Communications GmbH
  * Copyright (C) 2016-2017 Intel Deutschland GmbH
  */
@@ -703,6 +703,18 @@ int iwl_mvm_mac_setup_register(struct iwl_mvm *mvm)
 		} else {
 			hw->wiphy->iftype_ext_capab = add_iftypes_ext_capa + 1;
 		}
+	}
+
+	if (iwl_fw_lookup_cmd_ver(mvm->fw, WIDE_ID(LOCATION_GROUP,
+						   TOF_RANGE_REQ_CMD),
+				  IWL_FW_CMD_VER_UNKNOWN) >= 11) {
+		wiphy_ext_feature_set(hw->wiphy,
+				      NL80211_EXT_FEATURE_PROT_RANGE_NEGO_AND_MEASURE);
+
+		if (fw_has_capa(&mvm->fw->ucode_capa,
+				IWL_UCODE_TLV_CAPA_SECURE_LTF_SUPPORT))
+			wiphy_ext_feature_set(hw->wiphy,
+					      NL80211_EXT_FEATURE_SECURE_LTF);
 	}
 
 	mvm->rts_threshold = IEEE80211_MAX_RTS_THRESHOLD;
@@ -1436,7 +1448,7 @@ int iwl_mvm_post_channel_switch(struct ieee80211_hw *hw,
 
 		if (!fw_has_capa(&mvm->fw->ucode_capa,
 				 IWL_UCODE_TLV_CAPA_CHANNEL_SWITCH_CMD)) {
-			ret = iwl_mvm_enable_beacon_filter(mvm, vif, 0);
+			ret = iwl_mvm_enable_beacon_filter(mvm, vif);
 			if (ret)
 				goto out_unlock;
 
@@ -1620,7 +1632,7 @@ static int iwl_mvm_mac_add_interface(struct ieee80211_hw *hw,
 		goto out_remove_mac;
 
 	/* beacon filtering */
-	ret = iwl_mvm_disable_beacon_filter(mvm, vif, 0);
+	ret = iwl_mvm_disable_beacon_filter(mvm, vif);
 	if (ret)
 		goto out_remove_mac;
 
@@ -1641,7 +1653,7 @@ static int iwl_mvm_mac_add_interface(struct ieee80211_hw *hw,
 	if (vif->type == NL80211_IFTYPE_MONITOR) {
 		mvm->monitor_on = true;
 		mvm->monitor_p80 =
-			iwl_mvm_chandef_get_primary_80(&vif->bss_conf.chandef);
+			iwl_mvm_chandef_get_primary_80(&vif->bss_conf.chanreq.oper);
 	}
 
 	if (!test_bit(IWL_MVM_STATUS_IN_HW_RESTART, &mvm->status))
@@ -2563,7 +2575,7 @@ iwl_mvm_bss_info_changed_station_common(struct iwl_mvm *mvm,
 		iwl_mvm_stop_session_protection(mvm, vif);
 
 		iwl_mvm_sf_update(mvm, vif, false);
-		WARN_ON(iwl_mvm_enable_beacon_filter(mvm, vif, 0));
+		WARN_ON(iwl_mvm_enable_beacon_filter(mvm, vif));
 	}
 
 	if (changes & (BSS_CHANGED_PS | BSS_CHANGED_P2P_PS | BSS_CHANGED_QOS |
@@ -2584,7 +2596,7 @@ iwl_mvm_bss_info_changed_station_common(struct iwl_mvm *mvm,
 			/* FIXME: need to update per link when FW API will
 			 * support it
 			 */
-			ret = iwl_mvm_enable_beacon_filter(mvm, vif, 0);
+			ret = iwl_mvm_enable_beacon_filter(mvm, vif);
 			if (ret)
 				IWL_ERR(mvm,
 					"failed to update CQM thresholds\n");
@@ -2611,9 +2623,7 @@ static void iwl_mvm_bss_info_changed_station(struct iwl_mvm *mvm,
 	 */
 	if (changes & BSS_CHANGED_ASSOC && vif->cfg.assoc) {
 		if ((vif->bss_conf.he_support &&
-		     !iwlwifi_mod_params.disable_11ax) ||
-		    (vif->bss_conf.eht_support &&
-		     !iwlwifi_mod_params.disable_11be))
+		     !iwlwifi_mod_params.disable_11ax))
 			iwl_mvm_cfg_he_sta(mvm, vif, mvmvif->deflink.ap_sta_id);
 
 		iwl_mvm_mac_ctxt_recalc_tsf_id(mvm, vif);
@@ -2622,10 +2632,7 @@ static void iwl_mvm_bss_info_changed_station(struct iwl_mvm *mvm,
 	/* Update MU EDCA params */
 	if (changes & BSS_CHANGED_QOS && mvmvif->associated &&
 	    vif->cfg.assoc &&
-	    ((vif->bss_conf.he_support &&
-	      !iwlwifi_mod_params.disable_11ax) ||
-	     (vif->bss_conf.eht_support &&
-	      !iwlwifi_mod_params.disable_11be)))
+	    (vif->bss_conf.he_support && !iwlwifi_mod_params.disable_11ax))
 		iwl_mvm_cfg_he_sta(mvm, vif, mvmvif->deflink.ap_sta_id);
 
 	/*
@@ -3421,16 +3428,16 @@ iwl_mvm_check_he_obss_narrow_bw_ru(struct ieee80211_hw *hw,
 		.tolerated = true,
 	};
 
-	if (WARN_ON_ONCE(!link_conf->chandef.chan ||
+	if (WARN_ON_ONCE(!link_conf->chanreq.oper.chan ||
 			 !mvmvif->link[link_id]))
 		return;
 
-	if (!(link_conf->chandef.chan->flags & IEEE80211_CHAN_RADAR)) {
+	if (!(link_conf->chanreq.oper.chan->flags & IEEE80211_CHAN_RADAR)) {
 		mvmvif->link[link_id]->he_ru_2mhz_block = false;
 		return;
 	}
 
-	cfg80211_bss_iter(hw->wiphy, &link_conf->chandef,
+	cfg80211_bss_iter(hw->wiphy, &link_conf->chanreq.oper,
 			  iwl_mvm_check_he_obss_narrow_bw_ru_iter,
 			  &iter_data);
 
@@ -3490,10 +3497,10 @@ static void iwl_mvm_mei_host_associated(struct iwl_mvm *mvm,
 		return;
 
 	/* FIXME: MEI needs to be updated for MLO */
-	if (!vif->bss_conf.chandef.chan)
+	if (!vif->bss_conf.chanreq.oper.chan)
 		return;
 
-	conn_info.channel = vif->bss_conf.chandef.chan->hw_value;
+	conn_info.channel = vif->bss_conf.chanreq.oper.chan->hw_value;
 
 	switch (mvm_sta->pairwise_cipher) {
 	case WLAN_CIPHER_SUITE_TKIP:
@@ -3690,6 +3697,9 @@ iwl_mvm_sta_state_notexist_to_none(struct iwl_mvm *mvm,
 					   NL80211_TDLS_SETUP);
 	}
 
+	if (ret)
+		return ret;
+
 	for_each_sta_active_link(vif, sta, link_sta, i)
 		link_sta->agg.max_rc_amsdu_len = 1;
 
@@ -3737,10 +3747,8 @@ iwl_mvm_sta_state_auth_to_assoc(struct ieee80211_hw *hw,
 		 * the default bss_conf
 		 */
 		if (!mvm->mld_api_is_used &&
-		    ((vif->bss_conf.he_support &&
-		      !iwlwifi_mod_params.disable_11ax) ||
-		    (vif->bss_conf.eht_support &&
-		     !iwlwifi_mod_params.disable_11be)))
+		    (vif->bss_conf.he_support &&
+		     !iwlwifi_mod_params.disable_11ax))
 			iwl_mvm_cfg_he_sta(mvm, vif, mvm_sta->deflink.sta_id);
 	} else if (vif->type == NL80211_IFTYPE_STATION) {
 		iwl_mvm_vif_set_he_support(hw, vif, sta, true);
@@ -3792,7 +3800,7 @@ iwl_mvm_sta_state_assoc_to_authorized(struct iwl_mvm *mvm,
 					   NL80211_TDLS_ENABLE_LINK);
 	} else {
 		/* enable beacon filtering */
-		WARN_ON(iwl_mvm_enable_beacon_filter(mvm, vif, 0));
+		WARN_ON(iwl_mvm_enable_beacon_filter(mvm, vif));
 
 		mvmvif->authorized = 1;
 
@@ -3850,7 +3858,7 @@ iwl_mvm_sta_state_authorized_to_assoc(struct iwl_mvm *mvm,
 		mvmvif->authorized = 0;
 
 		/* disable beacon filtering */
-		iwl_mvm_disable_beacon_filter(mvm, vif, 0);
+		iwl_mvm_disable_beacon_filter(mvm, vif);
 	}
 
 	return 0;
@@ -5294,8 +5302,8 @@ static int __iwl_mvm_mac_testmode_cmd(struct iwl_mvm *mvm,
 			return -EINVAL;
 
 		if (nla_get_u32(tb[IWL_MVM_TM_ATTR_BEACON_FILTER_STATE]))
-			return iwl_mvm_enable_beacon_filter(mvm, vif, 0);
-		return iwl_mvm_disable_beacon_filter(mvm, vif, 0);
+			return iwl_mvm_enable_beacon_filter(mvm, vif);
+		return iwl_mvm_disable_beacon_filter(mvm, vif);
 	}
 
 	return -EOPNOTSUPP;
@@ -5379,7 +5387,7 @@ static int iwl_mvm_old_pre_chan_sw_sta(struct iwl_mvm *mvm,
 		iwl_mvm_csa_client_absent(mvm, vif);
 
 	if (mvmvif->bf_data.bf_enabled) {
-		int ret = iwl_mvm_disable_beacon_filter(mvm, vif, 0);
+		int ret = iwl_mvm_disable_beacon_filter(mvm, vif);
 
 		if (ret)
 			return ret;
@@ -6041,6 +6049,7 @@ void iwl_mvm_mac_event_callback(struct ieee80211_hw *hw,
 	}
 }
 
+#define SYNC_RX_QUEUE_TIMEOUT (HZ)
 void iwl_mvm_sync_rx_queues_internal(struct iwl_mvm *mvm,
 				     enum iwl_mvm_rxq_notif_type type,
 				     bool sync,
@@ -6089,11 +6098,12 @@ void iwl_mvm_sync_rx_queues_internal(struct iwl_mvm *mvm,
 		lockdep_assert_held(&mvm->mutex);
 		ret = wait_event_timeout(mvm->rx_sync_waitq,
 					 READ_ONCE(mvm->queue_sync_state) == 0 ||
-					 iwl_mvm_is_radio_killed(mvm),
-					 HZ);
-		WARN_ONCE(!ret && !iwl_mvm_is_radio_killed(mvm),
-			  "queue sync: failed to sync, state is 0x%lx\n",
-			  mvm->queue_sync_state);
+					 iwl_mvm_is_radio_hw_killed(mvm),
+					 SYNC_RX_QUEUE_TIMEOUT);
+		WARN_ONCE(!ret && !iwl_mvm_is_radio_hw_killed(mvm),
+			  "queue sync: failed to sync, state is 0x%lx, cookie %d\n",
+			  mvm->queue_sync_state,
+			  mvm->queue_sync_cookie);
 	}
 
 out:

@@ -3994,15 +3994,11 @@ vm_fault_t do_swap_page(struct vm_fault *vmf)
 		if (data_race(si->flags & SWP_SYNCHRONOUS_IO) &&
 		    __swap_count(entry) == 1) {
 			/*
-			 * With swap count == 1, after we read the entry,
-			 * other threads could finish swapin first, free
-			 * the entry, then swapout the modified page using
-			 * the same entry. Now the content we just read is
-			 * stalled, and it's undetectable as pte_same()
-			 * returns true due to entry reuse.
-			 *
-			 * So pin the swap entry using the cache flag even
-			 * cache is not used.
+			 * Prevent parallel swapin from proceeding with
+			 * the cache flag. Otherwise, another thread may
+			 * finish swapin first, free the entry, and swapout
+			 * reusing the same entry. It's undetectable as
+			 * pte_same() returns true due to entry reuse.
 			 */
 			if (swapcache_prepare(entry))
 				goto out;

@@ -5740,7 +5740,7 @@ static void rtl8xxxu_update_beacon_work_callback(struct work_struct *work)
 
 	if (vif->bss_conf.csa_active) {
 		if (ieee80211_beacon_cntdwn_is_complete(vif)) {
-			ieee80211_csa_finish(vif);
+			ieee80211_csa_finish(vif, 0);
 			return;
 		}
 		schedule_delayed_work(&priv->update_beacon_work,
@@ -7654,6 +7654,10 @@ static int rtl8xxxu_sta_remove(struct ieee80211_hw *hw,
 }
 
 static const struct ieee80211_ops rtl8xxxu_ops = {
+	.add_chanctx = ieee80211_emulate_add_chanctx,
+	.remove_chanctx = ieee80211_emulate_remove_chanctx,
+	.change_chanctx = ieee80211_emulate_change_chanctx,
+	.switch_vif_chanctx = ieee80211_emulate_switch_vif_chanctx,
 	.tx = rtl8xxxu_tx,
 	.wake_tx_queue = ieee80211_handle_wake_tx_queue,
 	.add_interface = rtl8xxxu_add_interface,

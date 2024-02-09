@@ -65,7 +65,7 @@ static inline bool __must_check __must_check_overflow(bool overflow)
 	__must_check_overflow(__builtin_add_overflow(a, b, d))
 
 /**
- * add_wrap() - Intentionally perform a wrapping addition
+ * wrapping_add() - Intentionally perform a wrapping addition
  * @type: type for result of calculation
  * @a: first addend
  * @b: second addend
@@ -73,27 +73,27 @@ static inline bool __must_check __must_check_overflow(bool overflow)
  * Return the potentially wrapped-around addition without
  * tripping any wrap-around sanitizers that may be enabled.
  */
-#define add_wrap(type, a, b)				\
-	({						\
-		type __val;				\
-		if (check_add_overflow(a, b, &__val)) {	\
-			/* do nothing */		\
-		}					\
-		__val;					\
+#define wrapping_add(type, a, b)				\
+	({							\
+		type __val;					\
+		__builtin_add_overflow(a, b, &__val);		\
+		__val;						\
 	})
 
 /**
- * inc_wrap() - Intentionally perform a wrapping increment
+ * wrapping_inc() - Intentionally perform a wrapping increment
  * @var: variable to be incremented
  * @offset: amount to add
  *
  * Increments @var by @offset with wrap-around. Returns the resulting
  * value of @var. Will not trip any wrap-around sanitizers.
+ *
+ * Returns the new value of @var.
  */
-#define inc_wrap(var, offset)					\
-	({							\
-		typeof(var) *__ptr = &(var);			\
-		*__ptr = add_wrap(typeof(var), *__ptr, offset);	\
+#define wrapping_inc(var, offset)					\
+	({								\
+		typeof(var) *__ptr = &(var);				\
+		*__ptr = wrapping_add(typeof(var), *__ptr, offset);	\
 	})
 
 /**
@@ -110,7 +110,7 @@ static inline bool __must_check __must_check_overflow(bool overflow)
 	__must_check_overflow(__builtin_sub_overflow(a, b, d))
 
 /**
- * sub_wrap() - Intentionally perform a wrapping subtraction
+ * wrapping_sub() - Intentionally perform a wrapping subtraction
  * @type: type for result of calculation
  * @a: minuend; value to subtract from
  * @b: subtrahend; value to subtract from @a
@@ -118,27 +118,27 @@ static inline bool __must_check __must_check_overflow(bool overflow)
  * Return the potentially wrapped-around subtraction without
  * tripping any wrap-around sanitizers that may be enabled.
  */
-#define sub_wrap(type, a, b)				\
-	({						\
-		type __val;				\
-		if (check_sub_overflow(a, b, &__val)) {	\
-			/* do nothing */		\
-		}					\
-		__val;					\
+#define wrapping_sub(type, a, b)				\
+	({							\
+		type __val;					\
+		__builtin_sub_overflow(a, b, &__val);		\
+		__val;						\
 	})
 
 /**
- * dec_wrap() - Intentionally perform a wrapping decrement
+ * wrapping_dec() - Intentionally perform a wrapping decrement
  * @var: variable to be decremented
  * @offset: amount to subtract
  *
  * Decrements @var by @offset with wrap-around. Returns the resulting
  * value of @var. Will not trip any wrap-around sanitizers.
+ *
+ * Returns the new value of @var.
  */
-#define dec_wrap(var, offset)					\
-	({							\
-		typeof(var) *__ptr = &(var);			\
-		*__ptr = sub_wrap(typeof(var), *__ptr, offset);	\
+#define wrapping_dec(var, offset)					\
+	({								\
+		typeof(var) *__ptr = &(var);				\
+		*__ptr = wrapping_sub(typeof(var), *__ptr, offset);	\
 	})
 
 /**
@@ -155,7 +155,7 @@ static inline bool __must_check __must_check_overflow(bool overflow)
 	__must_check_overflow(__builtin_mul_overflow(a, b, d))
 
 /**
- * mul_wrap() - Intentionally perform a wrapping multiplication
+ * wrapping_mul() - Intentionally perform a wrapping multiplication
  * @type: type for result of calculation
  * @a: first factor
  * @b: second factor
@@ -163,13 +163,11 @@ static inline bool __must_check __must_check_overflow(bool overflow)
  * Return the potentially wrapped-around multiplication without
  * tripping any wrap-around sanitizers that may be enabled.
  */
-#define mul_wrap(type, a, b)				\
-	({						\
-		type __val;				\
-		if (check_mul_overflow(a, b, &__val)) {	\
-			/* do nothing */		\
-		}					\
-		__val;					\
+#define wrapping_mul(type, a, b)				\
+	({							\
+		type __val;					\
+		__builtin_mul_overflow(a, b, &__val);		\
+		__val;						\
 	})
 
 /**
