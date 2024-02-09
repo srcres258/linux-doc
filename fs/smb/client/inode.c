@@ -807,7 +807,7 @@ bool cifs_reparse_point_to_fattr(struct cifs_sb_info *cifs_sb,
 
 static void cifs_open_info_to_fattr(struct cifs_fattr *fattr,
 				    struct cifs_open_info_data *data,
-				    struct super_block *sb)
+				    struct super_block *sb, const char *full_path)
 {
 	struct smb2_file_all_info *info = &data->fi;
 	struct cifs_sb_info *cifs_sb = CIFS_SB(sb);
@@ -815,8 +815,10 @@ static void cifs_open_info_to_fattr(struct cifs_fattr *fattr,
 
 	memset(fattr, 0, sizeof(*fattr));
 	fattr->cf_cifsattrs = le32_to_cpu(info->Attributes);
-	if (info->DeletePending)
+	if (info->DeletePending) {
 		fattr->cf_flags |= CIFS_FATTR_DELETE_PENDING;
+		cifs_mark_open_handles_for_deleted_file(tcon, full_path);
+	}
 
 	if (info->LastAccessTime)
 		fattr->cf_atime = cifs_NTtimeToUnix(info->LastAccessTime);
@@ -893,6 +895,9 @@ cifs_get_file_info(struct file *filp)
 	struct cifsFileInfo *cfile = filp->private_data;
 	struct cifs_tcon *tcon = tlink_tcon(cfile->tlink);
 	struct TCP_Server_Info *server = tcon->ses->server;
+	struct dentry *dentry = filp->f_path.dentry;
+	void *page = alloc_dentry_path();
+	const unsigned char *path;
 
 	if (!server->ops->query_file_info)
 		return -ENOSYS;
@@ -907,7 +912,12 @@ cifs_get_file_info(struct file *filp)
 			data.symlink = true;
 			data.reparse.tag = IO_REPARSE_TAG_SYMLINK;
 		}
-		cifs_open_info_to_fattr(&fattr, &data, inode->i_sb);
+		path = build_path_from_dentry(dentry, page);
+		if (IS_ERR(path)) {
+			free_dentry_path(page);
+			return PTR_ERR(path);
+		}
+		cifs_open_info_to_fattr(&fattr, &data, inode->i_sb, path);
 		break;
 	case -EREMOTE:
 		cifs_create_junction_fattr(&fattr, inode->i_sb);
@@ -937,6 +947,7 @@ cifs_get_file_info(struct file *filp)
 	rc = cifs_fattr_to_inode(inode, &fattr);
 cgfi_exit:
 	cifs_free_open_info(&data);
+	free_dentry_path(page);
 	free_xid(xid);
 	return rc;
 }
@@ -1115,7 +1126,7 @@ static int reparse_info_to_fattr(struct cifs_open_info_data *data,
 	if (tcon->posix_extensions)
 		smb311_posix_info_to_fattr(fattr, data, sb);
 	else
-		cifs_open_info_to_fattr(fattr, data, sb);
+		cifs_open_info_to_fattr(fattr, data, sb, full_path);
 out:
 	fattr->cf_cifstag = data->reparse.tag;
 	free_rsp_buf(rsp_buftype, rsp_iov.iov_base);
@@ -1169,7 +1180,7 @@ static int cifs_get_fattr(struct cifs_open_info_data *data,
 			rc = reparse_info_to_fattr(data, sb, xid, tcon,
 						   full_path, fattr);
 		} else {
-			cifs_open_info_to_fattr(fattr, data, sb);
+			cifs_open_info_to_fattr(fattr, data, sb, full_path);
 		}
 		break;
 	case -EREMOTE:
@@ -1900,6 +1911,8 @@ out_reval:
 	cifs_inode = CIFS_I(dir);
 	CIFS_I(dir)->time = 0;	/* force revalidate of dir as well */
 unlink_out:
+	if (rc == 0)
+		cifs_mark_open_handles_for_deleted_file(tcon, full_path);
 	free_dentry_path(page);
 	kfree(attrs);
 	free_xid(xid);
