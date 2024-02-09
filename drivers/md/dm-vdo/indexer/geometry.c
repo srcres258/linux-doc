@@ -14,7 +14,7 @@
 #include "../permassert.h"
 
 #include "delta-index.h"
-#include "uds.h"
+#include "indexer.h"
 
 /*
  * An index volume is divided into a fixed number of fixed-size chapters, each consisting of a

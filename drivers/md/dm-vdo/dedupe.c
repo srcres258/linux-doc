@@ -132,7 +132,7 @@
 #include "permassert.h"
 #include "string-utils.h"
 
-#include "indexer/uds.h"
+#include "indexer/indexer.h"
 
 #include "action-manager.h"
 #include "admin-state.h"

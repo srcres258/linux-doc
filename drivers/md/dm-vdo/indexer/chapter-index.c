@@ -5,7 +5,7 @@
 
 #include "chapter-index.h"
 #include "hash-utils.h"
-#include "uds.h"
+#include "indexer.h"
 
 #include "../errors.h"
 #include "../logger.h"
