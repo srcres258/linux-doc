@@ -132,26 +132,6 @@ static const void *find_guid_context(struct wmi_block *wblock,
 	return NULL;
 }
 
-static int get_subobj_info(acpi_handle handle, const char *pathname,
-			   struct acpi_device_info **info)
-{
-	acpi_handle subobj_handle;
-	acpi_status status;
-
-	status = acpi_get_handle(handle, pathname, &subobj_handle);
-	if (status == AE_NOT_FOUND)
-		return -ENOENT;
-
-	if (ACPI_FAILURE(status))
-		return -EIO;
-
-	status = acpi_get_object_info(subobj_handle, info);
-	if (ACPI_FAILURE(status))
-		return -EIO;
-
-	return 0;
-}
-
 static acpi_status wmi_method_enable(struct wmi_block *wblock, bool enable)
 {
 	struct guid_block *block;
@@ -232,7 +212,7 @@ static int wmidev_match_notify_id(struct device *dev, const void *data)
 	return 0;
 }
 
-static struct bus_type wmi_bus_type;
+static const struct bus_type wmi_bus_type;
 
 static struct wmi_device *wmi_find_device_by_guid(const char *guid_string)
 {
@@ -931,7 +911,7 @@ static struct class wmi_bus_class = {
 	.name = "wmi_bus",
 };
 
-static struct bus_type wmi_bus_type = {
+static const struct bus_type wmi_bus_type = {
 	.name = "wmi",
 	.dev_groups = wmi_groups,
 	.match = wmi_dev_match,
@@ -979,9 +959,10 @@ static int wmi_create_device(struct device *wmi_bus_dev,
 			     struct wmi_block *wblock,
 			     struct acpi_device *device)
 {
-	struct acpi_device_info *info;
 	char method[WMI_ACPI_METHOD_NAME_SIZE];
-	int result;
+	struct acpi_device_info *info;
+	acpi_handle method_handle;
+	acpi_status status;
 	uint count;
 
 	if (wblock->gblock.flags & ACPI_WMI_EVENT) {
@@ -990,6 +971,15 @@ static int wmi_create_device(struct device *wmi_bus_dev,
 	}
 
 	if (wblock->gblock.flags & ACPI_WMI_METHOD) {
+		get_acpi_method_name(wblock, 'M', method);
+		if (!acpi_has_method(device->handle, method)) {
+			dev_warn(wmi_bus_dev,
+				 FW_BUG "%s method block execution control method not found\n",
+				 method);
+
+			return -ENXIO;
+		}
+
 		wblock->dev.dev.type = &wmi_type_method;
 		goto out_init;
 	}
@@ -1000,14 +990,18 @@ static int wmi_create_device(struct device *wmi_bus_dev,
 	 * we ignore this data block.
 	 */
 	get_acpi_method_name(wblock, 'Q', method);
-	result = get_subobj_info(device->handle, method, &info);
-
-	if (result) {
+	status = acpi_get_handle(device->handle, method, &method_handle);
+	if (ACPI_FAILURE(status)) {
 		dev_warn(wmi_bus_dev,
-			 "%s data block query control method not found\n",
+			 FW_BUG "%s data block query control method not found\n",
 			 method);
-		return result;
+
+		return -ENXIO;
 	}
+
+	status = acpi_get_object_info(method_handle, &info);
+	if (ACPI_FAILURE(status))
+		return -EIO;
 
 	wblock->dev.dev.type = &wmi_type_data;
 
@@ -1133,10 +1127,8 @@ static int parse_wdg(struct device *wmi_bus_dev, struct platform_device *pdev)
 			continue;
 
 		wblock = kzalloc(sizeof(*wblock), GFP_KERNEL);
-		if (!wblock) {
-			dev_err(wmi_bus_dev, "Failed to allocate %pUL\n", &gblock[i].guid);
+		if (!wblock)
 			continue;
-		}
 
 		wblock->acpi_device = device;
 		wblock->gblock = gblock[i];
@@ -1245,8 +1237,7 @@ static int wmi_notify_device(struct device *dev, void *data)
 	}
 	up_read(&wblock->notify_lock);
 
-	acpi_bus_generate_netlink_event(wblock->acpi_device->pnp.device_class,
-					dev_name(&wblock->dev.dev), *event, 0);
+	acpi_bus_generate_netlink_event("wmi", acpi_dev_name(wblock->acpi_device), *event, 0);
 
 	return -EBUSY;
 }
@@ -1347,7 +1338,7 @@ static int acpi_wmi_probe(struct platform_device *device)
 
 	error = parse_wdg(wmi_bus_dev, device);
 	if (error) {
-		pr_err("Failed to parse WDG method\n");
+		dev_err(&device->dev, "Failed to parse _WDG method\n");
 		return error;
 	}
 
