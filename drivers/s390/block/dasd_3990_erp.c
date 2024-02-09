@@ -7,12 +7,8 @@
  *
  */
 
-#define KMSG_COMPONENT "dasd-eckd"
-
 #include <linux/timer.h>
 #include <asm/idals.h>
-
-#define PRINTK_HEADER "dasd_erp(3990): "
 
 #include "dasd_int.h"
 #include "dasd_eckd.h"
@@ -398,7 +394,6 @@ dasd_3990_handle_env_data(struct dasd_ccw_req * erp, char *sense)
 	struct dasd_device *device = erp->startdev;
 	char msg_format = (sense[7] & 0xF0);
 	char msg_no = (sense[7] & 0x0F);
-	char errorstring[ERRORLENGTH];
 
 	switch (msg_format) {
 	case 0x00:		/* Format 0 - Program or System Checks */
@@ -1004,12 +999,9 @@ dasd_3990_handle_env_data(struct dasd_ccw_req * erp, char *sense)
 		}
 		break;
 
-	default:	/* unknown message format - should not happen
-			   internal error 03 - unknown message format */
-		snprintf(errorstring, ERRORLENGTH, "03 %x02", msg_format);
+	default:
 		dev_err(&device->cdev->dev,
-			 "An error occurred in the DASD device driver, "
-			 "reason=%s\n", errorstring);
+			"Unknown message format %02x", msg_format);
 		break;
 	}			/* end switch message format */
 
@@ -2663,7 +2655,7 @@ dasd_3990_erp_further_erp(struct dasd_ccw_req *erp)
 		 * necessary
 		 */
 		dev_err(&device->cdev->dev,
-			"ERP %p has run out of retries and failed\n", erp);
+			"ERP %px has run out of retries and failed\n", erp);
 
 		erp->status = DASD_CQR_FAILED;
 	}
@@ -2704,8 +2696,7 @@ dasd_3990_erp_handle_match_erp(struct dasd_ccw_req *erp_head,
 	while (erp_done != erp) {
 
 		if (erp_done == NULL)	/* end of chain reached */
-			panic(PRINTK_HEADER "Programming error in ERP! The "
-			      "original request was lost\n");
+			panic("Programming error in ERP! The original request was lost\n");
 
 		/* remove the request from the device queue */
 		list_del(&erp_done->blocklist);
@@ -2786,11 +2777,9 @@ dasd_3990_erp_action(struct dasd_ccw_req * cqr)
 			    "ERP chain at BEGINNING of ERP-ACTION\n");
 		for (temp_erp = cqr;
 		     temp_erp != NULL; temp_erp = temp_erp->refers) {
-
 			dev_err(&device->cdev->dev,
-				    "ERP %p (%02x) refers to %p\n",
-				    temp_erp, temp_erp->status,
-				    temp_erp->refers);
+				"ERP %px (%02x) refers to %px\n",
+				temp_erp, temp_erp->status, temp_erp->refers);
 		}
 	}
 
@@ -2837,11 +2826,9 @@ dasd_3990_erp_action(struct dasd_ccw_req * cqr)
 			    "ERP chain at END of ERP-ACTION\n");
 		for (temp_erp = erp;
 		     temp_erp != NULL; temp_erp = temp_erp->refers) {
-
 			dev_err(&device->cdev->dev,
-				    "ERP %p (%02x) refers to %p\n",
-				    temp_erp, temp_erp->status,
-				    temp_erp->refers);
+				"ERP %px (%02x) refers to %px\n",
+				temp_erp, temp_erp->status, temp_erp->refers);
 		}
 	}
 
