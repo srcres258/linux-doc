@@ -20,7 +20,7 @@
 #include "config.h"
 #include "geometry.h"
 #include "hash-utils.h"
-#include "uds.h"
+#include "indexer.h"
 
 /*
  * The volume index is a combination of two separate subindexes, one containing sparse hook entries

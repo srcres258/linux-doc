@@ -7,7 +7,7 @@
 #define UDS_HASH_UTILS_H
 
 #include "geometry.h"
-#include "uds.h"
+#include "indexer.h"
 
 #include "../numeric.h"
 

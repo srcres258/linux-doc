@@ -9,7 +9,7 @@
 #include <linux/list.h>
 #include <linux/timer.h>
 
-#include "indexer/uds.h"
+#include "indexer/indexer.h"
 
 #include "admin-state.h"
 #include "constants.h"

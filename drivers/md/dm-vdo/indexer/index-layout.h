@@ -8,7 +8,7 @@
 
 #include "config.h"
 #include "io-factory.h"
-#include "uds.h"
+#include "indexer.h"
 
 /*
  * The index layout describes the format of the index on the underlying storage, and is responsible

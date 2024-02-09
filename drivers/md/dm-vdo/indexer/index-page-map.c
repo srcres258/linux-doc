@@ -14,7 +14,7 @@
 #include "../thread-utils.h"
 
 #include "hash-utils.h"
-#include "uds.h"
+#include "indexer.h"
 
 /*
  * The index page map is conceptually a two-dimensional array indexed by chapter number and index

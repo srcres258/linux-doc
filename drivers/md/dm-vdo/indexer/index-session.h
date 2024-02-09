@@ -12,7 +12,7 @@
 #include "../thread-utils.h"
 
 #include "config.h"
-#include "uds.h"
+#include "indexer.h"
 
 /*
  * The index session mediates all interactions with a UDS index. Once the index session is created,

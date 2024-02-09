@@ -20,7 +20,7 @@
 #include "../time-utils.h"
 
 #include "config.h"
-#include "uds.h"
+#include "indexer.h"
 
 /*
  * The entries in a delta index could be stored in a single delta list, but to reduce search times

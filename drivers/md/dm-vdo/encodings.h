@@ -12,7 +12,7 @@
 #include <linux/uuid.h>
 
 #include "numeric.h"
-#include "indexer/uds.h"
+#include "indexer/indexer.h"
 
 #include "constants.h"
 #include "types.h"

@@ -12,7 +12,7 @@
 #include "logger.h"
 #include "memory-alloc.h"
 #include "string-utils.h"
-#include "indexer/uds.h"
+#include "indexer/indexer.h"
 
 #define UDS_SYSFS_NAME "uds"
 
