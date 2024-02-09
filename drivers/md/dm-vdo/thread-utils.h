@@ -11,7 +11,6 @@
 #include <linux/jiffies.h>
 #include <linux/mutex.h>
 #include <linux/semaphore.h>
-#include <linux/wait.h>
 
 #include "errors.h"
 
@@ -24,31 +23,5 @@ int __must_check vdo_create_thread(void (*thread_function)(void *), void *thread
 void vdo_join_threads(struct thread *thread);
 
 void vdo_perform_once(atomic_t *once_state, void (*function) (void));
-
-struct cond_var {
-	wait_queue_head_t wait_queue;
-};
-
-static inline int __must_check uds_init_cond(struct cond_var *cv)
-{
-	init_waitqueue_head(&cv->wait_queue);
-	return UDS_SUCCESS;
-}
-
-static inline void uds_signal_cond(struct cond_var *cv)
-{
-	wake_up(&cv->wait_queue);
-}
-
-static inline void uds_broadcast_cond(struct cond_var *cv)
-{
-	wake_up_all(&cv->wait_queue);
-}
-
-void uds_wait_cond(struct cond_var *cond, struct mutex *mutex);
-
-static inline void uds_destroy_cond(struct cond_var *cv)
-{
-}
 
 #endif /* THREAD_UTILS_H */

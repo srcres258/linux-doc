@@ -226,27 +226,13 @@ static int __must_check make_empty_index_session(struct uds_index_session **inde
 		return result;
 
 	mutex_init(&session->request_mutex);
-
-	result = uds_init_cond(&session->request_cond);
-	if (result != UDS_SUCCESS) {
-		uds_free(session);
-		return result;
-	}
-
+	uds_init_cond(&session->request_cond);
 	mutex_init(&session->load_context.mutex);
-
-	result = uds_init_cond(&session->load_context.cond);
-	if (result != UDS_SUCCESS) {
-		uds_destroy_cond(&session->request_cond);
-		uds_free(session);
-		return result;
-	}
+	uds_init_cond(&session->load_context.cond);
 
 	result = uds_make_request_queue("callbackW", &handle_callbacks,
 					&session->callback_queue);
 	if (result != UDS_SUCCESS) {
-		uds_destroy_cond(&session->load_context.cond);
-		uds_destroy_cond(&session->request_cond);
 		uds_free(session);
 		return result;
 	}
@@ -686,8 +672,6 @@ int uds_destroy_index_session(struct uds_index_session *index_session)
 	result = save_and_free_index(index_session);
 	uds_request_queue_finish(index_session->callback_queue);
 	index_session->callback_queue = NULL;
-	uds_destroy_cond(&index_session->load_context.cond);
-	uds_destroy_cond(&index_session->request_cond);
 	uds_log_debug("Destroyed index session");
 	uds_free(index_session);
 	return uds_status_to_errno(result);
