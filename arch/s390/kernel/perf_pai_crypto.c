@@ -694,6 +694,12 @@ static int __init attr_event_init_one(struct attribute **attrs, int num)
 {
 	struct perf_pmu_events_attr *pa;
 
+	/* Index larger than array_size, no counter name available */
+	if (num >= ARRAY_SIZE(paicrypt_ctrnames)) {
+		attrs[num] = NULL;
+		return 0;
+	}
+
 	pa = kzalloc(sizeof(*pa), GFP_KERNEL);
 	if (!pa)
 		return -ENOMEM;
@@ -714,14 +720,13 @@ static int __init attr_event_init(void)
 	struct attribute **attrs;
 	int ret, i;
 
-	attrs = kmalloc_array(ARRAY_SIZE(paicrypt_ctrnames) + 1, sizeof(*attrs),
-			      GFP_KERNEL);
+	attrs = kmalloc_array(paicrypt_cnt + 2, sizeof(*attrs), GFP_KERNEL);
 	if (!attrs)
 		return -ENOMEM;
-	for (i = 0; i < ARRAY_SIZE(paicrypt_ctrnames); i++) {
+	for (i = 0; i <= paicrypt_cnt; i++) {
 		ret = attr_event_init_one(attrs, i);
 		if (ret) {
-			attr_event_free(attrs, i - 1);
+			attr_event_free(attrs, i);
 			return ret;
 		}
 	}
@@ -742,8 +747,10 @@ static int __init paicrypt_init(void)
 	paicrypt_cnt = ib.num_cc;
 	if (paicrypt_cnt == 0)
 		return 0;
-	if (paicrypt_cnt >= PAI_CRYPTO_MAXCTR)
-		paicrypt_cnt = PAI_CRYPTO_MAXCTR - 1;
+	if (paicrypt_cnt >= PAI_CRYPTO_MAXCTR) {
+		pr_err("Too many PMU pai_crypto counters %d\n", paicrypt_cnt);
+		return -E2BIG;
+	}
 
 	rc = attr_event_init();		/* Export known PAI crypto events */
 	if (rc) {
