@@ -12,7 +12,7 @@
 #include <linux/limits.h>
 
 #include "../permassert.h"
-#include "../uds-threads.h"
+#include "../thread-utils.h"
 
 #include "chapter-index.h"
 #include "config.h"

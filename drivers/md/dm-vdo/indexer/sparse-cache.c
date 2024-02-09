@@ -15,7 +15,7 @@
 #include "../logger.h"
 #include "../memory-alloc.h"
 #include "../permassert.h"
-#include "../uds-threads.h"
+#include "../thread-utils.h"
 
 /*
  * Since the cache is small, it is implemented as a simple array of cache entries. Searching for a
