@@ -10,7 +10,6 @@
 #include <linux/blk_types.h>
 #include <linux/completion.h>
 #include <linux/dm-kcopyd.h>
-#include <linux/kobject.h>
 #include <linux/list.h>
 #include <linux/spinlock.h>
 
@@ -249,11 +248,6 @@ struct vdo {
 	struct vdo_statistics stats_buffer;
 	/* Protects the stats_buffer */
 	struct mutex stats_mutex;
-	/* true if sysfs directory is set up */
-	bool sysfs_added;
-	/* Used when shutting down the sysfs statistics */
-	struct completion stats_shutdown;
-
 
 	/* A list of all device_configs referencing this vdo */
 	struct list_head device_config_list;
@@ -264,10 +258,6 @@ struct vdo {
 	/* Underlying block device info. */
 	u64 starting_sector_offset;
 	struct volume_geometry geometry;
-
-	/* For sysfs */
-	struct kobject vdo_directory;
-	struct kobject stats_directory;
 
 	/* N blobs of context data for LZ4 code, one per CPU thread. */
 	char **compression_context;

@@ -120,7 +120,6 @@
 #include <linux/atomic.h>
 #include <linux/jiffies.h>
 #include <linux/kernel.h>
-#include <linux/kobject.h>
 #include <linux/list.h>
 #include <linux/ratelimit.h>
 #include <linux/spinlock.h>
@@ -285,7 +284,6 @@ enum {
 
 struct hash_zones {
 	struct action_manager *manager;
-	struct kobject dedupe_directory;
 	struct uds_parameters parameters;
 	struct uds_index_session *index_session;
 	struct ratelimit_state ratelimiter;
@@ -2029,55 +2027,7 @@ void vdo_share_compressed_write_lock(struct data_vio *data_vio,
 	ASSERT_LOG_ONLY(claimed, "impossible to fail to claim an initial increment");
 }
 
-static void dedupe_kobj_release(struct kobject *directory)
-{
-	uds_free(container_of(directory, struct hash_zones, dedupe_directory));
-}
-
-static ssize_t dedupe_status_show(struct kobject *directory, struct attribute *attr,
-				  char *buf)
-{
-	struct uds_attribute *ua = container_of(attr, struct uds_attribute, attr);
-	struct hash_zones *zones = container_of(directory, struct hash_zones,
-						dedupe_directory);
-
-	if (ua->show_string != NULL)
-		return sprintf(buf, "%s\n", ua->show_string(zones));
-	else
-		return -EINVAL;
-}
-
-static ssize_t dedupe_status_store(struct kobject *kobj __always_unused,
-				   struct attribute *attr __always_unused,
-				   const char *buf __always_unused,
-				   size_t length __always_unused)
-{
-	return -EINVAL;
-}
-
 /*----------------------------------------------------------------------*/
-
-static const struct sysfs_ops dedupe_sysfs_ops = {
-	.show = dedupe_status_show,
-	.store = dedupe_status_store,
-};
-
-static struct uds_attribute dedupe_status_attribute = {
-	.attr = {.name = "status", .mode = 0444, },
-	.show_string = vdo_get_dedupe_index_state_name,
-};
-
-static struct attribute *dedupe_attrs[] = {
-	&dedupe_status_attribute.attr,
-	NULL,
-};
-ATTRIBUTE_GROUPS(dedupe);
-
-static const struct kobj_type dedupe_directory_type = {
-	.release = dedupe_kobj_release,
-	.sysfs_ops = &dedupe_sysfs_ops,
-	.default_groups = dedupe_groups,
-};
 
 static void start_uds_queue(void *ptr)
 {
@@ -2273,7 +2223,6 @@ static int initialize_index(struct vdo *vdo, struct hash_zones *zones)
 	vdo_initialize_completion(&zones->completion, vdo, VDO_HASH_ZONES_COMPLETION);
 	vdo_set_completion_callback(&zones->completion, change_dedupe_state,
 				    vdo->thread_config.dedupe_thread);
-	kobject_init(&zones->dedupe_directory, &dedupe_directory_type);
 	return VDO_SUCCESS;
 }
 
@@ -2546,8 +2495,6 @@ void vdo_free_hash_zones(struct hash_zones *zones)
 	ratelimit_state_exit(&zones->ratelimiter);
 	if (vdo_get_admin_state_code(&zones->state) == VDO_ADMIN_STATE_NEW)
 		uds_free(zones);
-	else
-		kobject_put(&zones->dedupe_directory);
 }
 
 static void initiate_suspend_index(struct admin_state *state)
@@ -3052,19 +2999,6 @@ int vdo_message_dedupe_index(struct hash_zones *zones, const char *name)
 	}
 
 	return -EINVAL;
-}
-
-int vdo_add_dedupe_index_sysfs(struct hash_zones *zones)
-{
-	int result = kobject_add(&zones->dedupe_directory,
-				 &zones->completion.vdo->vdo_directory, "dedupe");
-
-	if (result == 0) {
-		vdo_set_admin_state_code(&zones->state,
-					 VDO_ADMIN_STATE_NORMAL_OPERATION);
-	}
-
-	return result;
 }
 
 /* If create_flag, create a new index without first attempting to load an existing index. */
