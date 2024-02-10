@@ -27,7 +27,6 @@
 #include "logger.h"
 #include "memory-alloc.h"
 #include "message-stats.h"
-#include "pool-sysfs.h"
 #include "recovery-journal.h"
 #include "repair.h"
 #include "slab-depot.h"
@@ -36,7 +35,6 @@
 #include "thread-device.h"
 #include "thread-registry.h"
 #include "types.h"
-#include "uds-sysfs.h"
 #include "vdo.h"
 #include "vio.h"
 
@@ -54,7 +52,6 @@ enum {
 	GROW_PHYSICAL_PHASE_END,
 	GROW_PHYSICAL_PHASE_ERROR,
 	LOAD_PHASE_START,
-	LOAD_PHASE_STATS,
 	LOAD_PHASE_LOAD_DEPOT,
 	LOAD_PHASE_MAKE_DIRTY,
 	LOAD_PHASE_PREPARE_TO_ALLOCATE,
@@ -104,7 +101,6 @@ static const char * const ADMIN_PHASE_NAMES[] = {
 	"GROW_PHYSICAL_PHASE_END",
 	"GROW_PHYSICAL_PHASE_ERROR",
 	"LOAD_PHASE_START",
-	"LOAD_PHASE_STATS",
 	"LOAD_PHASE_LOAD_DEPOT",
 	"LOAD_PHASE_MAKE_DIRTY",
 	"LOAD_PHASE_PREPARE_TO_ALLOCATE",
@@ -2181,32 +2177,6 @@ static enum slab_depot_load_type get_load_type(struct vdo *vdo)
 }
 
 /**
- * vdo_initialize_kobjects() - Initialize the vdo sysfs directory.
- * @vdo: The vdo being initialized.
- *
- * Return: VDO_SUCCESS or an error code.
- */
-static int vdo_initialize_kobjects(struct vdo *vdo)
-{
-	int result;
-	struct dm_target *target = vdo->device_config->owning_target;
-	struct mapped_device *md = dm_table_get_md(target->table);
-
-	kobject_init(&vdo->vdo_directory, &vdo_directory_type);
-	vdo->sysfs_added = true;
-	result = kobject_add(&vdo->vdo_directory, &disk_to_dev(dm_disk(md))->kobj,
-			     "vdo");
-	if (result != 0)
-		return VDO_CANT_ADD_SYSFS_NODE;
-
-	result = vdo_add_dedupe_index_sysfs(vdo->hash_zones);
-	if (result != 0)
-		return VDO_CANT_ADD_SYSFS_NODE;
-
-	return vdo_add_sysfs_stats_dir(vdo);
-}
-
-/**
  * load_callback() - Callback to do the destructive parts of loading a VDO.
  * @completion: The sub-task completion.
  */
@@ -2229,10 +2199,6 @@ static void load_callback(struct vdo_completion *completion)
 		vdo_open_recovery_journal(vdo->recovery_journal, vdo->depot,
 					  vdo->block_map);
 		vdo_allow_read_only_mode_entry(completion);
-		return;
-
-	case LOAD_PHASE_STATS:
-		vdo_continue_completion(completion, vdo_initialize_kobjects(vdo));
 		return;
 
 	case LOAD_PHASE_LOAD_DEPOT:
@@ -2913,7 +2879,6 @@ static int __init vdo_init(void)
 	 * UDS module level initialization must be done first, as VDO initialization depends on it
 	 */
 	uds_memory_init();
-	uds_init_sysfs();
 
 	vdo_initialize_thread_device_registry();
 	vdo_initialize_device_registry_once();
@@ -2945,7 +2910,6 @@ static void __exit vdo_exit(void)
 	 * UDS module level exit processing must be done after all VDO module exit processing is
 	 * complete.
 	 */
-	uds_put_sysfs();
 	uds_memory_exit();
 }
 
