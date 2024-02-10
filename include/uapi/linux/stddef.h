@@ -31,23 +31,23 @@
 
 #ifdef __cplusplus
 /* sizeof(struct{}) is 1 in C++, not 0, can't use C version of the macro. */
-#define __DECLARE_FLEX_ARRAY(T, member)	\
-	T member[0]
+#define __DECLARE_FLEX_ARRAY(TYPE, NAME, ...)	\
+	TYPE NAME[0] __VA_ARGS__
 #else
 /**
  * __DECLARE_FLEX_ARRAY() - Declare a flexible array usable in a union
- *
  * @TYPE: The type of each flexible array element
  * @NAME: The name of the flexible array member
+ * @...: The list of member attributes to apply (optional)
  *
  * In order to have a flexible array member in a union or alone in a
  * struct, it needs to be wrapped in an anonymous struct with at least 1
  * named member, but that member can be empty.
  */
-#define __DECLARE_FLEX_ARRAY(TYPE, NAME)	\
+#define __DECLARE_FLEX_ARRAY(TYPE, NAME, ...)	\
 	struct { \
 		struct { } __empty_ ## NAME; \
-		TYPE NAME[]; \
+		TYPE NAME[] __VA_ARGS__; \
 	}
 #endif
 
