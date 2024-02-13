@@ -8,7 +8,7 @@
 
 #include <linux/compiler.h>
 
-#include "errors.h"
+#include "status-codes.h"
 
 /* Utilities for asserting that certain conditions are met */
 
