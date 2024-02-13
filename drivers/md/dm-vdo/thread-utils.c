@@ -11,9 +11,9 @@
 #include <linux/mutex.h>
 #include <linux/types.h>
 
-#include "errors.h"
 #include "logger.h"
 #include "memory-alloc.h"
+#include "status-codes.h"
 
 static struct hlist_head thread_list;
 static struct mutex thread_mutex;
@@ -85,7 +85,7 @@ int vdo_create_thread(void (*thread_function)(void *), void *thread_data,
 	int result;
 
 	result = vdo_allocate(1, struct thread, __func__, &thread);
-	if (result != UDS_SUCCESS) {
+	if (result != VDO_SUCCESS) {
 		uds_log_warning("Error allocating memory for %s", name);
 		return result;
 	}
