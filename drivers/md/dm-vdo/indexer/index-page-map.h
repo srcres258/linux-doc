@@ -25,7 +25,7 @@ struct index_page_map {
 int __must_check uds_make_index_page_map(const struct index_geometry *geometry,
 					 struct index_page_map **map_ptr);
 
-void uds_free_index_page_map(struct index_page_map *map);
+void vdo_free_index_page_map(struct index_page_map *map);
 
 int __must_check uds_read_index_page_map(struct index_page_map *map,
 					 struct buffered_reader *reader);

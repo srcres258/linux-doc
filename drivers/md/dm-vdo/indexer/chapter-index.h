@@ -33,7 +33,7 @@ int __must_check uds_make_open_chapter_index(struct open_chapter_index **chapter
 					     const struct index_geometry *geometry,
 					     u64 volume_nonce);
 
-void uds_free_open_chapter_index(struct open_chapter_index *chapter_index);
+void vdo_free_open_chapter_index(struct open_chapter_index *chapter_index);
 
 void uds_empty_open_chapter_index(struct open_chapter_index *chapter_index,
 				  u64 virtual_chapter_number);

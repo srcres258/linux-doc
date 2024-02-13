@@ -21,7 +21,7 @@ struct index_layout;
 int __must_check uds_make_index_layout(struct uds_configuration *config, bool new_layout,
 				       struct index_layout **layout_ptr);
 
-void uds_free_index_layout(struct index_layout *layout);
+void vdo_free_index_layout(struct index_layout *layout);
 
 int __must_check uds_replace_index_layout_storage(struct index_layout *layout,
 						  struct block_device *bdev);

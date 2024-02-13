@@ -69,7 +69,7 @@ struct __aligned(L1_CACHE_BYTES) funnel_queue {
 
 int __must_check uds_make_funnel_queue(struct funnel_queue **queue_ptr);
 
-void uds_free_funnel_queue(struct funnel_queue *queue);
+void vdo_free_funnel_queue(struct funnel_queue *queue);
 
 /*
  * Put an entry on the end of the queue.

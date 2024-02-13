@@ -198,7 +198,7 @@ int uds_make_request_queue(const char *queue_name,
 	int result;
 	struct uds_request_queue *queue;
 
-	result = uds_allocate(1, struct uds_request_queue, __func__, &queue);
+	result = vdo_allocate(1, struct uds_request_queue, __func__, &queue);
 	if (result != UDS_SUCCESS)
 		return result;
 
@@ -273,7 +273,7 @@ void uds_request_queue_finish(struct uds_request_queue *queue)
 		vdo_join_threads(queue->thread);
 	}
 
-	uds_free_funnel_queue(queue->main_queue);
-	uds_free_funnel_queue(queue->retry_queue);
-	uds_free(queue);
+	vdo_free_funnel_queue(queue->main_queue);
+	vdo_free_funnel_queue(queue->retry_queue);
+	vdo_free(queue);
 }

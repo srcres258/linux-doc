@@ -1204,12 +1204,12 @@ int vdo_write_stats(struct vdo *vdo,
 	struct vdo_statistics *stats;
 	int result;
 
-	result = uds_allocate(1, struct vdo_statistics, __func__, &stats);
+	result = vdo_allocate(1, struct vdo_statistics, __func__, &stats);
 	if (result != VDO_SUCCESS)
 		return result;
 
 	vdo_fetch_statistics(vdo, stats);
 	result = write_vdo_statistics(NULL, stats, NULL, &buf, &maxlen);
-	uds_free(stats);
+	vdo_free(stats);
 	return result;
 }

@@ -327,7 +327,7 @@ int uds_make_configuration(const struct uds_parameters *params,
 	if (result != UDS_SUCCESS)
 		return result;
 
-	result = uds_allocate(1, struct uds_configuration, __func__, &config);
+	result = vdo_allocate(1, struct uds_configuration, __func__, &config);
 	if (result != UDS_SUCCESS)
 		return result;
 
@@ -335,7 +335,7 @@ int uds_make_configuration(const struct uds_parameters *params,
 					 chapters_per_volume, sparse_chapters_per_volume,
 					 0, 0, &config->geometry);
 	if (result != UDS_SUCCESS) {
-		uds_free_configuration(config);
+		vdo_free_configuration(config);
 		return result;
 	}
 
@@ -354,11 +354,11 @@ int uds_make_configuration(const struct uds_parameters *params,
 	return UDS_SUCCESS;
 }
 
-void uds_free_configuration(struct uds_configuration *config)
+void vdo_free_configuration(struct uds_configuration *config)
 {
 	if (config != NULL) {
-		uds_free_index_geometry(config->geometry);
-		uds_free(config);
+		vdo_free_index_geometry(config->geometry);
+		vdo_free(config);
 	}
 }
 
