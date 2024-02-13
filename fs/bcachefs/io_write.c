@@ -88,7 +88,7 @@ void bch2_latency_acct(struct bch_dev *ca, u64 submit_time, int rw)
 
 	bch2_congested_acct(ca, io_latency, now, rw);
 
-	__bch2_time_stats_update(&ca->io_latency[rw], submit_time, now);
+	__time_stats_update(&ca->io_latency[rw].stats, submit_time, now);
 }
 
 #endif
@@ -457,7 +457,7 @@ static void bch2_write_done(struct closure *cl)
 
 	EBUG_ON(op->open_buckets.nr);
 
-	bch2_time_stats_update(&c->times[BCH_TIME_data_write], op->start_time);
+	time_stats_update(&c->times[BCH_TIME_data_write], op->start_time);
 	bch2_disk_reservation_put(c, &op->res);
 
 	if (!(op->flags & BCH_WRITE_MOVE))
@@ -1564,6 +1564,7 @@ CLOSURE_CALLBACK(bch2_write)
 	BUG_ON(!op->write_point.v);
 	BUG_ON(bkey_eq(op->pos, POS_MAX));
 
+	op->nr_replicas_required = min_t(unsigned, op->nr_replicas_required, op->nr_replicas);
 	op->start_time = local_clock();
 	bch2_keylist_init(&op->insert_keys, op->inline_keys);
 	wbio_init(bio)->put_bio = false;

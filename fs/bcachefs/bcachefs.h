@@ -200,6 +200,8 @@
 #include <linux/seqlock.h>
 #include <linux/shrinker.h>
 #include <linux/srcu.h>
+#include <linux/thread_with_file_types.h>
+#include <linux/time_stats.h>
 #include <linux/types.h>
 #include <linux/workqueue.h>
 #include <linux/zstd.h>
@@ -465,7 +467,6 @@ enum bch_time_stats {
 #include "replicas_types.h"
 #include "subvolume_types.h"
 #include "super_types.h"
-#include "thread_with_file_types.h"
 
 /* Number of nodes btree coalesce will try to coalesce at once */
 #define GC_MERGE_NODES		4U
@@ -504,6 +505,7 @@ enum gc_phase {
 	GC_PHASE_BTREE_deleted_inodes,
 	GC_PHASE_BTREE_logged_ops,
 	GC_PHASE_BTREE_rebalance_work,
+	GC_PHASE_BTREE_subvolume_children,
 
 	GC_PHASE_PENDING_DELETE,
 };
@@ -593,7 +595,7 @@ struct bch_dev {
 
 	/* The rest of this all shows up in sysfs */
 	atomic64_t		cur_latency[2];
-	struct bch2_time_stats	io_latency[2];
+	struct time_stats_quantiles	io_latency[2];
 
 #define CONGESTED_MAX		1024
 	atomic_t		congested;
@@ -640,8 +642,8 @@ struct btree_debug {
 #define BCH_TRANSACTIONS_NR 128
 
 struct btree_transaction_stats {
-	struct bch2_time_stats	duration;
-	struct bch2_time_stats	lock_hold_times;
+	struct time_stats	duration;
+	struct time_stats	lock_hold_times;
 	struct mutex		lock;
 	unsigned		nr_max_paths;
 	unsigned		journal_entries_size;
@@ -919,8 +921,6 @@ struct bch_fs {
 	/* ALLOCATOR */
 	spinlock_t		freelist_lock;
 	struct closure_waitlist	freelist_wait;
-	u64			blocked_allocate;
-	u64			blocked_allocate_open_bucket;
 
 	open_bucket_idx_t	open_buckets_freelist;
 	open_bucket_idx_t	open_buckets_nr_free;
@@ -1104,7 +1104,7 @@ struct bch_fs {
 	unsigned		copy_gc_enabled:1;
 	bool			promote_whole_extents;
 
-	struct bch2_time_stats	times[BCH_TIME_STAT_NR];
+	struct time_stats	times[BCH_TIME_STAT_NR];
 
 	struct btree_transaction_stats btree_transaction_stats[BCH_TRANSACTIONS_NR];
 
@@ -1247,6 +1247,18 @@ static inline struct stdio_redirect *bch2_fs_stdio_redirect(struct bch_fs *c)
 	if (c->stdio_filter && c->stdio_filter != current)
 		stdio = NULL;
 	return stdio;
+}
+
+static inline unsigned metadata_replicas_required(struct bch_fs *c)
+{
+	return min(c->opts.metadata_replicas,
+		   c->opts.metadata_replicas_required);
+}
+
+static inline unsigned data_replicas_required(struct bch_fs *c)
+{
+	return min(c->opts.data_replicas,
+		   c->opts.data_replicas_required);
 }
 
 #define BKEY_PADDED_ONSTACK(key, pad)				\

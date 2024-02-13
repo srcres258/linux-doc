@@ -840,7 +840,9 @@ struct bch_sb_field_downgrade {
 	x(snapshot_skiplists,		BCH_VERSION(1,  1))		\
 	x(deleted_inodes,		BCH_VERSION(1,  2))		\
 	x(rebalance_work,		BCH_VERSION(1,  3))		\
-	x(member_seq,			BCH_VERSION(1,  4))
+	x(member_seq,			BCH_VERSION(1,  4))		\
+	x(subvolume_fs_parent,		BCH_VERSION(1,  5))		\
+	x(btree_subvolume_children,	BCH_VERSION(1,  6))
 
 enum bcachefs_metadata_version {
 	bcachefs_metadata_version_min = 9,
@@ -1275,7 +1277,8 @@ static inline __u64 __bset_magic(struct bch_sb *sb)
 	x(dev_usage,		8)		\
 	x(log,			9)		\
 	x(overwrite,		10)		\
-	x(write_buffer_keys,	11)
+	x(write_buffer_keys,	11)		\
+	x(datetime,		12)
 
 enum {
 #define x(f, nr)	BCH_JSET_ENTRY_##f	= nr,
@@ -1374,6 +1377,11 @@ static inline unsigned jset_entry_dev_usage_nr_types(struct jset_entry_dev_usage
 struct jset_entry_log {
 	struct jset_entry	entry;
 	u8			d[];
+} __packed __aligned(8);
+
+struct jset_entry_datetime {
+	struct jset_entry	entry;
+	__le64			seconds;
 } __packed __aligned(8);
 
 /*
@@ -1482,7 +1490,9 @@ enum btree_id_flags {
 	  BIT_ULL(KEY_TYPE_logged_op_truncate)|					\
 	  BIT_ULL(KEY_TYPE_logged_op_finsert))					\
 	x(rebalance_work,	18,	BTREE_ID_SNAPSHOT_FIELD,		\
-	  BIT_ULL(KEY_TYPE_set)|BIT_ULL(KEY_TYPE_cookie))
+	  BIT_ULL(KEY_TYPE_set)|BIT_ULL(KEY_TYPE_cookie))			\
+	x(subvolume_children,	19,	0,					\
+	  BIT_ULL(KEY_TYPE_set))
 
 enum btree_id {
 #define x(name, nr, ...) BTREE_ID_##name = nr,
