@@ -111,7 +111,7 @@ struct uds_configuration_6_02 {
 int __must_check uds_make_configuration(const struct uds_parameters *params,
 					struct uds_configuration **config_ptr);
 
-void uds_free_configuration(struct uds_configuration *config);
+void vdo_free_configuration(struct uds_configuration *config);
 
 int __must_check uds_validate_config_contents(struct buffered_reader *reader,
 					      struct uds_configuration *config);

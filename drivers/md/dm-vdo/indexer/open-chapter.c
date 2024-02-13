@@ -70,7 +70,7 @@ int uds_make_open_chapter(const struct index_geometry *geometry, unsigned int zo
 	size_t capacity = geometry->records_per_chapter / zone_count;
 	size_t slot_count = (1 << bits_per(capacity * LOAD_RATIO));
 
-	result = uds_allocate_extended(struct open_chapter_zone, slot_count,
+	result = vdo_allocate_extended(struct open_chapter_zone, slot_count,
 				       struct open_chapter_zone_slot, "open chapter",
 				       &open_chapter);
 	if (result != UDS_SUCCESS)
@@ -78,10 +78,10 @@ int uds_make_open_chapter(const struct index_geometry *geometry, unsigned int zo
 
 	open_chapter->slot_count = slot_count;
 	open_chapter->capacity = capacity;
-	result = uds_allocate_cache_aligned(records_size(open_chapter), "record pages",
+	result = vdo_allocate_cache_aligned(records_size(open_chapter), "record pages",
 					    &open_chapter->records);
 	if (result != UDS_SUCCESS) {
-		uds_free_open_chapter(open_chapter);
+		vdo_free_open_chapter(open_chapter);
 		return result;
 	}
 
@@ -193,11 +193,11 @@ void uds_remove_from_open_chapter(struct open_chapter_zone *open_chapter,
 	}
 }
 
-void uds_free_open_chapter(struct open_chapter_zone *open_chapter)
+void vdo_free_open_chapter(struct open_chapter_zone *open_chapter)
 {
 	if (open_chapter != NULL) {
-		uds_free(open_chapter->records);
-		uds_free(open_chapter);
+		vdo_free(open_chapter->records);
+		vdo_free(open_chapter);
 	}
 }
 

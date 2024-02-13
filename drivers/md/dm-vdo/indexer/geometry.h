@@ -104,7 +104,7 @@ int __must_check uds_make_index_geometry(size_t bytes_per_page, u32 record_pages
 int __must_check uds_copy_index_geometry(struct index_geometry *source,
 					 struct index_geometry **geometry_ptr);
 
-void uds_free_index_geometry(struct index_geometry *geometry);
+void vdo_free_index_geometry(struct index_geometry *geometry);
 
 u32 __must_check uds_map_to_physical_chapter(const struct index_geometry *geometry,
 					     u64 virtual_chapter);

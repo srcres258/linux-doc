@@ -221,7 +221,7 @@ static int __must_check make_empty_index_session(struct uds_index_session **inde
 	int result;
 	struct uds_index_session *session;
 
-	result = uds_allocate(1, struct uds_index_session, __func__, &session);
+	result = vdo_allocate(1, struct uds_index_session, __func__, &session);
 	if (result != UDS_SUCCESS)
 		return result;
 
@@ -233,7 +233,7 @@ static int __must_check make_empty_index_session(struct uds_index_session **inde
 	result = uds_make_request_queue("callbackW", &handle_callbacks,
 					&session->callback_queue);
 	if (result != UDS_SUCCESS) {
-		uds_free(session);
+		vdo_free(session);
 		return result;
 	}
 
@@ -302,7 +302,7 @@ static int initialize_index_session(struct uds_index_session *index_session,
 	else
 		uds_log_configuration(config);
 
-	uds_free_configuration(config);
+	vdo_free_configuration(config);
 	return result;
 }
 
@@ -565,7 +565,7 @@ static int save_and_free_index(struct uds_index_session *index_session)
 			uds_log_warning_strerror(result,
 						 "ignoring error from save_index");
 	}
-	uds_free_index(index);
+	vdo_free_index(index);
 	index_session->index = NULL;
 
 	/*
@@ -673,7 +673,7 @@ int uds_destroy_index_session(struct uds_index_session *index_session)
 	uds_request_queue_finish(index_session->callback_queue);
 	index_session->callback_queue = NULL;
 	uds_log_debug("Destroyed index session");
-	uds_free(index_session);
+	vdo_free(index_session);
 	return uds_status_to_errno(result);
 }
 

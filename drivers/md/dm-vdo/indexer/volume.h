@@ -127,7 +127,7 @@ int __must_check uds_make_volume(const struct uds_configuration *config,
 				 struct index_layout *layout,
 				 struct volume **new_volume);
 
-void uds_free_volume(struct volume *volume);
+void vdo_free_volume(struct volume *volume);
 
 int __must_check uds_replace_volume_storage(struct volume *volume,
 					    struct index_layout *layout,
@@ -150,7 +150,7 @@ int __must_check uds_search_cached_record_page(struct volume *volume,
 					       struct uds_request *request, u32 chapter,
 					       u16 record_page_number, bool *found);
 
-void uds_forget_chapter(struct volume *volume, u64 chapter);
+void vdo_forget_chapter(struct volume *volume, u64 chapter);
 
 int __must_check uds_write_chapter(struct volume *volume,
 				   struct open_chapter_index *chapter_index,

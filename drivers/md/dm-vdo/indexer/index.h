@@ -69,7 +69,7 @@ int __must_check uds_make_index(struct uds_configuration *config,
 
 int __must_check uds_save_index(struct uds_index *index);
 
-void uds_free_index(struct uds_index *index);
+void vdo_free_index(struct uds_index *index);
 
 int __must_check uds_replace_index_storage(struct uds_index *index,
 					   struct block_device *bdev);

@@ -19,7 +19,7 @@ int uds_make_open_chapter_index(struct open_chapter_index **chapter_index,
 	size_t memory_size;
 	struct open_chapter_index *index;
 
-	result = uds_allocate(1, struct open_chapter_index, "open chapter index", &index);
+	result = vdo_allocate(1, struct open_chapter_index, "open chapter index", &index);
 	if (result != UDS_SUCCESS)
 		return result;
 
@@ -36,7 +36,7 @@ int uds_make_open_chapter_index(struct open_chapter_index **chapter_index,
 					    geometry->chapter_payload_bits,
 					    memory_size, 'm');
 	if (result != UDS_SUCCESS) {
-		uds_free(index);
+		vdo_free(index);
 		return result;
 	}
 
@@ -45,13 +45,13 @@ int uds_make_open_chapter_index(struct open_chapter_index **chapter_index,
 	return UDS_SUCCESS;
 }
 
-void uds_free_open_chapter_index(struct open_chapter_index *chapter_index)
+void vdo_free_open_chapter_index(struct open_chapter_index *chapter_index)
 {
 	if (chapter_index == NULL)
 		return;
 
 	uds_uninitialize_delta_index(&chapter_index->delta_index);
-	uds_free(chapter_index);
+	vdo_free(chapter_index);
 }
 
 /* Re-initialize an open chapter index for a new chapter. */

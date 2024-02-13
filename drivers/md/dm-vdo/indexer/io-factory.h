@@ -42,7 +42,7 @@ int __must_check uds_make_buffered_reader(struct io_factory *factory, off_t offs
 					  u64 block_count,
 					  struct buffered_reader **reader_ptr);
 
-void uds_free_buffered_reader(struct buffered_reader *reader);
+void vdo_free_buffered_reader(struct buffered_reader *reader);
 
 int __must_check uds_read_from_buffered_reader(struct buffered_reader *reader, u8 *data,
 					       size_t length);
@@ -54,7 +54,7 @@ int __must_check uds_make_buffered_writer(struct io_factory *factory, off_t offs
 					  u64 block_count,
 					  struct buffered_writer **writer_ptr);
 
-void uds_free_buffered_writer(struct buffered_writer *buffer);
+void vdo_free_buffered_writer(struct buffered_writer *buffer);
 
 int __must_check uds_write_to_buffered_writer(struct buffered_writer *writer,
 					      const u8 *data, size_t length);
