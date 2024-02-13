@@ -1378,6 +1378,7 @@ struct cifs_open_parms {
 	struct cifs_fid *fid;
 	umode_t mode;
 	bool reconnect:1;
+	bool replay:1; /* indicates that this open is for a replay */
 };
 
 struct cifs_fid {
@@ -1600,10 +1601,7 @@ CIFS_FILE_SB(struct file *file)
 
 static inline char CIFS_DIR_SEP(const struct cifs_sb_info *cifs_sb)
 {
-	if (cifs_sb->mnt_cifs_flags & CIFS_MOUNT_POSIX_PATHS)
-		return '/';
-	else
-		return '\\';
+	return '/';
 }
 
 static inline void
