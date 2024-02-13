@@ -15,7 +15,6 @@ dm-vdo-objs := \
 	errors.o \
 	flush.o \
 	funnel-queue.o \
-	funnel-requestqueue.o \
 	funnel-workqueue.o \
 	int-map.o \
 	io-submitter.o \
@@ -41,6 +40,7 @@ dm-vdo-objs := \
 	indexer/chapter-index.o \
 	indexer/config.o \
 	indexer/delta-index.o \
+	indexer/funnel-requestqueue.o \
 	indexer/geometry.o \
 	indexer/index.o \
 	indexer/index-layout.o \

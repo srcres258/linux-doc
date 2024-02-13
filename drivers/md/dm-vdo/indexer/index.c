@@ -3,11 +3,11 @@
  * Copyright 2023 Red Hat
  */
 
+#include "funnel-requestqueue.h"
 #include "index.h"
 #include "hash-utils.h"
 #include "sparse-cache.h"
 
-#include "../funnel-requestqueue.h"
 #include "../logger.h"
 #include "../memory-alloc.h"
 
