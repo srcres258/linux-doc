@@ -36,6 +36,14 @@ struct page_owner {
 	pid_t free_tgid;
 };
 
+struct stack {
+	struct stack_record *stack_record;
+	struct stack *next;
+};
+
+static struct stack *stack_list;
+static DEFINE_SPINLOCK(stack_list_lock);
+
 static bool page_owner_enabled __initdata;
 DEFINE_STATIC_KEY_FALSE(page_owner_inited);
 
@@ -59,6 +67,62 @@ early_param("page_owner", early_page_owner_param);
 static __init bool need_page_owner(void)
 {
 	return page_owner_enabled;
+}
+
+static void add_stack_record_to_list(struct stack_record *stack_record)
+{
+	unsigned long flags;
+	struct stack *stack;
+
+	stack = kmalloc(sizeof(*stack), GFP_KERNEL);
+	if (stack) {
+		stack->stack_record = stack_record;
+		stack->next = NULL;
+
+		spin_lock_irqsave(&stack_list_lock, flags);
+		if (!stack_list) {
+			stack_list = stack;
+		} else {
+			stack->next = stack_list;
+			/* This pairs with smp_load_acquire() from function
+			 * stack_start(). This guarantees that stack_start()
+			 * will see an updated stack_list before starting to
+			 * traverse the list.
+			 */
+			smp_store_release(&stack_list, stack);
+		}
+		spin_unlock_irqrestore(&stack_list_lock, flags);
+	}
+}
+
+static void inc_stack_record_count(depot_stack_handle_t handle)
+{
+	struct stack_record *stack_record = __stack_depot_get_stack_record(handle);
+
+	if (stack_record) {
+		/*
+		 * New stack_record's that do not use STACK_DEPOT_FLAG_GET start
+		 * with REFCOUNT_SATURATED to catch spurious increments of their
+		 * refcount.
+		 * Since we do not use STACK_DEPOT_FLAG_{GET,PUT} API, let us
+		 * set a refcount of 1 ourselves.
+		 */
+		if (refcount_read(&stack_record->count) == REFCOUNT_SATURATED) {
+			refcount_set(&stack_record->count, 1);
+
+			/* Add the new stack_record to our list */
+			add_stack_record_to_list(stack_record);
+		}
+		refcount_inc(&stack_record->count);
+	}
+}
+
+static void dec_stack_record_count(depot_stack_handle_t handle)
+{
+	struct stack_record *stack_record = __stack_depot_get_stack_record(handle);
+
+	if (stack_record)
+		refcount_dec(&stack_record->count);
 }
 
 static __always_inline depot_stack_handle_t create_dummy_stack(void)
@@ -140,12 +204,16 @@ void __reset_page_owner(struct page *page, unsigned short order)
 	int i;
 	struct page_ext *page_ext;
 	depot_stack_handle_t handle;
+	depot_stack_handle_t alloc_handle;
 	struct page_owner *page_owner;
 	u64 free_ts_nsec = local_clock();
 
 	page_ext = page_ext_get(page);
 	if (unlikely(!page_ext))
 		return;
+
+	page_owner = get_page_owner(page_ext);
+	alloc_handle = page_owner->handle;
 
 	handle = save_stack(GFP_NOWAIT | __GFP_NOWARN);
 	for (i = 0; i < (1 << order); i++) {
@@ -158,6 +226,15 @@ void __reset_page_owner(struct page *page, unsigned short order)
 		page_ext = page_ext_next(page_ext);
 	}
 	page_ext_put(page_ext);
+	if (alloc_handle != early_handle)
+		/*
+		 * early_handle is being set as a handle for all those
+		 * early allocated pages. See init_pages_in_zone().
+		 * Since their refcount is not being incremented because
+		 * the machinery is not ready yet, we cannot decrement
+		 * their refcount either.
+		 */
+		dec_stack_record_count(alloc_handle);
 }
 
 static inline void __set_page_owner_handle(struct page_ext *page_ext,
@@ -199,6 +276,7 @@ noinline void __set_page_owner(struct page *page, unsigned short order,
 		return;
 	__set_page_owner_handle(page_ext, handle, order, gfp_mask);
 	page_ext_put(page_ext);
+	inc_stack_record_count(handle);
 }
 
 void __set_page_owner_migrate_reason(struct page *page, int reason)
@@ -719,8 +797,115 @@ static const struct file_operations proc_page_owner_operations = {
 	.llseek		= lseek_page_owner,
 };
 
+static void *stack_start(struct seq_file *m, loff_t *ppos)
+{
+	struct stack *stack;
+
+	if (*ppos == -1UL)
+		return NULL;
+
+	if (!*ppos) {
+		/*
+		 * This pairs with smp_store_release() from function
+		 * add_stack_record_to_list(), so we get a consistent
+		 * value of stack_list.
+		 */
+		stack = smp_load_acquire(&stack_list);
+	} else {
+		stack = m->private;
+		stack = stack->next;
+	}
+
+	m->private = stack;
+
+	return stack;
+}
+
+static void *stack_next(struct seq_file *m, void *v, loff_t *ppos)
+{
+	struct stack *stack = v;
+
+	stack = stack->next;
+	*ppos = stack ? *ppos + 1 : -1UL;
+	m->private = stack;
+
+	return stack;
+}
+
+static unsigned long page_owner_stack_threshold;
+
+static int stack_print(struct seq_file *m, void *v)
+{
+	char *buf;
+	int ret = 0;
+	struct stack *stack = v;
+	struct stack_record *stack_record = stack->stack_record;
+	int stack_count = refcount_read(&stack_record->count);
+
+	if (!stack_record->size || stack_record->size < 0 ||
+	    stack_count < 2 || stack_count < page_owner_stack_threshold)
+		return 0;
+
+	buf = kzalloc(PAGE_SIZE, GFP_KERNEL);
+
+	ret += stack_trace_snprint(buf, PAGE_SIZE, stack_record->entries,
+				   stack_record->size, 0);
+	if (!ret)
+		goto out;
+
+	scnprintf(buf + ret, PAGE_SIZE - ret, "stack_count: %d\n\n",
+		  stack_count);
+
+	seq_printf(m, buf);
+	seq_puts(m, "\n\n");
+out:
+	kfree(buf);
+
+	return 0;
+}
+
+static void stack_stop(struct seq_file *m, void *v)
+{
+}
+
+static const struct seq_operations page_owner_stack_op = {
+	.start	= stack_start,
+	.next	= stack_next,
+	.stop	= stack_stop,
+	.show	= stack_print
+};
+
+static int page_owner_stack_open(struct inode *inode, struct file *file)
+{
+	return seq_open_private(file, &page_owner_stack_op, 0);
+}
+
+static const struct file_operations page_owner_stack_operations = {
+	.open		= page_owner_stack_open,
+	.read		= seq_read,
+	.llseek		= seq_lseek,
+	.release	= seq_release,
+};
+
+static int page_owner_threshold_get(void *data, u64 *val)
+{
+	*val = page_owner_stack_threshold;
+	return 0;
+}
+
+static int page_owner_threshold_set(void *data, u64 val)
+{
+	page_owner_stack_threshold = val;
+	return 0;
+}
+
+DEFINE_SIMPLE_ATTRIBUTE(proc_page_owner_threshold, &page_owner_threshold_get,
+			&page_owner_threshold_set, "%llu");
+
 static int __init pageowner_init(void)
 {
+	struct dentry *dir;
+
 	if (!static_branch_unlikely(&page_owner_inited)) {
 		pr_info("page_owner is disabled\n");
 		return 0;
@@ -728,6 +913,11 @@ static int __init pageowner_init(void)
 
 	debugfs_create_file("page_owner", 0400, NULL, NULL,
 			    &proc_page_owner_operations);
+	dir = debugfs_create_dir("page_owner_stacks", NULL);
+	debugfs_create_file("show_stacks", 0400, dir, NULL,
+			    &page_owner_stack_operations);
+	debugfs_create_file("set_threshold", 0600, dir, NULL,
+			    &proc_page_owner_threshold);
 
 	return 0;
 }
