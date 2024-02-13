@@ -50,11 +50,11 @@
 
 #include <linux/minmax.h>
 
-#include "errors.h"
 #include "logger.h"
 #include "memory-alloc.h"
 #include "numeric.h"
 #include "permassert.h"
+#include "status-codes.h"
 
 enum {
 	DEFAULT_CAPACITY = 16, /* the number of neighborhoods in a new table */
@@ -399,7 +399,7 @@ static int resize_buckets(struct int_map *map)
 			continue;
 
 		result = vdo_int_map_put(map, entry->key, entry->value, true, NULL);
-		if (result != UDS_SUCCESS) {
+		if (result != VDO_SUCCESS) {
 			/* Destroy the new partial map and restore the map from the stack. */
 			vdo_free(vdo_forget(map->buckets));
 			*map = old_map;
@@ -527,12 +527,8 @@ static struct bucket *move_empty_bucket(struct int_map *map __always_unused,
  *
  * Return: true if the map contains a mapping for the key, false if it does not.
  */
-static bool update_mapping(struct int_map *map,
-			   struct bucket *neighborhood,
-			   u64 key,
-			   void *new_value,
-			   bool update,
-			   void **old_value_ptr)
+static bool update_mapping(struct int_map *map, struct bucket *neighborhood,
+			   u64 key, void *new_value, bool update, void **old_value_ptr)
 {
 	struct bucket *bucket = search_hop_list(map, neighborhood, key, NULL);
 
@@ -611,15 +607,15 @@ static struct bucket *find_or_make_vacancy(struct int_map *map,
  * update is true. In either case the old value is returned. If the map does not already contain a
  * value for the specified key, the new value is added regardless of the value of update.
  *
- * Return: UDS_SUCCESS or an error code.
+ * Return: VDO_SUCCESS or an error code.
  */
 int vdo_int_map_put(struct int_map *map, u64 key, void *new_value, bool update,
 		    void **old_value_ptr)
 {
 	struct bucket *neighborhood, *bucket;
 
-	if (new_value == NULL)
-		return UDS_INVALID_ARGUMENT;
+	if (unlikely(new_value == NULL))
+		return -EINVAL;
 
 	/*
 	 * Select the bucket at the start of the neighborhood that must contain any entry for the
@@ -632,7 +628,7 @@ int vdo_int_map_put(struct int_map *map, u64 key, void *new_value, bool update,
 	 * optionally update it, returning the old value.
 	 */
 	if (update_mapping(map, neighborhood, key, new_value, update, old_value_ptr))
-		return UDS_SUCCESS;
+		return VDO_SUCCESS;
 
 	/*
 	 * Find an empty bucket in the desired neighborhood for the new entry or re-arrange entries
@@ -668,7 +664,7 @@ int vdo_int_map_put(struct int_map *map, u64 key, void *new_value, bool update,
 	/* There was no existing entry, so there was no old value to be returned. */
 	if (old_value_ptr != NULL)
 		*old_value_ptr = NULL;
-	return UDS_SUCCESS;
+	return VDO_SUCCESS;
 }
 
 /**
