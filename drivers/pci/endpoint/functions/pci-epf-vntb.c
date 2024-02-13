@@ -446,7 +446,7 @@ static int epf_ntb_config_spad_bar_alloc(struct epf_ntb *ntb)
 	else if (size < ctrl_size + spad_size)
 		return -EINVAL;
 
-	base = pci_epf_alloc_space(epf, size, barno, align, 0);
+	base = pci_epf_alloc_space(epf, size, barno, epc_features, 0);
 	if (!base) {
 		dev_err(dev, "Config/Status/SPAD alloc region fail\n");
 		return -ENOMEM;
@@ -527,7 +527,6 @@ static int epf_ntb_configure_interrupt(struct epf_ntb *ntb)
 static int epf_ntb_db_bar_init(struct epf_ntb *ntb)
 {
 	const struct pci_epc_features *epc_features;
-	u32 align;
 	struct device *dev = &ntb->epf->dev;
 	int ret;
 	struct pci_epf_bar *epf_bar;
@@ -538,19 +537,9 @@ static int epf_ntb_db_bar_init(struct epf_ntb *ntb)
 	epc_features = pci_epc_get_features(ntb->epf->epc,
 					    ntb->epf->func_no,
 					    ntb->epf->vfunc_no);
-	align = epc_features->align;
-
-	if (size < 128)
-		size = 128;
-
-	if (align)
-		size = ALIGN(size, align);
-	else
-		size = roundup_pow_of_two(size);
-
 	barno = ntb->epf_ntb_bar[BAR_DB];
 
-	mw_addr = pci_epf_alloc_space(ntb->epf, size, barno, align, 0);
+	mw_addr = pci_epf_alloc_space(ntb->epf, size, barno, epc_features, 0);
 	if (!mw_addr) {
 		dev_err(dev, "Failed to allocate OB address\n");
 		return -ENOMEM;
