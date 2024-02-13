@@ -27,7 +27,6 @@
 #include "logger.h"
 #include "memory-alloc.h"
 #include "message-stats.h"
-#include "pool-sysfs.h"
 #include "recovery-journal.h"
 #include "repair.h"
 #include "slab-depot.h"
@@ -36,7 +35,6 @@
 #include "thread-device.h"
 #include "thread-registry.h"
 #include "types.h"
-#include "uds-sysfs.h"
 #include "vdo.h"
 #include "vio.h"
 
@@ -54,7 +52,6 @@ enum {
 	GROW_PHYSICAL_PHASE_END,
 	GROW_PHYSICAL_PHASE_ERROR,
 	LOAD_PHASE_START,
-	LOAD_PHASE_STATS,
 	LOAD_PHASE_LOAD_DEPOT,
 	LOAD_PHASE_MAKE_DIRTY,
 	LOAD_PHASE_PREPARE_TO_ALLOCATE,
@@ -104,7 +101,6 @@ static const char * const ADMIN_PHASE_NAMES[] = {
 	"GROW_PHYSICAL_PHASE_END",
 	"GROW_PHYSICAL_PHASE_ERROR",
 	"LOAD_PHASE_START",
-	"LOAD_PHASE_STATS",
 	"LOAD_PHASE_LOAD_DEPOT",
 	"LOAD_PHASE_MAKE_DIRTY",
 	"LOAD_PHASE_PREPARE_TO_ALLOCATE",
@@ -1107,7 +1103,7 @@ static int vdo_message(struct dm_target *ti, unsigned int argc, char **argv,
 
 	vdo = get_vdo_for_target(ti);
 	uds_register_allocating_thread(&allocating_thread, NULL);
-	uds_register_thread_device_id(&instance_thread, &vdo->instance);
+	vdo_register_thread_device_id(&instance_thread, &vdo->instance);
 
 	/*
 	 * Must be done here so we don't map return codes. The code in dm-ioctl expects a 1 for a
@@ -1120,7 +1116,7 @@ static int vdo_message(struct dm_target *ti, unsigned int argc, char **argv,
 		result = vdo_status_to_errno(process_vdo_message(vdo, argc, argv));
 	}
 
-	uds_unregister_thread_device_id();
+	vdo_unregister_thread_device_id();
 	uds_unregister_allocating_thread();
 	return result;
 }
@@ -1235,9 +1231,10 @@ static int perform_admin_operation(struct vdo *vdo, u32 starting_phase,
 	 * Using the "interruptible" interface means that Linux will not log a message when we wait
 	 * for more than 120 seconds.
 	 */
-	while (wait_for_completion_interruptible(&admin->callback_sync) != 0)
-		/* * However, if we get a signal in a user-mode process, we could spin... */
+	while (wait_for_completion_interruptible(&admin->callback_sync)) {
+		/* However, if we get a signal in a user-mode process, we could spin... */
 		fsleep(1000);
+	}
 
 	result = admin->completion.result;
 	/* pairs with implicit barrier in cmpxchg above */
@@ -1631,9 +1628,9 @@ static int construct_new_vdo(struct dm_target *ti, unsigned int argc, char **arg
 	if (result != VDO_SUCCESS)
 		return -ENOMEM;
 
-	uds_register_thread_device_id(&instance_thread, &instance);
+	vdo_register_thread_device_id(&instance_thread, &instance);
 	result = construct_new_vdo_registered(ti, argc, argv, instance);
-	uds_unregister_thread_device_id();
+	vdo_unregister_thread_device_id();
 	return result;
 }
 
@@ -1912,9 +1909,9 @@ static int vdo_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	if (vdo == NULL) {
 		result = construct_new_vdo(ti, argc, argv);
 	} else {
-		uds_register_thread_device_id(&instance_thread, &vdo->instance);
+		vdo_register_thread_device_id(&instance_thread, &vdo->instance);
 		result = update_existing_vdo(device_name, ti, argc, argv, vdo);
-		uds_unregister_thread_device_id();
+		vdo_unregister_thread_device_id();
 	}
 
 	uds_unregister_allocating_thread();
@@ -1934,7 +1931,7 @@ static void vdo_dtr(struct dm_target *ti)
 		unsigned int instance = vdo->instance;
 		struct registered_thread allocating_thread, instance_thread;
 
-		uds_register_thread_device_id(&instance_thread, &instance);
+		vdo_register_thread_device_id(&instance_thread, &instance);
 		uds_register_allocating_thread(&allocating_thread, NULL);
 
 		device_name = vdo_get_device_name(ti);
@@ -1944,7 +1941,7 @@ static void vdo_dtr(struct dm_target *ti)
 
 		vdo_destroy(uds_forget(vdo));
 		uds_log_info("device '%s' stopped", device_name);
-		uds_unregister_thread_device_id();
+		vdo_unregister_thread_device_id();
 		uds_unregister_allocating_thread();
 		release_instance(instance);
 	} else if (config == vdo->device_config) {
@@ -2103,7 +2100,7 @@ static void vdo_postsuspend(struct dm_target *ti)
 	const char *device_name;
 	int result;
 
-	uds_register_thread_device_id(&instance_thread, &vdo->instance);
+	vdo_register_thread_device_id(&instance_thread, &vdo->instance);
 	device_name = vdo_get_device_name(vdo->device_config->owning_target);
 	uds_log_info("suspending device '%s'", device_name);
 
@@ -2128,7 +2125,7 @@ static void vdo_postsuspend(struct dm_target *ti)
 				       device_name);
 	}
 
-	uds_unregister_thread_device_id();
+	vdo_unregister_thread_device_id();
 }
 
 /**
@@ -2180,32 +2177,6 @@ static enum slab_depot_load_type get_load_type(struct vdo *vdo)
 }
 
 /**
- * vdo_initialize_kobjects() - Initialize the vdo sysfs directory.
- * @vdo: The vdo being initialized.
- *
- * Return: VDO_SUCCESS or an error code.
- */
-static int vdo_initialize_kobjects(struct vdo *vdo)
-{
-	int result;
-	struct dm_target *target = vdo->device_config->owning_target;
-	struct mapped_device *md = dm_table_get_md(target->table);
-
-	kobject_init(&vdo->vdo_directory, &vdo_directory_type);
-	vdo->sysfs_added = true;
-	result = kobject_add(&vdo->vdo_directory, &disk_to_dev(dm_disk(md))->kobj,
-			     "vdo");
-	if (result != 0)
-		return VDO_CANT_ADD_SYSFS_NODE;
-
-	result = vdo_add_dedupe_index_sysfs(vdo->hash_zones);
-	if (result != 0)
-		return VDO_CANT_ADD_SYSFS_NODE;
-
-	return vdo_add_sysfs_stats_dir(vdo);
-}
-
-/**
  * load_callback() - Callback to do the destructive parts of loading a VDO.
  * @completion: The sub-task completion.
  */
@@ -2228,10 +2199,6 @@ static void load_callback(struct vdo_completion *completion)
 		vdo_open_recovery_journal(vdo->recovery_journal, vdo->depot,
 					  vdo->block_map);
 		vdo_allow_read_only_mode_entry(completion);
-		return;
-
-	case LOAD_PHASE_STATS:
-		vdo_continue_completion(completion, vdo_initialize_kobjects(vdo));
 		return;
 
 	case LOAD_PHASE_LOAD_DEPOT:
@@ -2845,11 +2812,11 @@ static int vdo_preresume(struct dm_target *ti)
 	struct vdo *vdo = get_vdo_for_target(ti);
 	int result;
 
-	uds_register_thread_device_id(&instance_thread, &vdo->instance);
+	vdo_register_thread_device_id(&instance_thread, &vdo->instance);
 	result = vdo_preresume_registered(ti, vdo);
 	if ((result == VDO_PARAMETER_MISMATCH) || (result == VDO_INVALID_ADMIN_STATE))
 		result = -EINVAL;
-	uds_unregister_thread_device_id();
+	vdo_unregister_thread_device_id();
 	return vdo_status_to_errno(result);
 }
 
@@ -2857,10 +2824,10 @@ static void vdo_resume(struct dm_target *ti)
 {
 	struct registered_thread instance_thread;
 
-	uds_register_thread_device_id(&instance_thread,
+	vdo_register_thread_device_id(&instance_thread,
 				      &get_vdo_for_target(ti)->instance);
 	uds_log_info("device '%s' resumed", vdo_get_device_name(ti));
-	uds_unregister_thread_device_id();
+	vdo_unregister_thread_device_id();
 }
 
 /*
@@ -2911,10 +2878,9 @@ static int __init vdo_init(void)
 	/*
 	 * UDS module level initialization must be done first, as VDO initialization depends on it
 	 */
-	uds_initialize_thread_device_registry();
 	uds_memory_init();
-	uds_init_sysfs();
 
+	vdo_initialize_thread_device_registry();
 	vdo_initialize_device_registry_once();
 	uds_log_info("loaded version %s", CURRENT_VERSION);
 
@@ -2944,12 +2910,14 @@ static void __exit vdo_exit(void)
 	 * UDS module level exit processing must be done after all VDO module exit processing is
 	 * complete.
 	 */
-	uds_put_sysfs();
 	uds_memory_exit();
 }
 
 module_init(vdo_init);
 module_exit(vdo_exit);
+
+module_param_named(log_level, log_level, uint, 0644);
+MODULE_PARM_DESC(log_level, "Log-level for log messages");
 
 MODULE_DESCRIPTION(DM_NAME " target for transparent deduplication");
 MODULE_AUTHOR("Red Hat, Inc.");

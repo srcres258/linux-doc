@@ -320,6 +320,7 @@ static void __init ptdump_initialize(void)
 
 static struct ptdump_info kernel_ptdump_info __ro_after_init = {
 	.mm		= &init_mm,
+	.base_addr	= PAGE_OFFSET,
 };
 
 bool ptdump_check_wx(void)
@@ -360,28 +361,27 @@ static int __init ptdump_init(void)
 	u64 page_offset = _PAGE_OFFSET(vabits_actual);
 	u64 vmemmap_start = (u64)virt_to_page((void *)page_offset);
 	struct addr_marker m[] = {
-		{ PAGE_OFFSET,			"Linear Mapping start" },
-		{ PAGE_END,			"Linear Mapping end" },
+		{ PAGE_OFFSET,		"Linear Mapping start" },
+		{ PAGE_END,		"Linear Mapping end" },
 #if defined(CONFIG_KASAN_GENERIC) || defined(CONFIG_KASAN_SW_TAGS)
-		{ KASAN_SHADOW_START,		"Kasan shadow start" },
-		{ KASAN_SHADOW_END,		"Kasan shadow end" },
+		{ KASAN_SHADOW_START,   "Kasan shadow start" },
+		{ KASAN_SHADOW_END,     "Kasan shadow end" },
 #endif
-		{ MODULES_VADDR,		"Modules start" },
-		{ MODULES_END,			"Modules end" },
-		{ VMALLOC_START,		"vmalloc() area" },
-		{ VMALLOC_END,			"vmalloc() end" },
-		{ vmemmap_start,		"vmemmap start" },
-		{ VMEMMAP_START + VMEMMAP_SIZE,	"vmemmap end" },
-		{ PCI_IO_START,			"PCI I/O start" },
-		{ PCI_IO_END,			"PCI I/O end" },
-		{ FIXADDR_TOT_START,		"Fixmap start" },
-		{ FIXADDR_TOP,			"Fixmap end" },
-		{ -1,				NULL },
+		{ MODULES_VADDR,	"Modules start" },
+		{ MODULES_END,		"Modules end" },
+		{ VMALLOC_START,	"vmalloc() area" },
+		{ VMALLOC_END,		"vmalloc() end" },
+		{ vmemmap_start,	"vmemmap start" },
+		{ VMEMMAP_END,		"vmemmap end" },
+		{ PCI_IO_START,		"PCI I/O start" },
+		{ PCI_IO_END,		"PCI I/O end" },
+		{ FIXADDR_TOT_START,    "Fixmap start" },
+		{ FIXADDR_TOP,	        "Fixmap end" },
+		{ -1,			NULL },
 	};
 	static struct addr_marker address_markers[ARRAY_SIZE(m)] __ro_after_init;
 
 	kernel_ptdump_info.markers = memcpy(address_markers, m, sizeof(m));
-	kernel_ptdump_info.base_addr = page_offset;
 
 	ptdump_initialize();
 	ptdump_debugfs_register(&kernel_ptdump_info, "kernel_page_tables");

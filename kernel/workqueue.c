@@ -1787,14 +1787,12 @@ static bool pwq_activate_first_inactive(struct pool_workqueue *pwq, bool fill)
 }
 
 /**
- * unplug_oldest_pwq - restart an oldest plugged pool_workqueue
- * @wq: workqueue_struct to be restarted
+ * unplug_oldest_pwq - unplug the oldest pool_workqueue
+ * @wq: workqueue_struct where its oldest pwq is to be unplugged
  *
- * pwq's are linked into wq->pwqs with the oldest first. For ordered
- * workqueues, only the oldest pwq is unplugged, the others are plugged to
- * suspend execution until the oldest one is drained. When this happens, the
- * next oldest one (first plugged pwq in iteration) will be unplugged to
- * restart work item execution to ensure proper work item ordering.
+ * This function should only be called for ordered workqueues where only the
+ * oldest pwq is unplugged, the others are plugged to suspend execution to
+ * ensure proper work item ordering::
  *
  *    dfl_pwq --------------+     [P] - plugged
  *                          |
@@ -1804,6 +1802,11 @@ static bool pwq_activate_first_inactive(struct pool_workqueue *pwq, bool fill)
  *            1    3        5
  *            |    |        |
  *            2    4        6
+ *
+ * When the oldest pwq is drained and removed, this function should be called
+ * to unplug the next oldest one to start its work item execution. Note that
+ * pwq's are linked into wq->pwqs with the oldest first, so the first one in
+ * the list is the oldest.
  */
 static void unplug_oldest_pwq(struct workqueue_struct *wq)
 {
@@ -5625,6 +5628,33 @@ void workqueue_set_max_active(struct workqueue_struct *wq, int max_active)
 	mutex_unlock(&wq->mutex);
 }
 EXPORT_SYMBOL_GPL(workqueue_set_max_active);
+
+/**
+ * workqueue_set_min_active - adjust min_active of an unbound workqueue
+ * @wq: target unbound workqueue
+ * @min_active: new min_active value
+ *
+ * Set min_active of an unbound workqueue. Unlike other types of workqueues, an
+ * unbound workqueue is not guaranteed to be able to process max_active
+ * interdependent work items. Instead, an unbound workqueue is guaranteed to be
+ * able to process min_active number of interdependent work items which is
+ * %WQ_DFL_MIN_ACTIVE by default.
+ *
+ * Use this function to adjust the min_active value between 0 and the current
+ * max_active.
+ */
+void workqueue_set_min_active(struct workqueue_struct *wq, int min_active)
+{
+	/* min_active is only meaningful for non-ordered unbound workqueues */
+	if (WARN_ON((wq->flags & (WQ_BH | WQ_UNBOUND | __WQ_ORDERED)) !=
+		    WQ_UNBOUND))
+		return;
+
+	mutex_lock(&wq->mutex);
+	wq->saved_min_active = clamp(min_active, 0, wq->saved_max_active);
+	wq_adjust_max_active(wq);
+	mutex_unlock(&wq->mutex);
+}
 
 /**
  * current_work - retrieve %current task's work struct

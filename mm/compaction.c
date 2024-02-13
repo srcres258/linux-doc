@@ -1878,13 +1878,10 @@ again:
 	dst = list_first_entry(&cc->freepages[order].pages, struct folio, lru);
 	cc->freepages[order].nr_pages--;
 	list_del(&dst->lru);
-done:
-	post_alloc_hook(&dst->page, order, __GFP_MOVABLE);
-	if (order)
-		prep_compound_page(&dst->page, order);
-	cc->nr_freepages -= 1 << order;
-	cc->nr_migratepages -= 1 << order;
-	return page_rmappable_folio(&dst->page);
+	cc->nr_freepages--;
+	cc->nr_migratepages -= 1 << folio_order(src);
+
+	return dst;
 }
 
 /*
@@ -1898,15 +1895,9 @@ static void compaction_free(struct folio *dst, unsigned long data)
 	int order = folio_order(dst);
 	struct page *page = &dst->page;
 
-	folio_set_count(dst, 0);
-	free_pages_prepare_fpi_none(page, order);
-
-	INIT_LIST_HEAD(&dst->lru);
-
-	list_add(&dst->lru, &cc->freepages[order].pages);
-	cc->freepages[order].nr_pages++;
-	cc->nr_freepages += 1 << order;
-	cc->nr_migratepages += 1 << order;
+	list_add(&dst->lru, &cc->freepages);
+	cc->nr_freepages++;
+	cc->nr_migratepages += 1 << folio_order(dst);
 }
 
 /* possible outcome of isolate_migratepages */
@@ -2895,7 +2886,7 @@ enum compact_result try_to_compact_pages(gfp_t gfp_mask, unsigned int order,
  * reaching score targets due to various back-off conditions, such as,
  * contention on per-node or per-zone locks.
  */
-static void compact_node(pg_data_t *pgdat, bool proactive)
+static int compact_node(pg_data_t *pgdat, bool proactive)
 {
 	int zoneid;
 	struct zone *zone;
@@ -2913,6 +2904,9 @@ static void compact_node(pg_data_t *pgdat, bool proactive)
 		if (!populated_zone(zone))
 			continue;
 
+		if (fatal_signal_pending(current))
+			return -EINTR;
+
 		cc.zone = zone;
 
 		compact_zone(&cc, NULL);
@@ -2924,18 +2918,25 @@ static void compact_node(pg_data_t *pgdat, bool proactive)
 					     cc.total_free_scanned);
 		}
 	}
+
+	return 0;
 }
 
 /* Compact all zones of all nodes in the system */
-static void compact_nodes(void)
+static int compact_nodes(void)
 {
-	int nid;
+	int ret, nid;
 
 	/* Flush pending updates to the LRU lists */
 	lru_add_drain_all();
 
-	for_each_online_node(nid)
-		compact_node(NODE_DATA(nid), false);
+	for_each_online_node(nid) {
+		ret = compact_node(NODE_DATA(nid), false);
+		if (ret)
+			return ret;
+	}
+
+	return 0;
 }
 
 static int compaction_proactiveness_sysctl_handler(const struct ctl_table *table,
@@ -2981,9 +2982,9 @@ static int sysctl_compaction_handler(const struct ctl_table *table, int write,
 		return -EINVAL;
 
 	if (write)
-		compact_nodes();
+		ret = compact_nodes();
 
-	return 0;
+	return ret;
 }
 
 #if defined(CONFIG_SYSFS) && defined(CONFIG_NUMA)

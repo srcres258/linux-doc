@@ -120,9 +120,9 @@ ssize_t sized_strscpy(char *, const char *, size_t);
 
 /**
  * strscpy_pad() - Copy a C-string into a sized buffer
- * @dest: Where to copy the string to
+ * @dst: Where to copy the string to
  * @src: Where to copy the string from
- * @count: Size of destination buffer
+ * @...: Size of destination buffer
  *
  * Copy the string, or as much of it as fits, into the dest buffer. The
  * behavior is undefined if the string buffers overlap. The destination

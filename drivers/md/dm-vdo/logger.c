@@ -11,8 +11,9 @@
 #include <linux/printk.h>
 #include <linux/sched.h>
 
+#include "errors.h"
 #include "thread-device.h"
-#include "uds-threads.h"
+#include "thread-utils.h"
 
 struct priority_name {
 	const char *name;
@@ -47,16 +48,17 @@ static const char *const PRIORITY_STRINGS[] = {
 	"DEBUG",
 };
 
-static int log_level = UDS_LOG_INFO;
+int log_level = UDS_LOG_DEFAULT;
 
 int uds_get_log_level(void)
 {
-	return log_level;
-}
+	int log_level_latch = READ_ONCE(log_level);
 
-void uds_set_log_level(int new_log_level)
-{
-	log_level = new_log_level;
+	if (unlikely(log_level_latch > UDS_LOG_MAX)) {
+		log_level_latch = UDS_LOG_DEFAULT;
+		WRITE_ONCE(log_level, log_level_latch);
+	}
+	return log_level_latch;
 }
 
 int uds_log_string_to_priority(const char *string)
@@ -175,7 +177,7 @@ static void emit_log_message(int priority, const char *module, const char *prefi
 	}
 
 	/* Not at interrupt level; we have a process we can look at, and might have a device ID. */
-	device_instance = uds_get_thread_device_id();
+	device_instance = vdo_get_thread_device_id();
 	if (device_instance >= 0) {
 		emit_log_message_to_kernel(priority, "%s%u:%s: %s%pV%pV\n", module,
 					   device_instance, current->comm, prefix, vaf1,

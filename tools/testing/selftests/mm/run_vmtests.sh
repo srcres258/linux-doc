@@ -248,6 +248,17 @@ run_test() {
 
 echo "TAP version 13" | tap_output
 
+HAVE_ROOT=0
+if [ "$(id -u)" = "0" ]; then
+	AS_ROOT=
+	HAVE_ROOT=1
+elif [ "$(command -v sudo)" != "" ]; then
+	AS_ROOT=sudo
+	HAVE_ROOT=1
+else
+	echo # WARNING: Unable to run as root
+fi
+
 CATEGORY="hugetlb" run_test ./hugepage-mmap
 
 shmmax=$(cat /proc/sys/kernel/shmmax)
@@ -366,7 +377,8 @@ CATEGORY="hmm" run_test bash ./test_hmm.sh smoke
 # MADV_POPULATE_READ and MADV_POPULATE_WRITE tests
 CATEGORY="madv_populate" run_test ./madv_populate
 
-(echo 0 | sudo tee /proc/sys/kernel/yama/ptrace_scope 2>&1) | tap_prefix
+# FIXME: What if we can't get root?
+(echo 0 | ${AS_ROOT} tee /proc/sys/kernel/yama/ptrace_scope 2>&1) | tap_prefix
 CATEGORY="memfd_secret" run_test ./memfd_secret
 
 # KSM KSM_MERGE_TIME_HUGE_PAGES test with size of 100
