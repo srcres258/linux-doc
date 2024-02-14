@@ -39,10 +39,10 @@ static inline int __must_check vdo_must_use(int value)
 
 #define __VDO_ASSERT(expr, ...)				      \
 	(likely(expr) ? VDO_SUCCESS			      \
-		      : uds_assertion_failed(STRINGIFY(expr), __FILE__, __LINE__, __VA_ARGS__))
+		      : vdo_assertion_failed(STRINGIFY(expr), __FILE__, __LINE__, __VA_ARGS__))
 
 /* Log an assertion failure message. */
-int uds_assertion_failed(const char *expression_string, const char *file_name,
+int vdo_assertion_failed(const char *expression_string, const char *file_name,
 			 int line_number, const char *format, ...)
 	__printf(4, 5);
 
