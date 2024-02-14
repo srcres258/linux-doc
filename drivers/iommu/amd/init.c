@@ -2769,6 +2769,7 @@ static void early_enable_iommu(struct amd_iommu *iommu)
 	iommu_enable_command_buffer(iommu);
 	iommu_enable_event_buffer(iommu);
 	iommu_set_exclusion_range(iommu);
+	iommu_enable_gt(iommu);
 	iommu_enable_ga(iommu);
 	iommu_enable_xt(iommu);
 	iommu_enable_irtcachedis(iommu);
@@ -2825,6 +2826,7 @@ static void early_enable_iommus(void)
 			iommu_disable_irtcachedis(iommu);
 			iommu_enable_command_buffer(iommu);
 			iommu_enable_event_buffer(iommu);
+			iommu_enable_gt(iommu);
 			iommu_enable_ga(iommu);
 			iommu_enable_xt(iommu);
 			iommu_enable_irtcachedis(iommu);
@@ -2838,10 +2840,8 @@ static void enable_iommus_v2(void)
 {
 	struct amd_iommu *iommu;
 
-	for_each_iommu(iommu) {
+	for_each_iommu(iommu)
 		iommu_enable_ppr_log(iommu);
-		iommu_enable_gt(iommu);
-	}
 }
 
 static void enable_iommus_vapic(void)
@@ -3694,13 +3694,11 @@ u8 amd_iommu_pc_get_max_banks(unsigned int idx)
 
 	return 0;
 }
-EXPORT_SYMBOL(amd_iommu_pc_get_max_banks);
 
 bool amd_iommu_pc_supported(void)
 {
 	return amd_iommu_pc_present;
 }
-EXPORT_SYMBOL(amd_iommu_pc_supported);
 
 u8 amd_iommu_pc_get_max_counters(unsigned int idx)
 {
@@ -3711,7 +3709,6 @@ u8 amd_iommu_pc_get_max_counters(unsigned int idx)
 
 	return 0;
 }
-EXPORT_SYMBOL(amd_iommu_pc_get_max_counters);
 
 static int iommu_pc_get_set_reg(struct amd_iommu *iommu, u8 bank, u8 cntr,
 				u8 fxn, u64 *value, bool is_write)
