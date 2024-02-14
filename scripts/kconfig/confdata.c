@@ -20,6 +20,8 @@
 
 #include "lkc.h"
 
+struct gstr autoconf_cmd;
+
 /* return true if 'path' exists, false otherwise */
 static bool is_present(const char *path)
 {
@@ -293,63 +295,12 @@ static int conf_set_sym_val(struct symbol *sym, int def, int def_flags, char *p)
 	return 0;
 }
 
-#define LINE_GROWTH 16
-static int add_byte(int c, char **lineptr, size_t slen, size_t *n)
-{
-	size_t new_size = slen + 1;
-
-	if (new_size > *n) {
-		new_size += LINE_GROWTH - 1;
-		new_size *= 2;
-		*lineptr = xrealloc(*lineptr, new_size);
-		*n = new_size;
-	}
-
-	(*lineptr)[slen] = c;
-
-	return 0;
-}
-
-static ssize_t compat_getline(char **lineptr, size_t *n, FILE *stream)
-{
-	char *line = *lineptr;
-	size_t slen = 0;
-
-	for (;;) {
-		int c = getc(stream);
-
-		switch (c) {
-		case '\n':
-			if (add_byte(c, &line, slen, n) < 0)
-				goto e_out;
-			slen++;
-			/* fall through */
-		case EOF:
-			if (add_byte('\0', &line, slen, n) < 0)
-				goto e_out;
-			*lineptr = line;
-			if (slen == 0)
-				return -1;
-			return slen;
-		default:
-			if (add_byte(c, &line, slen, n) < 0)
-				goto e_out;
-			slen++;
-		}
-	}
-
-e_out:
-	line[slen-1] = '\0';
-	*lineptr = line;
-	return -1;
-}
-
 /* like getline(), but the newline character is stripped away */
 static ssize_t getline_stripped(char **lineptr, size_t *n, FILE *stream)
 {
 	ssize_t len;
 
-	len = compat_getline(lineptr, n, stream);
+	len = getline(lineptr, n, stream);
 
 	if (len > 0 && (*lineptr)[len - 1] == '\n') {
 		len--;
@@ -1023,7 +974,6 @@ end_check:
 static int conf_write_autoconf_cmd(const char *autoconf_name)
 {
 	char name[PATH_MAX], tmp[PATH_MAX];
-	struct file *file;
 	FILE *out;
 	int ret;
 
@@ -1044,15 +994,9 @@ static int conf_write_autoconf_cmd(const char *autoconf_name)
 		return -1;
 	}
 
-	fprintf(out, "deps_config := \\\n");
-	for (file = file_list; file; file = file->next)
-		fprintf(out, "\t%s \\\n", file->name);
+	fprintf(out, "autoconfig := %s\n", autoconf_name);
 
-	fprintf(out, "\n%s: $(deps_config)\n\n", autoconf_name);
-
-	env_write_dep(out, autoconf_name);
-
-	fprintf(out, "\n$(deps_config): ;\n");
+	fputs(str_get(&autoconf_cmd), out);
 
 	fflush(out);
 	ret = ferror(out); /* error check for all fprintf() calls */
