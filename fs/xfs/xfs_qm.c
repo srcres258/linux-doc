@@ -628,7 +628,8 @@ xfs_qm_init_quotainfo(
 
 	ASSERT(XFS_IS_QUOTA_ON(mp));
 
-	qinf = mp->m_quotainfo = kmem_zalloc(sizeof(struct xfs_quotainfo), 0);
+	qinf = mp->m_quotainfo = kzalloc(sizeof(struct xfs_quotainfo),
+					GFP_KERNEL | __GFP_NOFAIL);
 
 	error = list_lru_init(&qinf->qi_lru);
 	if (error)
@@ -642,9 +643,9 @@ xfs_qm_init_quotainfo(
 	if (error)
 		goto out_free_lru;
 
-	INIT_RADIX_TREE(&qinf->qi_uquota_tree, GFP_NOFS);
-	INIT_RADIX_TREE(&qinf->qi_gquota_tree, GFP_NOFS);
-	INIT_RADIX_TREE(&qinf->qi_pquota_tree, GFP_NOFS);
+	INIT_RADIX_TREE(&qinf->qi_uquota_tree, GFP_KERNEL);
+	INIT_RADIX_TREE(&qinf->qi_gquota_tree, GFP_KERNEL);
+	INIT_RADIX_TREE(&qinf->qi_pquota_tree, GFP_KERNEL);
 	mutex_init(&qinf->qi_tree_lock);
 
 	/* mutex used to serialize quotaoffs */
@@ -700,7 +701,7 @@ out_free_inos:
 out_free_lru:
 	list_lru_destroy(&qinf->qi_lru);
 out_free_qinf:
-	kmem_free(qinf);
+	kfree(qinf);
 	mp->m_quotainfo = NULL;
 	return error;
 }
@@ -724,7 +725,7 @@ xfs_qm_destroy_quotainfo(
 	xfs_qm_destroy_quotainos(qi);
 	mutex_destroy(&qi->qi_tree_lock);
 	mutex_destroy(&qi->qi_quotaofflock);
-	kmem_free(qi);
+	kfree(qi);
 	mp->m_quotainfo = NULL;
 }
 
@@ -996,7 +997,8 @@ xfs_qm_reset_dqcounts_buf(
 	if (qip->i_nblocks == 0)
 		return 0;
 
-	map = kmem_alloc(XFS_DQITER_MAP_SIZE * sizeof(*map), 0);
+	map = kmalloc(XFS_DQITER_MAP_SIZE * sizeof(*map),
+			GFP_KERNEL | __GFP_NOFAIL);
 
 	lblkno = 0;
 	maxlblkcnt = XFS_B_TO_FSB(mp, mp->m_super->s_maxbytes);
@@ -1058,7 +1060,7 @@ xfs_qm_reset_dqcounts_buf(
 	} while (nmaps > 0);
 
 out:
-	kmem_free(map);
+	kfree(map);
 	return error;
 }
 

@@ -861,18 +861,11 @@ TRACE_EVENT(xfile_destroy,
 		__field(loff_t, size)
 	),
 	TP_fast_assign(
-		struct xfile_stat	statbuf;
-		int			ret;
+		struct inode		*inode = file_inode(xf->file);
 
-		ret = xfile_stat(xf, &statbuf);
-		if (!ret) {
-			__entry->bytes = statbuf.bytes;
-			__entry->size = statbuf.size;
-		} else {
-			__entry->bytes = -1;
-			__entry->size = -1;
-		}
-		__entry->ino = file_inode(xf->file)->i_ino;
+		__entry->ino = inode->i_ino;
+		__entry->bytes = inode->i_blocks << SECTOR_SHIFT;
+		__entry->size = i_size_read(inode);
 	),
 	TP_printk("xfino 0x%lx mem_bytes 0x%llx isize 0x%llx",
 		  __entry->ino,
@@ -891,19 +884,12 @@ DECLARE_EVENT_CLASS(xfile_class,
 		__field(unsigned long long, bytecount)
 	),
 	TP_fast_assign(
-		struct xfile_stat	statbuf;
-		int			ret;
+		struct inode		*inode = file_inode(xf->file);
 
-		ret = xfile_stat(xf, &statbuf);
-		if (!ret) {
-			__entry->bytes_used = statbuf.bytes;
-			__entry->size = statbuf.size;
-		} else {
-			__entry->bytes_used = -1;
-			__entry->size = -1;
-		}
-		__entry->ino = file_inode(xf->file)->i_ino;
+		__entry->ino = inode->i_ino;
+		__entry->bytes_used = inode->i_blocks << SECTOR_SHIFT;
 		__entry->pos = pos;
+		__entry->size = i_size_read(inode);
 		__entry->bytecount = bytecount;
 	),
 	TP_printk("xfino 0x%lx mem_bytes 0x%llx pos 0x%llx bytecount 0x%llx isize 0x%llx",
@@ -917,11 +903,11 @@ DECLARE_EVENT_CLASS(xfile_class,
 DEFINE_EVENT(xfile_class, name, \
 	TP_PROTO(struct xfile *xf, loff_t pos, unsigned long long bytecount), \
 	TP_ARGS(xf, pos, bytecount))
-DEFINE_XFILE_EVENT(xfile_pread);
-DEFINE_XFILE_EVENT(xfile_pwrite);
+DEFINE_XFILE_EVENT(xfile_load);
+DEFINE_XFILE_EVENT(xfile_store);
 DEFINE_XFILE_EVENT(xfile_seek_data);
-DEFINE_XFILE_EVENT(xfile_get_page);
-DEFINE_XFILE_EVENT(xfile_put_page);
+DEFINE_XFILE_EVENT(xfile_get_folio);
+DEFINE_XFILE_EVENT(xfile_put_folio);
 
 TRACE_EVENT(xfarray_create,
 	TP_PROTO(struct xfarray *xfa, unsigned long long required_capacity),
@@ -968,7 +954,7 @@ TRACE_EVENT(xfarray_isort,
 		  __entry->hi - __entry->lo)
 );
 
-TRACE_EVENT(xfarray_pagesort,
+TRACE_EVENT(xfarray_foliosort,
 	TP_PROTO(struct xfarray_sortinfo *si, uint64_t lo, uint64_t hi),
 	TP_ARGS(si, lo, hi),
 	TP_STRUCT__entry(
@@ -1037,6 +1023,47 @@ TRACE_EVENT(xfarray_sort,
 		  __entry->obj_size,
 		  __entry->max_stack_depth,
 		  __entry->bytes)
+);
+
+TRACE_EVENT(xfarray_sort_scan,
+	TP_PROTO(struct xfarray_sortinfo *si, unsigned long long idx),
+	TP_ARGS(si, idx),
+	TP_STRUCT__entry(
+		__field(unsigned long, ino)
+		__field(unsigned long long, nr)
+		__field(size_t, obj_size)
+		__field(unsigned long long, idx)
+		__field(unsigned long long, folio_pos)
+		__field(unsigned long, folio_bytes)
+		__field(unsigned long long, first_idx)
+		__field(unsigned long long, last_idx)
+	),
+	TP_fast_assign(
+		__entry->nr = si->array->nr;
+		__entry->obj_size = si->array->obj_size;
+		__entry->ino = file_inode(si->array->xfile->file)->i_ino;
+		__entry->idx = idx;
+		if (si->folio) {
+			__entry->folio_pos = folio_pos(si->folio);
+			__entry->folio_bytes = folio_size(si->folio);
+			__entry->first_idx = si->first_folio_idx;
+			__entry->last_idx = si->last_folio_idx;
+		} else {
+			__entry->folio_pos = 0;
+			__entry->folio_bytes = 0;
+			__entry->first_idx = 0;
+			__entry->last_idx = 0;
+		}
+	),
+	TP_printk("xfino 0x%lx nr %llu objsz %zu idx %llu folio_pos 0x%llx folio_bytes 0x%lx first_idx %llu last_idx %llu",
+		  __entry->ino,
+		  __entry->nr,
+		  __entry->obj_size,
+		  __entry->idx,
+		  __entry->folio_pos,
+		  __entry->folio_bytes,
+		  __entry->first_idx,
+		  __entry->last_idx)
 );
 
 TRACE_EVENT(xfarray_sort_stats,

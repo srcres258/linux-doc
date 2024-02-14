@@ -20,8 +20,6 @@ typedef __u32			xfs_dev_t;
 typedef __u32			xfs_nlink_t;
 
 #include "xfs_types.h"
-
-#include "kmem.h"
 #include "mrlock.h"
 
 #include <linux/semaphore.h>
@@ -30,6 +28,7 @@ typedef __u32			xfs_nlink_t;
 #include <linux/kernel.h>
 #include <linux/blkdev.h>
 #include <linux/slab.h>
+#include <linux/vmalloc.h>
 #include <linux/crc32c.h>
 #include <linux/module.h>
 #include <linux/mutex.h>
@@ -268,5 +267,16 @@ int xfs_rw_bdev(struct block_device *bdev, sector_t sector, unsigned int count,
 #else
 # define PTR_FMT "%p"
 #endif
+
+/*
+ * Helper for IO routines to grab backing pages from allocated kernel memory.
+ */
+static inline struct page *
+kmem_to_page(void *addr)
+{
+	if (is_vmalloc_addr(addr))
+		return vmalloc_to_page(addr);
+	return virt_to_page(addr);
+}
 
 #endif /* __XFS_LINUX__ */
