@@ -1365,12 +1365,14 @@ static bool suitable_migration_target(struct compact_control *cc,
 {
 	/* If the page is a large free page, then disallow migration */
 	if (PageBuddy(page)) {
+		int order = cc->order > 0 ? cc->order : pageblock_order;
+
 		/*
 		 * We are checking page_order without zone->lock taken. But
 		 * the only small danger is that we skip a potentially suitable
 		 * pageblock, so it's not worth to check order for valid range.
 		 */
-		if (buddy_order_unsafe(page) >= pageblock_order)
+		if (buddy_order_unsafe(page) >= order)
 			return false;
 	}
 
@@ -1796,6 +1798,7 @@ static struct folio *compaction_alloc(struct folio *src, unsigned long data)
 	dst = list_entry(cc->freepages.next, struct folio, lru);
 	list_del(&dst->lru);
 	cc->nr_freepages--;
+	cc->nr_migratepages -= 1 << folio_order(src);
 
 	return dst;
 }
@@ -1811,6 +1814,7 @@ static void compaction_free(struct folio *dst, unsigned long data)
 
 	list_add(&dst->lru, &cc->freepages);
 	cc->nr_freepages++;
+	cc->nr_migratepages += 1 << folio_order(dst);
 }
 
 /* possible outcome of isolate_migratepages */
@@ -2788,25 +2792,27 @@ enum compact_result try_to_compact_pages(gfp_t gfp_mask, unsigned int order,
 }
 
 /*
- * Compact all zones within a node till each zone's fragmentation score
- * reaches within proactive compaction thresholds (as determined by the
- * proactiveness tunable).
+ * compact_node() - compact all zones within a node
+ * @pgdat: The node page data
+ * @proactive: Whether the compaction is proactive
  *
- * It is possible that the function returns before reaching score targets
- * due to various back-off conditions, such as, contention on per-node or
- * per-zone locks.
+ * For proactive compaction, compact till each zone's fragmentation score
+ * reaches within proactive compaction thresholds (as determined by the
+ * proactiveness tunable), it is possible that the function returns before
+ * reaching score targets due to various back-off conditions, such as,
+ * contention on per-node or per-zone locks.
  */
-static void proactive_compact_node(pg_data_t *pgdat)
+static int compact_node(pg_data_t *pgdat, bool proactive)
 {
 	int zoneid;
 	struct zone *zone;
 	struct compact_control cc = {
 		.order = -1,
-		.mode = MIGRATE_SYNC_LIGHT,
+		.mode = proactive ? MIGRATE_SYNC_LIGHT : MIGRATE_SYNC,
 		.ignore_skip_hint = true,
 		.whole_zone = true,
 		.gfp_mask = GFP_KERNEL,
-		.proactive_compaction = true,
+		.proactive_compaction = proactive,
 	};
 
 	for (zoneid = 0; zoneid < MAX_NR_ZONES; zoneid++) {
@@ -2814,54 +2820,39 @@ static void proactive_compact_node(pg_data_t *pgdat)
 		if (!populated_zone(zone))
 			continue;
 
-		cc.zone = zone;
-
-		compact_zone(&cc, NULL);
-
-		count_compact_events(KCOMPACTD_MIGRATE_SCANNED,
-				     cc.total_migrate_scanned);
-		count_compact_events(KCOMPACTD_FREE_SCANNED,
-				     cc.total_free_scanned);
-	}
-}
-
-/* Compact all zones within a node */
-static void compact_node(int nid)
-{
-	pg_data_t *pgdat = NODE_DATA(nid);
-	int zoneid;
-	struct zone *zone;
-	struct compact_control cc = {
-		.order = -1,
-		.mode = MIGRATE_SYNC,
-		.ignore_skip_hint = true,
-		.whole_zone = true,
-		.gfp_mask = GFP_KERNEL,
-	};
-
-
-	for (zoneid = 0; zoneid < MAX_NR_ZONES; zoneid++) {
-
-		zone = &pgdat->node_zones[zoneid];
-		if (!populated_zone(zone))
-			continue;
+		if (fatal_signal_pending(current))
+			return -EINTR;
 
 		cc.zone = zone;
 
 		compact_zone(&cc, NULL);
+
+		if (proactive) {
+			count_compact_events(KCOMPACTD_MIGRATE_SCANNED,
+					     cc.total_migrate_scanned);
+			count_compact_events(KCOMPACTD_FREE_SCANNED,
+					     cc.total_free_scanned);
+		}
 	}
+
+	return 0;
 }
 
-/* Compact all nodes in the system */
-static void compact_nodes(void)
+/* Compact all zones of all nodes in the system */
+static int compact_nodes(void)
 {
-	int nid;
+	int ret, nid;
 
 	/* Flush pending updates to the LRU lists */
 	lru_add_drain_all();
 
-	for_each_online_node(nid)
-		compact_node(nid);
+	for_each_online_node(nid) {
+		ret = compact_node(NODE_DATA(nid), false);
+		if (ret)
+			return ret;
+	}
+
+	return 0;
 }
 
 static int compaction_proactiveness_sysctl_handler(struct ctl_table *table, int write,
@@ -2907,9 +2898,9 @@ static int sysctl_compaction_handler(struct ctl_table *table, int write,
 		return -EINVAL;
 
 	if (write)
-		compact_nodes();
+		ret = compact_nodes();
 
-	return 0;
+	return ret;
 }
 
 #if defined(CONFIG_SYSFS) && defined(CONFIG_NUMA)
@@ -2923,7 +2914,7 @@ static ssize_t compact_store(struct device *dev,
 		/* Flush pending updates to the LRU lists */
 		lru_add_drain_all();
 
-		compact_node(nid);
+		compact_node(NODE_DATA(nid), false);
 	}
 
 	return count;
@@ -3132,7 +3123,7 @@ static int kcompactd(void *p)
 			unsigned int prev_score, score;
 
 			prev_score = fragmentation_score_node(pgdat);
-			proactive_compact_node(pgdat);
+			compact_node(pgdat, true);
 			score = fragmentation_score_node(pgdat);
 			/*
 			 * Defer proactive compaction if the fragmentation
