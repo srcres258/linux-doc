@@ -459,7 +459,7 @@ static void spi_shutdown(struct device *dev)
 	}
 }
 
-struct bus_type spi_bus_type = {
+const struct bus_type spi_bus_type = {
 	.name		= "spi",
 	.dev_groups	= spi_dev_groups,
 	.match		= spi_match_device,
@@ -584,7 +584,7 @@ struct spi_device *spi_alloc_device(struct spi_controller *ctlr)
 		return NULL;
 	}
 
-	spi->master = spi->controller = ctlr;
+	spi->controller = ctlr;
 	spi->dev.parent = &ctlr->dev;
 	spi->dev.bus = &spi_bus_type;
 	spi->dev.release = spidev_release;
@@ -1747,13 +1747,36 @@ static int __spi_pump_transfer_message(struct spi_controller *ctlr,
 
 	trace_spi_message_start(msg);
 
-	ret = spi_split_transfers_maxsize(ctlr, msg,
-					  spi_max_transfer_size(msg->spi),
-					  GFP_KERNEL | GFP_DMA);
-	if (ret) {
-		msg->status = ret;
-		spi_finalize_current_message(ctlr);
-		return ret;
+	/*
+	 * If an SPI controller does not support toggling the CS line on each
+	 * transfer (indicated by the SPI_CS_WORD flag) or we are using a GPIO
+	 * for the CS line, we can emulate the CS-per-word hardware function by
+	 * splitting transfers into one-word transfers and ensuring that
+	 * cs_change is set for each transfer.
+	 */
+	if ((msg->spi->mode & SPI_CS_WORD) && (!(ctlr->mode_bits & SPI_CS_WORD) ||
+					       spi_is_csgpiod(msg->spi))) {
+		ret = spi_split_transfers_maxwords(ctlr, msg, 1);
+		if (ret) {
+			msg->status = ret;
+			spi_finalize_current_message(ctlr);
+			return ret;
+		}
+
+		list_for_each_entry(xfer, &msg->transfers, transfer_list) {
+			/* Don't change cs_change on the last entry in the list */
+			if (list_is_last(&xfer->transfer_list, &msg->transfers))
+				break;
+			xfer->cs_change = 1;
+		}
+	} else {
+		ret = spi_split_transfers_maxsize(ctlr, msg,
+						  spi_max_transfer_size(msg->spi));
+		if (ret) {
+			msg->status = ret;
+			spi_finalize_current_message(ctlr);
+			return ret;
+		}
 	}
 
 	if (ctlr->prepare_message) {
@@ -3687,8 +3710,7 @@ static struct spi_replaced_transfers *spi_replace_transfers(
 static int __spi_split_transfer_maxsize(struct spi_controller *ctlr,
 					struct spi_message *msg,
 					struct spi_transfer **xferp,
-					size_t maxsize,
-					gfp_t gfp)
+					size_t maxsize)
 {
 	struct spi_transfer *xfer = *xferp, *xfers;
 	struct spi_replaced_transfers *srt;
@@ -3699,7 +3721,7 @@ static int __spi_split_transfer_maxsize(struct spi_controller *ctlr,
 	count = DIV_ROUND_UP(xfer->len, maxsize);
 
 	/* Create replacement */
-	srt = spi_replace_transfers(msg, xfer, 1, count, NULL, 0, gfp);
+	srt = spi_replace_transfers(msg, xfer, 1, count, NULL, 0, GFP_KERNEL);
 	if (IS_ERR(srt))
 		return PTR_ERR(srt);
 	xfers = srt->inserted_transfers;
@@ -3759,14 +3781,12 @@ static int __spi_split_transfer_maxsize(struct spi_controller *ctlr,
  * @ctlr:    the @spi_controller for this transfer
  * @msg:   the @spi_message to transform
  * @maxsize:  the maximum when to apply this
- * @gfp: GFP allocation flags
  *
  * Return: status of transformation
  */
 int spi_split_transfers_maxsize(struct spi_controller *ctlr,
 				struct spi_message *msg,
-				size_t maxsize,
-				gfp_t gfp)
+				size_t maxsize)
 {
 	struct spi_transfer *xfer;
 	int ret;
@@ -3781,7 +3801,7 @@ int spi_split_transfers_maxsize(struct spi_controller *ctlr,
 	list_for_each_entry(xfer, &msg->transfers, transfer_list) {
 		if (xfer->len > maxsize) {
 			ret = __spi_split_transfer_maxsize(ctlr, msg, &xfer,
-							   maxsize, gfp);
+							   maxsize);
 			if (ret)
 				return ret;
 		}
@@ -3799,14 +3819,12 @@ EXPORT_SYMBOL_GPL(spi_split_transfers_maxsize);
  * @ctlr:     the @spi_controller for this transfer
  * @msg:      the @spi_message to transform
  * @maxwords: the number of words to limit each transfer to
- * @gfp:      GFP allocation flags
  *
  * Return: status of transformation
  */
 int spi_split_transfers_maxwords(struct spi_controller *ctlr,
 				 struct spi_message *msg,
-				 size_t maxwords,
-				 gfp_t gfp)
+				 size_t maxwords)
 {
 	struct spi_transfer *xfer;
 
@@ -3824,7 +3842,7 @@ int spi_split_transfers_maxwords(struct spi_controller *ctlr,
 		maxsize = maxwords * roundup_pow_of_two(BITS_TO_BYTES(xfer->bits_per_word));
 		if (xfer->len > maxsize) {
 			ret = __spi_split_transfer_maxsize(ctlr, msg, &xfer,
-							   maxsize, gfp);
+							   maxsize);
 			if (ret)
 				return ret;
 		}
@@ -4063,33 +4081,7 @@ static int __spi_validate(struct spi_device *spi, struct spi_message *message)
 	if (list_empty(&message->transfers))
 		return -EINVAL;
 
-	/*
-	 * If an SPI controller does not support toggling the CS line on each
-	 * transfer (indicated by the SPI_CS_WORD flag) or we are using a GPIO
-	 * for the CS line, we can emulate the CS-per-word hardware function by
-	 * splitting transfers into one-word transfers and ensuring that
-	 * cs_change is set for each transfer.
-	 */
-	if ((spi->mode & SPI_CS_WORD) && (!(ctlr->mode_bits & SPI_CS_WORD) ||
-					  spi_is_csgpiod(spi))) {
-		size_t maxsize = BITS_TO_BYTES(spi->bits_per_word);
-		int ret;
-
-		/* spi_split_transfers_maxsize() requires message->spi */
-		message->spi = spi;
-
-		ret = spi_split_transfers_maxsize(ctlr, message, maxsize,
-						  GFP_KERNEL);
-		if (ret)
-			return ret;
-
-		list_for_each_entry(xfer, &message->transfers, transfer_list) {
-			/* Don't change cs_change on the last entry in the list */
-			if (list_is_last(&xfer->transfer_list, &message->transfers))
-				break;
-			xfer->cs_change = 1;
-		}
-	}
+	message->spi = spi;
 
 	/*
 	 * Half-duplex links include original MicroWire, and ones with
@@ -4214,8 +4206,6 @@ static int __spi_async(struct spi_device *spi, struct spi_message *message)
 	if (!ctlr->transfer)
 		return -ENOTSUPP;
 
-	message->spi = spi;
-
 	SPI_STATISTICS_INCREMENT_FIELD(ctlr->pcpu_statistics, spi_async);
 	SPI_STATISTICS_INCREMENT_FIELD(spi->pcpu_statistics, spi_async);
 
@@ -4285,57 +4275,6 @@ int spi_async(struct spi_device *spi, struct spi_message *message)
 }
 EXPORT_SYMBOL_GPL(spi_async);
 
-/**
- * spi_async_locked - version of spi_async with exclusive bus usage
- * @spi: device with which data will be exchanged
- * @message: describes the data transfers, including completion callback
- * Context: any (IRQs may be blocked, etc)
- *
- * This call may be used in_irq and other contexts which can't sleep,
- * as well as from task contexts which can sleep.
- *
- * The completion callback is invoked in a context which can't sleep.
- * Before that invocation, the value of message->status is undefined.
- * When the callback is issued, message->status holds either zero (to
- * indicate complete success) or a negative error code.  After that
- * callback returns, the driver which issued the transfer request may
- * deallocate the associated memory; it's no longer in use by any SPI
- * core or controller driver code.
- *
- * Note that although all messages to a spi_device are handled in
- * FIFO order, messages may go to different devices in other orders.
- * Some device might be higher priority, or have various "hard" access
- * time requirements, for example.
- *
- * On detection of any fault during the transfer, processing of
- * the entire message is aborted, and the device is deselected.
- * Until returning from the associated message completion callback,
- * no other spi_message queued to that device will be processed.
- * (This rule applies equally to all the synchronous transfer calls,
- * which are wrappers around this core asynchronous primitive.)
- *
- * Return: zero on success, else a negative error code.
- */
-static int spi_async_locked(struct spi_device *spi, struct spi_message *message)
-{
-	struct spi_controller *ctlr = spi->controller;
-	int ret;
-	unsigned long flags;
-
-	ret = __spi_validate(spi, message);
-	if (ret != 0)
-		return ret;
-
-	spin_lock_irqsave(&ctlr->bus_lock_spinlock, flags);
-
-	ret = __spi_async(spi, message);
-
-	spin_unlock_irqrestore(&ctlr->bus_lock_spinlock, flags);
-
-	return ret;
-
-}
-
 static void __spi_transfer_message_noqueue(struct spi_controller *ctlr, struct spi_message *msg)
 {
 	bool was_busy;
@@ -4383,6 +4322,7 @@ static void spi_complete(void *arg)
 static int __spi_sync(struct spi_device *spi, struct spi_message *message)
 {
 	DECLARE_COMPLETION_ONSTACK(done);
+	unsigned long flags;
 	int status;
 	struct spi_controller *ctlr = spi->controller;
 
@@ -4394,8 +4334,6 @@ static int __spi_sync(struct spi_device *spi, struct spi_message *message)
 	status = __spi_validate(spi, message);
 	if (status != 0)
 		return status;
-
-	message->spi = spi;
 
 	SPI_STATISTICS_INCREMENT_FIELD(ctlr->pcpu_statistics, spi_sync);
 	SPI_STATISTICS_INCREMENT_FIELD(spi->pcpu_statistics, spi_sync);
@@ -4428,7 +4366,11 @@ static int __spi_sync(struct spi_device *spi, struct spi_message *message)
 	 */
 	message->complete = spi_complete;
 	message->context = &done;
-	status = spi_async_locked(spi, message);
+
+	spin_lock_irqsave(&ctlr->bus_lock_spinlock, flags);
+	status = __spi_async(spi, message);
+	spin_unlock_irqrestore(&ctlr->bus_lock_spinlock, flags);
+
 	if (status == 0) {
 		wait_for_completion(&done);
 		status = message->status;
