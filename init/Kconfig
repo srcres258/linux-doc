@@ -107,6 +107,8 @@ config CONSTRUCTORS
 
 config IRQ_WORK
 	bool
+	depends on SMP
+	default y
 
 config BUILDTIME_TABLE_SORT
 	bool
