@@ -88,8 +88,8 @@ int vdo_get_compressed_block_fragment(enum block_mapping_state mapping_state,
  */
 static inline void assert_on_packer_thread(struct packer *packer, const char *caller)
 {
-	ASSERT_LOG_ONLY((vdo_get_callback_thread_id() == packer->thread_id),
-			"%s() called from packer thread", caller);
+	VDO_ASSERT_LOG_ONLY((vdo_get_callback_thread_id() == packer->thread_id),
+			    "%s() called from packer thread", caller);
 }
 
 /**
@@ -122,7 +122,7 @@ static int __must_check make_bin(struct packer *packer)
 	struct packer_bin *bin;
 	int result;
 
-	result = uds_allocate_extended(struct packer_bin, VDO_MAX_COMPRESSION_SLOTS,
+	result = vdo_allocate_extended(struct packer_bin, VDO_MAX_COMPRESSION_SLOTS,
 				       struct vio *, __func__, &bin);
 	if (result != VDO_SUCCESS)
 		return result;
@@ -148,7 +148,7 @@ int vdo_make_packer(struct vdo *vdo, block_count_t bin_count, struct packer **pa
 	block_count_t i;
 	int result;
 
-	result = uds_allocate(1, struct packer, __func__, &packer);
+	result = vdo_allocate(1, struct packer, __func__, &packer);
 	if (result != VDO_SUCCESS)
 		return result;
 
@@ -170,7 +170,7 @@ int vdo_make_packer(struct vdo *vdo, block_count_t bin_count, struct packer **pa
 	 * bin must have a canceler for which it is waiting, and any canceler will only have
 	 * canceled one lock holder at a time.
 	 */
-	result = uds_allocate_extended(struct packer_bin, MAXIMUM_VDO_USER_VIOS / 2,
+	result = vdo_allocate_extended(struct packer_bin, MAXIMUM_VDO_USER_VIOS / 2,
 				       struct vio *, __func__, &packer->canceled_bin);
 	if (result != VDO_SUCCESS) {
 		vdo_free_packer(packer);
@@ -200,11 +200,11 @@ void vdo_free_packer(struct packer *packer)
 
 	list_for_each_entry_safe(bin, tmp, &packer->bins, list) {
 		list_del_init(&bin->list);
-		uds_free(bin);
+		vdo_free(bin);
 	}
 
-	uds_free(uds_forget(packer->canceled_bin));
-	uds_free(packer);
+	vdo_free(vdo_forget(packer->canceled_bin));
+	vdo_free(packer);
 }
 
 /**
@@ -571,9 +571,9 @@ void vdo_attempt_packing(struct data_vio *data_vio)
 
 	assert_on_packer_thread(packer, __func__);
 
-	result = ASSERT((status.stage == DATA_VIO_COMPRESSING),
-			"attempt to pack data_vio not ready for packing, stage: %u",
-			status.stage);
+	result = VDO_ASSERT((status.stage == DATA_VIO_COMPRESSING),
+			    "attempt to pack data_vio not ready for packing, stage: %u",
+			    status.stage);
 	if (result != VDO_SUCCESS)
 		return;
 
@@ -673,9 +673,9 @@ void vdo_remove_lock_holder_from_packer(struct vdo_completion *completion)
 
 	assert_data_vio_in_packer_zone(data_vio);
 
-	lock_holder = uds_forget(data_vio->compression.lock_holder);
+	lock_holder = vdo_forget(data_vio->compression.lock_holder);
 	bin = lock_holder->compression.bin;
-	ASSERT_LOG_ONLY((bin != NULL), "data_vio in packer has a bin");
+	VDO_ASSERT_LOG_ONLY((bin != NULL), "data_vio in packer has a bin");
 
 	slot = lock_holder->compression.slot;
 	bin->slots_used--;
@@ -752,7 +752,7 @@ static void dump_packer_bin(const struct packer_bin *bin, bool canceled)
 		/* Don't dump empty bins. */
 		return;
 
-	uds_log_info("	  %sBin slots_used=%u free_space=%zu",
+	vdo_log_info("	  %sBin slots_used=%u free_space=%zu",
 		     (canceled ? "Canceled" : ""), bin->slots_used, bin->free_space);
 
 	/*
@@ -771,8 +771,8 @@ void vdo_dump_packer(const struct packer *packer)
 {
 	struct packer_bin *bin;
 
-	uds_log_info("packer");
-	uds_log_info("	flushGeneration=%llu state %s  packer_bin_count=%llu",
+	vdo_log_info("packer");
+	vdo_log_info("	flushGeneration=%llu state %s  packer_bin_count=%llu",
 		     (unsigned long long) packer->flush_generation,
 		     vdo_get_admin_state_code(&packer->state)->name,
 		     (unsigned long long) packer->size);

@@ -5,6 +5,7 @@
 
 #include "thread-registry.h"
 
+#include <asm/current.h>
 #include <linux/rculist.h>
 
 #include "permassert.h"
@@ -43,7 +44,7 @@ void vdo_register_thread(struct thread_registry *registry,
 	list_add_tail_rcu(&new_thread->links, &registry->links);
 	spin_unlock(&registry->lock);
 
-	ASSERT_LOG_ONLY(!found_it, "new thread not already in registry");
+	VDO_ASSERT_LOG_ONLY(!found_it, "new thread not already in registry");
 	if (found_it) {
 		/* Ensure no RCU iterators see it before re-initializing. */
 		synchronize_rcu();
@@ -66,7 +67,7 @@ void vdo_unregister_thread(struct thread_registry *registry)
 	}
 	spin_unlock(&registry->lock);
 
-	ASSERT_LOG_ONLY(found_it, "thread found in registry");
+	VDO_ASSERT_LOG_ONLY(found_it, "thread found in registry");
 	if (found_it) {
 		/* Ensure no RCU iterators see it before re-initializing. */
 		synchronize_rcu();

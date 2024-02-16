@@ -62,7 +62,7 @@ int vdo_make_priority_table(unsigned int max_priority, struct priority_table **t
 	if (max_priority > MAX_PRIORITY)
 		return UDS_INVALID_ARGUMENT;
 
-	result = uds_allocate_extended(struct priority_table, max_priority + 1,
+	result = vdo_allocate_extended(struct priority_table, max_priority + 1,
 				       struct bucket, __func__, &table);
 	if (result != VDO_SUCCESS)
 		return result;
@@ -98,7 +98,7 @@ void vdo_free_priority_table(struct priority_table *table)
 	 */
 	vdo_reset_priority_table(table);
 
-	uds_free(table);
+	vdo_free(table);
 }
 
 /**
@@ -129,8 +129,8 @@ void vdo_reset_priority_table(struct priority_table *table)
 void vdo_priority_table_enqueue(struct priority_table *table, unsigned int priority,
 				struct list_head *entry)
 {
-	ASSERT_LOG_ONLY((priority <= table->max_priority),
-			"entry priority must be valid for the table");
+	VDO_ASSERT_LOG_ONLY((priority <= table->max_priority),
+			    "entry priority must be valid for the table");
 
 	/* Append the entry to the queue in the specified bucket. */
 	list_move_tail(entry, &table->buckets[priority].queue);

@@ -59,8 +59,8 @@ struct flusher {
  */
 static inline void assert_on_flusher_thread(struct flusher *flusher, const char *caller)
 {
-	ASSERT_LOG_ONLY((vdo_get_callback_thread_id() == flusher->thread_id),
-			"%s() called from flusher thread", caller);
+	VDO_ASSERT_LOG_ONLY((vdo_get_callback_thread_id() == flusher->thread_id),
+			    "%s() called from flusher thread", caller);
 }
 
 /**
@@ -103,12 +103,12 @@ static void *allocate_flush(gfp_t gfp_mask, void *pool_data)
 	struct vdo_flush *flush = NULL;
 
 	if ((gfp_mask & GFP_NOWAIT) == GFP_NOWAIT) {
-		flush = uds_allocate_memory_nowait(sizeof(struct vdo_flush), __func__);
+		flush = vdo_allocate_memory_nowait(sizeof(struct vdo_flush), __func__);
 	} else {
-		int result = uds_allocate(1, struct vdo_flush, __func__, &flush);
+		int result = vdo_allocate(1, struct vdo_flush, __func__, &flush);
 
 		if (result != VDO_SUCCESS)
-			uds_log_error_strerror(result, "failed to allocate spare flush");
+			vdo_log_error_strerror(result, "failed to allocate spare flush");
 	}
 
 	if (flush != NULL) {
@@ -123,7 +123,7 @@ static void *allocate_flush(gfp_t gfp_mask, void *pool_data)
 
 static void free_flush(void *element, void *pool_data __always_unused)
 {
-	uds_free(element);
+	vdo_free(element);
 }
 
 /**
@@ -134,7 +134,7 @@ static void free_flush(void *element, void *pool_data __always_unused)
  */
 int vdo_make_flusher(struct vdo *vdo)
 {
-	int result = uds_allocate(1, struct flusher, __func__, &vdo->flusher);
+	int result = vdo_allocate(1, struct flusher, __func__, &vdo->flusher);
 
 	if (result != VDO_SUCCESS)
 		return result;
@@ -162,8 +162,8 @@ void vdo_free_flusher(struct flusher *flusher)
 		return;
 
 	if (flusher->flush_pool != NULL)
-		mempool_destroy(uds_forget(flusher->flush_pool));
-	uds_free(flusher);
+		mempool_destroy(vdo_forget(flusher->flush_pool));
+	vdo_free(flusher);
 }
 
 /**
@@ -272,8 +272,8 @@ static void flush_vdo(struct vdo_completion *completion)
 	int result;
 
 	assert_on_flusher_thread(flusher, __func__);
-	result = ASSERT(vdo_is_state_normal(&flusher->state),
-			"flusher is in normal operation");
+	result = VDO_ASSERT(vdo_is_state_normal(&flusher->state),
+			    "flusher is in normal operation");
 	if (result != VDO_SUCCESS) {
 		vdo_enter_read_only_mode(flusher->vdo, result);
 		vdo_complete_flush(flush);
@@ -330,11 +330,11 @@ void vdo_complete_flushes(struct flusher *flusher)
 		if (flush->flush_generation >= oldest_active_generation)
 			return;
 
-		ASSERT_LOG_ONLY((flush->flush_generation ==
-				 flusher->first_unacknowledged_generation),
-				"acknowledged next expected flush, %llu, was: %llu",
-				(unsigned long long) flusher->first_unacknowledged_generation,
-				(unsigned long long) flush->flush_generation);
+		VDO_ASSERT_LOG_ONLY((flush->flush_generation ==
+				     flusher->first_unacknowledged_generation),
+				    "acknowledged next expected flush, %llu, was: %llu",
+				    (unsigned long long) flusher->first_unacknowledged_generation,
+				    (unsigned long long) flush->flush_generation);
 		vdo_waitq_dequeue_waiter(&flusher->pending_flushes);
 		vdo_complete_flush(flush);
 		flusher->first_unacknowledged_generation++;
@@ -349,11 +349,11 @@ void vdo_complete_flushes(struct flusher *flusher)
  */
 void vdo_dump_flusher(const struct flusher *flusher)
 {
-	uds_log_info("struct flusher");
-	uds_log_info("  flush_generation=%llu first_unacknowledged_generation=%llu",
+	vdo_log_info("struct flusher");
+	vdo_log_info("  flush_generation=%llu first_unacknowledged_generation=%llu",
 		     (unsigned long long) flusher->flush_generation,
 		     (unsigned long long) flusher->first_unacknowledged_generation);
-	uds_log_info("  notifiers queue is %s; pending_flushes queue is %s",
+	vdo_log_info("  notifiers queue is %s; pending_flushes queue is %s",
 		     (vdo_waitq_has_waiters(&flusher->notifiers) ? "not empty" : "empty"),
 		     (vdo_waitq_has_waiters(&flusher->pending_flushes) ? "not empty" : "empty"));
 }
@@ -400,8 +400,8 @@ void vdo_launch_flush(struct vdo *vdo, struct bio *bio)
 	struct flusher *flusher = vdo->flusher;
 	const struct admin_state_code *code = vdo_get_admin_state_code(&flusher->state);
 
-	ASSERT_LOG_ONLY(!code->quiescent, "Flushing not allowed in state %s",
-			code->name);
+	VDO_ASSERT_LOG_ONLY(!code->quiescent, "Flushing not allowed in state %s",
+			    code->name);
 
 	spin_lock(&flusher->lock);
 

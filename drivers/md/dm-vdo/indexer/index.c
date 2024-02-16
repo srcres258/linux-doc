@@ -3,11 +3,11 @@
  * Copyright 2023 Red Hat
  */
 
+#include "funnel-requestqueue.h"
 #include "index.h"
 #include "hash-utils.h"
 #include "sparse-cache.h"
 
-#include "../funnel-requestqueue.h"
 #include "../logger.h"
 #include "../memory-alloc.h"
 
@@ -86,8 +86,8 @@ static int launch_zone_message(struct uds_zone_message message, unsigned int zon
 	int result;
 	struct uds_request *request;
 
-	result = uds_allocate(1, struct uds_request, __func__, &request);
-	if (result != UDS_SUCCESS)
+	result = vdo_allocate(1, struct uds_request, __func__, &request);
+	if (result != VDO_SUCCESS)
 		return result;
 
 	request->index = index;
@@ -186,7 +186,7 @@ static int finish_previous_chapter(struct uds_index *index, u64 current_chapter_
 	mutex_unlock(&writer->mutex);
 
 	if (result != UDS_SUCCESS)
-		return uds_log_error_strerror(result,
+		return vdo_log_error_strerror(result,
 					      "Writing of previous open chapter failed");
 
 	return UDS_SUCCESS;
@@ -256,7 +256,7 @@ static int open_next_chapter(struct index_zone *zone)
 	unsigned int finished_zones;
 	u32 expire_chapters;
 
-	uds_log_debug("closing chapter %llu of zone %u after %u entries (%u short)",
+	vdo_log_debug("closing chapter %llu of zone %u after %u entries (%u short)",
 		      (unsigned long long) zone->newest_virtual_chapter, zone->id,
 		      zone->open_chapter->size,
 		      zone->open_chapter->capacity - zone->open_chapter->size);
@@ -287,7 +287,7 @@ static int open_next_chapter(struct index_zone *zone)
 		return UDS_SUCCESS;
 
 	while (expire_chapters-- > 0)
-		uds_forget_chapter(zone->index->volume, expiring++);
+		vdo_forget_chapter(zone->index->volume, expiring++);
 
 	return UDS_SUCCESS;
 }
@@ -313,7 +313,7 @@ static int dispatch_index_zone_control_request(struct uds_request *request)
 		return handle_chapter_closed(zone, message->virtual_chapter);
 
 	default:
-		uds_log_error("invalid message type: %d", message->type);
+		vdo_log_error("invalid message type: %d", message->type);
 		return UDS_INVALID_ARGUMENT;
 	}
 }
@@ -598,7 +598,7 @@ static int dispatch_index_request(struct uds_index *index, struct uds_request *r
 		break;
 
 	default:
-		result = uds_log_warning_strerror(UDS_INVALID_ARGUMENT,
+		result = vdo_log_warning_strerror(UDS_INVALID_ARGUMENT,
 						  "invalid request type: %d",
 						  request->type);
 		break;
@@ -616,12 +616,12 @@ static void execute_zone_request(struct uds_request *request)
 	if (request->zone_message.type != UDS_MESSAGE_NONE) {
 		result = dispatch_index_zone_control_request(request);
 		if (result != UDS_SUCCESS) {
-			uds_log_error_strerror(result, "error executing message: %d",
+			vdo_log_error_strerror(result, "error executing message: %d",
 					       request->zone_message.type);
 		}
 
 		/* Once the message is processed it can be freed. */
-		uds_free(uds_forget(request));
+		vdo_free(vdo_forget(request));
 		return;
 	}
 
@@ -676,7 +676,7 @@ static void close_chapters(void *arg)
 	struct chapter_writer *writer = arg;
 	struct uds_index *index = writer->index;
 
-	uds_log_debug("chapter writer starting");
+	vdo_log_debug("chapter writer starting");
 	mutex_lock(&writer->mutex);
 	for (;;) {
 		while (writer->zones_to_write < index->zone_count) {
@@ -686,7 +686,7 @@ static void close_chapters(void *arg)
 				 * open chapter, so we can exit now.
 				 */
 				mutex_unlock(&writer->mutex);
-				uds_log_debug("chapter writer stopping");
+				vdo_log_debug("chapter writer stopping");
 				return;
 			}
 			uds_wait_cond(&writer->cond, &writer->mutex);
@@ -709,7 +709,7 @@ static void close_chapters(void *arg)
 			index->has_saved_open_chapter = false;
 			result = uds_discard_open_chapter(index->layout);
 			if (result == UDS_SUCCESS)
-				uds_log_debug("Discarding saved open chapter");
+				vdo_log_debug("Discarding saved open chapter");
 		}
 
 		result = uds_close_open_chapter(writer->chapters, index->zone_count,
@@ -752,9 +752,9 @@ static void free_chapter_writer(struct chapter_writer *writer)
 		return;
 
 	stop_chapter_writer(writer);
-	uds_free_open_chapter_index(writer->open_chapter_index);
-	uds_free(writer->collated_records);
-	uds_free(writer);
+	vdo_free_open_chapter_index(writer->open_chapter_index);
+	vdo_free(writer->collated_records);
+	vdo_free(writer);
 }
 
 static int make_chapter_writer(struct uds_index *index,
@@ -765,19 +765,19 @@ static int make_chapter_writer(struct uds_index *index,
 	size_t collated_records_size =
 		(sizeof(struct uds_volume_record) * index->volume->geometry->records_per_chapter);
 
-	result = uds_allocate_extended(struct chapter_writer, index->zone_count,
+	result = vdo_allocate_extended(struct chapter_writer, index->zone_count,
 				       struct open_chapter_zone *, "Chapter Writer",
 				       &writer);
-	if (result != UDS_SUCCESS)
+	if (result != VDO_SUCCESS)
 		return result;
 
 	writer->index = index;
 	mutex_init(&writer->mutex);
 	uds_init_cond(&writer->cond);
 
-	result = uds_allocate_cache_aligned(collated_records_size, "collated records",
+	result = vdo_allocate_cache_aligned(collated_records_size, "collated records",
 					    &writer->collated_records);
-	if (result != UDS_SUCCESS) {
+	if (result != VDO_SUCCESS) {
 		free_chapter_writer(writer);
 		return result;
 	}
@@ -796,7 +796,7 @@ static int make_chapter_writer(struct uds_index *index,
 			       writer->open_chapter_index->memory_size);
 
 	result = vdo_create_thread(close_chapters, writer, "writer", &writer->thread);
-	if (result != UDS_SUCCESS) {
+	if (result != VDO_SUCCESS) {
 		free_chapter_writer(writer);
 		return result;
 	}
@@ -816,7 +816,7 @@ static int load_index(struct uds_index *index)
 
 	last_save_chapter = ((index->last_save != NO_LAST_SAVE) ? index->last_save : 0);
 
-	uds_log_info("loaded index from chapter %llu through chapter %llu",
+	vdo_log_info("loaded index from chapter %llu through chapter %llu",
 		     (unsigned long long) index->oldest_virtual_chapter,
 		     (unsigned long long) last_save_chapter);
 
@@ -841,7 +841,7 @@ static int rebuild_index_page_map(struct uds_index *index, u64 vcn)
 						   index_page_number,
 						   &chapter_index_page);
 		if (result != UDS_SUCCESS) {
-			return uds_log_error_strerror(result,
+			return vdo_log_error_strerror(result,
 						      "failed to read index page %u in chapter %u",
 						      index_page_number, chapter);
 		}
@@ -849,7 +849,7 @@ static int rebuild_index_page_map(struct uds_index *index, u64 vcn)
 		lowest_delta_list = chapter_index_page->lowest_list_number;
 		highest_delta_list = chapter_index_page->highest_list_number;
 		if (lowest_delta_list != expected_list_number) {
-			return uds_log_error_strerror(UDS_CORRUPT_DATA,
+			return vdo_log_error_strerror(UDS_CORRUPT_DATA,
 						      "chapter %u index page %u is corrupt",
 						      chapter, index_page_number);
 		}
@@ -978,7 +978,7 @@ static int replay_chapter(struct uds_index *index, u64 virtual, bool sparse)
 	u32 physical_chapter;
 
 	if (check_for_suspend(index)) {
-		uds_log_info("Replay interrupted by index shutdown at chapter %llu",
+		vdo_log_info("Replay interrupted by index shutdown at chapter %llu",
 			     (unsigned long long) virtual);
 		return -EBUSY;
 	}
@@ -990,7 +990,7 @@ static int replay_chapter(struct uds_index *index, u64 virtual, bool sparse)
 
 	result = rebuild_index_page_map(index, virtual);
 	if (result != UDS_SUCCESS) {
-		return uds_log_error_strerror(result,
+		return vdo_log_error_strerror(result,
 					      "could not rebuild index page map for chapter %u",
 					      physical_chapter);
 	}
@@ -1003,7 +1003,7 @@ static int replay_chapter(struct uds_index *index, u64 virtual, bool sparse)
 		result = uds_get_volume_record_page(index->volume, physical_chapter,
 						    record_page_number, &record_page);
 		if (result != UDS_SUCCESS) {
-			return uds_log_error_strerror(result, "could not get page %d",
+			return vdo_log_error_strerror(result, "could not get page %d",
 						      record_page_number);
 		}
 
@@ -1032,7 +1032,7 @@ static int replay_volume(struct uds_index *index)
 	u64 upto_virtual = index->newest_virtual_chapter;
 	bool will_be_sparse;
 
-	uds_log_info("Replaying volume from chapter %llu through chapter %llu",
+	vdo_log_info("Replaying volume from chapter %llu through chapter %llu",
 		     (unsigned long long) from_virtual,
 		     (unsigned long long) upto_virtual);
 
@@ -1062,7 +1062,7 @@ static int replay_volume(struct uds_index *index)
 
 	new_map_update = index->volume->index_page_map->last_update;
 	if (new_map_update != old_map_update) {
-		uds_log_info("replay changed index page map update from %llu to %llu",
+		vdo_log_info("replay changed index page map update from %llu to %llu",
 			     (unsigned long long) old_map_update,
 			     (unsigned long long) new_map_update);
 	}
@@ -1082,7 +1082,7 @@ static int rebuild_index(struct uds_index *index)
 	result = uds_find_volume_chapter_boundaries(index->volume, &lowest, &highest,
 						    &is_empty);
 	if (result != UDS_SUCCESS) {
-		return uds_log_fatal_strerror(result,
+		return vdo_log_fatal_strerror(result,
 					      "cannot rebuild index: unknown volume chapter boundaries");
 	}
 
@@ -1114,9 +1114,9 @@ static void free_index_zone(struct index_zone *zone)
 	if (zone == NULL)
 		return;
 
-	uds_free_open_chapter(zone->open_chapter);
-	uds_free_open_chapter(zone->writing_chapter);
-	uds_free(zone);
+	vdo_free_open_chapter(zone->open_chapter);
+	vdo_free_open_chapter(zone->writing_chapter);
+	vdo_free(zone);
 }
 
 static int make_index_zone(struct uds_index *index, unsigned int zone_number)
@@ -1124,8 +1124,8 @@ static int make_index_zone(struct uds_index *index, unsigned int zone_number)
 	int result;
 	struct index_zone *zone;
 
-	result = uds_allocate(1, struct index_zone, "index zone", &zone);
-	if (result != UDS_SUCCESS)
+	result = vdo_allocate(1, struct index_zone, "index zone", &zone);
+	if (result != VDO_SUCCESS)
 		return result;
 
 	result = uds_make_open_chapter(index->volume->geometry, index->zone_count,
@@ -1161,29 +1161,29 @@ int uds_make_index(struct uds_configuration *config, enum uds_open_index_type op
 	u64 nonce;
 	unsigned int z;
 
-	result = uds_allocate_extended(struct uds_index, config->zone_count,
+	result = vdo_allocate_extended(struct uds_index, config->zone_count,
 				       struct uds_request_queue *, "index", &index);
-	if (result != UDS_SUCCESS)
+	if (result != VDO_SUCCESS)
 		return result;
 
 	index->zone_count = config->zone_count;
 
 	result = uds_make_index_layout(config, new, &index->layout);
 	if (result != UDS_SUCCESS) {
-		uds_free_index(index);
+		vdo_free_index(index);
 		return result;
 	}
 
-	result = uds_allocate(index->zone_count, struct index_zone *, "zones",
+	result = vdo_allocate(index->zone_count, struct index_zone *, "zones",
 			      &index->zones);
-	if (result != UDS_SUCCESS) {
-		uds_free_index(index);
+	if (result != VDO_SUCCESS) {
+		vdo_free_index(index);
 		return result;
 	}
 
 	result = uds_make_volume(config, index->layout, &index->volume);
 	if (result != UDS_SUCCESS) {
-		uds_free_index(index);
+		vdo_free_index(index);
 		return result;
 	}
 
@@ -1191,8 +1191,8 @@ int uds_make_index(struct uds_configuration *config, enum uds_open_index_type op
 	for (z = 0; z < index->zone_count; z++) {
 		result = make_index_zone(index, z);
 		if (result != UDS_SUCCESS) {
-			uds_free_index(index);
-			return uds_log_error_strerror(result,
+			vdo_free_index(index);
+			return vdo_log_error_strerror(result,
 						      "Could not create index zone");
 		}
 	}
@@ -1200,8 +1200,8 @@ int uds_make_index(struct uds_configuration *config, enum uds_open_index_type op
 	nonce = uds_get_volume_nonce(index->layout);
 	result = uds_make_volume_index(config, nonce, &index->volume_index);
 	if (result != UDS_SUCCESS) {
-		uds_free_index(index);
-		return uds_log_error_strerror(result, "could not make volume index");
+		vdo_free_index(index);
+		return vdo_log_error_strerror(result, "could not make volume index");
 	}
 
 	index->load_context = load_context;
@@ -1209,13 +1209,13 @@ int uds_make_index(struct uds_configuration *config, enum uds_open_index_type op
 
 	result = initialize_index_queues(index, config->geometry);
 	if (result != UDS_SUCCESS) {
-		uds_free_index(index);
+		vdo_free_index(index);
 		return result;
 	}
 
 	result = make_chapter_writer(index, &index->chapter_writer);
 	if (result != UDS_SUCCESS) {
-		uds_free_index(index);
+		vdo_free_index(index);
 		return result;
 	}
 
@@ -1227,14 +1227,14 @@ int uds_make_index(struct uds_configuration *config, enum uds_open_index_type op
 			break;
 		case -ENOMEM:
 			/* We should not try a rebuild for this error. */
-			uds_log_error_strerror(result, "index could not be loaded");
+			vdo_log_error_strerror(result, "index could not be loaded");
 			break;
 		default:
-			uds_log_error_strerror(result, "index could not be loaded");
+			vdo_log_error_strerror(result, "index could not be loaded");
 			if (open_type == UDS_LOAD) {
 				result = rebuild_index(index);
 				if (result != UDS_SUCCESS) {
-					uds_log_error_strerror(result,
+					vdo_log_error_strerror(result,
 							       "index could not be rebuilt");
 				}
 			}
@@ -1243,8 +1243,8 @@ int uds_make_index(struct uds_configuration *config, enum uds_open_index_type op
 	}
 
 	if (result != UDS_SUCCESS) {
-		uds_free_index(index);
-		return uds_log_error_strerror(result, "fatal error in %s()", __func__);
+		vdo_free_index(index);
+		return vdo_log_error_strerror(result, "fatal error in %s()", __func__);
 	}
 
 	for (z = 0; z < index->zone_count; z++) {
@@ -1270,7 +1270,7 @@ int uds_make_index(struct uds_configuration *config, enum uds_open_index_type op
 	return UDS_SUCCESS;
 }
 
-void uds_free_index(struct uds_index *index)
+void vdo_free_index(struct uds_index *index)
 {
 	unsigned int i;
 
@@ -1283,16 +1283,16 @@ void uds_free_index(struct uds_index *index)
 
 	free_chapter_writer(index->chapter_writer);
 
-	uds_free_volume_index(index->volume_index);
+	vdo_free_volume_index(index->volume_index);
 	if (index->zones != NULL) {
 		for (i = 0; i < index->zone_count; i++)
 			free_index_zone(index->zones[i]);
-		uds_free(index->zones);
+		vdo_free(index->zones);
 	}
 
-	uds_free_volume(index->volume);
-	uds_free_index_layout(uds_forget(index->layout));
-	uds_free(index);
+	vdo_free_volume(index->volume);
+	vdo_free_index_layout(vdo_forget(index->layout));
+	vdo_free(index);
 }
 
 /* Wait for the chapter writer to complete any outstanding writes. */
@@ -1318,16 +1318,16 @@ int uds_save_index(struct uds_index *index)
 	index->prev_save = index->last_save;
 	index->last_save = ((index->newest_virtual_chapter == 0) ?
 			    NO_LAST_SAVE : index->newest_virtual_chapter - 1);
-	uds_log_info("beginning save (vcn %llu)", (unsigned long long) index->last_save);
+	vdo_log_info("beginning save (vcn %llu)", (unsigned long long) index->last_save);
 
 	result = uds_save_index_state(index->layout, index);
 	if (result != UDS_SUCCESS) {
-		uds_log_info("save index failed");
+		vdo_log_info("save index failed");
 		index->last_save = index->prev_save;
 	} else {
 		index->has_saved_open_chapter = true;
 		index->need_to_save = false;
-		uds_log_info("finished save (vcn %llu)",
+		vdo_log_info("finished save (vcn %llu)",
 			     (unsigned long long) index->last_save);
 	}
 

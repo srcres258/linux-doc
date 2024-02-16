@@ -27,7 +27,6 @@ bcachefs-y		:=	\
 	checksum.o		\
 	clock.o			\
 	compress.o		\
-	darray.o		\
 	debug.o			\
 	dirent.o		\
 	disk_groups.o		\
@@ -81,7 +80,6 @@ bcachefs-y		:=	\
 	super-io.o		\
 	sysfs.o			\
 	tests.o			\
-	thread_with_file.o	\
 	trace.o			\
 	two_state_shared_lock.o	\
 	util.o			\

@@ -82,13 +82,13 @@ static inline void set_pbn_lock_type(struct pbn_lock *lock, enum pbn_lock_type t
  */
 void vdo_downgrade_pbn_write_lock(struct pbn_lock *lock, bool compressed_write)
 {
-	ASSERT_LOG_ONLY(!vdo_is_pbn_read_lock(lock),
-			"PBN lock must not already have been downgraded");
-	ASSERT_LOG_ONLY(!has_lock_type(lock, VIO_BLOCK_MAP_WRITE_LOCK),
-			"must not downgrade block map write locks");
-	ASSERT_LOG_ONLY(lock->holder_count == 1,
-			"PBN write lock should have one holder but has %u",
-			lock->holder_count);
+	VDO_ASSERT_LOG_ONLY(!vdo_is_pbn_read_lock(lock),
+			    "PBN lock must not already have been downgraded");
+	VDO_ASSERT_LOG_ONLY(!has_lock_type(lock, VIO_BLOCK_MAP_WRITE_LOCK),
+			    "must not downgrade block map write locks");
+	VDO_ASSERT_LOG_ONLY(lock->holder_count == 1,
+			    "PBN write lock should have one holder but has %u",
+			    lock->holder_count);
 	/*
 	 * data_vio write locks are downgraded in place--the writer retains the hold on the lock.
 	 * If this was a compressed write, the holder has not yet journaled its own inc ref,
@@ -130,8 +130,8 @@ bool vdo_claim_pbn_lock_increment(struct pbn_lock *lock)
  */
 void vdo_assign_pbn_lock_provisional_reference(struct pbn_lock *lock)
 {
-	ASSERT_LOG_ONLY(!lock->has_provisional_reference,
-			"lock does not have a provisional reference");
+	VDO_ASSERT_LOG_ONLY(!lock->has_provisional_reference,
+			    "lock does not have a provisional reference");
 	lock->has_provisional_reference = true;
 }
 
@@ -165,7 +165,7 @@ static void release_pbn_lock_provisional_reference(struct pbn_lock *lock,
 
 	result = vdo_release_block_reference(allocator, locked_pbn);
 	if (result != VDO_SUCCESS) {
-		uds_log_error_strerror(result,
+		vdo_log_error_strerror(result,
 				       "Failed to release reference to %s physical block %llu",
 				       lock->implementation->release_reason,
 				       (unsigned long long) locked_pbn);
@@ -223,7 +223,7 @@ static void return_pbn_lock_to_pool(struct pbn_lock_pool *pool, struct pbn_lock 
 	INIT_LIST_HEAD(&idle->entry);
 	list_add_tail(&idle->entry, &pool->idle_list);
 
-	ASSERT_LOG_ONLY(pool->borrowed > 0, "shouldn't return more than borrowed");
+	VDO_ASSERT_LOG_ONLY(pool->borrowed > 0, "shouldn't return more than borrowed");
 	pool->borrowed -= 1;
 }
 
@@ -241,7 +241,7 @@ static int make_pbn_lock_pool(size_t capacity, struct pbn_lock_pool **pool_ptr)
 	struct pbn_lock_pool *pool;
 	int result;
 
-	result = uds_allocate_extended(struct pbn_lock_pool, capacity, idle_pbn_lock,
+	result = vdo_allocate_extended(struct pbn_lock_pool, capacity, idle_pbn_lock,
 				       __func__, &pool);
 	if (result != VDO_SUCCESS)
 		return result;
@@ -269,10 +269,10 @@ static void free_pbn_lock_pool(struct pbn_lock_pool *pool)
 	if (pool == NULL)
 		return;
 
-	ASSERT_LOG_ONLY(pool->borrowed == 0,
-			"All PBN locks must be returned to the pool before it is freed, but %zu locks are still on loan",
-			pool->borrowed);
-	uds_free(pool);
+	VDO_ASSERT_LOG_ONLY(pool->borrowed == 0,
+			    "All PBN locks must be returned to the pool before it is freed, but %zu locks are still on loan",
+			    pool->borrowed);
+	vdo_free(pool);
 }
 
 /**
@@ -296,12 +296,12 @@ static int __must_check borrow_pbn_lock_from_pool(struct pbn_lock_pool *pool,
 	idle_pbn_lock *idle;
 
 	if (pool->borrowed >= pool->capacity)
-		return uds_log_error_strerror(VDO_LOCK_ERROR,
+		return vdo_log_error_strerror(VDO_LOCK_ERROR,
 					      "no free PBN locks left to borrow");
 	pool->borrowed += 1;
 
-	result = ASSERT(!list_empty(&pool->idle_list),
-			"idle list should not be empty if pool not at capacity");
+	result = VDO_ASSERT(!list_empty(&pool->idle_list),
+			    "idle list should not be empty if pool not at capacity");
 	if (result != VDO_SUCCESS)
 		return result;
 
@@ -346,7 +346,7 @@ static int initialize_zone(struct vdo *vdo, struct physical_zones *zones)
 	zone->next = &zones->zones[(zone_number + 1) % vdo->thread_config.physical_zone_count];
 	result = vdo_make_default_thread(vdo, zone->thread_id);
 	if (result != VDO_SUCCESS) {
-		free_pbn_lock_pool(uds_forget(zone->lock_pool));
+		free_pbn_lock_pool(vdo_forget(zone->lock_pool));
 		vdo_int_map_free(zone->pbn_operations);
 		return result;
 	}
@@ -369,7 +369,7 @@ int vdo_make_physical_zones(struct vdo *vdo, struct physical_zones **zones_ptr)
 	if (zone_count == 0)
 		return VDO_SUCCESS;
 
-	result = uds_allocate_extended(struct physical_zones, zone_count,
+	result = vdo_allocate_extended(struct physical_zones, zone_count,
 				       struct physical_zone, __func__, &zones);
 	if (result != VDO_SUCCESS)
 		return result;
@@ -400,11 +400,11 @@ void vdo_free_physical_zones(struct physical_zones *zones)
 	for (index = 0; index < zones->zone_count; index++) {
 		struct physical_zone *zone = &zones->zones[index];
 
-		free_pbn_lock_pool(uds_forget(zone->lock_pool));
-		vdo_int_map_free(uds_forget(zone->pbn_operations));
+		free_pbn_lock_pool(vdo_forget(zone->lock_pool));
+		vdo_int_map_free(vdo_forget(zone->pbn_operations));
 	}
 
-	uds_free(zones);
+	vdo_free(zones);
 }
 
 /**
@@ -449,7 +449,7 @@ int vdo_attempt_physical_zone_pbn_lock(struct physical_zone *zone,
 
 	result = borrow_pbn_lock_from_pool(zone->lock_pool, type, &new_lock);
 	if (result != VDO_SUCCESS) {
-		ASSERT_LOG_ONLY(false, "must always be able to borrow a PBN lock");
+		VDO_ASSERT_LOG_ONLY(false, "must always be able to borrow a PBN lock");
 		return result;
 	}
 
@@ -462,9 +462,9 @@ int vdo_attempt_physical_zone_pbn_lock(struct physical_zone *zone,
 
 	if (lock != NULL) {
 		/* The lock is already held, so we don't need the borrowed one. */
-		return_pbn_lock_to_pool(zone->lock_pool, uds_forget(new_lock));
-		result = ASSERT(lock->holder_count > 0, "physical block %llu lock held",
-				(unsigned long long) pbn);
+		return_pbn_lock_to_pool(zone->lock_pool, vdo_forget(new_lock));
+		result = VDO_ASSERT(lock->holder_count > 0, "physical block %llu lock held",
+				    (unsigned long long) pbn);
 		if (result != VDO_SUCCESS)
 			return result;
 		*lock_ptr = lock;
@@ -487,8 +487,8 @@ static int allocate_and_lock_block(struct allocation *allocation)
 	int result;
 	struct pbn_lock *lock;
 
-	ASSERT_LOG_ONLY(allocation->lock == NULL,
-			"must not allocate a block while already holding a lock on one");
+	VDO_ASSERT_LOG_ONLY(allocation->lock == NULL,
+			    "must not allocate a block while already holding a lock on one");
 
 	result = vdo_allocate_block(allocation->zone->allocator, &allocation->pbn);
 	if (result != VDO_SUCCESS)
@@ -501,7 +501,7 @@ static int allocate_and_lock_block(struct allocation *allocation)
 
 	if (lock->holder_count > 0) {
 		/* This block is already locked, which should be impossible. */
-		return uds_log_error_strerror(VDO_LOCK_ERROR,
+		return vdo_log_error_strerror(VDO_LOCK_ERROR,
 					      "Newly allocated block %llu was spuriously locked (holder_count=%u)",
 					      (unsigned long long) allocation->pbn,
 					      lock->holder_count);
@@ -619,8 +619,8 @@ void vdo_release_physical_zone_pbn_lock(struct physical_zone *zone,
 	if (lock == NULL)
 		return;
 
-	ASSERT_LOG_ONLY(lock->holder_count > 0,
-			"should not be releasing a lock that is not held");
+	VDO_ASSERT_LOG_ONLY(lock->holder_count > 0,
+			    "should not be releasing a lock that is not held");
 
 	lock->holder_count -= 1;
 	if (lock->holder_count > 0) {
@@ -629,8 +629,8 @@ void vdo_release_physical_zone_pbn_lock(struct physical_zone *zone,
 	}
 
 	holder = vdo_int_map_remove(zone->pbn_operations, locked_pbn);
-	ASSERT_LOG_ONLY((lock == holder), "physical block lock mismatch for block %llu",
-			(unsigned long long) locked_pbn);
+	VDO_ASSERT_LOG_ONLY((lock == holder), "physical block lock mismatch for block %llu",
+			    (unsigned long long) locked_pbn);
 
 	release_pbn_lock_provisional_reference(lock, locked_pbn, zone->allocator);
 	return_pbn_lock_to_pool(zone->lock_pool, lock);

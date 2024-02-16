@@ -331,8 +331,8 @@ static inline struct hash_zones *as_hash_zones(struct vdo_completion *completion
 
 static inline void assert_in_hash_zone(struct hash_zone *zone, const char *name)
 {
-	ASSERT_LOG_ONLY((vdo_get_callback_thread_id() == zone->thread_id),
-			"%s called on hash zone thread", name);
+	VDO_ASSERT_LOG_ONLY((vdo_get_callback_thread_id() == zone->thread_id),
+			    "%s called on hash zone thread", name);
 }
 
 static inline bool change_context_state(struct dedupe_context *context, int old, int new)
@@ -408,8 +408,8 @@ static void assert_hash_lock_agent(struct data_vio *data_vio, const char *where)
 {
 	/* Not safe to access the agent field except from the hash zone. */
 	assert_data_vio_in_hash_zone(data_vio);
-	ASSERT_LOG_ONLY(data_vio == data_vio->hash_lock->agent,
-			"%s must be for the hash lock agent", where);
+	VDO_ASSERT_LOG_ONLY(data_vio == data_vio->hash_lock->agent,
+			    "%s must be for the hash lock agent", where);
 }
 
 /**
@@ -420,9 +420,8 @@ static void assert_hash_lock_agent(struct data_vio *data_vio, const char *where)
  */
 static void set_duplicate_lock(struct hash_lock *hash_lock, struct pbn_lock *pbn_lock)
 {
-	ASSERT_LOG_ONLY((hash_lock->duplicate_lock == NULL),
-			"hash lock must not already hold a duplicate lock");
-
+	VDO_ASSERT_LOG_ONLY((hash_lock->duplicate_lock == NULL),
+			    "hash lock must not already hold a duplicate lock");
 	pbn_lock->holder_count += 1;
 	hash_lock->duplicate_lock = pbn_lock;
 }
@@ -450,12 +449,12 @@ static void set_hash_lock(struct data_vio *data_vio, struct hash_lock *new_lock)
 	struct hash_lock *old_lock = data_vio->hash_lock;
 
 	if (old_lock != NULL) {
-		ASSERT_LOG_ONLY(data_vio->hash_zone != NULL,
-				"must have a hash zone when holding a hash lock");
-		ASSERT_LOG_ONLY(!list_empty(&data_vio->hash_lock_entry),
-				"must be on a hash lock ring when holding a hash lock");
-		ASSERT_LOG_ONLY(old_lock->reference_count > 0,
-				"hash lock reference must be counted");
+		VDO_ASSERT_LOG_ONLY(data_vio->hash_zone != NULL,
+				    "must have a hash zone when holding a hash lock");
+		VDO_ASSERT_LOG_ONLY(!list_empty(&data_vio->hash_lock_entry),
+				    "must be on a hash lock ring when holding a hash lock");
+		VDO_ASSERT_LOG_ONLY(old_lock->reference_count > 0,
+				    "hash lock reference must be counted");
 
 		if ((old_lock->state != VDO_HASH_LOCK_BYPASSING) &&
 		    (old_lock->state != VDO_HASH_LOCK_UNLOCKING)) {
@@ -463,9 +462,9 @@ static void set_hash_lock(struct data_vio *data_vio, struct hash_lock *new_lock)
 			 * If the reference count goes to zero in a non-terminal state, we're most
 			 * likely leaking this lock.
 			 */
-			ASSERT_LOG_ONLY(old_lock->reference_count > 1,
-					"hash locks should only become unreferenced in a terminal state, not state %s",
-					get_hash_lock_state_name(old_lock->state));
+			VDO_ASSERT_LOG_ONLY(old_lock->reference_count > 1,
+					    "hash locks should only become unreferenced in a terminal state, not state %s",
+					    get_hash_lock_state_name(old_lock->state));
 		}
 
 		list_del_init(&data_vio->hash_lock_entry);
@@ -645,8 +644,8 @@ static void finish_unlocking(struct vdo_completion *completion)
 
 	assert_hash_lock_agent(agent, __func__);
 
-	ASSERT_LOG_ONLY(lock->duplicate_lock == NULL,
-			"must have released the duplicate lock for the hash lock");
+	VDO_ASSERT_LOG_ONLY(lock->duplicate_lock == NULL,
+			    "must have released the duplicate lock for the hash lock");
 
 	if (!lock->verified) {
 		/*
@@ -700,11 +699,11 @@ static void unlock_duplicate_pbn(struct vdo_completion *completion)
 	struct hash_lock *lock = agent->hash_lock;
 
 	assert_data_vio_in_duplicate_zone(agent);
-	ASSERT_LOG_ONLY(lock->duplicate_lock != NULL,
-			"must have a duplicate lock to release");
+	VDO_ASSERT_LOG_ONLY(lock->duplicate_lock != NULL,
+			    "must have a duplicate lock to release");
 
 	vdo_release_physical_zone_pbn_lock(agent->duplicate.zone, agent->duplicate.pbn,
-					   uds_forget(lock->duplicate_lock));
+					   vdo_forget(lock->duplicate_lock));
 	if (lock->state == VDO_HASH_LOCK_BYPASSING) {
 		complete_data_vio(completion);
 		return;
@@ -803,8 +802,8 @@ static void start_updating(struct hash_lock *lock, struct data_vio *agent)
 {
 	lock->state = VDO_HASH_LOCK_UPDATING;
 
-	ASSERT_LOG_ONLY(lock->verified, "new advice should have been verified");
-	ASSERT_LOG_ONLY(lock->update_advice, "should only update advice if needed");
+	VDO_ASSERT_LOG_ONLY(lock->verified, "new advice should have been verified");
+	VDO_ASSERT_LOG_ONLY(lock->update_advice, "should only update advice if needed");
 
 	agent->last_async_operation = VIO_ASYNC_OP_UPDATE_DEDUPE_INDEX;
 	set_data_vio_hash_zone_callback(agent, finish_updating);
@@ -826,9 +825,9 @@ static void finish_deduping(struct hash_lock *lock, struct data_vio *data_vio)
 {
 	struct data_vio *agent = data_vio;
 
-	ASSERT_LOG_ONLY(lock->agent == NULL, "shouldn't have an agent in DEDUPING");
-	ASSERT_LOG_ONLY(!vdo_waitq_has_waiters(&lock->waiters),
-			"shouldn't have any lock waiters in DEDUPING");
+	VDO_ASSERT_LOG_ONLY(lock->agent == NULL, "shouldn't have an agent in DEDUPING");
+	VDO_ASSERT_LOG_ONLY(!vdo_waitq_has_waiters(&lock->waiters),
+			    "shouldn't have any lock waiters in DEDUPING");
 
 	/* Just release the lock reference if other data_vios are still deduping. */
 	if (lock->reference_count > 1) {
@@ -883,8 +882,8 @@ static int __must_check acquire_lock(struct hash_zone *zone,
 	 * Borrow and prepare a lock from the pool so we don't have to do two int_map accesses
 	 * in the common case of no lock contention.
 	 */
-	result = ASSERT(!list_empty(&zone->lock_pool),
-			"never need to wait for a free hash lock");
+	result = VDO_ASSERT(!list_empty(&zone->lock_pool),
+			    "never need to wait for a free hash lock");
 	if (result != VDO_SUCCESS)
 		return result;
 
@@ -900,17 +899,17 @@ static int __must_check acquire_lock(struct hash_zone *zone,
 	result = vdo_int_map_put(zone->hash_lock_map, hash_lock_key(new_lock),
 				 new_lock, (replace_lock != NULL), (void **) &lock);
 	if (result != VDO_SUCCESS) {
-		return_hash_lock_to_pool(zone, uds_forget(new_lock));
+		return_hash_lock_to_pool(zone, vdo_forget(new_lock));
 		return result;
 	}
 
 	if (replace_lock != NULL) {
 		/* On mismatch put the old lock back and return a severe error */
-		ASSERT_LOG_ONLY(lock == replace_lock,
-				"old lock must have been in the lock map");
+		VDO_ASSERT_LOG_ONLY(lock == replace_lock,
+				    "old lock must have been in the lock map");
 		/* TODO: Check earlier and bail out? */
-		ASSERT_LOG_ONLY(replace_lock->registered,
-				"old lock must have been marked registered");
+		VDO_ASSERT_LOG_ONLY(replace_lock->registered,
+				    "old lock must have been marked registered");
 		replace_lock->registered = false;
 	}
 
@@ -919,7 +918,7 @@ static int __must_check acquire_lock(struct hash_zone *zone,
 		lock->registered = true;
 	} else {
 		/* There's already a lock for the hash, so we don't need the borrowed lock. */
-		return_hash_lock_to_pool(zone, uds_forget(new_lock));
+		return_hash_lock_to_pool(zone, vdo_forget(new_lock));
 	}
 
 	*lock_ptr = lock;
@@ -1022,15 +1021,15 @@ static void start_deduping(struct hash_lock *lock, struct data_vio *agent,
 	 * deduplicate against it.
 	 */
 	if (lock->duplicate_lock == NULL) {
-		ASSERT_LOG_ONLY(!vdo_is_state_compressed(agent->new_mapped.state),
-				"compression must have shared a lock");
-		ASSERT_LOG_ONLY(agent_is_done,
-				"agent must have written the new duplicate");
+		VDO_ASSERT_LOG_ONLY(!vdo_is_state_compressed(agent->new_mapped.state),
+				    "compression must have shared a lock");
+		VDO_ASSERT_LOG_ONLY(agent_is_done,
+				    "agent must have written the new duplicate");
 		transfer_allocation_lock(agent);
 	}
 
-	ASSERT_LOG_ONLY(vdo_is_pbn_read_lock(lock->duplicate_lock),
-			"duplicate_lock must be a PBN read lock");
+	VDO_ASSERT_LOG_ONLY(vdo_is_pbn_read_lock(lock->duplicate_lock),
+			    "duplicate_lock must be a PBN read lock");
 
 	/*
 	 * This state is not like any of the other states. There is no designated agent--the agent
@@ -1208,7 +1207,7 @@ static void start_verifying(struct hash_lock *lock, struct data_vio *agent)
 			agent->scratch_block);
 
 	lock->state = VDO_HASH_LOCK_VERIFYING;
-	ASSERT_LOG_ONLY(!lock->verified, "hash lock only verifies advice once");
+	VDO_ASSERT_LOG_ONLY(!lock->verified, "hash lock only verifies advice once");
 
 	agent->last_async_operation = VIO_ASYNC_OP_VERIFY_DUPLICATION;
 	result = vio_reset_bio(vio, buffer, verify_endio, REQ_OP_READ,
@@ -1238,8 +1237,8 @@ static void finish_locking(struct vdo_completion *completion)
 	assert_hash_lock_agent(agent, __func__);
 
 	if (!agent->is_duplicate) {
-		ASSERT_LOG_ONLY(lock->duplicate_lock == NULL,
-				"must not hold duplicate_lock if not flagged as a duplicate");
+		VDO_ASSERT_LOG_ONLY(lock->duplicate_lock == NULL,
+				    "must not hold duplicate_lock if not flagged as a duplicate");
 		/*
 		 * LOCKING -> WRITING transition: The advice block is being modified or has no
 		 * available references, so try to write or compress the data, remembering to
@@ -1251,8 +1250,8 @@ static void finish_locking(struct vdo_completion *completion)
 		return;
 	}
 
-	ASSERT_LOG_ONLY(lock->duplicate_lock != NULL,
-			"must hold duplicate_lock if flagged as a duplicate");
+	VDO_ASSERT_LOG_ONLY(lock->duplicate_lock != NULL,
+			    "must hold duplicate_lock if flagged as a duplicate");
 
 	if (!lock->verified) {
 		/*
@@ -1294,7 +1293,7 @@ static bool acquire_provisional_reference(struct data_vio *agent, struct pbn_loc
 	if (result == VDO_SUCCESS)
 		return true;
 
-	uds_log_warning_strerror(result,
+	vdo_log_warning_strerror(result,
 				 "Error acquiring provisional reference for dedupe candidate; aborting dedupe");
 	agent->is_duplicate = false;
 	vdo_release_physical_zone_pbn_lock(agent->duplicate.zone,
@@ -1422,8 +1421,8 @@ static void lock_duplicate_pbn(struct vdo_completion *completion)
  */
 static void start_locking(struct hash_lock *lock, struct data_vio *agent)
 {
-	ASSERT_LOG_ONLY(lock->duplicate_lock == NULL,
-			"must not acquire a duplicate lock when already holding it");
+	VDO_ASSERT_LOG_ONLY(lock->duplicate_lock == NULL,
+			    "must not acquire a duplicate lock when already holding it");
 
 	lock->state = VDO_HASH_LOCK_LOCKING;
 
@@ -1621,7 +1620,7 @@ static bool decode_uds_advice(struct dedupe_context *context)
 
 	version = encoding->data[offset++];
 	if (version != UDS_ADVICE_VERSION) {
-		uds_log_error("invalid UDS advice version code %u", version);
+		vdo_log_error("invalid UDS advice version code %u", version);
 		return false;
 	}
 
@@ -1632,7 +1631,7 @@ static bool decode_uds_advice(struct dedupe_context *context)
 
 	/* Don't use advice that's clearly meaningless. */
 	if ((advice->state == VDO_MAPPING_STATE_UNMAPPED) || (advice->pbn == VDO_ZERO_BLOCK)) {
-		uds_log_debug("Invalid advice from deduplication server: pbn %llu, state %u. Giving up on deduplication of logical block %llu",
+		vdo_log_debug("Invalid advice from deduplication server: pbn %llu, state %u. Giving up on deduplication of logical block %llu",
 			      (unsigned long long) advice->pbn, advice->state,
 			      (unsigned long long) data_vio->logical.lbn);
 		atomic64_inc(&vdo->stats.invalid_advice_pbn_count);
@@ -1641,7 +1640,7 @@ static bool decode_uds_advice(struct dedupe_context *context)
 
 	result = vdo_get_physical_zone(vdo, advice->pbn, &advice->zone);
 	if ((result != VDO_SUCCESS) || (advice->zone == NULL)) {
-		uds_log_debug("Invalid physical block number from deduplication server: %llu, giving up on deduplication of logical block %llu",
+		vdo_log_debug("Invalid physical block number from deduplication server: %llu, giving up on deduplication of logical block %llu",
 			      (unsigned long long) advice->pbn,
 			      (unsigned long long) data_vio->logical.lbn);
 		atomic64_inc(&vdo->stats.invalid_advice_pbn_count);
@@ -1729,8 +1728,8 @@ static void start_querying(struct hash_lock *lock, struct data_vio *data_vio)
  */
 static void report_bogus_lock_state(struct hash_lock *lock, struct data_vio *data_vio)
 {
-	ASSERT_LOG_ONLY(false, "hash lock must not be in unimplemented state %s",
-			get_hash_lock_state_name(lock->state));
+	VDO_ASSERT_LOG_ONLY(false, "hash lock must not be in unimplemented state %s",
+			    get_hash_lock_state_name(lock->state));
 	continue_data_vio_with_error(data_vio, VDO_LOCK_ERROR);
 }
 
@@ -1752,8 +1751,8 @@ void vdo_continue_hash_lock(struct vdo_completion *completion)
 
 	switch (lock->state) {
 	case VDO_HASH_LOCK_WRITING:
-		ASSERT_LOG_ONLY(data_vio == lock->agent,
-				"only the lock agent may continue the lock");
+		VDO_ASSERT_LOG_ONLY(data_vio == lock->agent,
+				    "only the lock agent may continue the lock");
 		finish_writing(lock, data_vio);
 		break;
 
@@ -1819,18 +1818,18 @@ static inline int assert_hash_lock_preconditions(const struct data_vio *data_vio
 	int result;
 
 	/* FIXME: BUG_ON() and/or enter read-only mode? */
-	result = ASSERT(data_vio->hash_lock == NULL,
-			"must not already hold a hash lock");
+	result = VDO_ASSERT(data_vio->hash_lock == NULL,
+			    "must not already hold a hash lock");
 	if (result != VDO_SUCCESS)
 		return result;
 
-	result = ASSERT(list_empty(&data_vio->hash_lock_entry),
-			"must not already be a member of a hash lock ring");
+	result = VDO_ASSERT(list_empty(&data_vio->hash_lock_entry),
+			    "must not already be a member of a hash lock ring");
 	if (result != VDO_SUCCESS)
 		return result;
 
-	return ASSERT(data_vio->recovery_sequence_number == 0,
-		      "must not hold a recovery lock when getting a hash lock");
+	return VDO_ASSERT(data_vio->recovery_sequence_number == 0,
+			  "must not hold a recovery lock when getting a hash lock");
 }
 
 /**
@@ -1937,24 +1936,24 @@ void vdo_release_hash_lock(struct data_vio *data_vio)
 		struct hash_lock *removed;
 
 		removed = vdo_int_map_remove(zone->hash_lock_map, lock_key);
-		ASSERT_LOG_ONLY(lock == removed,
-				"hash lock being released must have been mapped");
+		VDO_ASSERT_LOG_ONLY(lock == removed,
+				    "hash lock being released must have been mapped");
 	} else {
-		ASSERT_LOG_ONLY(lock != vdo_int_map_get(zone->hash_lock_map, lock_key),
-				"unregistered hash lock must not be in the lock map");
+		VDO_ASSERT_LOG_ONLY(lock != vdo_int_map_get(zone->hash_lock_map, lock_key),
+				    "unregistered hash lock must not be in the lock map");
 	}
 
-	ASSERT_LOG_ONLY(!vdo_waitq_has_waiters(&lock->waiters),
-			"hash lock returned to zone must have no waiters");
-	ASSERT_LOG_ONLY((lock->duplicate_lock == NULL),
-			"hash lock returned to zone must not reference a PBN lock");
-	ASSERT_LOG_ONLY((lock->state == VDO_HASH_LOCK_BYPASSING),
-			"returned hash lock must not be in use with state %s",
-			get_hash_lock_state_name(lock->state));
-	ASSERT_LOG_ONLY(list_empty(&lock->pool_node),
-			"hash lock returned to zone must not be in a pool ring");
-	ASSERT_LOG_ONLY(list_empty(&lock->duplicate_ring),
-			"hash lock returned to zone must not reference DataVIOs");
+	VDO_ASSERT_LOG_ONLY(!vdo_waitq_has_waiters(&lock->waiters),
+			    "hash lock returned to zone must have no waiters");
+	VDO_ASSERT_LOG_ONLY((lock->duplicate_lock == NULL),
+			    "hash lock returned to zone must not reference a PBN lock");
+	VDO_ASSERT_LOG_ONLY((lock->state == VDO_HASH_LOCK_BYPASSING),
+			    "returned hash lock must not be in use with state %s",
+			    get_hash_lock_state_name(lock->state));
+	VDO_ASSERT_LOG_ONLY(list_empty(&lock->pool_node),
+			    "hash lock returned to zone must not be in a pool ring");
+	VDO_ASSERT_LOG_ONLY(list_empty(&lock->duplicate_ring),
+			    "hash lock returned to zone must not reference DataVIOs");
 
 	return_hash_lock_to_pool(zone, lock);
 }
@@ -1969,13 +1968,13 @@ static void transfer_allocation_lock(struct data_vio *data_vio)
 	struct allocation *allocation = &data_vio->allocation;
 	struct hash_lock *hash_lock = data_vio->hash_lock;
 
-	ASSERT_LOG_ONLY(data_vio->new_mapped.pbn == allocation->pbn,
-			"transferred lock must be for the block written");
+	VDO_ASSERT_LOG_ONLY(data_vio->new_mapped.pbn == allocation->pbn,
+			    "transferred lock must be for the block written");
 
 	allocation->pbn = VDO_ZERO_BLOCK;
 
-	ASSERT_LOG_ONLY(vdo_is_pbn_read_lock(allocation->lock),
-			"must have downgraded the allocation lock before transfer");
+	VDO_ASSERT_LOG_ONLY(vdo_is_pbn_read_lock(allocation->lock),
+			    "must have downgraded the allocation lock before transfer");
 
 	hash_lock->duplicate = data_vio->new_mapped;
 	data_vio->duplicate = data_vio->new_mapped;
@@ -1984,7 +1983,7 @@ static void transfer_allocation_lock(struct data_vio *data_vio)
 	 * Since the lock is being transferred, the holder count doesn't change (and isn't even
 	 * safe to examine on this thread).
 	 */
-	hash_lock->duplicate_lock = uds_forget(allocation->lock);
+	hash_lock->duplicate_lock = vdo_forget(allocation->lock);
 }
 
 /**
@@ -2001,10 +2000,10 @@ void vdo_share_compressed_write_lock(struct data_vio *data_vio,
 {
 	bool claimed;
 
-	ASSERT_LOG_ONLY(vdo_get_duplicate_lock(data_vio) == NULL,
-			"a duplicate PBN lock should not exist when writing");
-	ASSERT_LOG_ONLY(vdo_is_state_compressed(data_vio->new_mapped.state),
-			"lock transfer must be for a compressed write");
+	VDO_ASSERT_LOG_ONLY(vdo_get_duplicate_lock(data_vio) == NULL,
+			    "a duplicate PBN lock should not exist when writing");
+	VDO_ASSERT_LOG_ONLY(vdo_is_state_compressed(data_vio->new_mapped.state),
+			    "lock transfer must be for a compressed write");
 	assert_data_vio_in_new_mapped_zone(data_vio);
 
 	/* First sharer downgrades the lock. */
@@ -2024,7 +2023,7 @@ void vdo_share_compressed_write_lock(struct data_vio *data_vio,
 	 * deduplicating against it before our incRef.
 	 */
 	claimed = vdo_claim_pbn_lock_increment(pbn_lock);
-	ASSERT_LOG_ONLY(claimed, "impossible to fail to claim an initial increment");
+	VDO_ASSERT_LOG_ONLY(claimed, "impossible to fail to claim an initial increment");
 }
 
 /*----------------------------------------------------------------------*/
@@ -2039,12 +2038,12 @@ static void start_uds_queue(void *ptr)
 	 */
 	struct vdo_thread *thread = vdo_get_work_queue_owner(vdo_get_current_work_queue());
 
-	uds_register_allocating_thread(&thread->allocating_thread, NULL);
+	vdo_register_allocating_thread(&thread->allocating_thread, NULL);
 }
 
 static void finish_uds_queue(void *ptr __always_unused)
 {
-	uds_unregister_allocating_thread();
+	vdo_unregister_allocating_thread();
 }
 
 static void close_index(struct hash_zones *zones)
@@ -2062,7 +2061,7 @@ static void close_index(struct hash_zones *zones)
 	result = uds_close_index(zones->index_session);
 
 	if (result != UDS_SUCCESS)
-		uds_log_error_strerror(result, "Error closing index");
+		vdo_log_error_strerror(result, "Error closing index");
 	spin_lock(&zones->lock);
 	zones->index_state = IS_CLOSED;
 	zones->error_flag |= result != UDS_SUCCESS;
@@ -2089,7 +2088,7 @@ static void open_index(struct hash_zones *zones)
 	result = uds_open_index(create_flag ? UDS_CREATE : UDS_LOAD,
 				&zones->parameters, zones->index_session);
 	if (result != UDS_SUCCESS)
-		uds_log_error_strerror(result, "Error opening index");
+		vdo_log_error_strerror(result, "Error opening index");
 
 	spin_lock(&zones->lock);
 	if (!create_flag) {
@@ -2113,7 +2112,7 @@ static void open_index(struct hash_zones *zones)
 		zones->index_target = IS_CLOSED;
 		zones->error_flag = true;
 		spin_unlock(&zones->lock);
-		uds_log_info("Setting UDS index target state to error");
+		vdo_log_info("Setting UDS index target state to error");
 		spin_lock(&zones->lock);
 	}
 	/*
@@ -2169,7 +2168,7 @@ static void report_dedupe_timeouts(struct hash_zones *zones, unsigned int timeou
 		u64 unreported = atomic64_read(&zones->timeouts);
 
 		unreported -= zones->reported_timeouts;
-		uds_log_debug("UDS index timeout on %llu requests",
+		vdo_log_debug("UDS index timeout on %llu requests",
 			      (unsigned long long) unreported);
 		zones->reported_timeouts += unreported;
 	}
@@ -2215,8 +2214,8 @@ static int initialize_index(struct vdo *vdo, struct hash_zones *zones)
 	result = vdo_make_thread(vdo, vdo->thread_config.dedupe_thread, &uds_queue_type,
 				 1, NULL);
 	if (result != VDO_SUCCESS) {
-		uds_destroy_index_session(uds_forget(zones->index_session));
-		uds_log_error("UDS index queue initialization failed (%d)", result);
+		uds_destroy_index_session(vdo_forget(zones->index_session));
+		vdo_log_error("UDS index queue initialization failed (%d)", result);
 		return result;
 	}
 
@@ -2251,11 +2250,11 @@ static void finish_index_operation(struct uds_request *request)
 	 */
 	if (!change_context_state(context, DEDUPE_CONTEXT_TIMED_OUT,
 				  DEDUPE_CONTEXT_TIMED_OUT_COMPLETE)) {
-		ASSERT_LOG_ONLY(false, "uds request was timed out (state %d)",
-				atomic_read(&context->state));
+		VDO_ASSERT_LOG_ONLY(false, "uds request was timed out (state %d)",
+				    atomic_read(&context->state));
 	}
 
-	uds_funnel_queue_put(context->zone->timed_out_complete, &context->queue_entry);
+	vdo_funnel_queue_put(context->zone->timed_out_complete, &context->queue_entry);
 }
 
 /**
@@ -2284,7 +2283,7 @@ static void check_for_drain_complete(struct hash_zone *zone)
 		struct dedupe_context *context;
 		struct funnel_queue_entry *entry;
 
-		entry = uds_funnel_queue_poll(zone->timed_out_complete);
+		entry = vdo_funnel_queue_poll(zone->timed_out_complete);
 		if (entry == NULL)
 			break;
 
@@ -2296,7 +2295,7 @@ static void check_for_drain_complete(struct hash_zone *zone)
 
 	if (recycled > 0)
 		WRITE_ONCE(zone->active, zone->active - recycled);
-	ASSERT_LOG_ONLY(READ_ONCE(zone->active) == 0, "all contexts inactive");
+	VDO_ASSERT_LOG_ONLY(READ_ONCE(zone->active) == 0, "all contexts inactive");
 	vdo_finish_draining(&zone->state);
 }
 
@@ -2372,7 +2371,7 @@ static int __must_check initialize_zone(struct vdo *vdo, struct hash_zones *zone
 	vdo_set_completion_callback(&zone->completion, timeout_index_operations_callback,
 				    zone->thread_id);
 	INIT_LIST_HEAD(&zone->lock_pool);
-	result = uds_allocate(LOCK_POOL_CAPACITY, struct hash_lock, "hash_lock array",
+	result = vdo_allocate(LOCK_POOL_CAPACITY, struct hash_lock, "hash_lock array",
 			      &zone->lock_array);
 	if (result != VDO_SUCCESS)
 		return result;
@@ -2382,7 +2381,7 @@ static int __must_check initialize_zone(struct vdo *vdo, struct hash_zones *zone
 
 	INIT_LIST_HEAD(&zone->available);
 	INIT_LIST_HEAD(&zone->pending);
-	result = uds_make_funnel_queue(&zone->timed_out_complete);
+	result = vdo_make_funnel_queue(&zone->timed_out_complete);
 	if (result != VDO_SUCCESS)
 		return result;
 
@@ -2426,14 +2425,14 @@ int vdo_make_hash_zones(struct vdo *vdo, struct hash_zones **zones_ptr)
 	if (zone_count == 0)
 		return VDO_SUCCESS;
 
-	result = uds_allocate_extended(struct hash_zones, zone_count, struct hash_zone,
+	result = vdo_allocate_extended(struct hash_zones, zone_count, struct hash_zone,
 				       __func__, &zones);
 	if (result != VDO_SUCCESS)
 		return result;
 
 	result = initialize_index(vdo, zones);
 	if (result != VDO_SUCCESS) {
-		uds_free(zones);
+		vdo_free(zones);
 		return result;
 	}
 
@@ -2465,7 +2464,7 @@ void vdo_finish_dedupe_index(struct hash_zones *zones)
 	if (zones == NULL)
 		return;
 
-	uds_destroy_index_session(uds_forget(zones->index_session));
+	uds_destroy_index_session(vdo_forget(zones->index_session));
 }
 
 /**
@@ -2479,14 +2478,14 @@ void vdo_free_hash_zones(struct hash_zones *zones)
 	if (zones == NULL)
 		return;
 
-	uds_free(uds_forget(zones->manager));
+	vdo_free(vdo_forget(zones->manager));
 
 	for (i = 0; i < zones->zone_count; i++) {
 		struct hash_zone *zone = &zones->zones[i];
 
-		uds_free_funnel_queue(uds_forget(zone->timed_out_complete));
-		vdo_int_map_free(uds_forget(zone->hash_lock_map));
-		uds_free(uds_forget(zone->lock_array));
+		vdo_free_funnel_queue(vdo_forget(zone->timed_out_complete));
+		vdo_int_map_free(vdo_forget(zone->hash_lock_map));
+		vdo_free(vdo_forget(zone->lock_array));
 	}
 
 	if (zones->index_session != NULL)
@@ -2494,7 +2493,7 @@ void vdo_free_hash_zones(struct hash_zones *zones)
 
 	ratelimit_state_exit(&zones->ratelimiter);
 	if (vdo_get_admin_state_code(&zones->state) == VDO_ADMIN_STATE_NEW)
-		uds_free(zones);
+		vdo_free(zones);
 }
 
 static void initiate_suspend_index(struct admin_state *state)
@@ -2512,7 +2511,7 @@ static void initiate_suspend_index(struct admin_state *state)
 
 		result = uds_suspend_index_session(zones->index_session, save);
 		if (result != UDS_SUCCESS)
-			uds_log_error_strerror(result, "Error suspending dedupe index");
+			vdo_log_error_strerror(result, "Error suspending dedupe index");
 	}
 
 	vdo_finish_draining(state);
@@ -2595,7 +2594,7 @@ static void resume_index(void *context, struct vdo_completion *parent)
 	zones->parameters.bdev = config->owned_device->bdev;
 	result = uds_resume_index_session(zones->index_session, zones->parameters.bdev);
 	if (result != UDS_SUCCESS)
-		uds_log_error_strerror(result, "Error resuming dedupe index");
+		vdo_log_error_strerror(result, "Error resuming dedupe index");
 
 	spin_lock(&zones->lock);
 	vdo_resume_if_quiescent(&zones->state);
@@ -2675,7 +2674,7 @@ static void get_index_statistics(struct hash_zones *zones,
 
 	result = uds_get_index_session_stats(zones->index_session, &index_stats);
 	if (result != UDS_SUCCESS) {
-		uds_log_error_strerror(result, "Error reading index stats");
+		vdo_log_error_strerror(result, "Error reading index stats");
 		return;
 	}
 
@@ -2760,7 +2759,7 @@ static void dump_hash_lock(const struct hash_lock *lock)
 	 * unambiguous. 'U' indicates a lock not registered in the map.
 	 */
 	state = get_hash_lock_state_name(lock->state);
-	uds_log_info("  hl %px: %3.3s %c%llu/%u rc=%u wc=%zu agt=%px",
+	vdo_log_info("  hl %px: %3.3s %c%llu/%u rc=%u wc=%zu agt=%px",
 		     lock, state, (lock->registered ? 'D' : 'U'),
 		     (unsigned long long) lock->duplicate.pbn,
 		     lock->duplicate.state, lock->reference_count,
@@ -2794,11 +2793,11 @@ static void dump_hash_zone(const struct hash_zone *zone)
 	data_vio_count_t i;
 
 	if (zone->hash_lock_map == NULL) {
-		uds_log_info("struct hash_zone %u: NULL map", zone->zone_number);
+		vdo_log_info("struct hash_zone %u: NULL map", zone->zone_number);
 		return;
 	}
 
-	uds_log_info("struct hash_zone %u: mapSize=%zu",
+	vdo_log_info("struct hash_zone %u: mapSize=%zu",
 		     zone->zone_number, vdo_int_map_size(zone->hash_lock_map));
 	for (i = 0; i < LOCK_POOL_CAPACITY; i++)
 		dump_hash_lock(&zone->lock_array[i]);
@@ -2818,9 +2817,9 @@ void vdo_dump_hash_zones(struct hash_zones *zones)
 	target = (zones->changing ? index_state_to_string(zones, zones->index_target) : NULL);
 	spin_unlock(&zones->lock);
 
-	uds_log_info("UDS index: state: %s", state);
+	vdo_log_info("UDS index: state: %s", state);
 	if (target != NULL)
-		uds_log_info("UDS index: changing to state: %s", target);
+		vdo_log_info("UDS index: changing to state: %s", target);
 
 	for (zone = 0; zone < zones->zone_count; zone++)
 		dump_hash_zone(&zones->zones[zone]);
@@ -2885,7 +2884,7 @@ static struct dedupe_context * __must_check acquire_context(struct hash_zone *zo
 		return context;
 	}
 
-	entry = uds_funnel_queue_poll(zone->timed_out_complete);
+	entry = vdo_funnel_queue_poll(zone->timed_out_complete);
 	return ((entry == NULL) ?
 		NULL : container_of(entry, struct dedupe_context, queue_entry));
 }
@@ -2967,7 +2966,7 @@ static void set_target_state(struct hash_zones *zones, enum index_state target,
 	spin_unlock(&zones->lock);
 
 	if (old_state != new_state)
-		uds_log_info("Setting UDS index target state to %s", new_state);
+		vdo_log_info("Setting UDS index target state to %s", new_state);
 }
 
 const char *vdo_get_dedupe_index_state_name(struct hash_zones *zones)

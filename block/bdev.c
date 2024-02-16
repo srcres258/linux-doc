@@ -915,6 +915,14 @@ abort_claiming:
 	return ret;
 }
 
+/*
+ * If BLK_OPEN_WRITE_IOCTL is set then this is a historical quirk
+ * associated with the floppy driver where it has allowed ioctls if the
+ * file was opened for writing, but does not allow reads or writes.
+ * Make sure that this quirk is reflected in @f_flags.
+ *
+ * It can also happen if a block device is opened as O_RDWR | O_WRONLY.
+ */
 static unsigned blk_to_file_flags(blk_mode_t mode)
 {
 	unsigned int flags = 0;
@@ -922,24 +930,17 @@ static unsigned blk_to_file_flags(blk_mode_t mode)
 	if ((mode & (BLK_OPEN_READ | BLK_OPEN_WRITE)) ==
 	    (BLK_OPEN_READ | BLK_OPEN_WRITE))
 		flags |= O_RDWR;
+	else if (mode & BLK_OPEN_WRITE_IOCTL)
+		flags |= O_RDWR | O_WRONLY;
 	else if (mode & BLK_OPEN_WRITE)
 		flags |= O_WRONLY;
 	else if (mode & BLK_OPEN_READ)
-		flags |= O_RDONLY;
-	else /* Neither read nor write for a block device requested? */
+		flags |= O_RDONLY; /* homeopathic, because O_RDONLY is 0 */
+	else
 		WARN_ON_ONCE(true);
 
 	if (mode & BLK_OPEN_NDELAY)
 		flags |= O_NDELAY;
-
-	/*
-	 * If BLK_OPEN_WRITE_IOCTL is set then this is a historical quirk
-	 * associated with the floppy driver where it has allowed ioctls if the
-	 * file was opened for writing, but does not allow reads or writes.
-	 * Make sure that this quirk is reflected in @f_flags.
-	 */
-	if (mode & BLK_OPEN_WRITE_IOCTL)
-		flags |= O_RDWR | O_WRONLY;
 
 	return flags;
 }

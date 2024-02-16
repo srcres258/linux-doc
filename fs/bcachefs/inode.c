@@ -324,7 +324,7 @@ int bch2_inode_unpack(struct bkey_s_c k,
 	return bch2_inode_unpack_slowpath(k, unpacked);
 }
 
-static int bch2_inode_peek_nowarn(struct btree_trans *trans,
+int bch2_inode_peek_nowarn(struct btree_trans *trans,
 		    struct btree_iter *iter,
 		    struct bch_inode_unpacked *inode,
 		    subvol_inum inum, unsigned flags)
@@ -620,7 +620,8 @@ int bch2_trigger_inode(struct btree_trans *trans,
 		bool old_deleted = bkey_is_deleted_inode(old);
 		bool new_deleted = bkey_is_deleted_inode(new.s_c);
 		if (old_deleted != new_deleted) {
-			int ret = bch2_btree_bit_mod(trans, BTREE_ID_deleted_inodes, new.k->p, new_deleted);
+			int ret = bch2_btree_bit_mod_buffered(trans, BTREE_ID_deleted_inodes,
+							      new.k->p, new_deleted);
 			if (ret)
 				return ret;
 		}
@@ -1172,7 +1173,7 @@ fsck_err:
 	bch2_trans_iter_exit(trans, &inode_iter);
 	return ret;
 delete:
-	ret = bch2_btree_bit_mod(trans, BTREE_ID_deleted_inodes, pos, false);
+	ret = bch2_btree_bit_mod_buffered(trans, BTREE_ID_deleted_inodes, pos, false);
 	goto out;
 }
 

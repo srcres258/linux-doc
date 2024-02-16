@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0
 
 #include "bcachefs.h"
+#include "bbpos.h"
 #include "bkey_buf.h"
 #include "btree_cache.h"
 #include "btree_io.h"
@@ -208,6 +209,18 @@ static int __btree_node_reclaim(struct bch_fs *c, struct btree *b, bool flush)
 	int ret = 0;
 
 	lockdep_assert_held(&bc->lock);
+
+	struct bbpos pos = BBPOS(b->c.btree_id, b->key.k.p);
+
+	u64 mask = b->c.level
+		? bc->pinned_nodes_interior_mask
+		: bc->pinned_nodes_leaf_mask;
+
+	if ((mask & BIT_ULL(b->c.btree_id)) &&
+	    bbpos_cmp(bc->pinned_nodes_start, pos) < 0 &&
+	    bbpos_cmp(bc->pinned_nodes_end, pos) >= 0)
+		return -BCH_ERR_ENOMEM_btree_node_reclaim;
+
 wait_on_io:
 	if (b->flags & ((1U << BTREE_NODE_dirty)|
 			(1U << BTREE_NODE_read_in_flight)|
@@ -905,7 +918,7 @@ retry:
 
 	if (unlikely(btree_node_read_error(b))) {
 		six_unlock_type(&b->c.lock, lock_type);
-		return ERR_PTR(-EIO);
+		return ERR_PTR(-BCH_ERR_btree_node_read_error);
 	}
 
 	EBUG_ON(b->c.btree_id != path->btree_id);
@@ -996,7 +1009,7 @@ struct btree *bch2_btree_node_get(struct btree_trans *trans, struct btree_path *
 
 	if (unlikely(btree_node_read_error(b))) {
 		six_unlock_type(&b->c.lock, lock_type);
-		return ERR_PTR(-EIO);
+		return ERR_PTR(-BCH_ERR_btree_node_read_error);
 	}
 
 	EBUG_ON(b->c.btree_id != path->btree_id);
@@ -1079,7 +1092,7 @@ lock_node:
 
 	if (unlikely(btree_node_read_error(b))) {
 		six_unlock_read(&b->c.lock);
-		b = ERR_PTR(-EIO);
+		b = ERR_PTR(-BCH_ERR_btree_node_read_error);
 		goto out;
 	}
 

@@ -59,6 +59,12 @@ SECTIONS
 	} :text = 0x0700
 
 	RO_DATA(PAGE_SIZE)
+	.data.rel.ro : {
+		*(.data.rel.ro .data.rel.ro.*)
+	}
+	.got : {
+		*(.got)
+	}
 
 	. = ALIGN(PAGE_SIZE);
 	_sdata = .;		/* Start of data section */
@@ -73,6 +79,9 @@ SECTIONS
 	__end_ro_after_init = .;
 
 	RW_DATA(0x100, PAGE_SIZE, THREAD_SIZE)
+	.data.rel : {
+		*(.data.rel*)
+	}
 	BOOT_DATA_PRESERVED
 
 	. = ALIGN(8);
@@ -191,6 +200,18 @@ SECTIONS
 		*(.rela*)
 		__rela_dyn_end = .;
 	}
+	.dynamic ALIGN(8) : {
+		*(.dynamic)
+	}
+	.dynstr ALIGN(8) : {
+		*(.dynstr)
+	}
+	.hash ALIGN(8) : {
+		*(.hash)
+	}
+	.gnu.hash ALIGN(8) : {
+		*(.gnu.hash)
+	}
 
 	. = ALIGN(PAGE_SIZE);
 	__init_end = .;		/* freed after init ends here */
@@ -234,6 +255,19 @@ SECTIONS
 	STABS_DEBUG
 	DWARF_DEBUG
 	ELF_DETAILS
+
+	/*
+	 * Sections that should stay zero sized, which is safer to
+	 * explicitly check instead of blindly discarding.
+	 */
+	.got.plt : {
+		*(.got.plt)
+	}
+	ASSERT(SIZEOF(.got.plt) == 0, "Unexpected GOT/PLT entries detected!")
+	.plt : {
+		*(.plt) *(.plt.*) *(.iplt) *(.igot .igot.plt)
+	}
+	ASSERT(SIZEOF(.plt) == 0, "Unexpected run-time procedure linkages detected!")
 
 	/* Sections to be discarded */
 	DISCARDS

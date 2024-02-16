@@ -237,7 +237,7 @@ static int __must_check compute_sizes(const struct uds_configuration *config,
 	result = uds_compute_volume_index_save_blocks(config, sls->block_size,
 						      &sls->volume_index_blocks);
 	if (result != UDS_SUCCESS)
-		return uds_log_error_strerror(result, "cannot compute index save size");
+		return vdo_log_error_strerror(result, "cannot compute index save size");
 
 	sls->page_map_blocks =
 		DIV_ROUND_UP(uds_compute_index_page_map_save_size(geometry),
@@ -261,18 +261,18 @@ int uds_compute_index_size(const struct uds_parameters *parameters, u64 *index_s
 	struct save_layout_sizes sizes;
 
 	if (index_size == NULL) {
-		uds_log_error("Missing output size pointer");
+		vdo_log_error("Missing output size pointer");
 		return -EINVAL;
 	}
 
 	result = uds_make_configuration(parameters, &index_config);
 	if (result != UDS_SUCCESS) {
-		uds_log_error_strerror(result, "cannot compute index size");
+		vdo_log_error_strerror(result, "cannot compute index size");
 		return uds_status_to_errno(result);
 	}
 
 	result = compute_sizes(index_config, &sizes);
-	uds_free_configuration(index_config);
+	vdo_free_configuration(index_config);
 	if (result != UDS_SUCCESS)
 		return uds_status_to_errno(result);
 
@@ -490,10 +490,10 @@ static int __must_check make_index_save_region_table(struct index_save_layout *i
 		type = RH_TYPE_UNSAVED;
 	}
 
-	result = uds_allocate_extended(struct region_table, region_count,
+	result = vdo_allocate_extended(struct region_table, region_count,
 				       struct layout_region,
 				       "layout region table for ISL", &table);
-	if (result != UDS_SUCCESS)
+	if (result != VDO_SUCCESS)
 		return result;
 
 	lr = &table->regions[0];
@@ -551,8 +551,8 @@ static int __must_check write_index_save_header(struct index_save_layout *isl,
 	u8 *buffer;
 	size_t offset = 0;
 
-	result = uds_allocate(table->encoded_size, u8, "index save data", &buffer);
-	if (result != UDS_SUCCESS)
+	result = vdo_allocate(table->encoded_size, u8, "index save data", &buffer);
+	if (result != VDO_SUCCESS)
 		return result;
 
 	encode_region_table(buffer, &offset, table);
@@ -570,7 +570,7 @@ static int __must_check write_index_save_header(struct index_save_layout *isl,
 	}
 
 	result = uds_write_to_buffered_writer(writer, buffer, offset);
-	uds_free(buffer);
+	vdo_free(buffer);
 	if (result != UDS_SUCCESS)
 		return result;
 
@@ -590,13 +590,13 @@ static int write_index_save_layout(struct index_layout *layout,
 
 	result = open_region_writer(layout, &isl->header, &writer);
 	if (result != UDS_SUCCESS) {
-		uds_free(table);
+		vdo_free(table);
 		return result;
 	}
 
 	result = write_index_save_header(isl, table, writer);
-	uds_free(table);
-	uds_free_buffered_writer(writer);
+	vdo_free(table);
+	vdo_free_buffered_writer(writer);
 
 	return result;
 }
@@ -654,7 +654,7 @@ static int discard_index_state_data(struct index_layout *layout)
 	}
 
 	if (saved_result != UDS_SUCCESS) {
-		return uds_log_error_strerror(result,
+		return vdo_log_error_strerror(result,
 					      "%s: cannot destroy all index saves",
 					      __func__);
 	}
@@ -673,10 +673,10 @@ static int __must_check make_layout_region_table(struct index_layout *layout,
 	struct region_table *table;
 	struct layout_region *lr;
 
-	result = uds_allocate_extended(struct region_table, region_count,
+	result = vdo_allocate_extended(struct region_table, region_count,
 				       struct layout_region, "layout region table",
 				       &table);
-	if (result != UDS_SUCCESS)
+	if (result != VDO_SUCCESS)
 		return result;
 
 	lr = &table->regions[0];
@@ -721,8 +721,8 @@ static int __must_check write_layout_header(struct index_layout *layout,
 	u8 *buffer;
 	size_t offset = 0;
 
-	result = uds_allocate(table->encoded_size, u8, "layout data", &buffer);
-	if (result != UDS_SUCCESS)
+	result = vdo_allocate(table->encoded_size, u8, "layout data", &buffer);
+	if (result != VDO_SUCCESS)
 		return result;
 
 	encode_region_table(buffer, &offset, table);
@@ -745,7 +745,7 @@ static int __must_check write_layout_header(struct index_layout *layout,
 	}
 
 	result = uds_write_to_buffered_writer(writer, buffer, offset);
-	uds_free(buffer);
+	vdo_free(buffer);
 	if (result != UDS_SUCCESS)
 		return result;
 
@@ -761,21 +761,21 @@ static int __must_check write_uds_index_config(struct index_layout *layout,
 
 	result = open_layout_writer(layout, &layout->config, offset, &writer);
 	if (result != UDS_SUCCESS)
-		return uds_log_error_strerror(result, "failed to open config region");
+		return vdo_log_error_strerror(result, "failed to open config region");
 
 	result = uds_write_config_contents(writer, config, layout->super.version);
 	if (result != UDS_SUCCESS) {
-		uds_free_buffered_writer(writer);
-		return uds_log_error_strerror(result, "failed to write config region");
+		vdo_free_buffered_writer(writer);
+		return vdo_log_error_strerror(result, "failed to write config region");
 	}
 
 	result = uds_flush_buffered_writer(writer);
 	if (result != UDS_SUCCESS) {
-		uds_free_buffered_writer(writer);
-		return uds_log_error_strerror(result, "cannot flush config writer");
+		vdo_free_buffered_writer(writer);
+		return vdo_log_error_strerror(result, "cannot flush config writer");
 	}
 
-	uds_free_buffered_writer(writer);
+	vdo_free_buffered_writer(writer);
 	return UDS_SUCCESS;
 }
 
@@ -791,13 +791,13 @@ static int __must_check save_layout(struct index_layout *layout, off_t offset)
 
 	result = open_layout_writer(layout, &layout->header, offset, &writer);
 	if (result != UDS_SUCCESS) {
-		uds_free(table);
+		vdo_free(table);
 		return result;
 	}
 
 	result = write_layout_header(layout, table, writer);
-	uds_free(table);
-	uds_free_buffered_writer(writer);
+	vdo_free(table);
+	vdo_free_buffered_writer(writer);
 
 	return result;
 }
@@ -811,9 +811,9 @@ static int create_index_layout(struct index_layout *layout, struct uds_configura
 	if (result != UDS_SUCCESS)
 		return result;
 
-	result = uds_allocate(sizes.save_count, struct index_save_layout, __func__,
+	result = vdo_allocate(sizes.save_count, struct index_save_layout, __func__,
 			      &layout->index.saves);
-	if (result != UDS_SUCCESS)
+	if (result != VDO_SUCCESS)
 		return result;
 
 	initialize_layout(layout, &sizes);
@@ -878,7 +878,7 @@ static int find_latest_uds_index_save_slot(struct index_layout *layout,
 	}
 
 	if (latest == NULL) {
-		uds_log_error("No valid index save found");
+		vdo_log_error("No valid index save found");
 		return UDS_INDEX_NOT_SAVED_CLEANLY;
 	}
 
@@ -902,12 +902,12 @@ int uds_discard_open_chapter(struct index_layout *layout)
 
 	result = uds_write_to_buffered_writer(writer, NULL, UDS_BLOCK_SIZE);
 	if (result != UDS_SUCCESS) {
-		uds_free_buffered_writer(writer);
+		vdo_free_buffered_writer(writer);
 		return result;
 	}
 
 	result = uds_flush_buffered_writer(writer);
-	uds_free_buffered_writer(writer);
+	vdo_free_buffered_writer(writer);
 	return result;
 }
 
@@ -931,7 +931,7 @@ int uds_load_index_state(struct index_layout *layout, struct uds_index *index)
 		return result;
 
 	result = uds_load_open_chapter(index, readers[0]);
-	uds_free_buffered_reader(readers[0]);
+	vdo_free_buffered_reader(readers[0]);
 	if (result != UDS_SUCCESS)
 		return result;
 
@@ -940,7 +940,7 @@ int uds_load_index_state(struct index_layout *layout, struct uds_index *index)
 					    &readers[zone]);
 		if (result != UDS_SUCCESS) {
 			for (; zone > 0; zone--)
-				uds_free_buffered_reader(readers[zone - 1]);
+				vdo_free_buffered_reader(readers[zone - 1]);
 
 			return result;
 		}
@@ -948,7 +948,7 @@ int uds_load_index_state(struct index_layout *layout, struct uds_index *index)
 
 	result = uds_load_volume_index(index->volume_index, readers, isl->zone_count);
 	for (zone = 0; zone < isl->zone_count; zone++)
-		uds_free_buffered_reader(readers[zone]);
+		vdo_free_buffered_reader(readers[zone]);
 	if (result != UDS_SUCCESS)
 		return result;
 
@@ -957,7 +957,7 @@ int uds_load_index_state(struct index_layout *layout, struct uds_index *index)
 		return result;
 
 	result = uds_read_index_page_map(index->volume->index_page_map, readers[0]);
-	uds_free_buffered_reader(readers[0]);
+	vdo_free_buffered_reader(readers[0]);
 
 	return result;
 }
@@ -1096,7 +1096,7 @@ int uds_save_index_state(struct index_layout *layout, struct uds_index *index)
 	}
 
 	result = uds_save_open_chapter(index, writers[0]);
-	uds_free_buffered_writer(writers[0]);
+	vdo_free_buffered_writer(writers[0]);
 	if (result != UDS_SUCCESS) {
 		cancel_uds_index_save(isl);
 		return result;
@@ -1107,7 +1107,7 @@ int uds_save_index_state(struct index_layout *layout, struct uds_index *index)
 					    &writers[zone]);
 		if (result != UDS_SUCCESS) {
 			for (; zone > 0; zone--)
-				uds_free_buffered_writer(writers[zone - 1]);
+				vdo_free_buffered_writer(writers[zone - 1]);
 
 			cancel_uds_index_save(isl);
 			return result;
@@ -1116,7 +1116,7 @@ int uds_save_index_state(struct index_layout *layout, struct uds_index *index)
 
 	result = uds_save_volume_index(index->volume_index, writers, index->zone_count);
 	for (zone = 0; zone < index->zone_count; zone++)
-		uds_free_buffered_writer(writers[zone]);
+		vdo_free_buffered_writer(writers[zone]);
 	if (result != UDS_SUCCESS) {
 		cancel_uds_index_save(isl);
 		return result;
@@ -1129,7 +1129,7 @@ int uds_save_index_state(struct index_layout *layout, struct uds_index *index)
 	}
 
 	result = uds_write_index_page_map(index->volume->index_page_map, writers[0]);
-	uds_free_buffered_writer(writers[0]);
+	vdo_free_buffered_writer(writers[0]);
 	if (result != UDS_SUCCESS) {
 		cancel_uds_index_save(isl);
 		return result;
@@ -1150,7 +1150,7 @@ static int __must_check load_region_table(struct buffered_reader *reader,
 
 	result = uds_read_from_buffered_reader(reader, buffer, sizeof(buffer));
 	if (result != UDS_SUCCESS)
-		return uds_log_error_strerror(result, "cannot read region table header");
+		return vdo_log_error_strerror(result, "cannot read region table header");
 
 	decode_u64_le(buffer, &offset, &header.magic);
 	decode_u64_le(buffer, &offset, &header.region_blocks);
@@ -1163,15 +1163,15 @@ static int __must_check load_region_table(struct buffered_reader *reader,
 		return UDS_NO_INDEX;
 
 	if (header.version != 1) {
-		return uds_log_error_strerror(UDS_UNSUPPORTED_VERSION,
+		return vdo_log_error_strerror(UDS_UNSUPPORTED_VERSION,
 					      "unknown region table version %hu",
 					      header.version);
 	}
 
-	result = uds_allocate_extended(struct region_table, header.region_count,
+	result = vdo_allocate_extended(struct region_table, header.region_count,
 				       struct layout_region,
 				       "single file layout region table", &table);
-	if (result != UDS_SUCCESS)
+	if (result != VDO_SUCCESS)
 		return result;
 
 	table->header = header;
@@ -1182,8 +1182,8 @@ static int __must_check load_region_table(struct buffered_reader *reader,
 		result = uds_read_from_buffered_reader(reader, region_buffer,
 						       sizeof(region_buffer));
 		if (result != UDS_SUCCESS) {
-			uds_free(table);
-			return uds_log_error_strerror(UDS_CORRUPT_DATA,
+			vdo_free(table);
+			return vdo_log_error_strerror(UDS_CORRUPT_DATA,
 						      "cannot read region table layouts");
 		}
 
@@ -1207,14 +1207,14 @@ static int __must_check read_super_block_data(struct buffered_reader *reader,
 	u8 *buffer;
 	size_t offset = 0;
 
-	result = uds_allocate(saved_size, u8, "super block data", &buffer);
-	if (result != UDS_SUCCESS)
+	result = vdo_allocate(saved_size, u8, "super block data", &buffer);
+	if (result != VDO_SUCCESS)
 		return result;
 
 	result = uds_read_from_buffered_reader(reader, buffer, saved_size);
 	if (result != UDS_SUCCESS) {
-		uds_free(buffer);
-		return uds_log_error_strerror(result, "cannot read region table header");
+		vdo_free(buffer);
+		return vdo_log_error_strerror(result, "cannot read region table header");
 	}
 
 	memcpy(&super->magic_label, buffer, MAGIC_SIZE);
@@ -1238,22 +1238,22 @@ static int __must_check read_super_block_data(struct buffered_reader *reader,
 		super->start_offset = 0;
 	}
 
-	uds_free(buffer);
+	vdo_free(buffer);
 
 	if (memcmp(super->magic_label, LAYOUT_MAGIC, MAGIC_SIZE) != 0)
-		return uds_log_error_strerror(UDS_CORRUPT_DATA,
+		return vdo_log_error_strerror(UDS_CORRUPT_DATA,
 					      "unknown superblock magic label");
 
 	if ((super->version < SUPER_VERSION_MINIMUM) ||
 	    (super->version == 4) || (super->version == 5) || (super->version == 6) ||
 	    (super->version > SUPER_VERSION_MAXIMUM)) {
-		return uds_log_error_strerror(UDS_UNSUPPORTED_VERSION,
+		return vdo_log_error_strerror(UDS_UNSUPPORTED_VERSION,
 					      "unknown superblock version number %u",
 					      super->version);
 	}
 
 	if (super->volume_offset < super->start_offset) {
-		return uds_log_error_strerror(UDS_CORRUPT_DATA,
+		return vdo_log_error_strerror(UDS_CORRUPT_DATA,
 					      "inconsistent offsets (start %llu, volume %llu)",
 					      (unsigned long long) super->start_offset,
 					      (unsigned long long) super->volume_offset);
@@ -1261,13 +1261,13 @@ static int __must_check read_super_block_data(struct buffered_reader *reader,
 
 	/* Sub-indexes are no longer used but the layout retains this field. */
 	if (super->index_count != 1) {
-		return uds_log_error_strerror(UDS_CORRUPT_DATA,
+		return vdo_log_error_strerror(UDS_CORRUPT_DATA,
 					      "invalid subindex count %u",
 					      super->index_count);
 	}
 
 	if (generate_primary_nonce(super->nonce_info, sizeof(super->nonce_info)) != super->nonce) {
-		return uds_log_error_strerror(UDS_CORRUPT_DATA,
+		return vdo_log_error_strerror(UDS_CORRUPT_DATA,
 					      "inconsistent superblock nonce");
 	}
 
@@ -1278,15 +1278,15 @@ static int __must_check verify_region(struct layout_region *lr, u64 start_block,
 				      enum region_kind kind, unsigned int instance)
 {
 	if (lr->start_block != start_block)
-		return uds_log_error_strerror(UDS_CORRUPT_DATA,
+		return vdo_log_error_strerror(UDS_CORRUPT_DATA,
 					      "incorrect layout region offset");
 
 	if (lr->kind != kind)
-		return uds_log_error_strerror(UDS_CORRUPT_DATA,
+		return vdo_log_error_strerror(UDS_CORRUPT_DATA,
 					      "incorrect layout region kind");
 
 	if (lr->instance != instance) {
-		return uds_log_error_strerror(UDS_CORRUPT_DATA,
+		return vdo_log_error_strerror(UDS_CORRUPT_DATA,
 					      "incorrect layout region instance");
 	}
 
@@ -1328,7 +1328,7 @@ static int __must_check verify_sub_index(struct index_layout *layout, u64 start_
 
 	next_block -= layout->super.volume_offset;
 	if (next_block != start_block + sil->sub_index.block_count) {
-		return uds_log_error_strerror(UDS_CORRUPT_DATA,
+		return vdo_log_error_strerror(UDS_CORRUPT_DATA,
 					      "sub index region does not span all saves");
 	}
 
@@ -1341,9 +1341,9 @@ static int __must_check reconstitute_layout(struct index_layout *layout,
 	int result;
 	u64 next_block = first_block;
 
-	result = uds_allocate(layout->super.max_saves, struct index_save_layout,
+	result = vdo_allocate(layout->super.max_saves, struct index_save_layout,
 			      __func__, &layout->index.saves);
-	if (result != UDS_SUCCESS)
+	if (result != VDO_SUCCESS)
 		return result;
 
 	layout->total_blocks = table->header.region_blocks;
@@ -1373,7 +1373,7 @@ static int __must_check reconstitute_layout(struct index_layout *layout,
 		return result;
 
 	if (++next_block != (first_block + layout->total_blocks)) {
-		return uds_log_error_strerror(UDS_CORRUPT_DATA,
+		return vdo_log_error_strerror(UDS_CORRUPT_DATA,
 					      "layout table does not span total blocks");
 	}
 
@@ -1392,27 +1392,27 @@ static int __must_check load_super_block(struct index_layout *layout, size_t blo
 		return result;
 
 	if (table->header.type != RH_TYPE_SUPER) {
-		uds_free(table);
-		return uds_log_error_strerror(UDS_CORRUPT_DATA,
+		vdo_free(table);
+		return vdo_log_error_strerror(UDS_CORRUPT_DATA,
 					      "not a superblock region table");
 	}
 
 	result = read_super_block_data(reader, layout, table->header.payload);
 	if (result != UDS_SUCCESS) {
-		uds_free(table);
-		return uds_log_error_strerror(result, "unknown superblock format");
+		vdo_free(table);
+		return vdo_log_error_strerror(result, "unknown superblock format");
 	}
 
 	if (super->block_size != block_size) {
-		uds_free(table);
-		return uds_log_error_strerror(UDS_CORRUPT_DATA,
+		vdo_free(table);
+		return vdo_log_error_strerror(UDS_CORRUPT_DATA,
 					      "superblock saved block_size %u differs from supplied block_size %zu",
 					      super->block_size, block_size);
 	}
 
 	first_block -= (super->volume_offset - super->start_offset);
 	result = reconstitute_layout(layout, table, first_block);
-	uds_free(table);
+	vdo_free(table);
 	return result;
 }
 
@@ -1426,14 +1426,14 @@ static int __must_check read_index_save_data(struct buffered_reader *reader,
 	size_t offset = 0;
 
 	if (saved_size != sizeof(buffer)) {
-		return uds_log_error_strerror(UDS_CORRUPT_DATA,
+		return vdo_log_error_strerror(UDS_CORRUPT_DATA,
 					      "unexpected index save data size %zu",
 					      saved_size);
 	}
 
 	result = uds_read_from_buffered_reader(reader, buffer, sizeof(buffer));
 	if (result != UDS_SUCCESS)
-		return uds_log_error_strerror(result, "cannot read index save data");
+		return vdo_log_error_strerror(result, "cannot read index save data");
 
 	decode_u64_le(buffer, &offset, &isl->save_data.timestamp);
 	decode_u64_le(buffer, &offset, &isl->save_data.nonce);
@@ -1441,7 +1441,7 @@ static int __must_check read_index_save_data(struct buffered_reader *reader,
 	offset += sizeof(u32);
 
 	if (isl->save_data.version > 1) {
-		return uds_log_error_strerror(UDS_UNSUPPORTED_VERSION,
+		return vdo_log_error_strerror(UDS_UNSUPPORTED_VERSION,
 					      "unknown index save version number %u",
 					      isl->save_data.version);
 	}
@@ -1451,7 +1451,7 @@ static int __must_check read_index_save_data(struct buffered_reader *reader,
 
 	if ((file_version.signature != INDEX_STATE_VERSION_301.signature) ||
 	    (file_version.version_id != INDEX_STATE_VERSION_301.version_id)) {
-		return uds_log_error_strerror(UDS_UNSUPPORTED_VERSION,
+		return vdo_log_error_strerror(UDS_UNSUPPORTED_VERSION,
 					      "index state version %d,%d is unsupported",
 					      file_version.signature,
 					      file_version.version_id);
@@ -1528,7 +1528,7 @@ static int __must_check reconstruct_index_save(struct index_save_layout *isl,
 
 	next_block += isl->free_space.block_count;
 	if (next_block != last_block) {
-		return uds_log_error_strerror(UDS_CORRUPT_DATA,
+		return vdo_log_error_strerror(UDS_CORRUPT_DATA,
 					      "index save layout table incomplete");
 	}
 
@@ -1544,46 +1544,46 @@ static int __must_check load_index_save(struct index_save_layout *isl,
 
 	result = load_region_table(reader, &table);
 	if (result != UDS_SUCCESS) {
-		return uds_log_error_strerror(result, "cannot read index save %u header",
+		return vdo_log_error_strerror(result, "cannot read index save %u header",
 					      instance);
 	}
 
 	if (table->header.region_blocks != isl->index_save.block_count) {
 		u64 region_blocks = table->header.region_blocks;
 
-		uds_free(table);
-		return uds_log_error_strerror(UDS_CORRUPT_DATA,
+		vdo_free(table);
+		return vdo_log_error_strerror(UDS_CORRUPT_DATA,
 					      "unexpected index save %u region block count %llu",
 					      instance,
 					      (unsigned long long) region_blocks);
 	}
 
 	if (table->header.type == RH_TYPE_UNSAVED) {
-		uds_free(table);
+		vdo_free(table);
 		reset_index_save_layout(isl, 0);
 		return UDS_SUCCESS;
 	}
 
 
 	if (table->header.type != RH_TYPE_SAVE) {
-		uds_free(table);
-		return uds_log_error_strerror(UDS_CORRUPT_DATA,
+		vdo_free(table);
+		return vdo_log_error_strerror(UDS_CORRUPT_DATA,
 					      "unexpected index save %u header type %u",
 					      instance, table->header.type);
 	}
 
 	result = read_index_save_data(reader, isl, table->header.payload);
 	if (result != UDS_SUCCESS) {
-		uds_free(table);
-		return uds_log_error_strerror(result,
+		vdo_free(table);
+		return vdo_log_error_strerror(result,
 					      "unknown index save %u data format",
 					      instance);
 	}
 
 	result = reconstruct_index_save(isl, table);
-	uds_free(table);
+	vdo_free(table);
 	if (result != UDS_SUCCESS) {
-		return uds_log_error_strerror(result, "cannot reconstruct index save %u",
+		return vdo_log_error_strerror(result, "cannot reconstruct index save %u",
 					      instance);
 	}
 
@@ -1602,14 +1602,14 @@ static int __must_check load_sub_index_regions(struct index_layout *layout)
 		result = open_region_reader(layout, &isl->index_save, &reader);
 
 		if (result != UDS_SUCCESS) {
-			uds_log_error_strerror(result,
+			vdo_log_error_strerror(result,
 					       "cannot get reader for index 0 save %u",
 					       j);
 			return result;
 		}
 
 		result = load_index_save(isl, reader, j);
-		uds_free_buffered_reader(reader);
+		vdo_free_buffered_reader(reader);
 		if (result != UDS_SUCCESS) {
 			/* Another save slot might be valid. */
 			reset_index_save_layout(isl, 0);
@@ -1630,15 +1630,15 @@ static int __must_check verify_uds_index_config(struct index_layout *layout,
 	offset = layout->super.volume_offset - layout->super.start_offset;
 	result = open_layout_reader(layout, &layout->config, offset, &reader);
 	if (result != UDS_SUCCESS)
-		return uds_log_error_strerror(result, "failed to open config reader");
+		return vdo_log_error_strerror(result, "failed to open config reader");
 
 	result = uds_validate_config_contents(reader, config);
 	if (result != UDS_SUCCESS) {
-		uds_free_buffered_reader(reader);
-		return uds_log_error_strerror(result, "failed to read config region");
+		vdo_free_buffered_reader(reader);
+		return vdo_log_error_strerror(result, "failed to read config region");
 	}
 
-	uds_free_buffered_reader(reader);
+	vdo_free_buffered_reader(reader);
 	return UDS_SUCCESS;
 }
 
@@ -1650,11 +1650,11 @@ static int load_index_layout(struct index_layout *layout, struct uds_configurati
 	result = uds_make_buffered_reader(layout->factory,
 					  layout->offset / UDS_BLOCK_SIZE, 1, &reader);
 	if (result != UDS_SUCCESS)
-		return uds_log_error_strerror(result, "unable to read superblock");
+		return vdo_log_error_strerror(result, "unable to read superblock");
 
 	result = load_super_block(layout, UDS_BLOCK_SIZE,
 				  layout->offset / UDS_BLOCK_SIZE, reader);
-	uds_free_buffered_reader(reader);
+	vdo_free_buffered_reader(reader);
 	if (result != UDS_SUCCESS)
 		return result;
 
@@ -1679,7 +1679,7 @@ static int create_layout_factory(struct index_layout *layout,
 	writable_size = uds_get_writable_size(factory) & -UDS_BLOCK_SIZE;
 	if (writable_size < config->size + config->offset) {
 		uds_put_io_factory(factory);
-		uds_log_error("index storage (%zu) is smaller than the requested size %zu",
+		vdo_log_error("index storage (%zu) is smaller than the requested size %zu",
 			      writable_size, config->size + config->offset);
 		return -ENOSPC;
 	}
@@ -1701,21 +1701,21 @@ int uds_make_index_layout(struct uds_configuration *config, bool new_layout,
 	if (result != UDS_SUCCESS)
 		return result;
 
-	result = uds_allocate(1, struct index_layout, __func__, &layout);
-	if (result != UDS_SUCCESS)
+	result = vdo_allocate(1, struct index_layout, __func__, &layout);
+	if (result != VDO_SUCCESS)
 		return result;
 
 	result = create_layout_factory(layout, config);
 	if (result != UDS_SUCCESS) {
-		uds_free_index_layout(layout);
+		vdo_free_index_layout(layout);
 		return result;
 	}
 
 	if (layout->factory_size < sizes.total_size) {
-		uds_log_error("index storage (%zu) is smaller than the required size %llu",
+		vdo_log_error("index storage (%zu) is smaller than the required size %llu",
 			      layout->factory_size,
 			      (unsigned long long) sizes.total_size);
-		uds_free_index_layout(layout);
+		vdo_free_index_layout(layout);
 		return -ENOSPC;
 	}
 
@@ -1724,7 +1724,7 @@ int uds_make_index_layout(struct uds_configuration *config, bool new_layout,
 	else
 		result = load_index_layout(layout, config);
 	if (result != UDS_SUCCESS) {
-		uds_free_index_layout(layout);
+		vdo_free_index_layout(layout);
 		return result;
 	}
 
@@ -1732,16 +1732,16 @@ int uds_make_index_layout(struct uds_configuration *config, bool new_layout,
 	return UDS_SUCCESS;
 }
 
-void uds_free_index_layout(struct index_layout *layout)
+void vdo_free_index_layout(struct index_layout *layout)
 {
 	if (layout == NULL)
 		return;
 
-	uds_free(layout->index.saves);
+	vdo_free(layout->index.saves);
 	if (layout->factory != NULL)
 		uds_put_io_factory(layout->factory);
 
-	uds_free(layout);
+	vdo_free(layout);
 }
 
 int uds_replace_index_layout_storage(struct index_layout *layout,

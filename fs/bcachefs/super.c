@@ -68,6 +68,7 @@
 #include <linux/percpu.h>
 #include <linux/random.h>
 #include <linux/sysfs.h>
+#include <linux/thread_with_file.h>
 #include <crypto/hash.h>
 
 MODULE_LICENSE("GPL");
@@ -87,6 +88,23 @@ const char * const bch2_fs_flag_strs[] = {
 	NULL
 };
 
+void bch2_print_opts(struct bch_opts *opts, const char *fmt, ...)
+{
+	struct stdio_redirect *stdio = (void *)(unsigned long)opts->stdio;
+
+	va_list args;
+	va_start(args, fmt);
+	if (likely(!stdio)) {
+		vprintk(fmt, args);
+	} else {
+		if (fmt[0] == KERN_SOH[0])
+			fmt += 2;
+
+		stdio_redirect_vprintf(stdio, true, fmt, args);
+	}
+	va_end(args);
+}
+
 void __bch2_print(struct bch_fs *c, const char *fmt, ...)
 {
 	struct stdio_redirect *stdio = bch2_fs_stdio_redirect(c);
@@ -99,7 +117,7 @@ void __bch2_print(struct bch_fs *c, const char *fmt, ...)
 		if (fmt[0] == KERN_SOH[0])
 			fmt += 2;
 
-		bch2_stdio_redirect_vprintf(stdio, true, fmt, args);
+		stdio_redirect_vprintf(stdio, true, fmt, args);
 	}
 	va_end(args);
 }
@@ -1163,8 +1181,8 @@ static void bch2_dev_free(struct bch_dev *ca)
 	bch2_dev_buckets_free(ca);
 	free_page((unsigned long) ca->sb_read_scratch);
 
-	time_stats_exit(&ca->io_latency[WRITE]);
-	time_stats_exit(&ca->io_latency[READ]);
+	time_stats_quantiles_exit(&ca->io_latency[WRITE]);
+	time_stats_quantiles_exit(&ca->io_latency[READ]);
 
 	percpu_ref_exit(&ca->io_ref);
 	percpu_ref_exit(&ca->ref);
@@ -1255,10 +1273,8 @@ static struct bch_dev *__bch2_dev_alloc(struct bch_fs *c,
 
 	INIT_WORK(&ca->io_error_work, bch2_io_error_work);
 
-	time_stats_init(&ca->io_latency[READ]);
-	time_stats_init(&ca->io_latency[WRITE]);
-	ca->io_latency[READ].quantiles_enabled = true;
-	ca->io_latency[WRITE].quantiles_enabled = true;
+	time_stats_quantiles_init(&ca->io_latency[READ]);
+	time_stats_quantiles_init(&ca->io_latency[WRITE]);
 
 	ca->mi = bch2_mi_to_cpu(member);
 
@@ -1425,10 +1441,10 @@ bool bch2_dev_state_allowed(struct bch_fs *c, struct bch_dev *ca,
 
 		required = max(!(flags & BCH_FORCE_IF_METADATA_DEGRADED)
 			       ? c->opts.metadata_replicas
-			       : c->opts.metadata_replicas_required,
+			       : metadata_replicas_required(c),
 			       !(flags & BCH_FORCE_IF_DATA_DEGRADED)
 			       ? c->opts.data_replicas
-			       : c->opts.data_replicas_required);
+			       : data_replicas_required(c));
 
 		return nr_rw >= required;
 	case BCH_MEMBER_STATE_failed:
@@ -1594,27 +1610,27 @@ int bch2_dev_remove(struct bch_fs *c, struct bch_dev *ca, int flags)
 	__bch2_dev_read_only(c, ca);
 
 	ret = bch2_dev_data_drop(c, ca->dev_idx, flags);
-	bch_err_msg(ca, ret, "dropping data");
+	bch_err_msg(ca, ret, "bch2_dev_data_drop()");
 	if (ret)
 		goto err;
 
 	ret = bch2_dev_remove_alloc(c, ca);
-	bch_err_msg(ca, ret, "deleting alloc info");
+	bch_err_msg(ca, ret, "bch2_dev_remove_alloc()");
 	if (ret)
 		goto err;
 
 	ret = bch2_journal_flush_device_pins(&c->journal, ca->dev_idx);
-	bch_err_msg(ca, ret, "flushing journal");
+	bch_err_msg(ca, ret, "bch2_journal_flush_device_pins()");
 	if (ret)
 		goto err;
 
 	ret = bch2_journal_flush(&c->journal);
-	bch_err(ca, "journal error");
+	bch_err_msg(ca, ret, "bch2_journal_flush()");
 	if (ret)
 		goto err;
 
 	ret = bch2_replicas_gc2(c);
-	bch_err_msg(ca, ret, "in replicas_gc2()");
+	bch_err_msg(ca, ret, "bch2_replicas_gc2()");
 	if (ret)
 		goto err;
 

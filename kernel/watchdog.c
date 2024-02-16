@@ -40,6 +40,8 @@ static DEFINE_MUTEX(watchdog_mutex);
 # define WATCHDOG_HARDLOCKUP_DEFAULT	0
 #endif
 
+#define NUM_SAMPLE_PERIODS	5
+
 unsigned long __read_mostly watchdog_enabled;
 int __read_mostly watchdog_user_enabled = 1;
 static int __read_mostly watchdog_hardlockup_user_enabled = WATCHDOG_HARDLOCKUP_DEFAULT;
@@ -339,7 +341,6 @@ __setup("watchdog_thresh=", watchdog_thresh_setup);
 static void __lockup_detector_cleanup(void);
 
 #ifdef CONFIG_SOFTLOCKUP_DETECTOR_INTR_STORM
-#define NUM_STATS_GROUPS	5
 enum stats_per_group {
 	STATS_SYSTEM,
 	STATS_SOFTIRQ,
@@ -356,7 +357,7 @@ static const enum cpu_usage_stat tracked_stats[NUM_STATS_PER_GROUP] = {
 };
 
 static DEFINE_PER_CPU(u16, cpustat_old[NUM_STATS_PER_GROUP]);
-static DEFINE_PER_CPU(u8, cpustat_util[NUM_STATS_GROUPS][NUM_STATS_PER_GROUP]);
+static DEFINE_PER_CPU(u8, cpustat_util[NUM_SAMPLE_PERIODS][NUM_STATS_PER_GROUP]);
 static DEFINE_PER_CPU(u8, cpustat_tail);
 
 /*
@@ -381,6 +382,7 @@ static void update_cpustat(void)
 	u16 sample_period_16 = get_16bit_precision(sample_period);
 
 	kcpustat_cpu_fetch(&kcpustat, smp_processor_id());
+
 	for (i = 0; i < NUM_STATS_PER_GROUP; i++) {
 		old_stat = __this_cpu_read(cpustat_old[i]);
 		new_stat = get_16bit_precision(cpustat[tracked_stats[i]]);
@@ -388,7 +390,8 @@ static void update_cpustat(void)
 		__this_cpu_write(cpustat_util[tail][i], util);
 		__this_cpu_write(cpustat_old[i], new_stat);
 	}
-	__this_cpu_write(cpustat_tail, (tail + 1) % NUM_STATS_GROUPS);
+
+	__this_cpu_write(cpustat_tail, (tail + 1) % NUM_SAMPLE_PERIODS);
 }
 
 static void print_cpustat(void)
@@ -398,14 +401,16 @@ static void print_cpustat(void)
 	u64 sample_period_second = sample_period;
 
 	do_div(sample_period_second, NSEC_PER_SEC);
+
 	/*
 	 * We do not want the "watchdog: " prefix on every line,
 	 * hence we use "printk" instead of "pr_crit".
 	 */
 	printk(KERN_CRIT "CPU#%d Utilization every %llus during lockup:\n",
 	       smp_processor_id(), sample_period_second);
-	for (i = 0; i < NUM_STATS_GROUPS; i++) {
-		group = (tail + i) % NUM_STATS_GROUPS;
+
+	for (i = 0; i < NUM_SAMPLE_PERIODS; i++) {
+		group = (tail + i) % NUM_SAMPLE_PERIODS;
 		printk(KERN_CRIT "\t#%d: %3u%% system,\t%3u%% softirq,\t"
 			"%3u%% hardirq,\t%3u%% idle\n", i + 1,
 			__this_cpu_read(cpustat_util[group][STATS_SYSTEM]),
@@ -463,10 +468,11 @@ static void start_counting_irqs(void)
 		 * nr_irqs has the potential to grow at runtime. We should read
 		 * it and store locally to avoid array out-of-bounds access.
 		 */
-		local_nr_irqs = READ_ONCE(nr_irqs);
+		local_nr_irqs = nr_irqs;
 		counts = kcalloc(local_nr_irqs, sizeof(u32), GFP_ATOMIC);
 		if (!counts)
 			return;
+
 		for (i = 0; i < local_nr_irqs; i++) {
 			desc = irq_to_desc(i);
 			if (!desc)
@@ -474,6 +480,7 @@ static void start_counting_irqs(void)
 			counts[i] = desc->kstat_irqs ?
 				*this_cpu_ptr(desc->kstat_irqs) : 0;
 		}
+
 		__this_cpu_write(actual_nr_irqs, local_nr_irqs);
 		__this_cpu_write(hardirq_counts, counts);
 	}
@@ -506,21 +513,22 @@ static void print_irq_counts(void)
 				counts_diff = *this_cpu_ptr(desc->kstat_irqs);
 				if (i < local_nr_irqs)
 					counts_diff -= counts[i];
-			} else {
-				counts_diff = 0;
+				tabulate_irq_count(irq_counts_sorted, i, counts_diff,
+						   NUM_HARDIRQ_REPORT);
 			}
-			tabulate_irq_count(irq_counts_sorted, i, counts_diff,
-					   NUM_HARDIRQ_REPORT);
 		}
+
 		/*
 		 * We do not want the "watchdog: " prefix on every line,
 		 * hence we use "printk" instead of "pr_crit".
 		 */
 		printk(KERN_CRIT "CPU#%d Detect HardIRQ Time exceeds %d%%. Most frequent HardIRQs:\n",
 		       smp_processor_id(), HARDIRQ_PERCENT_THRESH);
+
 		for (i = 0; i < NUM_HARDIRQ_REPORT; i++) {
 			if (irq_counts_sorted[i].irq == -1)
 				break;
+
 			desc = irq_to_desc(irq_counts_sorted[i].irq);
 			if (desc && desc->action)
 				printk(KERN_CRIT "\t#%u: %-10u\tirq#%d(%s)\n",
@@ -531,6 +539,7 @@ static void print_irq_counts(void)
 				       i + 1, irq_counts_sorted[i].counts,
 				       irq_counts_sorted[i].irq);
 		}
+
 		/*
 		 * If the hardirq time is less than HARDIRQ_PERCENT_THRESH% in the last
 		 * sample_period, then we suspect the interrupt storm might be subsiding.
@@ -584,7 +593,7 @@ static void set_sample_period(void)
 	 * and hard thresholds) to increment before the
 	 * hardlockup detector generates a warning
 	 */
-	sample_period = get_softlockup_thresh() * ((u64)NSEC_PER_SEC / 5);
+	sample_period = get_softlockup_thresh() * ((u64)NSEC_PER_SEC / NUM_SAMPLE_PERIODS);
 	watchdog_update_hrtimer_threshold(sample_period);
 }
 

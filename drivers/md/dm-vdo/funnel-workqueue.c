@@ -98,7 +98,7 @@ static struct vdo_completion *poll_for_completion(struct simple_work_queue *queu
 	int i;
 
 	for (i = queue->common.type->max_priority; i >= 0; i--) {
-		struct funnel_queue_entry *link = uds_funnel_queue_poll(queue->priority_lists[i]);
+		struct funnel_queue_entry *link = vdo_funnel_queue_poll(queue->priority_lists[i]);
 
 		if (link != NULL)
 			return container_of(link, struct vdo_completion, work_queue_entry_link);
@@ -110,20 +110,20 @@ static struct vdo_completion *poll_for_completion(struct simple_work_queue *queu
 static void enqueue_work_queue_completion(struct simple_work_queue *queue,
 					  struct vdo_completion *completion)
 {
-	ASSERT_LOG_ONLY(completion->my_queue == NULL,
-			"completion %px (fn %px) to enqueue (%px) is not already queued (%px)",
-			completion, completion->callback, queue, completion->my_queue);
+	VDO_ASSERT_LOG_ONLY(completion->my_queue == NULL,
+			    "completion %px (fn %px) to enqueue (%px) is not already queued (%px)",
+			    completion, completion->callback, queue, completion->my_queue);
 	if (completion->priority == VDO_WORK_Q_DEFAULT_PRIORITY)
 		completion->priority = queue->common.type->default_priority;
 
-	if (ASSERT(completion->priority <= queue->common.type->max_priority,
-		   "priority is in range for queue") != VDO_SUCCESS)
+	if (VDO_ASSERT(completion->priority <= queue->common.type->max_priority,
+		       "priority is in range for queue") != VDO_SUCCESS)
 		completion->priority = 0;
 
 	completion->my_queue = &queue->common;
 
 	/* Funnel queue handles the synchronization for the put. */
-	uds_funnel_queue_put(queue->priority_lists[completion->priority],
+	vdo_funnel_queue_put(queue->priority_lists[completion->priority],
 			     &completion->work_queue_entry_link);
 
 	/*
@@ -222,9 +222,9 @@ static struct vdo_completion *wait_for_next_completion(struct simple_work_queue 
 static void process_completion(struct simple_work_queue *queue,
 			       struct vdo_completion *completion)
 {
-	if (ASSERT(completion->my_queue == &queue->common,
-		   "completion %px from queue %px marked as being in this queue (%px)",
-		   completion, queue, completion->my_queue) == UDS_SUCCESS)
+	if (VDO_ASSERT(completion->my_queue == &queue->common,
+		       "completion %px from queue %px marked as being in this queue (%px)",
+		       completion, queue, completion->my_queue) == VDO_SUCCESS)
 		completion->my_queue = NULL;
 
 	vdo_run_completion(completion);
@@ -275,9 +275,9 @@ static void free_simple_work_queue(struct simple_work_queue *queue)
 	unsigned int i;
 
 	for (i = 0; i <= VDO_WORK_Q_MAX_PRIORITY; i++)
-		uds_free_funnel_queue(queue->priority_lists[i]);
-	uds_free(queue->common.name);
-	uds_free(queue);
+		vdo_free_funnel_queue(queue->priority_lists[i]);
+	vdo_free(queue->common.name);
+	vdo_free(queue);
 }
 
 static void free_round_robin_work_queue(struct round_robin_work_queue *queue)
@@ -290,9 +290,9 @@ static void free_round_robin_work_queue(struct round_robin_work_queue *queue)
 
 	for (i = 0; i < count; i++)
 		free_simple_work_queue(queue_table[i]);
-	uds_free(queue_table);
-	uds_free(queue->common.name);
-	uds_free(queue);
+	vdo_free(queue_table);
+	vdo_free(queue->common.name);
+	vdo_free(queue);
 }
 
 void vdo_free_work_queue(struct vdo_work_queue *queue)
@@ -319,12 +319,12 @@ static int make_simple_work_queue(const char *thread_name_prefix, const char *na
 	struct task_struct *thread = NULL;
 	int result;
 
-	ASSERT_LOG_ONLY((type->max_priority <= VDO_WORK_Q_MAX_PRIORITY),
-			"queue priority count %u within limit %u", type->max_priority,
-			VDO_WORK_Q_MAX_PRIORITY);
+	VDO_ASSERT_LOG_ONLY((type->max_priority <= VDO_WORK_Q_MAX_PRIORITY),
+			    "queue priority count %u within limit %u", type->max_priority,
+			    VDO_WORK_Q_MAX_PRIORITY);
 
-	result = uds_allocate(1, struct simple_work_queue, "simple work queue", &queue);
-	if (result != UDS_SUCCESS)
+	result = vdo_allocate(1, struct simple_work_queue, "simple work queue", &queue);
+	if (result != VDO_SUCCESS)
 		return result;
 
 	queue->private = private;
@@ -333,15 +333,15 @@ static int make_simple_work_queue(const char *thread_name_prefix, const char *na
 	queue->common.owner = owner;
 	init_waitqueue_head(&queue->waiting_worker_threads);
 
-	result = uds_duplicate_string(name, "queue name", &queue->common.name);
+	result = vdo_duplicate_string(name, "queue name", &queue->common.name);
 	if (result != VDO_SUCCESS) {
-		uds_free(queue);
+		vdo_free(queue);
 		return -ENOMEM;
 	}
 
 	for (i = 0; i <= type->max_priority; i++) {
-		result = uds_make_funnel_queue(&queue->priority_lists[i]);
-		if (result != UDS_SUCCESS) {
+		result = vdo_make_funnel_queue(&queue->priority_lists[i]);
+		if (result != VDO_SUCCESS) {
 			free_simple_work_queue(queue);
 			return result;
 		}
@@ -367,7 +367,7 @@ static int make_simple_work_queue(const char *thread_name_prefix, const char *na
 	wait_for_completion(&started);
 
 	*queue_ptr = queue;
-	return UDS_SUCCESS;
+	return VDO_SUCCESS;
 }
 
 /**
@@ -399,15 +399,15 @@ int vdo_make_work_queue(const char *thread_name_prefix, const char *name,
 		return result;
 	}
 
-	result = uds_allocate(1, struct round_robin_work_queue, "round-robin work queue",
+	result = vdo_allocate(1, struct round_robin_work_queue, "round-robin work queue",
 			      &queue);
-	if (result != UDS_SUCCESS)
+	if (result != VDO_SUCCESS)
 		return result;
 
-	result = uds_allocate(thread_count, struct simple_work_queue *,
+	result = vdo_allocate(thread_count, struct simple_work_queue *,
 			      "subordinate work queues", &queue->service_queues);
-	if (result != UDS_SUCCESS) {
-		uds_free(queue);
+	if (result != VDO_SUCCESS) {
+		vdo_free(queue);
 		return result;
 	}
 
@@ -415,10 +415,10 @@ int vdo_make_work_queue(const char *thread_name_prefix, const char *name,
 	queue->common.round_robin_mode = true;
 	queue->common.owner = owner;
 
-	result = uds_duplicate_string(name, "queue name", &queue->common.name);
+	result = vdo_duplicate_string(name, "queue name", &queue->common.name);
 	if (result != VDO_SUCCESS) {
-		uds_free(queue->service_queues);
-		uds_free(queue);
+		vdo_free(queue->service_queues);
+		vdo_free(queue);
 		return -ENOMEM;
 	}
 
@@ -433,7 +433,7 @@ int vdo_make_work_queue(const char *thread_name_prefix, const char *name,
 		if (result != VDO_SUCCESS) {
 			queue->num_service_queues = i;
 			/* Destroy previously created subordinates. */
-			vdo_free_work_queue(uds_forget(*queue_ptr));
+			vdo_free_work_queue(vdo_forget(*queue_ptr));
 			return result;
 		}
 	}
@@ -485,7 +485,7 @@ static void dump_simple_work_queue(struct simple_work_queue *queue)
 		thread_status = atomic_read(&queue->idle) ? "idle" : "running";
 	}
 
-	uds_log_info("workQ %px (%s) %s (%c)", &queue->common, queue->common.name,
+	vdo_log_info("workQ %px (%s) %s (%c)", &queue->common, queue->common.name,
 		     thread_status, task_state_report);
 
 	/* ->waiting_worker_threads wait queue status? anyone waiting? */

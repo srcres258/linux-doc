@@ -1506,6 +1506,8 @@ static int journal_write_alloc(struct journal *j, struct journal_buf *w)
 		c->opts.foreground_target;
 	unsigned i, replicas = 0, replicas_want =
 		READ_ONCE(c->opts.metadata_replicas);
+	unsigned replicas_need = min_t(unsigned, replicas_want,
+				       READ_ONCE(c->opts.metadata_replicas_required));
 
 	rcu_read_lock();
 retry:
@@ -1554,7 +1556,7 @@ done:
 
 	BUG_ON(bkey_val_u64s(&w->key.k) > BCH_REPLICAS_MAX);
 
-	return replicas >= c->opts.metadata_replicas_required ? 0 : -EROFS;
+	return replicas >= replicas_need ? 0 : -EROFS;
 }
 
 static void journal_buf_realloc(struct journal *j, struct journal_buf *buf)

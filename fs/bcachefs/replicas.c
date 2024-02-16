@@ -232,7 +232,7 @@ static inline int __replicas_entry_idx(struct bch_replicas_cpu *r,
 
 	verify_replicas_entry(search);
 
-#define entry_cmp(_l, _r, size)	memcmp(_l, _r, entry_size)
+#define entry_cmp(_l, _r)	memcmp(_l, _r, entry_size)
 	idx = eytzinger0_find(r->entries, r->nr, r->entry_size,
 			      entry_cmp, search);
 #undef entry_cmp

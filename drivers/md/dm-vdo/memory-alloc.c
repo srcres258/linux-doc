@@ -37,7 +37,7 @@ static inline bool allocations_allowed(void)
  * @new_thread: registered_thread structure to use for the current thread
  * @flag_ptr: Location of the allocation-allowed flag
  */
-void uds_register_allocating_thread(struct registered_thread *new_thread,
+void vdo_register_allocating_thread(struct registered_thread *new_thread,
 				    const bool *flag_ptr)
 {
 	if (flag_ptr == NULL) {
@@ -50,7 +50,7 @@ void uds_register_allocating_thread(struct registered_thread *new_thread,
 }
 
 /* Unregister the current thread as an allocating thread. */
-void uds_unregister_allocating_thread(void)
+void vdo_unregister_allocating_thread(void)
 {
 	vdo_unregister_thread(&allocating_threads);
 }
@@ -148,9 +148,9 @@ static void remove_vmalloc_block(void *ptr)
 
 	spin_unlock_irqrestore(&memory_stats.lock, flags);
 	if (block != NULL)
-		uds_free(block);
+		vdo_free(block);
 	else
-		uds_log_info("attempting to remove ptr %px not found in vmalloc list", ptr);
+		vdo_log_info("attempting to remove ptr %px not found in vmalloc list", ptr);
 }
 
 /*
@@ -194,9 +194,9 @@ static inline bool use_kmalloc(size_t size)
  * @what: What is being allocated (for error logging)
  * @ptr: A pointer to hold the allocated memory
  *
- * Return: UDS_SUCCESS or an error code
+ * Return: VDO_SUCCESS or an error code
  */
-int uds_allocate_memory(size_t size, size_t align, const char *what, void *ptr)
+int vdo_allocate_memory(size_t size, size_t align, const char *what, void *ptr)
 {
 	/*
 	 * The __GFP_RETRY_MAYFAIL flag means the VM implementation will retry memory reclaim
@@ -216,12 +216,12 @@ int uds_allocate_memory(size_t size, size_t align, const char *what, void *ptr)
 	unsigned long start_time;
 	void *p = NULL;
 
-	if (ptr == NULL)
-		return UDS_INVALID_ARGUMENT;
+	if (unlikely(ptr == NULL))
+		return -EINVAL;
 
 	if (size == 0) {
 		*((void **) ptr) = NULL;
-		return UDS_SUCCESS;
+		return VDO_SUCCESS;
 	}
 
 	if (allocations_restricted)
@@ -245,8 +245,7 @@ int uds_allocate_memory(size_t size, size_t align, const char *what, void *ptr)
 	} else {
 		struct vmalloc_block_info *block;
 
-		if (uds_allocate(1, struct vmalloc_block_info, __func__, &block) ==
-		    UDS_SUCCESS) {
+		if (vdo_allocate(1, struct vmalloc_block_info, __func__, &block) == VDO_SUCCESS) {
 			/*
 			 * It is possible for __vmalloc to fail to allocate memory because there
 			 * are no pages available (see VDO-3661). A short sleep may allow the page
@@ -259,7 +258,6 @@ int uds_allocate_memory(size_t size, size_t align, const char *what, void *ptr)
 			 */
 			for (;;) {
 				p = __vmalloc(size, gfp_flags | __GFP_NOWARN);
-
 				if (p != NULL)
 					break;
 
@@ -273,7 +271,7 @@ int uds_allocate_memory(size_t size, size_t align, const char *what, void *ptr)
 			}
 
 			if (p == NULL) {
-				uds_free(block);
+				vdo_free(block);
 			} else {
 				block->ptr = p;
 				block->size = PAGE_ALIGN(size);
@@ -286,13 +284,13 @@ int uds_allocate_memory(size_t size, size_t align, const char *what, void *ptr)
 		memalloc_noio_restore(noio_flags);
 
 	if (unlikely(p == NULL)) {
-		uds_log_error("Could not allocate %zu bytes for %s in %u msecs",
+		vdo_log_error("Could not allocate %zu bytes for %s in %u msecs",
 			      size, what, jiffies_to_msecs(jiffies - start_time));
 		return -ENOMEM;
 	}
 
 	*((void **) ptr) = p;
-	return UDS_SUCCESS;
+	return VDO_SUCCESS;
 }
 
 /*
@@ -304,7 +302,7 @@ int uds_allocate_memory(size_t size, size_t align, const char *what, void *ptr)
  *
  * Return: pointer to the allocated memory, or NULL if the required space is not available.
  */
-void *uds_allocate_memory_nowait(size_t size, const char *what __maybe_unused)
+void *vdo_allocate_memory_nowait(size_t size, const char *what __maybe_unused)
 {
 	void *p = kmalloc(size, GFP_NOWAIT | __GFP_ZERO);
 
@@ -314,7 +312,7 @@ void *uds_allocate_memory_nowait(size_t size, const char *what __maybe_unused)
 	return p;
 }
 
-void uds_free(void *ptr)
+void vdo_free(void *ptr)
 {
 	if (ptr != NULL) {
 		if (is_vmalloc_addr(ptr)) {
@@ -337,21 +335,21 @@ void uds_free(void *ptr)
  * @what: What is being allocated (for error logging)
  * @new_ptr: A pointer to hold the reallocated pointer
  *
- * Return: UDS_SUCCESS or an error code
+ * Return: VDO_SUCCESS or an error code
  */
-int uds_reallocate_memory(void *ptr, size_t old_size, size_t size, const char *what,
+int vdo_reallocate_memory(void *ptr, size_t old_size, size_t size, const char *what,
 			  void *new_ptr)
 {
 	int result;
 
 	if (size == 0) {
-		uds_free(ptr);
+		vdo_free(ptr);
 		*(void **) new_ptr = NULL;
-		return UDS_SUCCESS;
+		return VDO_SUCCESS;
 	}
 
-	result = uds_allocate(size, char, what, new_ptr);
-	if (result != UDS_SUCCESS)
+	result = vdo_allocate(size, char, what, new_ptr);
+	if (result != VDO_SUCCESS)
 		return result;
 
 	if (ptr != NULL) {
@@ -359,44 +357,44 @@ int uds_reallocate_memory(void *ptr, size_t old_size, size_t size, const char *w
 			size = old_size;
 
 		memcpy(*((void **) new_ptr), ptr, size);
-		uds_free(ptr);
+		vdo_free(ptr);
 	}
 
-	return UDS_SUCCESS;
+	return VDO_SUCCESS;
 }
 
-int uds_duplicate_string(const char *string, const char *what, char **new_string)
+int vdo_duplicate_string(const char *string, const char *what, char **new_string)
 {
 	int result;
 	u8 *dup;
 
-	result = uds_allocate(strlen(string) + 1, u8, what, &dup);
-	if (result != UDS_SUCCESS)
+	result = vdo_allocate(strlen(string) + 1, u8, what, &dup);
+	if (result != VDO_SUCCESS)
 		return result;
 
 	memcpy(dup, string, strlen(string) + 1);
 	*new_string = dup;
-	return UDS_SUCCESS;
+	return VDO_SUCCESS;
 }
 
-void uds_memory_init(void)
+void vdo_memory_init(void)
 {
 	spin_lock_init(&memory_stats.lock);
 	vdo_initialize_thread_registry(&allocating_threads);
 }
 
-void uds_memory_exit(void)
+void vdo_memory_exit(void)
 {
-	ASSERT_LOG_ONLY(memory_stats.kmalloc_bytes == 0,
-			"kmalloc memory used (%zd bytes in %zd blocks) is returned to the kernel",
-			memory_stats.kmalloc_bytes, memory_stats.kmalloc_blocks);
-	ASSERT_LOG_ONLY(memory_stats.vmalloc_bytes == 0,
-			"vmalloc memory used (%zd bytes in %zd blocks) is returned to the kernel",
-			memory_stats.vmalloc_bytes, memory_stats.vmalloc_blocks);
-	uds_log_debug("peak usage %zd bytes", memory_stats.peak_bytes);
+	VDO_ASSERT_LOG_ONLY(memory_stats.kmalloc_bytes == 0,
+			    "kmalloc memory used (%zd bytes in %zd blocks) is returned to the kernel",
+			    memory_stats.kmalloc_bytes, memory_stats.kmalloc_blocks);
+	VDO_ASSERT_LOG_ONLY(memory_stats.vmalloc_bytes == 0,
+			    "vmalloc memory used (%zd bytes in %zd blocks) is returned to the kernel",
+			    memory_stats.vmalloc_bytes, memory_stats.vmalloc_blocks);
+	vdo_log_debug("peak usage %zd bytes", memory_stats.peak_bytes);
 }
 
-void uds_get_memory_stats(u64 *bytes_used, u64 *peak_bytes_used)
+void vdo_get_memory_stats(u64 *bytes_used, u64 *peak_bytes_used)
 {
 	unsigned long flags;
 
@@ -410,7 +408,7 @@ void uds_get_memory_stats(u64 *bytes_used, u64 *peak_bytes_used)
  * Report stats on any allocated memory that we're tracking. Not all allocation types are
  * guaranteed to be tracked in bytes (e.g., bios).
  */
-void uds_report_memory_usage(void)
+void vdo_report_memory_usage(void)
 {
 	unsigned long flags;
 	u64 kmalloc_blocks;
@@ -428,13 +426,13 @@ void uds_report_memory_usage(void)
 	peak_usage = memory_stats.peak_bytes;
 	spin_unlock_irqrestore(&memory_stats.lock, flags);
 	total_bytes = kmalloc_bytes + vmalloc_bytes;
-	uds_log_info("current module memory tracking (actual allocation sizes, not requested):");
-	uds_log_info("  %llu bytes in %llu kmalloc blocks",
+	vdo_log_info("current module memory tracking (actual allocation sizes, not requested):");
+	vdo_log_info("  %llu bytes in %llu kmalloc blocks",
 		     (unsigned long long) kmalloc_bytes,
 		     (unsigned long long) kmalloc_blocks);
-	uds_log_info("  %llu bytes in %llu vmalloc blocks",
+	vdo_log_info("  %llu bytes in %llu vmalloc blocks",
 		     (unsigned long long) vmalloc_bytes,
 		     (unsigned long long) vmalloc_blocks);
-	uds_log_info("  total %llu bytes, peak usage %llu bytes",
+	vdo_log_info("  total %llu bytes, peak usage %llu bytes",
 		     (unsigned long long) total_bytes, (unsigned long long) peak_usage);
 }

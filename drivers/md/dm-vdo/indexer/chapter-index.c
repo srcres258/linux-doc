@@ -19,8 +19,8 @@ int uds_make_open_chapter_index(struct open_chapter_index **chapter_index,
 	size_t memory_size;
 	struct open_chapter_index *index;
 
-	result = uds_allocate(1, struct open_chapter_index, "open chapter index", &index);
-	if (result != UDS_SUCCESS)
+	result = vdo_allocate(1, struct open_chapter_index, "open chapter index", &index);
+	if (result != VDO_SUCCESS)
 		return result;
 
 	/*
@@ -36,7 +36,7 @@ int uds_make_open_chapter_index(struct open_chapter_index **chapter_index,
 					    geometry->chapter_payload_bits,
 					    memory_size, 'm');
 	if (result != UDS_SUCCESS) {
-		uds_free(index);
+		vdo_free(index);
 		return result;
 	}
 
@@ -45,13 +45,13 @@ int uds_make_open_chapter_index(struct open_chapter_index **chapter_index,
 	return UDS_SUCCESS;
 }
 
-void uds_free_open_chapter_index(struct open_chapter_index *chapter_index)
+void vdo_free_open_chapter_index(struct open_chapter_index *chapter_index)
 {
 	if (chapter_index == NULL)
 		return;
 
 	uds_uninitialize_delta_index(&chapter_index->delta_index);
-	uds_free(chapter_index);
+	vdo_free(chapter_index);
 }
 
 /* Re-initialize an open chapter index for a new chapter. */
@@ -165,7 +165,7 @@ int uds_pack_open_chapter_index_page(struct open_chapter_index *chapter_index,
 
 		if (removals == 0) {
 			uds_get_delta_index_stats(delta_index, &stats);
-			uds_log_warning("The chapter index for chapter %llu contains %llu entries with %llu collisions",
+			vdo_log_warning("The chapter index for chapter %llu contains %llu entries with %llu collisions",
 					(unsigned long long) chapter_number,
 					(unsigned long long) stats.record_count,
 					(unsigned long long) stats.collision_count);
@@ -197,7 +197,7 @@ int uds_pack_open_chapter_index_page(struct open_chapter_index *chapter_index,
 	}
 
 	if (removals > 0) {
-		uds_log_warning("To avoid chapter index page overflow in chapter %llu, %u entries were removed from the chapter index",
+		vdo_log_warning("To avoid chapter index page overflow in chapter %llu, %u entries were removed from the chapter index",
 				(unsigned long long) chapter_number, removals);
 	}
 

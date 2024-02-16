@@ -96,7 +96,7 @@ int vdo_make_logical_zones(struct vdo *vdo, struct logical_zones **zones_ptr)
 	if (zone_count == 0)
 		return VDO_SUCCESS;
 
-	result = uds_allocate_extended(struct logical_zones, zone_count,
+	result = vdo_allocate_extended(struct logical_zones, zone_count,
 				       struct logical_zone, __func__, &zones);
 	if (result != VDO_SUCCESS)
 		return result;
@@ -134,18 +134,18 @@ void vdo_free_logical_zones(struct logical_zones *zones)
 	if (zones == NULL)
 		return;
 
-	uds_free(uds_forget(zones->manager));
+	vdo_free(vdo_forget(zones->manager));
 
 	for (index = 0; index < zones->zone_count; index++)
-		vdo_int_map_free(uds_forget(zones->zones[index].lbn_operations));
+		vdo_int_map_free(vdo_forget(zones->zones[index].lbn_operations));
 
-	uds_free(zones);
+	vdo_free(zones);
 }
 
 static inline void assert_on_zone_thread(struct logical_zone *zone, const char *what)
 {
-	ASSERT_LOG_ONLY((vdo_get_callback_thread_id() == zone->thread_id),
-			"%s() called on correct thread", what);
+	VDO_ASSERT_LOG_ONLY((vdo_get_callback_thread_id() == zone->thread_id),
+			    "%s() called on correct thread", what);
 }
 
 /**
@@ -249,10 +249,10 @@ void vdo_increment_logical_zone_flush_generation(struct logical_zone *zone,
 						 sequence_number_t expected_generation)
 {
 	assert_on_zone_thread(zone, __func__);
-	ASSERT_LOG_ONLY((zone->flush_generation == expected_generation),
-			"logical zone %u flush generation %llu should be %llu before increment",
-			zone->zone_number, (unsigned long long) zone->flush_generation,
-			(unsigned long long) expected_generation);
+	VDO_ASSERT_LOG_ONLY((zone->flush_generation == expected_generation),
+			    "logical zone %u flush generation %llu should be %llu before increment",
+			    zone->zone_number, (unsigned long long) zone->flush_generation,
+			    (unsigned long long) expected_generation);
 
 	zone->flush_generation++;
 	zone->ios_in_flush_generation = 0;
@@ -269,7 +269,7 @@ void vdo_acquire_flush_generation_lock(struct data_vio *data_vio)
 	struct logical_zone *zone = data_vio->logical.zone;
 
 	assert_on_zone_thread(zone, __func__);
-	ASSERT_LOG_ONLY(vdo_is_state_normal(&zone->state), "vdo state is normal");
+	VDO_ASSERT_LOG_ONLY(vdo_is_state_normal(&zone->state), "vdo state is normal");
 
 	data_vio->flush_generation = zone->flush_generation;
 	list_add_tail(&data_vio->write_entry, &zone->write_vios);
@@ -334,10 +334,10 @@ void vdo_release_flush_generation_lock(struct data_vio *data_vio)
 		return;
 
 	list_del_init(&data_vio->write_entry);
-	ASSERT_LOG_ONLY((zone->oldest_active_generation <= data_vio->flush_generation),
-			"data_vio releasing lock on generation %llu is not older than oldest active generation %llu",
-			(unsigned long long) data_vio->flush_generation,
-			(unsigned long long) zone->oldest_active_generation);
+	VDO_ASSERT_LOG_ONLY((zone->oldest_active_generation <= data_vio->flush_generation),
+			    "data_vio releasing lock on generation %llu is not older than oldest active generation %llu",
+			    (unsigned long long) data_vio->flush_generation,
+			    (unsigned long long) zone->oldest_active_generation);
 
 	if (!update_oldest_active_generation(zone) || zone->notifying)
 		return;
@@ -365,11 +365,11 @@ struct physical_zone *vdo_get_next_allocation_zone(struct logical_zone *zone)
  */
 void vdo_dump_logical_zone(const struct logical_zone *zone)
 {
-	uds_log_info("logical_zone %u", zone->zone_number);
-	uds_log_info("  flush_generation=%llu oldest_active_generation=%llu notification_generation=%llu notifying=%s ios_in_flush_generation=%llu",
+	vdo_log_info("logical_zone %u", zone->zone_number);
+	vdo_log_info("  flush_generation=%llu oldest_active_generation=%llu notification_generation=%llu notifying=%s ios_in_flush_generation=%llu",
 		     (unsigned long long) READ_ONCE(zone->flush_generation),
 		     (unsigned long long) READ_ONCE(zone->oldest_active_generation),
 		     (unsigned long long) READ_ONCE(zone->notification_generation),
-		     uds_bool_to_string(READ_ONCE(zone->notifying)),
+		     vdo_bool_to_string(READ_ONCE(zone->notifying)),
 		     (unsigned long long) READ_ONCE(zone->ios_in_flush_generation));
 }

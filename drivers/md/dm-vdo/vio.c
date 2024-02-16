@@ -52,7 +52,7 @@ static int create_multi_block_bio(block_count_t size, struct bio **bio_ptr)
 	struct bio *bio = NULL;
 	int result;
 
-	result = uds_allocate_extended(struct bio, size + 1, struct bio_vec,
+	result = vdo_allocate_extended(struct bio, size + 1, struct bio_vec,
 				       "bio", &bio);
 	if (result != VDO_SUCCESS)
 		return result;
@@ -72,7 +72,7 @@ void vdo_free_bio(struct bio *bio)
 		return;
 
 	bio_uninit(bio);
-	uds_free(uds_forget(bio));
+	vdo_free(vdo_forget(bio));
 }
 
 int allocate_vio_components(struct vdo *vdo, enum vio_type vio_type,
@@ -82,14 +82,14 @@ int allocate_vio_components(struct vdo *vdo, enum vio_type vio_type,
 	struct bio *bio;
 	int result;
 
-	result = ASSERT(block_count <= MAX_BLOCKS_PER_VIO,
-			"block count %u does not exceed maximum %u", block_count,
-			MAX_BLOCKS_PER_VIO);
+	result = VDO_ASSERT(block_count <= MAX_BLOCKS_PER_VIO,
+			    "block count %u does not exceed maximum %u", block_count,
+			    MAX_BLOCKS_PER_VIO);
 	if (result != VDO_SUCCESS)
 		return result;
 
-	result = ASSERT(((vio_type != VIO_TYPE_UNINITIALIZED) && (vio_type != VIO_TYPE_DATA)),
-			"%d is a metadata type", vio_type);
+	result = VDO_ASSERT(((vio_type != VIO_TYPE_UNINITIALIZED) && (vio_type != VIO_TYPE_DATA)),
+			    "%d is a metadata type", vio_type);
 	if (result != VDO_SUCCESS)
 		return result;
 
@@ -130,16 +130,16 @@ int create_multi_block_metadata_vio(struct vdo *vdo, enum vio_type vio_type,
 	 * Metadata vios should use direct allocation and not use the buffer pool, which is
 	 * reserved for submissions from the linux block layer.
 	 */
-	result = uds_allocate(1, struct vio, __func__, &vio);
+	result = vdo_allocate(1, struct vio, __func__, &vio);
 	if (result != VDO_SUCCESS) {
-		uds_log_error("metadata vio allocation failure %d", result);
+		vdo_log_error("metadata vio allocation failure %d", result);
 		return result;
 	}
 
 	result = allocate_vio_components(vdo, vio_type, priority, parent, block_count,
 					 data, vio);
 	if (result != VDO_SUCCESS) {
-		uds_free(vio);
+		vdo_free(vio);
 		return result;
 	}
 
@@ -157,7 +157,7 @@ void free_vio_components(struct vio *vio)
 		return;
 
 	BUG_ON(is_data_vio(vio));
-	vdo_free_bio(uds_forget(vio->bio));
+	vdo_free_bio(vdo_forget(vio->bio));
 }
 
 /**
@@ -167,7 +167,7 @@ void free_vio_components(struct vio *vio)
 void free_vio(struct vio *vio)
 {
 	free_vio_components(vio);
-	uds_free(vio);
+	vdo_free(vio);
 }
 
 /* Set bio properties for a VDO read or write. */
@@ -226,7 +226,7 @@ int vio_reset_bio(struct vio *vio, char *data, bio_end_io_t callback,
 		bytes_added = bio_add_page(bio, page, bytes, offset);
 
 		if (bytes_added != bytes) {
-			return uds_log_error_strerror(VDO_BIO_CREATION_FAILED,
+			return vdo_log_error_strerror(VDO_BIO_CREATION_FAILED,
 						      "Could only add %i bytes to bio",
 						      bytes_added);
 		}
@@ -259,18 +259,18 @@ void update_vio_error_stats(struct vio *vio, const char *format, ...)
 
 	case VDO_NO_SPACE:
 		atomic64_inc(&vdo->stats.no_space_error_count);
-		priority = UDS_LOG_DEBUG;
+		priority = VDO_LOG_DEBUG;
 		break;
 
 	default:
-		priority = UDS_LOG_ERR;
+		priority = VDO_LOG_ERR;
 	}
 
 	if (!__ratelimit(&error_limiter))
 		return;
 
 	va_start(args, format);
-	uds_vlog_strerror(priority, vio->completion.result, UDS_LOGGING_MODULE_NAME,
+	vdo_vlog_strerror(priority, vio->completion.result, VDO_LOGGING_MODULE_NAME,
 			  format, args);
 	va_end(args);
 }
@@ -317,7 +317,7 @@ int make_vio_pool(struct vdo *vdo, size_t pool_size, thread_id_t thread_id,
 	char *ptr;
 	int result;
 
-	result = uds_allocate_extended(struct vio_pool, pool_size, struct pooled_vio,
+	result = vdo_allocate_extended(struct vio_pool, pool_size, struct pooled_vio,
 				       __func__, &pool);
 	if (result != VDO_SUCCESS)
 		return result;
@@ -326,7 +326,7 @@ int make_vio_pool(struct vdo *vdo, size_t pool_size, thread_id_t thread_id,
 	INIT_LIST_HEAD(&pool->available);
 	INIT_LIST_HEAD(&pool->busy);
 
-	result = uds_allocate(pool_size * VDO_BLOCK_SIZE, char,
+	result = vdo_allocate(pool_size * VDO_BLOCK_SIZE, char,
 			      "VIO pool buffer", &pool->buffer);
 	if (result != VDO_SUCCESS) {
 		free_vio_pool(pool);
@@ -364,13 +364,13 @@ void free_vio_pool(struct vio_pool *pool)
 		return;
 
 	/* Remove all available vios from the object pool. */
-	ASSERT_LOG_ONLY(!vdo_waitq_has_waiters(&pool->waiting),
-			"VIO pool must not have any waiters when being freed");
-	ASSERT_LOG_ONLY((pool->busy_count == 0),
-			"VIO pool must not have %zu busy entries when being freed",
-			pool->busy_count);
-	ASSERT_LOG_ONLY(list_empty(&pool->busy),
-			"VIO pool must not have busy entries when being freed");
+	VDO_ASSERT_LOG_ONLY(!vdo_waitq_has_waiters(&pool->waiting),
+			    "VIO pool must not have any waiters when being freed");
+	VDO_ASSERT_LOG_ONLY((pool->busy_count == 0),
+			    "VIO pool must not have %zu busy entries when being freed",
+			    pool->busy_count);
+	VDO_ASSERT_LOG_ONLY(list_empty(&pool->busy),
+			    "VIO pool must not have busy entries when being freed");
 
 	list_for_each_entry_safe(pooled, tmp, &pool->available, pool_entry) {
 		list_del(&pooled->pool_entry);
@@ -378,11 +378,11 @@ void free_vio_pool(struct vio_pool *pool)
 		pool->size--;
 	}
 
-	ASSERT_LOG_ONLY(pool->size == 0,
-			"VIO pool must not have missing entries when being freed");
+	VDO_ASSERT_LOG_ONLY(pool->size == 0,
+			    "VIO pool must not have missing entries when being freed");
 
-	uds_free(uds_forget(pool->buffer));
-	uds_free(pool);
+	vdo_free(vdo_forget(pool->buffer));
+	vdo_free(pool);
 }
 
 /**
@@ -404,8 +404,8 @@ void acquire_vio_from_pool(struct vio_pool *pool, struct vdo_waiter *waiter)
 {
 	struct pooled_vio *pooled;
 
-	ASSERT_LOG_ONLY((pool->thread_id == vdo_get_callback_thread_id()),
-			"acquire from active vio_pool called from correct thread");
+	VDO_ASSERT_LOG_ONLY((pool->thread_id == vdo_get_callback_thread_id()),
+			    "acquire from active vio_pool called from correct thread");
 
 	if (list_empty(&pool->available)) {
 		vdo_waitq_enqueue_waiter(&pool->waiting, waiter);
@@ -425,8 +425,8 @@ void acquire_vio_from_pool(struct vio_pool *pool, struct vdo_waiter *waiter)
  */
 void return_vio_to_pool(struct vio_pool *pool, struct pooled_vio *vio)
 {
-	ASSERT_LOG_ONLY((pool->thread_id == vdo_get_callback_thread_id()),
-			"vio pool entry returned on same thread as it was acquired");
+	VDO_ASSERT_LOG_ONLY((pool->thread_id == vdo_get_callback_thread_id()),
+			    "vio pool entry returned on same thread as it was acquired");
 
 	vio->vio.completion.error_handler = NULL;
 	vio->vio.completion.parent = NULL;
@@ -466,8 +466,8 @@ void vdo_count_bios(struct atomic_bio_stats *bio_stats, struct bio *bio)
 		 * shouldn't exist.
 		 */
 	default:
-		ASSERT_LOG_ONLY(0, "Bio operation %d not a write, read, discard, or empty flush",
-				bio_op(bio));
+		VDO_ASSERT_LOG_ONLY(0, "Bio operation %d not a write, read, discard, or empty flush",
+				    bio_op(bio));
 	}
 
 	if ((bio->bi_opf & REQ_PREFLUSH) != 0)

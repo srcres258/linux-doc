@@ -277,7 +277,7 @@ static inline ssize_t eytzinger0_find_le(void *base, size_t nr, size_t size,
 	int _res;							\
 									\
 	while (_i < _nr &&						\
-	       (_res = _cmp(_search, _base + _i * _size, _size)))	\
+	       (_res = _cmp(_search, _base + _i * _size)))		\
 		_i = eytzinger0_child(_i, _res > 0);			\
 	_i;								\
 })

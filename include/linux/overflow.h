@@ -57,9 +57,10 @@ static inline bool __must_check __must_check_overflow(bool overflow)
  * @b: second addend
  * @d: pointer to store sum
  *
- * Returns 0 on success, 1 on wrap-around.
+ * Returns true on wrap-around, false otherwise.
  *
- * *@d holds the results of the attempted addition, which may wrap-around.
+ * *@d holds the results of the attempted addition, regardless of whether
+ * wrap-around occurred.
  */
 #define check_add_overflow(a, b, d)	\
 	__must_check_overflow(__builtin_add_overflow(a, b, d))
@@ -81,7 +82,7 @@ static inline bool __must_check __must_check_overflow(bool overflow)
 	})
 
 /**
- * wrapping_inc() - Intentionally perform a wrapping increment
+ * wrapping_assign_add() - Intentionally perform a wrapping increment assignment
  * @var: variable to be incremented
  * @offset: amount to add
  *
@@ -90,7 +91,7 @@ static inline bool __must_check __must_check_overflow(bool overflow)
  *
  * Returns the new value of @var.
  */
-#define wrapping_inc(var, offset)					\
+#define wrapping_assign_add(var, offset)				\
 	({								\
 		typeof(var) *__ptr = &(var);				\
 		*__ptr = wrapping_add(typeof(var), *__ptr, offset);	\
@@ -102,9 +103,10 @@ static inline bool __must_check __must_check_overflow(bool overflow)
  * @b: subtrahend; value to subtract from @a
  * @d: pointer to store difference
  *
- * Returns 0 on success, 1 on wrap-around.
+ * Returns true on wrap-around, false otherwise.
  *
- * *@d holds the results of the attempted subtraction, which may wrap-around.
+ * *@d holds the results of the attempted subtraction, regardless of whether
+ * wrap-around occurred.
  */
 #define check_sub_overflow(a, b, d)	\
 	__must_check_overflow(__builtin_sub_overflow(a, b, d))
@@ -126,7 +128,7 @@ static inline bool __must_check __must_check_overflow(bool overflow)
 	})
 
 /**
- * wrapping_dec() - Intentionally perform a wrapping decrement
+ * wrapping_assign_sub() - Intentionally perform a wrapping decrement assign
  * @var: variable to be decremented
  * @offset: amount to subtract
  *
@@ -135,7 +137,7 @@ static inline bool __must_check __must_check_overflow(bool overflow)
  *
  * Returns the new value of @var.
  */
-#define wrapping_dec(var, offset)					\
+#define wrapping_assign_sub(var, offset)				\
 	({								\
 		typeof(var) *__ptr = &(var);				\
 		*__ptr = wrapping_sub(typeof(var), *__ptr, offset);	\
@@ -147,9 +149,10 @@ static inline bool __must_check __must_check_overflow(bool overflow)
  * @b: second factor
  * @d: pointer to store product
  *
- * Returns 0 on success, 1 on wrap-around.
+ * Returns true on wrap-around, false otherwise.
  *
- * *@d holds the results of the attempted multiplication, which may wrap-around.
+ * *@d holds the results of the attempted multiplication, regardless of whether
+ * wrap-around occurred.
  */
 #define check_mul_overflow(a, b, d)	\
 	__must_check_overflow(__builtin_mul_overflow(a, b, d))

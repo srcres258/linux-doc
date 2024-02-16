@@ -95,6 +95,8 @@ struct bkey_i *bch2_inode_to_v3(struct btree_trans *, struct bkey_i *);
 
 void bch2_inode_unpacked_to_text(struct printbuf *, struct bch_inode_unpacked *);
 
+int bch2_inode_peek_nowarn(struct btree_trans *, struct btree_iter *,
+		    struct bch_inode_unpacked *, subvol_inum, unsigned);
 int bch2_inode_peek(struct btree_trans *, struct btree_iter *,
 		    struct bch_inode_unpacked *, subvol_inum, unsigned);
 
@@ -173,6 +175,20 @@ static inline u8 mode_to_type(umode_t mode)
 static inline u8 inode_d_type(struct bch_inode_unpacked *inode)
 {
 	return inode->bi_subvol ? DT_SUBVOL : mode_to_type(inode->bi_mode);
+}
+
+static inline u32 bch2_inode_flags(struct bkey_s_c k)
+{
+	switch (k.k->type) {
+	case KEY_TYPE_inode:
+		return le32_to_cpu(bkey_s_c_to_inode(k).v->bi_flags);
+	case KEY_TYPE_inode_v2:
+		return le64_to_cpu(bkey_s_c_to_inode_v2(k).v->bi_flags);
+	case KEY_TYPE_inode_v3:
+		return le64_to_cpu(bkey_s_c_to_inode_v3(k).v->bi_flags);
+	default:
+		return 0;
+	}
 }
 
 /* i_nlink: */

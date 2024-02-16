@@ -671,7 +671,7 @@ static loff_t find_tree_dqentry(struct qtree_mem_dqinfo *info,
 	ret = read_blk(info, blks[depth], buf);
 	if (ret < 0) {
 		quota_error(dquot->dq_sb, "Can't read quota tree block %u",
-			    blk);
+			    blks[depth]);
 		goto out_buf;
 	}
 	ret = 0;

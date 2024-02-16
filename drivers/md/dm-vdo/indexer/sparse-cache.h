@@ -30,7 +30,7 @@ int __must_check uds_make_sparse_cache(const struct index_geometry *geometry,
 				       unsigned int capacity, unsigned int zone_count,
 				       struct sparse_cache **cache_ptr);
 
-void uds_free_sparse_cache(struct sparse_cache *cache);
+void vdo_free_sparse_cache(struct sparse_cache *cache);
 
 bool uds_sparse_cache_contains(struct sparse_cache *cache, u64 virtual_chapter,
 			       unsigned int zone_number);

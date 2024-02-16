@@ -200,6 +200,7 @@
 #include <linux/seqlock.h>
 #include <linux/shrinker.h>
 #include <linux/srcu.h>
+#include <linux/thread_with_file_types.h>
 #include <linux/time_stats.h>
 #include <linux/types.h>
 #include <linux/workqueue.h>
@@ -265,6 +266,9 @@ do {									\
 #endif
 
 #define bch2_fmt(_c, fmt)		bch2_log_msg(_c, fmt "\n")
+
+__printf(2, 3)
+void bch2_print_opts(struct bch_opts *, const char *, ...);
 
 __printf(2, 3)
 void __bch2_print(struct bch_fs *c, const char *fmt, ...);
@@ -466,7 +470,6 @@ enum bch_time_stats {
 #include "replicas_types.h"
 #include "subvolume_types.h"
 #include "super_types.h"
-#include "thread_with_file_types.h"
 
 /* Number of nodes btree coalesce will try to coalesce at once */
 #define GC_MERGE_NODES		4U
@@ -505,6 +508,7 @@ enum gc_phase {
 	GC_PHASE_BTREE_deleted_inodes,
 	GC_PHASE_BTREE_logged_ops,
 	GC_PHASE_BTREE_rebalance_work,
+	GC_PHASE_BTREE_subvolume_children,
 
 	GC_PHASE_PENDING_DELETE,
 };
@@ -594,7 +598,7 @@ struct bch_dev {
 
 	/* The rest of this all shows up in sysfs */
 	atomic64_t		cur_latency[2];
-	struct time_stats	io_latency[2];
+	struct time_stats_quantiles	io_latency[2];
 
 #define CONGESTED_MAX		1024
 	atomic_t		congested;
@@ -1246,6 +1250,18 @@ static inline struct stdio_redirect *bch2_fs_stdio_redirect(struct bch_fs *c)
 	if (c->stdio_filter && c->stdio_filter != current)
 		stdio = NULL;
 	return stdio;
+}
+
+static inline unsigned metadata_replicas_required(struct bch_fs *c)
+{
+	return min(c->opts.metadata_replicas,
+		   c->opts.metadata_replicas_required);
+}
+
+static inline unsigned data_replicas_required(struct bch_fs *c)
+{
+	return min(c->opts.data_replicas,
+		   c->opts.data_replicas_required);
 }
 
 #define BKEY_PADDED_ONSTACK(key, pad)				\
