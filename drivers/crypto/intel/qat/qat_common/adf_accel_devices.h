@@ -332,6 +332,7 @@ struct adf_accel_vf_info {
 	struct ratelimit_state vf2pf_ratelimit;
 	u32 vf_nr;
 	bool init;
+	bool restarting;
 	u8 vf_compat_ver;
 };
 
@@ -401,6 +402,7 @@ struct adf_accel_dev {
 	struct adf_error_counters ras_errors;
 	struct mutex state_lock; /* protect state of the device */
 	bool is_vf;
+	bool autoreset_on_error;
 	u32 accel_id;
 };
 #endif
