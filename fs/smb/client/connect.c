@@ -3452,7 +3452,8 @@ int cifs_mount_get_tcon(struct cifs_mount_ctx *mnt_ctx)
 	 */
 	if ((cifs_sb->ctx->wsize == 0) ||
 	    (cifs_sb->ctx->wsize > server->ops->negotiate_wsize(tcon, ctx))) {
-		cifs_sb->ctx->wsize = round_down(server->ops->negotiate_wsize(tcon, ctx), PAGE_SIZE);
+		cifs_sb->ctx->wsize =
+			round_down(server->ops->negotiate_wsize(tcon, ctx), PAGE_SIZE);
 		/*
 		 * in the very unlikely event that the server sent a max write size under PAGE_SIZE,
 		 * (which would get rounded down to 0) then reset wsize to absolute minimum eg 4096

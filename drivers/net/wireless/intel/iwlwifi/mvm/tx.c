@@ -520,16 +520,6 @@ static void iwl_mvm_set_tx_cmd_crypto(struct iwl_mvm *mvm,
 	}
 }
 
-static void iwl_mvm_copy_hdr(void *cmd, const void *hdr, int hdrlen,
-			     const u8 *addr3_override)
-{
-	struct ieee80211_hdr *out_hdr = cmd;
-
-	memcpy(cmd, hdr, hdrlen);
-	if (addr3_override)
-		memcpy(out_hdr->addr3, addr3_override, ETH_ALEN);
-}
-
 static bool iwl_mvm_use_host_rate(struct iwl_mvm *mvm,
 				  struct iwl_mvm_sta *mvmsta,
 				  struct ieee80211_hdr *hdr,
@@ -553,6 +543,16 @@ static bool iwl_mvm_use_host_rate(struct iwl_mvm *mvm,
 	 * selection was fixed.
 	 */
 	return mvm->trans->trans_cfg->device_family < IWL_DEVICE_FAMILY_BZ;
+}
+
+static void iwl_mvm_copy_hdr(void *cmd, const void *hdr, int hdrlen,
+			     const u8 *addr3_override)
+{
+	struct ieee80211_hdr *out_hdr = cmd;
+
+	memcpy(cmd, hdr, hdrlen);
+	if (addr3_override)
+		memcpy(out_hdr->addr3, addr3_override, ETH_ALEN);
 }
 
 /*

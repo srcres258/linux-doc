@@ -3385,6 +3385,225 @@ inline void RTW89_SET_FWCMD_MCC_SET_DURATION_DURATION_Y(void *cmd, u32 val)
 	le32p_replace_bits((__le32 *)cmd + 4, val, GENMASK(31, 0));
 }
 
+enum rtw89_h2c_mrc_sch_types {
+	RTW89_H2C_MRC_SCH_BAND0_ONLY = 0,
+	RTW89_H2C_MRC_SCH_BAND1_ONLY = 1,
+	RTW89_H2C_MRC_SCH_DUAL_BAND = 2,
+};
+
+enum rtw89_h2c_mrc_role_types {
+	RTW89_H2C_MRC_ROLE_WIFI = 0,
+	RTW89_H2C_MRC_ROLE_BT = 1,
+	RTW89_H2C_MRC_ROLE_EMPTY = 2,
+};
+
+#define RTW89_MAC_MRC_MAX_ADD_SLOT_NUM 3
+#define RTW89_MAC_MRC_MAX_ADD_ROLE_NUM_PER_SLOT 1 /* before MLO */
+
+struct rtw89_fw_mrc_add_slot_arg {
+	u16 duration; /* unit: TU */
+	bool courtesy_en;
+	u8 courtesy_period;
+	u8 courtesy_target; /* slot idx */
+
+	unsigned int role_num;
+	struct {
+		enum rtw89_h2c_mrc_role_types role_type;
+		bool is_master;
+		bool en_tx_null;
+		enum rtw89_band band;
+		enum rtw89_bandwidth bw;
+		u8 macid;
+		u8 central_ch;
+		u8 primary_ch;
+		u8 null_early; /* unit: TU */
+
+		/* if MLD, for macid: [0, chip::support_mld_num)
+		 * otherwise, for macid: [0, 32)
+		 */
+		u32 macid_main_bitmap;
+		/* for MLD, bit X maps to macid: X + chip::support_mld_num */
+		u32 macid_paired_bitmap;
+	} roles[RTW89_MAC_MRC_MAX_ADD_ROLE_NUM_PER_SLOT];
+};
+
+struct rtw89_fw_mrc_add_arg {
+	u8 sch_idx;
+	enum rtw89_h2c_mrc_sch_types sch_type;
+	bool btc_in_sch;
+
+	unsigned int slot_num;
+	struct rtw89_fw_mrc_add_slot_arg slots[RTW89_MAC_MRC_MAX_ADD_SLOT_NUM];
+};
+
+struct rtw89_h2c_mrc_add_role {
+	__le32 w0;
+	__le32 w1;
+	__le32 w2;
+	__le32 macid_main_bitmap;
+	__le32 macid_paired_bitmap;
+} __packed;
+
+#define RTW89_H2C_MRC_ADD_ROLE_W0_MACID GENMASK(15, 0)
+#define RTW89_H2C_MRC_ADD_ROLE_W0_ROLE_TYPE GENMASK(23, 16)
+#define RTW89_H2C_MRC_ADD_ROLE_W0_IS_MASTER BIT(24)
+#define RTW89_H2C_MRC_ADD_ROLE_W0_IS_ALT_ROLE BIT(25)
+#define RTW89_H2C_MRC_ADD_ROLE_W0_TX_NULL_EN BIT(26)
+#define RTW89_H2C_MRC_ADD_ROLE_W0_ROLE_ALT_EN BIT(27)
+#define RTW89_H2C_MRC_ADD_ROLE_W1_CENTRAL_CH_SEG GENMASK(7, 0)
+#define RTW89_H2C_MRC_ADD_ROLE_W1_PRI_CH GENMASK(15, 8)
+#define RTW89_H2C_MRC_ADD_ROLE_W1_BW GENMASK(19, 16)
+#define RTW89_H2C_MRC_ADD_ROLE_W1_CH_BAND_TYPE GENMASK(21, 20)
+#define RTW89_H2C_MRC_ADD_ROLE_W1_RFK_BY_PASS BIT(22)
+#define RTW89_H2C_MRC_ADD_ROLE_W1_CAN_BTC BIT(23)
+#define RTW89_H2C_MRC_ADD_ROLE_W1_NULL_EARLY GENMASK(31, 24)
+#define RTW89_H2C_MRC_ADD_ROLE_W2_ALT_PERIOD GENMASK(7, 0)
+#define RTW89_H2C_MRC_ADD_ROLE_W2_ALT_ROLE_TYPE GENMASK(15, 8)
+#define RTW89_H2C_MRC_ADD_ROLE_W2_ALT_ROLE_MACID GENMASK(23, 16)
+
+struct rtw89_h2c_mrc_add_slot {
+	__le32 w0;
+	__le32 w1;
+	struct rtw89_h2c_mrc_add_role roles[];
+} __packed;
+
+#define RTW89_H2C_MRC_ADD_SLOT_W0_DURATION GENMASK(15, 0)
+#define RTW89_H2C_MRC_ADD_SLOT_W0_COURTESY_EN BIT(17)
+#define RTW89_H2C_MRC_ADD_SLOT_W0_ROLE_NUM GENMASK(31, 24)
+#define RTW89_H2C_MRC_ADD_SLOT_W1_COURTESY_PERIOD GENMASK(7, 0)
+#define RTW89_H2C_MRC_ADD_SLOT_W1_COURTESY_TARGET GENMASK(15, 8)
+
+struct rtw89_h2c_mrc_add {
+	__le32 w0;
+	/* Logically append flexible struct rtw89_h2c_mrc_add_slot, but there
+	 * are other flexible array inside it. We cannot access them correctly
+	 * through this struct. So, in case misusing, we don't really declare
+	 * it here.
+	 */
+} __packed;
+
+#define RTW89_H2C_MRC_ADD_W0_SCH_IDX GENMASK(3, 0)
+#define RTW89_H2C_MRC_ADD_W0_SCH_TYPE GENMASK(7, 4)
+#define RTW89_H2C_MRC_ADD_W0_SLOT_NUM GENMASK(15, 8)
+#define RTW89_H2C_MRC_ADD_W0_BTC_IN_SCH BIT(16)
+
+enum rtw89_h2c_mrc_start_actions {
+	RTW89_H2C_MRC_START_ACTION_START_NEW = 0,
+	RTW89_H2C_MRC_START_ACTION_REPLACE_OLD = 1,
+};
+
+struct rtw89_fw_mrc_start_arg {
+	u8 sch_idx;
+	u8 old_sch_idx;
+	u64 start_tsf;
+	enum rtw89_h2c_mrc_start_actions action;
+};
+
+struct rtw89_h2c_mrc_start {
+	__le32 w0;
+	__le32 start_tsf_low;
+	__le32 start_tsf_high;
+} __packed;
+
+#define RTW89_H2C_MRC_START_W0_SCH_IDX GENMASK(3, 0)
+#define RTW89_H2C_MRC_START_W0_OLD_SCH_IDX GENMASK(7, 4)
+#define RTW89_H2C_MRC_START_W0_ACTION GENMASK(15, 8)
+
+struct rtw89_h2c_mrc_del {
+	__le32 w0;
+} __packed;
+
+#define RTW89_H2C_MRC_DEL_W0_SCH_IDX GENMASK(3, 0)
+#define RTW89_H2C_MRC_DEL_W0_DEL_ALL BIT(4)
+#define RTW89_H2C_MRC_DEL_W0_STOP_ONLY BIT(5)
+#define RTW89_H2C_MRC_DEL_W0_SPECIFIC_ROLE_EN BIT(6)
+#define RTW89_H2C_MRC_DEL_W0_STOP_SLOT_IDX GENMASK(15, 8)
+#define RTW89_H2C_MRC_DEL_W0_SPECIFIC_ROLE_MACID GENMASK(31, 16)
+
+#define RTW89_MAC_MRC_MAX_REQ_TSF_NUM 2
+
+struct rtw89_fw_mrc_req_tsf_arg {
+	unsigned int num;
+	struct {
+		u8 band;
+		u8 port;
+	} infos[RTW89_MAC_MRC_MAX_REQ_TSF_NUM];
+};
+
+struct rtw89_h2c_mrc_req_tsf {
+	u8 req_tsf_num;
+	u8 infos[] __counted_by(req_tsf_num);
+} __packed;
+
+#define RTW89_H2C_MRC_REQ_TSF_INFO_BAND GENMASK(3, 0)
+#define RTW89_H2C_MRC_REQ_TSF_INFO_PORT GENMASK(7, 4)
+
+enum rtw89_h2c_mrc_upd_bitmap_actions {
+	RTW89_H2C_MRC_UPD_BITMAP_ACTION_DEL = 0,
+	RTW89_H2C_MRC_UPD_BITMAP_ACTION_ADD = 1,
+};
+
+struct rtw89_fw_mrc_upd_bitmap_arg {
+	u8 sch_idx;
+	u8 macid;
+	u8 client_macid;
+	enum rtw89_h2c_mrc_upd_bitmap_actions action;
+};
+
+struct rtw89_h2c_mrc_upd_bitmap {
+	__le32 w0;
+	__le32 w1;
+} __packed;
+
+#define RTW89_H2C_MRC_UPD_BITMAP_W0_SCH_IDX GENMASK(3, 0)
+#define RTW89_H2C_MRC_UPD_BITMAP_W0_ACTION BIT(4)
+#define RTW89_H2C_MRC_UPD_BITMAP_W0_MACID GENMASK(31, 16)
+#define RTW89_H2C_MRC_UPD_BITMAP_W1_CLIENT_MACID GENMASK(15, 0)
+
+struct rtw89_fw_mrc_sync_arg {
+	u8 offset; /* unit: TU */
+	struct {
+		u8 band;
+		u8 port;
+	} src, dest;
+};
+
+struct rtw89_h2c_mrc_sync {
+	__le32 w0;
+	__le32 w1;
+} __packed;
+
+#define RTW89_H2C_MRC_SYNC_W0_SYNC_EN BIT(0)
+#define RTW89_H2C_MRC_SYNC_W0_SRC_PORT GENMASK(11, 8)
+#define RTW89_H2C_MRC_SYNC_W0_SRC_BAND GENMASK(15, 12)
+#define RTW89_H2C_MRC_SYNC_W0_DEST_PORT GENMASK(19, 16)
+#define RTW89_H2C_MRC_SYNC_W0_DEST_BAND GENMASK(23, 20)
+#define RTW89_H2C_MRC_SYNC_W1_OFFSET GENMASK(15, 0)
+
+struct rtw89_fw_mrc_upd_duration_arg {
+	u8 sch_idx;
+	u64 start_tsf;
+
+	unsigned int slot_num;
+	struct {
+		u8 slot_idx;
+		u16 duration; /* unit: TU */
+	} slots[RTW89_MAC_MRC_MAX_ADD_SLOT_NUM];
+};
+
+struct rtw89_h2c_mrc_upd_duration {
+	__le32 w0;
+	__le32 start_tsf_low;
+	__le32 start_tsf_high;
+	__le32 slots[];
+} __packed;
+
+#define RTW89_H2C_MRC_UPD_DURATION_W0_SCH_IDX GENMASK(3, 0)
+#define RTW89_H2C_MRC_UPD_DURATION_W0_SLOT_NUM GENMASK(15, 8)
+#define RTW89_H2C_MRC_UPD_DURATION_W0_BTC_IN_SCH BIT(16)
+#define RTW89_H2C_MRC_UPD_DURATION_SLOT_SLOT_IDX GENMASK(7, 0)
+#define RTW89_H2C_MRC_UPD_DURATION_SLOT_DURATION GENMASK(31, 16)
+
 #define RTW89_C2H_HEADER_LEN 8
 
 struct rtw89_c2h_hdr {
@@ -3572,6 +3791,36 @@ static_assert(sizeof(struct rtw89_mac_mcc_tsf_rpt) <= RTW89_COMPLETION_BUF_SIZE)
 	le32_get_bits(*((const __le32 *)(c2h) + 3), GENMASK(31, 0))
 #define RTW89_GET_MAC_C2H_MCC_STATUS_RPT_TSF_HIGH(c2h) \
 	le32_get_bits(*((const __le32 *)(c2h) + 4), GENMASK(31, 0))
+
+struct rtw89_mac_mrc_tsf_rpt {
+	unsigned int num;
+	u64 tsfs[RTW89_MAC_MRC_MAX_REQ_TSF_NUM];
+};
+
+static_assert(sizeof(struct rtw89_mac_mrc_tsf_rpt) <= RTW89_COMPLETION_BUF_SIZE);
+
+struct rtw89_c2h_mrc_tsf_rpt_info {
+	__le32 tsf_low;
+	__le32 tsf_high;
+} __packed;
+
+struct rtw89_c2h_mrc_tsf_rpt {
+	struct rtw89_c2h_hdr hdr;
+	__le32 w2;
+	struct rtw89_c2h_mrc_tsf_rpt_info infos[];
+} __packed;
+
+#define RTW89_C2H_MRC_TSF_RPT_W2_REQ_TSF_NUM GENMASK(7, 0)
+
+struct rtw89_c2h_mrc_status_rpt {
+	struct rtw89_c2h_hdr hdr;
+	__le32 w2;
+	__le32 tsf_low;
+	__le32 tsf_high;
+} __packed;
+
+#define RTW89_C2H_MRC_STATUS_RPT_W2_STATUS GENMASK(5, 0)
+#define RTW89_C2H_MRC_STATUS_RPT_W2_SCH_IDX GENMASK(7, 6)
 
 struct rtw89_c2h_pkt_ofld_rsp {
 	__le32 w0;
@@ -3958,6 +4207,27 @@ enum rtw89_mcc_h2c_func {
 
 #define RTW89_MCC_WAIT_COND(group, func) \
 	((group) * NUM_OF_RTW89_MCC_H2C_FUNC + (func))
+
+/* CLASS 24 - MRC */
+#define H2C_CL_MRC			0x18
+enum rtw89_mrc_h2c_func {
+	H2C_FUNC_MRC_REQ_TSF		= 0x0,
+	H2C_FUNC_ADD_MRC		= 0x1,
+	H2C_FUNC_START_MRC		= 0x2,
+	H2C_FUNC_DEL_MRC		= 0x3,
+	H2C_FUNC_MRC_SYNC		= 0x4,
+	H2C_FUNC_MRC_UPD_DURATION	= 0x5,
+	H2C_FUNC_MRC_UPD_BITMAP		= 0x6,
+
+	NUM_OF_RTW89_MRC_H2C_FUNC,
+};
+
+/* can consider MRC's sch_idx as MCC's group */
+#define RTW89_MRC_WAIT_COND(sch_idx, func) \
+	((sch_idx) * NUM_OF_RTW89_MRC_H2C_FUNC + (func))
+
+#define RTW89_MRC_WAIT_COND_REQ_TSF \
+	RTW89_MRC_WAIT_COND(0 /* don't care */, H2C_FUNC_MRC_REQ_TSF)
 
 #define H2C_CAT_OUTSRC			0x2
 
@@ -4375,6 +4645,20 @@ int rtw89_fw_h2c_mcc_sync(struct rtw89_dev *rtwdev, u8 group, u8 source,
 			  u8 target, u8 offset);
 int rtw89_fw_h2c_mcc_set_duration(struct rtw89_dev *rtwdev,
 				  const struct rtw89_fw_mcc_duration *p);
+int rtw89_fw_h2c_mrc_add(struct rtw89_dev *rtwdev,
+			 const struct rtw89_fw_mrc_add_arg *arg);
+int rtw89_fw_h2c_mrc_start(struct rtw89_dev *rtwdev,
+			   const struct rtw89_fw_mrc_start_arg *arg);
+int rtw89_fw_h2c_mrc_del(struct rtw89_dev *rtwdev, u8 sch_idx);
+int rtw89_fw_h2c_mrc_req_tsf(struct rtw89_dev *rtwdev,
+			     const struct rtw89_fw_mrc_req_tsf_arg *arg,
+			     struct rtw89_mac_mrc_tsf_rpt *rpt);
+int rtw89_fw_h2c_mrc_upd_bitmap(struct rtw89_dev *rtwdev,
+				const struct rtw89_fw_mrc_upd_bitmap_arg *arg);
+int rtw89_fw_h2c_mrc_sync(struct rtw89_dev *rtwdev,
+			  const struct rtw89_fw_mrc_sync_arg *arg);
+int rtw89_fw_h2c_mrc_upd_duration(struct rtw89_dev *rtwdev,
+				  const struct rtw89_fw_mrc_upd_duration_arg *arg);
 
 static inline void rtw89_fw_h2c_init_ba_cam(struct rtw89_dev *rtwdev)
 {

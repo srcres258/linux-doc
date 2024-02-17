@@ -174,7 +174,6 @@ struct smb3_fs_context {
 	bool got_wsize;
 	bool got_bsize;
 	unsigned short port;
-
 	char *username;
 	char *password;
 	char *domainname;

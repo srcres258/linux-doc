@@ -109,7 +109,7 @@ const char *gpiod_get_label(struct gpio_desc *desc)
 		return "interrupt";
 
 	return test_bit(FLAG_REQUESTED, &flags) ?
-			rcu_dereference(desc->label) : NULL;
+			srcu_dereference(desc->label, &desc->srcu) : NULL;
 }
 
 static int desc_set_label(struct gpio_desc *desc, const char *label)
@@ -221,7 +221,8 @@ struct gpio_chip *gpiod_to_chip(const struct gpio_desc *desc)
 {
 	if (!desc)
 		return NULL;
-	return rcu_dereference(desc->gdev->chip);
+
+	return gpio_device_get_chip(desc->gdev);
 }
 EXPORT_SYMBOL_GPL(gpiod_to_chip);
 
@@ -291,7 +292,7 @@ EXPORT_SYMBOL(gpio_device_get_label);
  */
 struct gpio_chip *gpio_device_get_chip(struct gpio_device *gdev)
 {
-	return rcu_dereference(gdev->chip);
+	return rcu_dereference_check(gdev->chip, 1);
 }
 EXPORT_SYMBOL_GPL(gpio_device_get_chip);
 
@@ -447,7 +448,7 @@ static struct gpio_desc *gpio_name_to_desc(const char * const name)
 				 srcu_read_lock_held(&gpio_devices_srcu)) {
 		guard(srcu)(&gdev->srcu);
 
-		gc = rcu_dereference(gdev->chip);
+		gc = srcu_dereference(gdev->chip, &gdev->srcu);
 		if (!gc)
 			continue;
 
@@ -1190,7 +1191,7 @@ struct gpio_device *gpio_device_find(void *data,
 				 srcu_read_lock_held(&gpio_devices_srcu)) {
 		guard(srcu)(&gdev->srcu);
 
-		gc = rcu_dereference(gdev->chip);
+		gc = srcu_dereference(gdev->chip, &gdev->srcu);
 
 		if (gc && match(gc, data))
 			return gpio_device_get(gdev);
@@ -2978,7 +2979,7 @@ static int gpiod_get_raw_value_commit(const struct gpio_desc *desc)
 
 	guard(srcu)(&gdev->srcu);
 
-	gc = rcu_dereference(gdev->chip);
+	gc = srcu_dereference(gdev->chip, &gdev->srcu);
 	if (!gc)
 		return -ENODEV;
 
@@ -3012,7 +3013,7 @@ static bool gpio_device_chip_cmp(struct gpio_device *gdev, struct gpio_chip *gc)
 {
 	guard(srcu)(&gdev->srcu);
 
-	return gc == rcu_dereference(gdev->chip);
+	return gc == srcu_dereference(gdev->chip, &gdev->srcu);
 }
 
 int gpiod_get_array_value_complex(bool raw, bool can_sleep,
@@ -3593,7 +3594,7 @@ int gpiod_to_irq(const struct gpio_desc *desc)
 	gdev = desc->gdev;
 	/* FIXME Cannot use gpio_chip_guard due to const desc. */
 	guard(srcu)(&gdev->srcu);
-	gc = rcu_dereference(gdev->chip);
+	gc = srcu_dereference(gdev->chip, &gdev->srcu);
 	if (!gc)
 		return -ENODEV;
 
@@ -4492,24 +4493,27 @@ EXPORT_SYMBOL_GPL(gpiod_get_index_optional);
 int gpiod_hog(struct gpio_desc *desc, const char *name,
 	      unsigned long lflags, enum gpiod_flags dflags)
 {
-	struct gpio_chip *gc;
+	struct gpio_device *gdev = desc->gdev;
 	struct gpio_desc *local_desc;
 	int hwnum;
 	int ret;
 
+	CLASS(gpio_chip_guard, guard)(desc);
+	if (!guard.gc)
+		return -ENODEV;
+
 	if (test_and_set_bit(FLAG_IS_HOGGED, &desc->flags))
 		return 0;
 
-	gc = gpiod_to_chip(desc);
 	hwnum = gpio_chip_hwgpio(desc);
 
-	local_desc = gpiochip_request_own_desc(gc, hwnum, name,
+	local_desc = gpiochip_request_own_desc(guard.gc, hwnum, name,
 					       lflags, dflags);
 	if (IS_ERR(local_desc)) {
 		clear_bit(FLAG_IS_HOGGED, &desc->flags);
 		ret = PTR_ERR(local_desc);
 		pr_err("requesting hog GPIO %s (chip %s, offset %d) failed, %d\n",
-		       name, gc->label, hwnum, ret);
+		       name, gdev->label, hwnum, ret);
 		return ret;
 	}
 
@@ -4784,7 +4788,7 @@ static void gpiolib_dbg_show(struct seq_file *s, struct gpio_device *gdev)
 
 	guard(srcu)(&gdev->srcu);
 
-	gc = rcu_dereference(gdev->chip);
+	gc = srcu_dereference(gdev->chip, &gdev->srcu);
 	if (!gc) {
 		seq_puts(s, "Underlying GPIO chip is gone\n");
 		return;
@@ -4869,7 +4873,7 @@ static int gpiolib_seq_show(struct seq_file *s, void *v)
 
 	guard(srcu)(&gdev->srcu);
 
-	gc = rcu_dereference(gdev->chip);
+	gc = srcu_dereference(gdev->chip, &gdev->srcu);
 	if (!gc) {
 		seq_printf(s, "%s%s: (dangling chip)",
 			   priv->newline ? "\n" : "",

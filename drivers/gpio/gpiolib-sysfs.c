@@ -14,6 +14,7 @@
 #include <linux/slab.h>
 #include <linux/spinlock.h>
 #include <linux/string.h>
+#include <linux/srcu.h>
 #include <linux/sysfs.h>
 #include <linux/types.h>
 
@@ -756,7 +757,7 @@ int gpiochip_sysfs_register(struct gpio_device *gdev)
 
 	guard(srcu)(&gdev->srcu);
 
-	chip = rcu_dereference(gdev->chip);
+	chip = srcu_dereference(gdev->chip, &gdev->srcu);
 	if (!chip)
 		return -ENODEV;
 
@@ -800,8 +801,8 @@ void gpiochip_sysfs_unregister(struct gpio_device *gdev)
 
 	guard(srcu)(&gdev->srcu);
 
-	chip = rcu_dereference(gdev->chip);
-	if (chip)
+	chip = srcu_dereference(gdev->chip, &gdev->srcu);
+	if (!chip)
 		return;
 
 	/* unregister gpiod class devices owned by sysfs */
