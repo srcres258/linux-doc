@@ -108,7 +108,7 @@ STATIC void
 xfs_attri_item_free(
 	struct xfs_attri_log_item	*attrip)
 {
-	kmem_free(attrip->attri_item.li_lv_shadow);
+	kvfree(attrip->attri_item.li_lv_shadow);
 	xfs_attri_log_nameval_put(attrip->attri_nameval);
 	kmem_cache_free(xfs_attri_cache, attrip);
 }
@@ -226,7 +226,7 @@ xfs_attri_init(
 {
 	struct xfs_attri_log_item	*attrip;
 
-	attrip = kmem_cache_zalloc(xfs_attri_cache, GFP_NOFS | __GFP_NOFAIL);
+	attrip = kmem_cache_zalloc(xfs_attri_cache, GFP_KERNEL | __GFP_NOFAIL);
 
 	/*
 	 * Grab an extra reference to the name/value buffer for this log item.
@@ -251,7 +251,7 @@ static inline struct xfs_attrd_log_item *ATTRD_ITEM(struct xfs_log_item *lip)
 STATIC void
 xfs_attrd_item_free(struct xfs_attrd_log_item *attrdp)
 {
-	kmem_free(attrdp->attrd_item.li_lv_shadow);
+	kvfree(attrdp->attrd_item.li_lv_shadow);
 	kmem_cache_free(xfs_attrd_cache, attrdp);
 }
 
@@ -386,7 +386,7 @@ xfs_attr_free_item(
 		xfs_da_state_free(attr->xattri_da_state);
 	xfs_attri_log_nameval_put(attr->xattri_nameval);
 	if (attr->xattri_da_args->op_flags & XFS_DA_OP_RECOVERY)
-		kmem_free(attr);
+		kfree(attr);
 	else
 		kmem_cache_free(xfs_attr_intent_cache, attr);
 }
@@ -512,8 +512,8 @@ xfs_attri_recover_work(
 	if (error)
 		return ERR_PTR(error);
 
-	attr = kmem_zalloc(sizeof(struct xfs_attr_intent) +
-			   sizeof(struct xfs_da_args), KM_NOFS);
+	attr = kzalloc(sizeof(struct xfs_attr_intent) +
+			sizeof(struct xfs_da_args), GFP_KERNEL | __GFP_NOFAIL);
 	args = (struct xfs_da_args *)(attr + 1);
 
 	attr->xattri_da_args = args;
@@ -666,7 +666,7 @@ xfs_attr_create_done(
 
 	attrip = ATTRI_ITEM(intent);
 
-	attrdp = kmem_cache_zalloc(xfs_attrd_cache, GFP_NOFS | __GFP_NOFAIL);
+	attrdp = kmem_cache_zalloc(xfs_attrd_cache, GFP_KERNEL | __GFP_NOFAIL);
 
 	xfs_log_item_init(tp->t_mountp, &attrdp->attrd_item, XFS_LI_ATTRD,
 			  &xfs_attrd_item_ops);
