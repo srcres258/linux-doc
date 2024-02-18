@@ -25,7 +25,6 @@
 #include "btrfs_inode.h"
 #include "transaction.h"
 #include "compression.h"
-#include "xattr.h"
 #include "print-tree.h"
 #include "accessors.h"
 #include "dir-item.h"
@@ -777,7 +776,12 @@ static int begin_cmd(struct send_ctx *sctx, int cmd)
 	if (WARN_ON(!sctx->send_buf))
 		return -EINVAL;
 
-	BUG_ON(sctx->send_size);
+	if (unlikely(sctx->send_size != 0)) {
+		btrfs_err(sctx->send_root->fs_info,
+			  "send: command header buffer not empty cmd %d offset %llu",
+			  cmd, sctx->send_off);
+		return -EINVAL;
+	}
 
 	sctx->send_size += sizeof(*hdr);
 	hdr = (struct btrfs_cmd_header *)sctx->send_buf;
@@ -1070,7 +1074,15 @@ static int iterate_inode_ref(struct btrfs_root *root, struct btrfs_path *path,
 					ret = PTR_ERR(start);
 					goto out;
 				}
-				BUG_ON(start < p->buf);
+				if (unlikely(start < p->buf)) {
+					btrfs_err(root->fs_info,
+			"send: path ref buffer underflow for key (%llu %u %llu)",
+						  found_key->objectid,
+						  found_key->type,
+						  found_key->offset);
+					ret = -EINVAL;
+					goto out;
+				}
 			}
 			p->start = start;
 		} else {
@@ -4182,7 +4194,13 @@ static int process_recorded_refs(struct send_ctx *sctx, int *pending_move)
 	 * This should never happen as the root dir always has the same ref
 	 * which is always '..'
 	 */
-	BUG_ON(sctx->cur_ino <= BTRFS_FIRST_FREE_OBJECTID);
+	if (unlikely(sctx->cur_ino <= BTRFS_FIRST_FREE_OBJECTID)) {
+		btrfs_err(fs_info,
+			  "send: unexpected inode %llu in process_recorded_refs()",
+			  sctx->cur_ino);
+		ret = -EINVAL;
+		goto out;
+	}
 
 	valid_path = fs_path_alloc();
 	if (!valid_path) {
@@ -5257,10 +5275,11 @@ static int put_file_data(struct send_ctx *sctx, u64 offset, u32 len)
 {
 	struct btrfs_root *root = sctx->send_root;
 	struct btrfs_fs_info *fs_info = root->fs_info;
-	struct page *page;
+	struct folio *folio;
 	pgoff_t index = offset >> PAGE_SHIFT;
 	pgoff_t last_index;
 	unsigned pg_offset = offset_in_page(offset);
+	struct address_space *mapping = sctx->cur_inode->i_mapping;
 	int ret;
 
 	ret = put_data_header(sctx, len);
@@ -5273,44 +5292,45 @@ static int put_file_data(struct send_ctx *sctx, u64 offset, u32 len)
 		unsigned cur_len = min_t(unsigned, len,
 					 PAGE_SIZE - pg_offset);
 
-		page = find_lock_page(sctx->cur_inode->i_mapping, index);
-		if (!page) {
-			page_cache_sync_readahead(sctx->cur_inode->i_mapping,
+		folio = filemap_lock_folio(mapping, index);
+		if (IS_ERR(folio)) {
+			page_cache_sync_readahead(mapping,
 						  &sctx->ra, NULL, index,
 						  last_index + 1 - index);
 
-			page = find_or_create_page(sctx->cur_inode->i_mapping,
-						   index, GFP_KERNEL);
-			if (!page) {
-				ret = -ENOMEM;
+	                folio = filemap_grab_folio(mapping, index);
+			if (IS_ERR(folio)) {
+				ret = PTR_ERR(folio);
 				break;
 			}
 		}
 
-		if (PageReadahead(page))
-			page_cache_async_readahead(sctx->cur_inode->i_mapping,
-						   &sctx->ra, NULL, page_folio(page),
+		WARN_ON(folio_order(folio));
+
+		if (folio_test_readahead(folio))
+			page_cache_async_readahead(mapping,
+						   &sctx->ra, NULL, folio,
 						   index, last_index + 1 - index);
 
-		if (!PageUptodate(page)) {
-			btrfs_read_folio(NULL, page_folio(page));
-			lock_page(page);
-			if (!PageUptodate(page)) {
-				unlock_page(page);
+		if (!folio_test_uptodate(folio)) {
+			btrfs_read_folio(NULL, folio);
+			folio_lock(folio);
+			if (!folio_test_uptodate(folio)) {
+				folio_unlock(folio);
 				btrfs_err(fs_info,
 			"send: IO error at offset %llu for inode %llu root %llu",
-					page_offset(page), sctx->cur_ino,
+					folio_pos(folio), sctx->cur_ino,
 					sctx->send_root->root_key.objectid);
-				put_page(page);
+				folio_put(folio);
 				ret = -EIO;
 				break;
 			}
 		}
 
-		memcpy_from_page(sctx->send_buf + sctx->send_size, page,
+		memcpy_from_folio(sctx->send_buf + sctx->send_size, folio,
 				 pg_offset, cur_len);
-		unlock_page(page);
-		put_page(page);
+		folio_unlock(folio);
+		folio_put(folio);
 		index++;
 		pg_offset = 0;
 		len -= cur_len;
@@ -6140,7 +6160,7 @@ static int send_write_or_clone(struct send_ctx *sctx,
 	int ret = 0;
 	u64 offset = key->offset;
 	u64 end;
-	u64 bs = sctx->send_root->fs_info->sb->s_blocksize;
+	u64 bs = sctx->send_root->fs_info->sectorsize;
 
 	end = min_t(u64, btrfs_file_extent_end(path), sctx->cur_inode_size);
 	if (offset >= end)
@@ -7420,8 +7440,8 @@ static int tree_move_down(struct btrfs_path *path, int *level, u64 reada_min_gen
 	u64 reada_done = 0;
 
 	lockdep_assert_held_read(&parent->fs_info->commit_root_sem);
+	ASSERT(*level != 0);
 
-	BUG_ON(*level == 0);
 	eb = btrfs_read_node_slot(parent, slot);
 	if (IS_ERR(eb))
 		return PTR_ERR(eb);
