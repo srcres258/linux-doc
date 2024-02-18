@@ -313,3 +313,4 @@ void mnt_idmap_put(struct mnt_idmap *idmap);
 int path_from_stashed(struct dentry **stashed, unsigned long ino,
 		      struct vfsmount *mnt, const struct file_operations *fops,
 		      void *data, struct path *path);
+void prune_stashed_dentry(struct dentry **stashed, struct dentry *dentry);
