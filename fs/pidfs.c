@@ -14,6 +14,8 @@
 #include <linux/seq_file.h>
 #include <uapi/linux/pidfd.h>
 
+#include "internal.h"
+
 static int pidfd_release(struct inode *inode, struct file *file)
 {
 #ifndef CONFIG_FS_PID
@@ -186,9 +188,21 @@ static char *pidfs_dname(struct dentry *dentry, char *buffer, int buflen)
 			     d_inode(dentry)->i_ino);
 }
 
+static void pidfdfs_prune_dentry(struct dentry *dentry)
+{
+	struct inode *inode;
+
+	inode = d_inode(dentry);
+	if (inode) {
+		struct pid *pid = inode->i_private;
+		WRITE_ONCE(pid->stashed, NULL);
+	}
+}
+
 const struct dentry_operations pidfs_dentry_operations = {
 	.d_delete	= always_delete_dentry,
 	.d_dname	= pidfs_dname,
+	.d_prune	= pidfdfs_prune_dentry,
 };
 
 static int pidfs_init_fs_context(struct fs_context *fc)
@@ -213,29 +227,23 @@ static struct file_system_type pidfs_type = {
 struct file *pidfs_alloc_file(struct pid *pid, unsigned int flags)
 {
 
-	struct inode *inode;
 	struct file *pidfd_file;
+	struct path path;
+	int ret;
 
-	inode = iget_locked(pidfs_sb, pid->ino);
-	if (!inode)
-		return ERR_PTR(-ENOMEM);
+	do {
+		ret = path_from_stashed(&pid->stashed, pid->ino, pidfs_mnt,
+					&pidfs_file_operations,
+					&pidfs_inode_operations, get_pid(pid),
+					&path);
+		if (ret <= 0 && ret != -EAGAIN)
+			put_pid(pid);
+	} while (ret == -EAGAIN);
+	if (ret < 0)
+		return ERR_PTR(ret);
 
-	if (inode->i_state & I_NEW) {
-		inode->i_ino = pid->ino;
-		inode->i_mode = S_IFREG | S_IRUGO;
-		inode->i_op = &pidfs_inode_operations;
-		inode->i_fop = &pidfs_file_operations;
-		inode->i_flags |= S_IMMUTABLE;
-		inode->i_private = get_pid(pid);
-		simple_inode_init_ts(inode);
-		unlock_new_inode(inode);
-	}
-
-	pidfd_file = alloc_file_pseudo(inode, pidfs_mnt, "", flags,
-				       &pidfs_file_operations);
-	if (IS_ERR(pidfd_file))
-		iput(inode);
-
+	pidfd_file = dentry_open(&path, flags, current_cred());
+	path_put(&path);
 	return pidfd_file;
 }
 
