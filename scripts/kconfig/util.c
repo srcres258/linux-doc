@@ -7,25 +7,41 @@
 #include <stdarg.h>
 #include <stdlib.h>
 #include <string.h>
+
+#include "hashtable.h"
 #include "lkc.h"
+#include "util.h"
+
+/* hash table of all parsed Kconfig files */
+static HASHTABLE_DEFINE(file_hashtable, 1U << 11);
+
+struct file {
+	struct hlist_node node;
+	char name[];
+};
 
 /* file already present in list? If not add it */
-struct file *file_lookup(const char *name)
+const char *file_lookup(const char *name)
 {
 	struct file *file;
+	size_t len;
+	int hash = strhash(name);
 
-	for (file = file_list; file; file = file->next) {
-		if (!strcmp(name, file->name)) {
-			return file;
-		}
-	}
+	hash_for_each_possible(file_hashtable, file, node, hash)
+		if (!strcmp(name, file->name))
+			return file->name;
 
-	file = xmalloc(sizeof(*file));
+	len = strlen(name);
+	file = xmalloc(sizeof(*file) + len + 1);
 	memset(file, 0, sizeof(*file));
-	file->name = xstrdup(name);
-	file->next = file_list;
-	file_list = file;
-	return file;
+	memcpy(file->name, name, len);
+	file->name[len] = '\0';
+
+	hash_add(file_hashtable, &file->node, hash);
+
+	str_printf(&autoconf_cmd, "\t%s \\\n", name);
+
+	return file->name;
 }
 
 /* Allocate initial growable string */
