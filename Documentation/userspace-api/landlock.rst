@@ -347,42 +347,45 @@ of the involved processes do not have an enforced Landlock ruleset.
 Restricting IOCTL commands
 --------------------------
 
-When the ``LANDLOCK_ACCESS_FS_IOCTL`` access right is handled, Landlock will
-restrict the invocation of IOCTL commands.  However, to *permit* these IOCTL
-commands again, some of these IOCTL commands are then granted through other,
-preexisting access rights.
+When the ``LANDLOCK_ACCESS_FS_IOCTL`` right is handled, Landlock will restrict
+the invocation of IOCTL commands.  However, to *allow* these IOCTL commands
+again, some of these IOCTL commands are then granted through other, preexisting
+access rights.
 
 For example, consider a program which handles ``LANDLOCK_ACCESS_FS_IOCTL`` and
-``LANDLOCK_ACCESS_FS_READ_FILE``.  The program *permits*
+``LANDLOCK_ACCESS_FS_READ_FILE``.  The program *allows*
 ``LANDLOCK_ACCESS_FS_READ_FILE`` on a file ``foo.log``.
 
 By virtue of granting this access on the ``foo.log`` file, it is now possible to
 use common and harmless IOCTL commands which are useful when reading files, such
 as ``FIONREAD``.
 
-On the other hand, if the program permits ``LANDLOCK_ACCESS_FS_IOCTL`` on
-another file, ``FIONREAD`` will not work on that file when it is opened.  As
-soon as ``LANDLOCK_ACCESS_FS_READ_FILE`` is *handled* in the ruleset, the IOCTL
-commands affected by it can not be reenabled though ``LANDLOCK_ACCESS_FS_IOCTL``
-any more, but are then governed by ``LANDLOCK_ACCESS_FS_READ_FILE``.
+When both ``LANDLOCK_ACCESS_FS_IOCTL`` and other access rights are
+handled in the ruleset, these other access rights may start governing
+the use of individual IOCTL commands instead of
+``LANDLOCK_ACCESS_FS_IOCTL``.  For instance, if both
+``LANDLOCK_ACCESS_FS_IOCTL`` and ``LANDLOCK_ACCESS_FS_READ_FILE`` are
+handled, allowing ``LANDLOCK_ACCESS_FS_READ_FILE`` will make it
+possible to use ``FIONREAD`` and other IOCTL commands.
 
 The following table illustrates how IOCTL attempts for ``FIONREAD`` are
-filtered, depending on how a Landlock ruleset handles and permits the
-``LANDLOCK_ACCESS_FS_IOCTL`` and ``LANDLOCK_ACCESS_FS_READ_FILE`` access rights:
+filtered, depending on how a Landlock ruleset handles and allows the
+``LANDLOCK_ACCESS_FS_IOCTL`` and ``LANDLOCK_ACCESS_FS_READ_FILE`` rights:
 
-+------------------------+-------------+-------------------+-------------------+
-|                        | ``IOCTL``   | ``IOCTL`` handled | ``IOCTL`` handled |
-|                        | not handled | and permitted     | and not permitted |
-+------------------------+-------------+-------------------+-------------------+
-| ``READ_FILE`` not      | allow       | allow             | deny              |
-| handled                |             |                   |                   |
-+------------------------+             +-------------------+-------------------+
-| ``READ_FILE`` handled  |             | allow                                 |
-| and permitted          |             |                                       |
-+------------------------+             +-------------------+-------------------+
-| ``READ_FILE`` handled  |             | deny                                  |
-| and not permitted      |             |                                       |
-+------------------------+-------------+-------------------+-------------------+
++-------------------------+--------------+--------------+--------------+
+|                         | ``FS_IOCTL`` | ``FS_IOCTL`` | ``FS_IOCTL`` |
+|                         | not handled  | handled and  | handled and  |
+|                         |              | allowed      | not allowed  |
++-------------------------+--------------+--------------+--------------+
+| ``FS_READ_FILE``        | allow        | allow        | deny         |
+| not handled             |              |              |              |
++-------------------------+              +--------------+--------------+
+| ``FS_READ_FILE``        |              | allow                       |
+| handled and allowed     |              |                             |
++-------------------------+              +-----------------------------+
+| ``FS_READ_FILE``        |              | deny                        |
+| handled and not allowed |              |                             |
++-------------------------+--------------+-----------------------------+
 
 The full list of IOCTL commands and the access rights which affect them is
 documented below.
@@ -517,10 +520,9 @@ by the Documentation/admin-guide/cgroup-v1/memory.rst.
 IOCTL support
 -------------
 
-The ``LANDLOCK_ACCESS_FS_IOCTL`` access right restricts the use of
-:manpage:`ioctl(2)`, but it only applies to newly opened files.  This means
-specifically that pre-existing file descriptors like stdin, stdout and stderr
-are unaffected.
+The ``LANDLOCK_ACCESS_FS_IOCTL`` right restricts the use of :manpage:`ioctl(2)`,
+but it only applies to newly opened files.  This means specifically that
+pre-existing file descriptors like stdin, stdout and stderr are unaffected.
 
 Users should be aware that TTY devices have traditionally permitted to control
 other processes on the same TTY through the ``TIOCSTI`` and ``TIOCLINUX`` IOCTL
@@ -531,7 +533,7 @@ function checks whether a given file descriptor is a TTY.
 
 Landlock's IOCTL support is coarse-grained at the moment, but may become more
 fine-grained in the future.  Until then, users are advised to establish the
-guarantees that they need through the file hierarchy, by only permitting the
+guarantees that they need through the file hierarchy, by only allowing the
 ``LANDLOCK_ACCESS_FS_IOCTL`` right on files where it is really harmless.  In
 cases where you can control the mounts, the ``nodev`` mount option can help to
 rule out that device files can be accessed.

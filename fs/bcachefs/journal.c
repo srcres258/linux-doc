@@ -53,33 +53,48 @@ static void bch2_journal_buf_to_text(struct printbuf *out, struct journal *j, u6
 	unsigned i = seq & JOURNAL_BUF_MASK;
 	struct journal_buf *buf = j->buf + i;
 
-	prt_printf(out, "seq:");
+	prt_str(out, "seq:");
 	prt_tab(out);
 	prt_printf(out, "%llu", seq);
 	prt_newline(out);
 	printbuf_indent_add(out, 2);
 
-	prt_printf(out, "refcount:");
+	prt_str(out, "refcount:");
 	prt_tab(out);
 	prt_printf(out, "%u", journal_state_count(s, i));
 	prt_newline(out);
 
-	prt_printf(out, "size:");
+	prt_str(out, "size:");
 	prt_tab(out);
 	prt_human_readable_u64(out, vstruct_bytes(buf->data));
 	prt_newline(out);
 
-	prt_printf(out, "expires");
+	prt_str(out, "expires:");
 	prt_tab(out);
 	prt_printf(out, "%li jiffies", buf->expires - jiffies);
 	prt_newline(out);
 
+	prt_str(out, "flags:");
+	prt_tab(out);
+	if (buf->noflush)
+		prt_str(out, "noflush ");
+	if (buf->must_flush)
+		prt_str(out, "must_flush ");
+	if (buf->separate_flush)
+		prt_str(out, "separate_flush ");
+	if (buf->need_flush_to_write_buffer)
+		prt_str(out, "need_flush_to_write_buffer ");
+	if (buf->need_flush_to_write_buffer)
+		prt_str(out, "need_flush_to_write_buffer ");
 	if (buf->write_done)
-		prt_printf(out, "write done\n");
-	else if (buf->write_allocated)
-		prt_printf(out, "write allocated\n");
-	else if (buf->write_started)
-		prt_printf(out, "write started\n");
+		prt_str(out, "write done ");
+	if (buf->write_started)
+		prt_str(out, "write started ");
+	if (buf->write_allocated)
+		prt_str(out, "write allocated ");
+	if (buf->write_done)
+		prt_str(out, "write done");
+	prt_newline(out);
 
 	printbuf_indent_sub(out, 2);
 }
@@ -1420,6 +1435,7 @@ void __bch2_journal_debug_to_text(struct printbuf *out, struct journal *j)
 	prt_printf(out, "reclaim kicked:\t\t%u\n",		j->reclaim_kicked);
 	prt_printf(out, "reclaim runs in:\t%u ms\n",		time_after(j->next_reclaim, now)
 	       ? jiffies_to_msecs(j->next_reclaim - jiffies) : 0);
+	prt_printf(out, "blocked:\t\t%u\n",			j->blocked);
 	prt_printf(out, "current entry sectors:\t%u\n",		j->cur_entry_sectors);
 	prt_printf(out, "current entry error:\t%s\n",		bch2_journal_errors[j->cur_entry_error]);
 	prt_printf(out, "current entry:\t\t");

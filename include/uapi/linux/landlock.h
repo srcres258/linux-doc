@@ -213,17 +213,14 @@ struct landlock_net_port_attr {
  *   %LANDLOCK_ACCESS_FS_IOCTL, granting these access rights will unlock access
  *   to additional groups of IOCTL commands, on the affected files:
  *
- *   * %LANDLOCK_ACCESS_FS_READ_FILE unlocks access to ``FIOQSIZE``,
- *     ``FS_IOC_FIEMAP``, ``FIBMAP``, ``FIGETBSZ``, ``FIONREAD``,
- *     ``FIDEDUPRANGE``.
- *
- *   * %LANDLOCK_ACCESS_FS_WRITE_FILE unlocks access to ``FIOQSIZE``,
- *     ``FS_IOC_FIEMAP``, ``FIBMAP``, ``FIGETBSZ``, ``FICLONE``,
- *     ``FICLONERANGE``, ``FS_IOC_RESVSP``, ``FS_IOC_RESVSP64``,
- *     ``FS_IOC_UNRESVSP``, ``FS_IOC_UNRESVSP64``, ``FS_IOC_ZERO_RANGE``.
+ *   * %LANDLOCK_ACCESS_FS_READ_FILE and %LANDLOCK_ACCESS_FS_WRITE_FILE unlock
+ *     access to ``FIOQSIZE``, ``FIONREAD``, ``FIGETBSZ``, ``FS_IOC_FIEMAP``,
+ *     ``FIBMAP``, ``FIDEDUPERANGE``, ``FICLONE``, ``FICLONERANGE``,
+ *     ``FS_IOC_RESVSP``, ``FS_IOC_RESVSP64``, ``FS_IOC_UNRESVSP``,
+ *     ``FS_IOC_UNRESVSP64``, ``FS_IOC_ZERO_RANGE``.
  *
  *   * %LANDLOCK_ACCESS_FS_READ_DIR unlocks access to ``FIOQSIZE``,
- *     ``FS_IOC_FIEMAP``, ``FIBMAP``, ``FIGETBSZ``.
+ *     ``FIONREAD``, ``FIGETBSZ``.
  *
  *   When these access rights are handled in the ruleset, the availability of
  *   the affected IOCTL commands is not governed by %LANDLOCK_ACCESS_FS_IOCTL

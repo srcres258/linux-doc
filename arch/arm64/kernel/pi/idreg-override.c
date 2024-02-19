@@ -23,15 +23,6 @@
 
 static u64 __boot_status __initdata;
 
-// temporary __prel64 related definitions
-// to be removed when this code is moved under pi/
-
-#define __prel64_initconst	__initconst
-
-#define PREL64(type, name)	union { type *name; }
-
-#define prel64_pointer(__d)	(__d)
-
 typedef bool filter_t(u64 val);
 
 struct ftr_set_desc {
@@ -206,6 +197,7 @@ static const struct ftr_set_desc sw_features __prel64_initconst = {
 static const
 PREL64(const struct ftr_set_desc, reg) regs[] __prel64_initconst = {
 	{ &mmfr1	},
+	{ &mmfr2	},
 	{ &pfr0 	},
 	{ &pfr1 	},
 	{ &isar1	},

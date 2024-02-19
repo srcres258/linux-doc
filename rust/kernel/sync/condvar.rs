@@ -27,6 +27,7 @@ macro_rules! new_condvar {
         $crate::sync::CondVar::new($crate::optional_name!($($name)?), $crate::static_lock_class!())
     };
 }
+pub use new_condvar;
 
 /// A conditional variable.
 ///
@@ -44,8 +45,7 @@ macro_rules! new_condvar {
 /// The following is an example of using a condvar with a mutex:
 ///
 /// ```
-/// use kernel::sync::{CondVar, Mutex};
-/// use kernel::{new_condvar, new_mutex};
+/// use kernel::sync::{new_condvar, new_mutex, CondVar, Mutex};
 ///
 /// #[pin_data]
 /// pub struct Example {
@@ -87,6 +87,8 @@ pub struct CondVar {
 
     /// A condvar needs to be pinned because it contains a [`struct list_head`] that is
     /// self-referential, so it cannot be safely moved once it is initialised.
+    ///
+    /// [`struct list_head`]: srctree/include/linux/types.h
     #[pin]
     _pin: PhantomPinned,
 }

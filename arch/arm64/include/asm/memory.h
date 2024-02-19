@@ -213,6 +213,16 @@
 #include <asm/boot.h>
 #include <asm/bug.h>
 #include <asm/sections.h>
+#include <asm/sysreg.h>
+
+static inline u64 __pure read_tcr(void)
+{
+	u64  tcr;
+
+	// read_sysreg() uses asm volatile, so avoid it here
+	asm("mrs %0, tcr_el1" : "=r"(tcr));
+	return tcr;
+}
 
 #if VA_BITS > 48
 // For reasons of #include hell, we can't use TCR_T1SZ_OFFSET/TCR_T1SZ_MASK here

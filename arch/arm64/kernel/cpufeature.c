@@ -2092,14 +2092,7 @@ static bool has_nested_virt_support(const struct arm64_cpu_capabilities *cap,
 static bool hvhe_possible(const struct arm64_cpu_capabilities *entry,
 			  int __unused)
 {
-	u64 val;
-
-	val = read_sysreg(id_aa64mmfr1_el1);
-	if (!cpuid_feature_extract_unsigned_field(val, ID_AA64MMFR1_EL1_VH_SHIFT))
-		return false;
-
-	val = arm64_sw_feature_override.val & arm64_sw_feature_override.mask;
-	return cpuid_feature_extract_unsigned_field(val, ARM64_SW_FEATURE_OVERRIDE_HVHE);
+	return arm64_test_sw_feature_override(ARM64_SW_FEATURE_OVERRIDE_HVHE);
 }
 
 #ifdef CONFIG_ARM64_PAN
@@ -2789,6 +2782,33 @@ static const struct arm64_cpu_capabilities arm64_features[] = {
 		.type = ARM64_CPUCAP_SYSTEM_FEATURE,
 		.matches = has_lpa2,
 	},
+#ifdef CONFIG_ARM64_VA_BITS_52
+	{
+		.capability = ARM64_HAS_VA52,
+		.type = ARM64_CPUCAP_BOOT_CPU_FEATURE,
+		.matches = has_cpuid_feature,
+		.field_width = 4,
+#ifdef CONFIG_ARM64_64K_PAGES
+		.desc = "52-bit Virtual Addressing (LVA)",
+		.sign = FTR_SIGNED,
+		.sys_reg = SYS_ID_AA64MMFR2_EL1,
+		.field_pos = ID_AA64MMFR2_EL1_VARange_SHIFT,
+		.min_field_value = ID_AA64MMFR2_EL1_VARange_52,
+#else
+		.desc = "52-bit Virtual Addressing (LPA2)",
+		.sys_reg = SYS_ID_AA64MMFR0_EL1,
+#ifdef CONFIG_ARM64_4K_PAGES
+		.sign = FTR_SIGNED,
+		.field_pos = ID_AA64MMFR0_EL1_TGRAN4_SHIFT,
+		.min_field_value = ID_AA64MMFR0_EL1_TGRAN4_52_BIT,
+#else
+		.sign = FTR_UNSIGNED,
+		.field_pos = ID_AA64MMFR0_EL1_TGRAN16_SHIFT,
+		.min_field_value = ID_AA64MMFR0_EL1_TGRAN16_52_BIT,
+#endif
+#endif
+	},
+#endif
 	{
 		.desc = "NV1",
 		.capability = ARM64_HAS_HCR_NV1,

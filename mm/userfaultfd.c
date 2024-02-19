@@ -140,9 +140,6 @@ static struct vm_area_struct *uffd_mfill_lock(struct mm_struct *dst_mm,
 out_unlock:
 	mmap_read_unlock(dst_mm);
 	return dst_vma;
-out_unlock:
-	unlock_vma(dst_vma);
-	return ERR_PTR(-ENOENT);
 }
 
 static void uffd_mfill_unlock(struct vm_area_struct *vma)

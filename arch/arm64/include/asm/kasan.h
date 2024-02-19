@@ -17,7 +17,6 @@
 
 asmlinkage void kasan_early_init(void);
 void kasan_init(void);
-void kasan_copy_shadow(pgd_t *pgdir);
 
 #else
 static inline void kasan_init(void) { }

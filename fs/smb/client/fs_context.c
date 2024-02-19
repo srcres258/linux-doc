@@ -880,8 +880,7 @@ static int smb3_reconfigure(struct fs_context *fc)
 	bool need_recon = false;
 	int rc;
 
-	if ((ses->ses_status == SES_NEED_RECON) ||
-	    (ses->ses_status == SES_IN_SETUP))
+	if (ses->expired_pwd)
 		need_recon = true;
 
 	rc = smb3_verify_reconfigure_ctx(fc, ctx, cifs_sb->ctx, need_recon);
@@ -1155,7 +1154,7 @@ static int smb3_fs_context_parse_param(struct fs_context *fc,
 	case Opt_wsize:
 		ctx->wsize = result.uint_32;
 		ctx->got_wsize = true;
-		if (round_down(ctx->wsize, PAGE_SIZE) != ctx->wsize) {
+		if (ctx->wsize % PAGE_SIZE != 0) {
 			ctx->wsize = round_down(ctx->wsize, PAGE_SIZE);
 			if (ctx->wsize == 0) {
 				ctx->wsize = PAGE_SIZE;

@@ -2722,13 +2722,13 @@ static int complete_formation(struct module *mod, struct load_info *info)
 
 	err = module_enable_rodata_ro(mod, false);
 	if (err)
-		goto out;
+		goto out_strict_rwx;
 	err = module_enable_data_nx(mod);
 	if (err)
-		goto out;
+		goto out_strict_rwx;
 	err = module_enable_text_rox(mod);
 	if (err)
-		goto out;
+		goto out_strict_rwx;
 
 	/*
 	 * Mark state as coming so strong_try_module_get() ignores us,
@@ -2739,6 +2739,8 @@ static int complete_formation(struct module *mod, struct load_info *info)
 
 	return 0;
 
+out_strict_rwx:
+	module_bug_cleanup(mod);
 out:
 	mutex_unlock(&module_mutex);
 	return err;

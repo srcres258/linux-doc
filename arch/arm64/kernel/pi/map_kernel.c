@@ -50,8 +50,7 @@ static void __init map_kernel(u64 kaslr_offset, u64 va_offset, int root_level)
 	 * install SW breakpoints. Allow this (only) when explicitly requested
 	 * with rodata=off.
 	 */
-	if (cpuid_feature_extract_unsigned_field(arm64_sw_feature_override.val,
-						 ARM64_SW_FEATURE_OVERRIDE_RODATA_OFF))
+	if (arm64_test_sw_feature_override(ARM64_SW_FEATURE_OVERRIDE_RODATA_OFF))
 		text_prot = PAGE_KERNEL_EXEC;
 
 	/*
@@ -250,8 +249,7 @@ asmlinkage void __init early_map_kernel(u64 boot_status, void *fdt)
 		sysreg_clear_set(tcr_el1, TCR_T1SZ_MASK, TCR_T1SZ(va_bits));
 
 	if (IS_ENABLED(CONFIG_ARM64_WXN) &&
-	    cpuid_feature_extract_unsigned_field(arm64_sw_feature_override.val,
-						 ARM64_SW_FEATURE_OVERRIDE_NOWXN))
+	    arm64_test_sw_feature_override(ARM64_SW_FEATURE_OVERRIDE_NOWXN))
 		disable_wxn();
 
 	/*

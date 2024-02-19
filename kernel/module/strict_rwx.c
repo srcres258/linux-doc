@@ -12,9 +12,12 @@
 #include "internal.h"
 
 static int module_set_memory(const struct module *mod, enum mod_mem_type type,
-			      int (*set_memory)(unsigned long start, int num_pages))
+			     int (*set_memory)(unsigned long start, int num_pages))
 {
 	const struct module_memory *mod_mem = &mod->mem[type];
+
+	if (!mod_mem->base)
+		return 0;
 
 	set_vm_flush_reset_perms(mod_mem->base);
 	return set_memory((unsigned long)mod_mem->base, mod_mem->size >> PAGE_SHIFT);
@@ -43,8 +46,7 @@ int module_enable_text_rox(const struct module *mod)
 
 int module_enable_rodata_ro(const struct module *mod, bool after_init)
 {
-	if (!IS_ENABLED(CONFIG_STRICT_MODULE_RWX) || !rodata_enabled)
-		return;
+	int ret;
 
 	if (!IS_ENABLED(CONFIG_STRICT_MODULE_RWX) || !rodata_enabled)
 		return 0;

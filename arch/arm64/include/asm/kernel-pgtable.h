@@ -41,19 +41,6 @@
  * with two adjacent PGDIR entries, which means that an additional page table
  * may be needed at each subordinate level.
  */
-#ifdef CONFIG_ARM64_4K_PAGES
-#define SWAPPER_PGTABLE_LEVELS	(CONFIG_PGTABLE_LEVELS - 1)
-#else
-#define SWAPPER_PGTABLE_LEVELS	(CONFIG_PGTABLE_LEVELS)
-#endif
-
-
-/*
- * A relocatable kernel may execute from an address that differs from the one at
- * which it was linked. In the worst case, its runtime placement may intersect
- * with two adjacent PGDIR entries, which means that an additional page table
- * may be needed at each subordinate level.
- */
 #define EXTRA_PAGE	__is_defined(CONFIG_RELOCATABLE)
 
 #define SPAN_NR_ENTRIES(vstart, vend, shift) \
@@ -75,11 +62,8 @@
 #define INIT_IDMAP_DIR_PAGES	(EARLY_PAGES(INIT_IDMAP_PGTABLE_LEVELS, KIMAGE_VADDR, _end, 1))
 #define INIT_IDMAP_DIR_SIZE	((INIT_IDMAP_DIR_PAGES + EARLY_IDMAP_EXTRA_PAGES) * PAGE_SIZE)
 
-#define EARLY_PAGES(vstart, vend, add) ( 1 			/* PGDIR page */				\
-			+ EARLY_PGDS((vstart), (vend), add) 	/* each PGDIR needs a next level page table */	\
-			+ EARLY_PUDS((vstart), (vend), add)	/* each PUD needs a next level page table */	\
-			+ EARLY_PMDS((vstart), (vend), add))	/* each PMD needs a next level page table */
-#define INIT_DIR_SIZE (PAGE_SIZE * EARLY_PAGES(KIMAGE_VADDR, _end, EXTRA_PAGE))
+#define INIT_IDMAP_FDT_PAGES	(EARLY_PAGES(INIT_IDMAP_PGTABLE_LEVELS, 0UL, UL(MAX_FDT_SIZE), 1) - 1)
+#define INIT_IDMAP_FDT_SIZE	((INIT_IDMAP_FDT_PAGES + EARLY_IDMAP_EXTRA_FDT_PAGES) * PAGE_SIZE)
 
 /* The number of segments in the kernel image (text, rodata, inittext, initdata, data+bss) */
 #define KERNEL_SEGMENT_COUNT	5

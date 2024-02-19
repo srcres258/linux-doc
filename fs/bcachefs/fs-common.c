@@ -486,10 +486,10 @@ int bch2_rename_trans(struct btree_trans *trans,
 			goto err;
 		}
 
-		if (S_ISDIR(dst_inode_u->bi_mode) &&
-		    bch2_empty_dir_trans(trans, dst_inum)) {
-			ret = -ENOTEMPTY;
-			goto err;
+		if (S_ISDIR(dst_inode_u->bi_mode)) {
+			ret = bch2_empty_dir_trans(trans, dst_inum);
+			if (ret)
+				goto err;
 		}
 	}
 
