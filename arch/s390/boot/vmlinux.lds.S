@@ -31,6 +31,7 @@ SECTIONS
 		_text = .;	/* Text */
 		*(.text)
 		*(.text.*)
+		INIT_TEXT
 		_etext = . ;
 	}
 	.rodata : {
@@ -38,6 +39,9 @@ SECTIONS
 		*(.rodata)	 /* read-only data */
 		*(.rodata.*)
 		_erodata = . ;
+	}
+	.got : {
+		*(.got)
 	}
 	NOTES
 	.data :	{
@@ -118,8 +122,29 @@ SECTIONS
 	}
 	_end = .;
 
+	DWARF_DEBUG
+	ELF_DETAILS
+
+	/*
+	 * Sections that should stay zero sized, which is safer to
+	 * explicitly check instead of blindly discarding.
+	 */
+	.got.plt : {
+		*(.got.plt)
+	}
+	ASSERT(SIZEOF(.got.plt) == 0, "Unexpected GOT/PLT entries detected!")
+	.plt : {
+		*(.plt) *(.plt.*) *(.iplt) *(.igot .igot.plt)
+	}
+	ASSERT(SIZEOF(.plt) == 0, "Unexpected run-time procedure linkages detected!")
+	.rela.dyn : {
+		*(.rela.*) *(.rela_*)
+	}
+	ASSERT(SIZEOF(.rela.dyn) == 0, "Unexpected run-time relocations (.rela) detected!")
+
 	/* Sections to be discarded */
 	/DISCARD/ : {
+		COMMON_DISCARDS
 		*(.eh_frame)
 		*(__ex_table)
 		*(*__ksymtab*)
