@@ -3956,7 +3956,7 @@ SYSCALL_DEFINE4(pidfd_send_signal, int, pidfd, int, sig,
 
 		/* Only allow sending arbitrary signals to yourself. */
 		ret = -EPERM;
-		if ((task_pid(current) != pid) &&
+		if (((task_pid(current) != pid) || type > PIDTYPE_TGID) &&
 		    (kinfo.si_code >= 0 || kinfo.si_code == SI_TKILL))
 			goto err;
 	} else {
