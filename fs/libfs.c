@@ -1580,7 +1580,7 @@ EXPORT_SYMBOL(alloc_anon_inode);
  * All arguments are ignored and it just returns -EINVAL.
  */
 int
-simple_nosetlease(struct file *filp, int arg, struct file_lock **flp,
+simple_nosetlease(struct file *filp, int arg, struct file_lease **flp,
 		  void **priv)
 {
 	return -EINVAL;
@@ -1752,7 +1752,7 @@ static int generic_ci_d_hash(const struct dentry *dentry, struct qstr *str)
 	const struct inode *dir = READ_ONCE(dentry->d_inode);
 	struct super_block *sb = dentry->d_sb;
 	const struct unicode_map *um = sb->s_encoding;
-	int ret = 0;
+	int ret;
 
 	if (!dir || !IS_CASEFOLDED(dir))
 		return 0;
@@ -1973,3 +1973,124 @@ struct timespec64 simple_inode_init_ts(struct inode *inode)
 	return ts;
 }
 EXPORT_SYMBOL(simple_inode_init_ts);
+
+static inline struct dentry *get_stashed_dentry(struct dentry *stashed)
+{
+	struct dentry *dentry;
+
+	rcu_read_lock();
+	dentry = READ_ONCE(stashed);
+	if (!dentry || !lockref_get_not_dead(&dentry->d_lockref))
+		dentry = NULL;
+	rcu_read_unlock();
+	return dentry;
+}
+
+static struct dentry *prepare_anon_dentry(unsigned long ino,
+					  struct super_block *sb,
+					  const struct file_operations *fops,
+					  void *data)
+{
+	struct dentry *dentry;
+	struct inode *inode;
+
+	dentry = d_alloc_anon(sb);
+	if (!dentry)
+		return ERR_PTR(-ENOMEM);
+
+	inode = new_inode_pseudo(sb);
+	if (!inode) {
+		dput(dentry);
+		return ERR_PTR(-ENOMEM);
+	}
+
+	inode->i_ino = ino;
+	inode->i_flags |= S_IMMUTABLE;
+	inode->i_mode = S_IFREG | S_IRUGO;
+	inode->i_fop = fops;
+	inode->i_private = data;
+	simple_inode_init_ts(inode);
+
+	/* @data is now owned by the fs */
+	d_instantiate(dentry, inode);
+	return dentry;
+}
+
+static struct dentry *stash_dentry(struct dentry **stashed,
+				   struct dentry *dentry)
+{
+	guard(rcu)();
+	for (;;) {
+		struct dentry *old;
+
+		/* Assume any old dentry was cleared out. */
+		old = cmpxchg(stashed, NULL, dentry);
+		if (likely(!old))
+			return dentry;
+
+		/* Check if somebody else installed a reusable dentry. */
+		if (lockref_get_not_dead(&old->d_lockref))
+			return old;
+
+		/* There's an old dead dentry there, try to take it over. */
+		if (likely(try_cmpxchg(stashed, &old, dentry)))
+			return dentry;
+	}
+}
+
+/**
+ * path_from_stashed - create path from stashed or new dentry
+ * @stashed:    where to retrieve or stash dentry
+ * @ino:        inode number to use
+ * @mnt:        mnt of the filesystems to use
+ * @fops:       file operations to use
+ * @data:       data to store in inode->i_private
+ * @path:       path to create
+ *
+ * The function tries to retrieve a stashed dentry from @stashed. If the dentry
+ * is still valid then it will be reused. If the dentry isn't able the function
+ * will allocate a new dentry and inode. It will then check again whether it
+ * can reuse an existing dentry in case one has been added in the meantime or
+ * update @stashed with the newly added dentry.
+ *
+ * Special-purpose helper for nsfs and pidfs.
+ *
+ * Return: If 0 or an error is returned the caller can be sure that @data must
+ *         be cleaned up. If 1 is returned @data is owned by the filesystem.
+ */
+int path_from_stashed(struct dentry **stashed, unsigned long ino,
+		      struct vfsmount *mnt, const struct file_operations *fops,
+		      void *data, struct path *path)
+{
+	struct dentry *dentry;
+	int ret = 0;
+
+	/* See if dentry can be reused. */
+	path->dentry = get_stashed_dentry(*stashed);
+	if (path->dentry)
+		goto out_path;
+
+	/* Allocate a new dentry. */
+	dentry = prepare_anon_dentry(ino, mnt->mnt_sb, fops, data);
+	if (IS_ERR(dentry))
+		return PTR_ERR(dentry);
+
+	/* Added a new dentry. @data is now owned by the filesystem. */
+	path->dentry = stash_dentry(stashed, dentry);
+	if (path->dentry != dentry)
+		dput(dentry);
+	ret = 1;
+
+out_path:
+	path->mnt = mntget(mnt);
+	return ret;
+}
+
+void prune_stashed_dentry(struct dentry **stashed, struct dentry *dentry)
+{
+	/*
+	 * Only replace our own @dentry as someone else might've already
+	 * cleared out @dentry and stashed their own dentry in there.
+	 */
+	cmpxchg(stashed, dentry, NULL);
+}
