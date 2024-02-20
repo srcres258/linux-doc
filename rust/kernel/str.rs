@@ -149,13 +149,13 @@ impl CStr {
         self.0.as_ptr() as _
     }
 
-    /// Convert the string to a byte slice without the trailing 0 byte.
+    /// Convert the string to a byte slice without the trailing `NUL` byte.
     #[inline]
     pub fn as_bytes(&self) -> &[u8] {
         &self.0[..self.len()]
     }
 
-    /// Convert the string to a byte slice containing the trailing 0 byte.
+    /// Convert the string to a byte slice containing the trailing `NUL` byte.
     #[inline]
     pub const fn as_bytes_with_nul(&self) -> &[u8] {
         &self.0
@@ -191,9 +191,9 @@ impl CStr {
     /// ```
     /// # use kernel::c_str;
     /// # use kernel::str::CStr;
+    /// let bar = c_str!("ツ");
     /// // SAFETY: String literals are guaranteed to be valid UTF-8
     /// // by the Rust compiler.
-    /// let bar = c_str!("ツ");
     /// assert_eq!(unsafe { bar.as_str_unchecked() }, "ツ");
     /// ```
     #[inline]
@@ -449,7 +449,7 @@ impl RawFormatter {
         self.pos as _
     }
 
-    /// Return the number of bytes written to the formatter.
+    /// Returns the number of bytes written to the formatter.
     pub(crate) fn bytes_written(&self) -> usize {
         self.pos - self.beg
     }
