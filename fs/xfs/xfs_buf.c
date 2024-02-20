@@ -189,8 +189,8 @@ xfs_buf_get_maps(
 		return 0;
 	}
 
-	bp->b_maps = kmem_zalloc(map_count * sizeof(struct xfs_buf_map),
-				KM_NOFS);
+	bp->b_maps = kzalloc(map_count * sizeof(struct xfs_buf_map),
+			GFP_KERNEL | __GFP_NOLOCKDEP | __GFP_NOFAIL);
 	if (!bp->b_maps)
 		return -ENOMEM;
 	return 0;
@@ -204,7 +204,7 @@ xfs_buf_free_maps(
 	struct xfs_buf	*bp)
 {
 	if (bp->b_maps != &bp->__b_map) {
-		kmem_free(bp->b_maps);
+		kfree(bp->b_maps);
 		bp->b_maps = NULL;
 	}
 }
@@ -222,7 +222,8 @@ _xfs_buf_alloc(
 	int			i;
 
 	*bpp = NULL;
-	bp = kmem_cache_zalloc(xfs_buf_cache, GFP_NOFS | __GFP_NOFAIL);
+	bp = kmem_cache_zalloc(xfs_buf_cache,
+			GFP_KERNEL | __GFP_NOLOCKDEP | __GFP_NOFAIL);
 
 	/*
 	 * We don't want certain flags to appear in b_flags unless they are
@@ -289,7 +290,7 @@ xfs_buf_free_pages(
 	mm_account_reclaimed_pages(bp->b_page_count);
 
 	if (bp->b_pages != bp->b_page_array)
-		kmem_free(bp->b_pages);
+		kfree(bp->b_pages);
 	bp->b_pages = NULL;
 	bp->b_flags &= ~_XBF_PAGES;
 }
@@ -315,7 +316,7 @@ xfs_buf_free(
 	if (bp->b_flags & _XBF_PAGES)
 		xfs_buf_free_pages(bp);
 	else if (bp->b_flags & _XBF_KMEM)
-		kmem_free(bp->b_addr);
+		kfree(bp->b_addr);
 
 	call_rcu(&bp->b_rcu, xfs_buf_free_callback);
 }
@@ -325,21 +326,21 @@ xfs_buf_alloc_kmem(
 	struct xfs_buf	*bp,
 	xfs_buf_flags_t	flags)
 {
-	xfs_km_flags_t	kmflag_mask = KM_NOFS;
+	gfp_t		gfp_mask = GFP_KERNEL | __GFP_NOLOCKDEP | __GFP_NOFAIL;
 	size_t		size = BBTOB(bp->b_length);
 
 	/* Assure zeroed buffer for non-read cases. */
 	if (!(flags & XBF_READ))
-		kmflag_mask |= KM_ZERO;
+		gfp_mask |= __GFP_ZERO;
 
-	bp->b_addr = kmem_alloc(size, kmflag_mask);
+	bp->b_addr = kmalloc(size, gfp_mask);
 	if (!bp->b_addr)
 		return -ENOMEM;
 
 	if (((unsigned long)(bp->b_addr + size - 1) & PAGE_MASK) !=
 	    ((unsigned long)bp->b_addr & PAGE_MASK)) {
 		/* b_addr spans two pages - use alloc_page instead */
-		kmem_free(bp->b_addr);
+		kfree(bp->b_addr);
 		bp->b_addr = NULL;
 		return -ENOMEM;
 	}
@@ -356,13 +357,11 @@ xfs_buf_alloc_pages(
 	struct xfs_buf	*bp,
 	xfs_buf_flags_t	flags)
 {
-	gfp_t		gfp_mask = __GFP_NOWARN;
+	gfp_t		gfp_mask = GFP_KERNEL | __GFP_NOLOCKDEP | __GFP_NOWARN;
 	long		filled = 0;
 
 	if (flags & XBF_READ_AHEAD)
 		gfp_mask |= __GFP_NORETRY;
-	else
-		gfp_mask |= GFP_NOFS;
 
 	/* Make sure that we have a page list */
 	bp->b_page_count = DIV_ROUND_UP(BBTOB(bp->b_length), PAGE_SIZE);
@@ -429,11 +428,18 @@ _xfs_buf_map_pages(
 
 		/*
 		 * vm_map_ram() will allocate auxiliary structures (e.g.
-		 * pagetables) with GFP_KERNEL, yet we are likely to be under
-		 * GFP_NOFS context here. Hence we need to tell memory reclaim
-		 * that we are in such a context via PF_MEMALLOC_NOFS to prevent
-		 * memory reclaim re-entering the filesystem here and
-		 * potentially deadlocking.
+		 * pagetables) with GFP_KERNEL, yet we often under a scoped nofs
+		 * context here. Mixing GFP_KERNEL with GFP_NOFS allocations
+		 * from the same call site that can be run from both above and
+		 * below memory reclaim causes lockdep false positives. Hence we
+		 * always need to force this allocation to nofs context because
+		 * we can't pass __GFP_NOLOCKDEP down to auxillary structures to
+		 * prevent false positive lockdep reports.
+		 *
+		 * XXX(dgc): I think dquot reclaim is the only place we can get
+		 * to this function from memory reclaim context now. If we fix
+		 * that like we've fixed inode reclaim to avoid writeback from
+		 * reclaim, this nofs wrapping can go away.
 		 */
 		nofs_flag = memalloc_nofs_save();
 		do {
@@ -1953,7 +1959,7 @@ xfs_free_buftarg(
 	if (btp->bt_bdev != btp->bt_mount->m_super->s_bdev)
 		bdev_release(btp->bt_bdev_handle);
 
-	kmem_free(btp);
+	kfree(btp);
 }
 
 int
@@ -2002,7 +2008,7 @@ xfs_alloc_buftarg(
 #if defined(CONFIG_FS_DAX) && defined(CONFIG_MEMORY_FAILURE)
 	ops = &xfs_dax_holder_operations;
 #endif
-	btp = kmem_zalloc(sizeof(*btp), KM_NOFS);
+	btp = kzalloc(sizeof(*btp), GFP_KERNEL | __GFP_NOFAIL);
 
 	btp->bt_mount = mp;
 	btp->bt_bdev_handle = bdev_handle;
@@ -2045,7 +2051,7 @@ error_pcpu:
 error_lru:
 	list_lru_destroy(&btp->bt_lru);
 error_free:
-	kmem_free(btp);
+	kfree(btp);
 	return NULL;
 }
 
