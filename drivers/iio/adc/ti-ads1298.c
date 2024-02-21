@@ -650,7 +650,8 @@ static int ads1298_probe(struct spi_device *spi)
 	/* Reset to be asserted before enabling clock and power */
 	reset_gpio = devm_gpiod_get_optional(dev, "reset", GPIOD_OUT_HIGH);
 	if (IS_ERR(reset_gpio))
-		return dev_err_probe(dev, ret, "Cannot get reset GPIO\n");
+		return dev_err_probe(dev, PTR_ERR(reset_gpio),
+				     "Cannot get reset GPIO\n");
 
 	/* VREF can be supplied externally, otherwise use internal reference */
 	priv->reg_vref = devm_regulator_get_optional(dev, "vref");

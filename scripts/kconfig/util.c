@@ -20,6 +20,24 @@ struct file {
 	char name[];
 };
 
+unsigned int strhash(const char *s)
+{
+	/* fnv32 hash */
+	unsigned int hash = 2166136261U;
+
+	for (; *s; s++)
+		hash = (hash ^ *s) * 0x01000193;
+	return hash;
+}
+
+/* hash table of all parsed Kconfig files */
+static HASHTABLE_DEFINE(file_hashtable, 1U << 11);
+
+struct file {
+	struct hlist_node node;
+	char name[];
+};
+
 /* file already present in list? If not add it */
 const char *file_lookup(const char *name)
 {

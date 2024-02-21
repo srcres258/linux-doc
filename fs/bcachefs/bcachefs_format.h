@@ -189,7 +189,11 @@ struct bversion {
 	__u32		hi;
 	__u64		lo;
 #endif
-} __packed __aligned(4);
+} __packed
+#if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+__aligned(4)
+#endif
+;
 
 struct bkey {
 	/* Size of combined key and value, in u64s */

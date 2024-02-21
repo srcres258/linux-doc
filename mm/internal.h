@@ -448,7 +448,7 @@ extern void prep_compound_page(struct page *page, unsigned int order);
 
 extern void post_alloc_hook(struct page *page, unsigned int order,
 					gfp_t gfp_flags);
-extern bool free_pages_prepare_fpi_none(struct page *page, unsigned int order);
+extern bool free_pages_prepare(struct page *page, unsigned int order);
 
 extern int user_min_free_kbytes;
 
@@ -489,7 +489,7 @@ struct page_list {
  * completes when free_pfn <= migrate_pfn
  */
 struct compact_control {
-	struct page_list freepages[NR_PAGE_ORDERS];	/* List of free pages to migrate to */
+	struct list_head freepages[NR_PAGE_ORDERS];	/* List of free pages to migrate to */
 	struct list_head migratepages;	/* List of pages being migrated */
 	unsigned int nr_freepages;	/* Number of isolated free pages */
 	unsigned int nr_migratepages;	/* Number of pages to migrate */

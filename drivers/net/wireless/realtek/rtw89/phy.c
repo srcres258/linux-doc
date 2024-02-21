@@ -725,6 +725,53 @@ u8 rtw89_phy_get_txsc(struct rtw89_dev *rtwdev,
 }
 EXPORT_SYMBOL(rtw89_phy_get_txsc);
 
+u8 rtw89_phy_get_txsb(struct rtw89_dev *rtwdev, const struct rtw89_chan *chan,
+		      enum rtw89_bandwidth dbw)
+{
+	enum rtw89_bandwidth cbw = chan->band_width;
+	u8 pri_ch = chan->primary_channel;
+	u8 central_ch = chan->channel;
+	u8 txsb_idx = 0;
+
+	if (cbw == dbw || cbw == RTW89_CHANNEL_WIDTH_20)
+		return txsb_idx;
+
+	switch (cbw) {
+	case RTW89_CHANNEL_WIDTH_40:
+		txsb_idx = pri_ch > central_ch ? 1 : 0;
+		break;
+	case RTW89_CHANNEL_WIDTH_80:
+		if (dbw == RTW89_CHANNEL_WIDTH_20)
+			txsb_idx = (pri_ch - central_ch + 6) / 4;
+		else
+			txsb_idx = pri_ch > central_ch ? 1 : 0;
+		break;
+	case RTW89_CHANNEL_WIDTH_160:
+		if (dbw == RTW89_CHANNEL_WIDTH_20)
+			txsb_idx = (pri_ch - central_ch + 14) / 4;
+		else if (dbw == RTW89_CHANNEL_WIDTH_40)
+			txsb_idx = (pri_ch - central_ch + 12) / 8;
+		else
+			txsb_idx = pri_ch > central_ch ? 1 : 0;
+		break;
+	case RTW89_CHANNEL_WIDTH_320:
+		if (dbw == RTW89_CHANNEL_WIDTH_20)
+			txsb_idx = (pri_ch - central_ch + 30) / 4;
+		else if (dbw == RTW89_CHANNEL_WIDTH_40)
+			txsb_idx = (pri_ch - central_ch + 28) / 8;
+		else if (dbw == RTW89_CHANNEL_WIDTH_80)
+			txsb_idx = (pri_ch - central_ch + 24) / 16;
+		else
+			txsb_idx = pri_ch > central_ch ? 1 : 0;
+		break;
+	default:
+		break;
+	}
+
+	return txsb_idx;
+}
+EXPORT_SYMBOL(rtw89_phy_get_txsb);
+
 static bool rtw89_phy_check_swsi_busy(struct rtw89_dev *rtwdev)
 {
 	return !!rtw89_phy_read32_mask(rtwdev, R_SWSI_V1, B_SWSI_W_BUSY_V1) ||
@@ -6330,6 +6377,78 @@ void rtw89_phy_edcca_track(struct rtw89_dev *rtwdev)
 	rtw89_phy_edcca_thre_calc(rtwdev);
 	rtw89_phy_edcca_log(rtwdev);
 }
+
+enum rtw89_rf_path_bit rtw89_phy_get_kpath(struct rtw89_dev *rtwdev,
+					   enum rtw89_phy_idx phy_idx)
+{
+	rtw89_debug(rtwdev, RTW89_DBG_RFK,
+		    "[RFK] kpath dbcc_en: 0x%x, mode=0x%x, PHY%d\n",
+		    rtwdev->dbcc_en, rtwdev->mlo_dbcc_mode, phy_idx);
+
+	switch (rtwdev->mlo_dbcc_mode) {
+	case MLO_1_PLUS_1_1RF:
+		if (phy_idx == RTW89_PHY_0)
+			return RF_A;
+		else
+			return RF_B;
+	case MLO_1_PLUS_1_2RF:
+		if (phy_idx == RTW89_PHY_0)
+			return RF_A;
+		else
+			return RF_D;
+	case MLO_0_PLUS_2_1RF:
+	case MLO_2_PLUS_0_1RF:
+		if (phy_idx == RTW89_PHY_0)
+			return RF_AB;
+		else
+			return RF_AB;
+	case MLO_0_PLUS_2_2RF:
+	case MLO_2_PLUS_0_2RF:
+	case MLO_2_PLUS_2_2RF:
+	default:
+		if (phy_idx == RTW89_PHY_0)
+			return RF_AB;
+		else
+			return RF_CD;
+	}
+}
+EXPORT_SYMBOL(rtw89_phy_get_kpath);
+
+enum rtw89_rf_path rtw89_phy_get_syn_sel(struct rtw89_dev *rtwdev,
+					 enum rtw89_phy_idx phy_idx)
+{
+	rtw89_debug(rtwdev, RTW89_DBG_RFK,
+		    "[RFK] kpath dbcc_en: 0x%x, mode=0x%x, PHY%d\n",
+		    rtwdev->dbcc_en, rtwdev->mlo_dbcc_mode, phy_idx);
+
+	switch (rtwdev->mlo_dbcc_mode) {
+	case MLO_1_PLUS_1_1RF:
+		if (phy_idx == RTW89_PHY_0)
+			return RF_PATH_A;
+		else
+			return RF_PATH_B;
+	case MLO_1_PLUS_1_2RF:
+		if (phy_idx == RTW89_PHY_0)
+			return RF_PATH_A;
+		else
+			return RF_PATH_D;
+	case MLO_0_PLUS_2_1RF:
+	case MLO_2_PLUS_0_1RF:
+		if (phy_idx == RTW89_PHY_0)
+			return RF_PATH_A;
+		else
+			return RF_PATH_B;
+	case MLO_0_PLUS_2_2RF:
+	case MLO_2_PLUS_0_2RF:
+	case MLO_2_PLUS_2_2RF:
+	default:
+		if (phy_idx == RTW89_PHY_0)
+			return RF_PATH_A;
+		else
+			return RF_PATH_C;
+	}
+}
+EXPORT_SYMBOL(rtw89_phy_get_syn_sel);
 
 static const struct rtw89_ccx_regs rtw89_ccx_regs_ax = {
 	.setting_addr = R_CCX,

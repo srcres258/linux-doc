@@ -83,10 +83,10 @@ comma (",").
     │ │ │ │ │ │ │ │ sz/min,max
     │ │ │ │ │ │ │ │ nr_accesses/min,max
     │ │ │ │ │ │ │ │ age/min,max
-    │ │ │ │ │ │ │ :ref:`quotas <sysfs_quotas>`/ms,bytes,reset_interval_ms
+    │ │ │ │ │ │ │ :ref:`quotas <sysfs_quotas>`/ms,bytes,reset_interval_ms,effective_bytes
     │ │ │ │ │ │ │ │ weights/sz_permil,nr_accesses_permil,age_permil
     │ │ │ │ │ │ │ │ :ref:`goals <sysfs_schemes_quota_goals>`/nr_goals
-    │ │ │ │ │ │ │ │ │ 0/target_value,current_value
+    │ │ │ │ │ │ │ │ │ 0/target_metric,target_value,current_value
     │ │ │ │ │ │ │ :ref:`watermarks <sysfs_watermarks>`/metric,interval_us,high,mid,low
     │ │ │ │ │ │ │ :ref:`filters <sysfs_filters>`/nr_filters
     │ │ │ │ │ │ │ │ 0/type,matching,memcg_id
@@ -153,6 +153,9 @@ Users can write below commands for the kdamond to the ``state`` file.
 - ``clear_schemes_tried_regions``: Clear the DAMON-based operating scheme
   action tried regions directory for each DAMON-based operation scheme of the
   kdamond.
+- ``update_schemes_effective_bytes``: Update the contents of
+  ``effective_bytes`` files for each DAMON-based operation scheme of the
+  kdamond.  For more details, refer to :ref:`quotas directory <sysfs_quotas>`.
 
 If the state is ``on``, reading ``pid`` shows the pid of the kdamond thread.
 
@@ -180,19 +183,14 @@ In each context directory, two files (``avail_operations`` and ``operations``)
 and three directories (``monitoring_attrs``, ``targets``, and ``schemes``)
 exist.
 
-DAMON supports multiple types of monitoring operations, including those for
-virtual address space and the physical address space.  You can get the list of
-available monitoring operations set on the currently running kernel by reading
+DAMON supports multiple types of :ref:`monitoring operations
+<damon_design_confiurable_operations_set>`, including those for virtual address
+space and the physical address space.  You can get the list of available
+monitoring operations set on the currently running kernel by reading
 ``avail_operations`` file.  Based on the kernel configuration, the file will
-list some or all of below keywords.
-
- - vaddr: Monitor virtual address spaces of specific processes
- - fvaddr: Monitor fixed virtual address ranges
- - paddr: Monitor the physical address space of the system
-
-Please refer to :ref:`regions sysfs directory <sysfs_regions>` for detailed
-differences between the operations sets in terms of the monitoring target
-regions.
+list different available operation sets.  Please refer to the :ref:`design
+<damon_operations_set>` for the list of all available operation sets and their
+brief explanations.
 
 You can set and get what type of monitoring operations DAMON will use for the
 context by writing one of the keywords listed in ``avail_operations`` file and
@@ -247,17 +245,11 @@ process to the ``pid_target`` file.
 targets/<N>/regions
 -------------------
 
-When ``vaddr`` monitoring operations set is being used (``vaddr`` is written to
-the ``contexts/<N>/operations`` file), DAMON automatically sets and updates the
-monitoring target regions so that entire memory mappings of target processes
-can be covered.  However, users could want to set the initial monitoring region
-to specific address ranges.
-
-In contrast, DAMON do not automatically sets and updates the monitoring target
-regions when ``fvaddr`` or ``paddr`` monitoring operations sets are being used
-(``fvaddr`` or ``paddr`` have written to the ``contexts/<N>/operations``).
-Therefore, users should set the monitoring target regions by themselves in the
-cases.
+In case of ``fvaddr`` or ``paddr`` monitoring operations sets, users are
+required to set the monitoring target address ranges.  In case of ``vaddr``
+operations set, it is not mandatory, but users can optionally set the initial
+monitoring region to specific address ranges.  Please refer to the :ref:`design
+<damon_design_vaddr_target_regions_construction>` for more details.
 
 For such cases, users can explicitly set the initial monitoring target regions
 as they want, by writing proper values to the files under this directory.
@@ -302,27 +294,8 @@ In each scheme directory, five directories (``access_pattern``, ``quotas``,
 
 The ``action`` file is for setting and getting the scheme's :ref:`action
 <damon_design_damos_action>`.  The keywords that can be written to and read
-from the file and their meaning are as below.
-
-Note that support of each action depends on the running DAMON operations set
-:ref:`implementation <sysfs_context>`.
-
- - ``willneed``: Call ``madvise()`` for the region with ``MADV_WILLNEED``.
-   Supported by ``vaddr`` and ``fvaddr`` operations set.
- - ``cold``: Call ``madvise()`` for the region with ``MADV_COLD``.
-   Supported by ``vaddr`` and ``fvaddr`` operations set.
- - ``pageout``: Call ``madvise()`` for the region with ``MADV_PAGEOUT``.
-   Supported by ``vaddr``, ``fvaddr`` and ``paddr`` operations set.
- - ``hugepage``: Call ``madvise()`` for the region with ``MADV_HUGEPAGE``.
-   Supported by ``vaddr`` and ``fvaddr`` operations set.
- - ``nohugepage``: Call ``madvise()`` for the region with ``MADV_NOHUGEPAGE``.
-   Supported by ``vaddr`` and ``fvaddr`` operations set.
- - ``lru_prio``: Prioritize the region on its LRU lists.
-   Supported by ``paddr`` operations set.
- - ``lru_deprio``: Deprioritize the region on its LRU lists.
-   Supported by ``paddr`` operations set.
- - ``stat``: Do nothing but count the statistics.
-   Supported by all operations sets.
+from the file and their meaning are same to those of the list on
+:ref:`design doc <damon_design_damos_action>`.
 
 The ``apply_interval_us`` file is for setting and getting the scheme's
 :ref:`apply_interval <damon_design_damos>` in microseconds.
@@ -350,8 +323,9 @@ schemes/<N>/quotas/
 The directory for the :ref:`quotas <damon_design_damos_quotas>` of the given
 DAMON-based operation scheme.
 
-Under ``quotas`` directory, three files (``ms``, ``bytes``,
-``reset_interval_ms``) and two directores (``weights`` and ``goals``) exist.
+Under ``quotas`` directory, four files (``ms``, ``bytes``,
+``reset_interval_ms``, ``effective_bytes``) and two directores (``weights`` and
+``goals``) exist.
 
 You can set the ``time quota`` in milliseconds, ``size quota`` in bytes, and
 ``reset interval`` in milliseconds by writing the values to the three files,
@@ -359,7 +333,17 @@ respectively.  Then, DAMON tries to use only up to ``time quota`` milliseconds
 for applying the ``action`` to memory regions of the ``access_pattern``, and to
 apply the action to only up to ``bytes`` bytes of memory regions within the
 ``reset_interval_ms``.  Setting both ``ms`` and ``bytes`` zero disables the
-quota limits.
+quota limits unless at least one :ref:`goal <sysfs_schemes_quota_goals>` is
+set.
+
+The time quota is internally transformed to a size quota.  Between the
+transformed size quota and user-specified size quota, smaller one is applied.
+Based on the user-specified :ref:`goal <sysfs_schemes_quota_goals>`, the
+effective size quota is further adjusted.  Reading ``effective_bytes`` returns
+the current effective size quota.  The file is not updated in real time, so
+users should ask DAMON sysfs interface to update the content of the file for
+the stats by writing a special keyword, ``update_schemes_effective_bytes`` to
+the relevant ``kdamonds/<N>/state`` file.
 
 Under ``weights`` directory, three files (``sz_permil``,
 ``nr_accesses_permil``, and ``age_permil``) exist.
@@ -382,11 +366,11 @@ number (``N``) to the file creates the number of child directories named ``0``
 to ``N-1``.  Each directory represents each goal and current achievement.
 Among the multiple feedback, the best one is used.
 
-Each goal directory contains two files, namely ``target_value`` and
-``current_value``.  Users can set and get any number to those files to set the
-feedback.  User space main workload's latency or throughput, system metrics
-like free memory ratio or memory pressure stall time (PSI) could be example
-metrics for the values.  Note that users should write
+Each goal directory contains three files, namely ``target_metric``,
+``target_value`` and ``current_value``.  Users can set and get the three
+parameters for the quota auto-tuning goals that specified on the :ref:`design
+doc <damon_design_damos_quota_auto_tuning>` by writing to and reading from each
+of the files.  Note that users should further write
 ``commit_schemes_quota_goals`` to the ``state`` file of the :ref:`kdamond
 directory <sysfs_kdamond>` to pass the feedback to DAMON.
 
@@ -763,19 +747,17 @@ Action
 ~~~~~~
 
 The ``<action>`` is a predefined integer for memory management :ref:`actions
-<damon_design_damos_action>`.  The supported numbers and their meanings are as
-below.
+<damon_design_damos_action>`.  The mapping between the ``<action>`` values and
+the memory management actions is as below.  For the detailed meaning of the
+action and DAMON operations set supporting each action, please refer to the
+list on :ref:`design doc <damon_design_damos_action>`.
 
- - 0: Call ``madvise()`` for the region with ``MADV_WILLNEED``.  Ignored if
-   ``target`` is ``paddr``.
- - 1: Call ``madvise()`` for the region with ``MADV_COLD``.  Ignored if
-   ``target`` is ``paddr``.
- - 2: Call ``madvise()`` for the region with ``MADV_PAGEOUT``.
- - 3: Call ``madvise()`` for the region with ``MADV_HUGEPAGE``.  Ignored if
-   ``target`` is ``paddr``.
- - 4: Call ``madvise()`` for the region with ``MADV_NOHUGEPAGE``.  Ignored if
-   ``target`` is ``paddr``.
- - 5: Do nothing but count the statistics
+ - 0: ``willneed``
+ - 1: ``cold``
+ - 2: ``pageout``
+ - 3: ``hugepage``
+ - 4: ``nohugepage``
+ - 5: ``stat``
 
 Quota
 ~~~~~

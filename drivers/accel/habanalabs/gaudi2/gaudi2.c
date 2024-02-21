@@ -158,11 +158,13 @@
 #define RAZWI_INITIATOR_ID_X_Y(xl, yl, xh) \
 	(RAZWI_INITIATOR_ID_X_Y_LOW(xl, yl) | RAZWI_INITIATOR_ID_X_HIGH(xh))
 
-#define PSOC_RAZWI_ENG_STR_SIZE 128
-#define PSOC_RAZWI_MAX_ENG_PER_RTR 5
+#define PSOC_RAZWI_ENG_STR_SIZE			128
+#define PSOC_RAZWI_MAX_ENG_PER_RTR		5
 
 /* HW scrambles only bits 0-25 */
-#define HW_UNSCRAMBLED_BITS_MASK GENMASK_ULL(63, 26)
+#define HW_UNSCRAMBLED_BITS_MASK		GENMASK_ULL(63, 26)
+
+#define GAUDI2_GLBL_ERR_MAX_CAUSE_NUM		17
 
 struct gaudi2_razwi_info {
 	u32 axuser_xy;
@@ -2467,8 +2469,6 @@ static int gaudi2_set_fixed_properties(struct hl_device *hdev)
 
 	prop->dmmu.pgt_size = HMMU_PAGE_TABLES_SIZE;
 	prop->mmu_pte_size = HL_PTE_SIZE;
-	prop->mmu_hop_table_size = HOP_TABLE_SIZE_512_PTE;
-	prop->mmu_hop0_tables_total_size = HOP_TABLE_SIZE_512_PTE * prop->max_asid;
 
 	prop->dmmu.hop_shifts[MMU_HOP0] = DHOP0_SHIFT;
 	prop->dmmu.hop_shifts[MMU_HOP1] = DHOP1_SHIFT;
@@ -2482,8 +2482,8 @@ static int gaudi2_set_fixed_properties(struct hl_device *hdev)
 	prop->dmmu.num_hops = MMU_ARCH_4_HOPS;
 	prop->dmmu.last_mask = LAST_MASK;
 	prop->dmmu.host_resident = 0;
-	prop->dmmu.hop_table_size = prop->mmu_hop_table_size;
-	prop->dmmu.hop0_tables_total_size = prop->mmu_hop0_tables_total_size;
+	prop->dmmu.hop_table_size = HOP_TABLE_SIZE_512_PTE;
+	prop->dmmu.hop0_tables_total_size = HOP_TABLE_SIZE_512_PTE * prop->max_asid;
 
 	/* As we need to set the pgt address in dram for HMMU init so we cannot
 	 * wait to the fw cpucp info to set the dram props as mmu init comes before
@@ -2500,8 +2500,8 @@ static int gaudi2_set_fixed_properties(struct hl_device *hdev)
 	prop->pmmu.host_resident = 1;
 	prop->pmmu.num_hops = MMU_ARCH_6_HOPS;
 	prop->pmmu.last_mask = LAST_MASK;
-	prop->pmmu.hop_table_size = prop->mmu_hop_table_size;
-	prop->pmmu.hop0_tables_total_size = prop->mmu_hop0_tables_total_size;
+	prop->pmmu.hop_table_size = HOP_TABLE_SIZE_512_PTE;
+	prop->pmmu.hop0_tables_total_size = HOP_TABLE_SIZE_512_PTE * prop->max_asid;
 
 	prop->hints_host_reserved_va_range.start_addr = RESERVED_VA_FOR_VIRTUAL_MSIX_DOORBELL_START;
 	prop->hints_host_reserved_va_range.end_addr = RESERVED_VA_RANGE_FOR_ARC_ON_HOST_END;
@@ -2600,6 +2600,8 @@ static int gaudi2_set_fixed_properties(struct hl_device *hdev)
 	prop->dma_mask = 64;
 
 	prop->hbw_flush_reg = mmPCIE_WRAP_SPECIAL_GLBL_SPARE_0;
+
+	prop->supports_advanced_cpucp_rc = true;
 
 	return 0;
 
@@ -3308,8 +3310,6 @@ static int gaudi2_late_init(struct hl_device *hdev)
 	struct gaudi2_device *gaudi2 = hdev->asic_specific;
 	int rc;
 
-	hdev->asic_prop.supports_advanced_cpucp_rc = true;
-
 	rc = hl_fw_send_pci_access_msg(hdev, CPUCP_PACKET_ENABLE_PCI_ACCESS,
 					gaudi2->virt_msix_db_dma_addr);
 	if (rc) {
@@ -3589,7 +3589,7 @@ static int gaudi2_special_blocks_config(struct hl_device *hdev)
 	int i, rc;
 
 	/* Configure Special blocks */
-	prop->glbl_err_cause_num = GAUDI2_NUM_OF_GLBL_ERR_CAUSE;
+	prop->glbl_err_max_cause_num = GAUDI2_GLBL_ERR_MAX_CAUSE_NUM;
 	prop->num_of_special_blocks = ARRAY_SIZE(gaudi2_special_blocks);
 	prop->special_blocks = kmalloc_array(prop->num_of_special_blocks,
 			sizeof(*prop->special_blocks), GFP_KERNEL);
@@ -3783,7 +3783,7 @@ static int gaudi2_sw_init(struct hl_device *hdev)
 	prop->supports_compute_reset = true;
 
 	/* Event queue sanity check added in FW version 1.11 */
-	if (hl_is_fw_sw_ver_below(hdev, 1, 11))
+	if (hl_fw_version_cmp(hdev, 1, 11, 0) < 0)
 		hdev->event_queue.check_eqe_index = false;
 	else
 		hdev->event_queue.check_eqe_index = true;
@@ -5934,7 +5934,7 @@ static int gaudi2_mmu_update_hop0_addr(struct hl_device *hdev, u32 stlb_base,
 		if (host_resident_pgt)
 			hop0_addr = hdev->mmu_priv.hr.mmu_asid_hop0[asid].phys_addr;
 		else
-			hop0_addr = prop->mmu_pgt_addr + (asid * prop->mmu_hop_table_size);
+			hop0_addr = prop->mmu_pgt_addr + (asid * prop->dmmu.hop_table_size);
 
 		rc = gaudi2_mmu_update_asid_hop0_addr(hdev, stlb_base, asid, hop0_addr);
 		if (rc) {
@@ -6314,26 +6314,6 @@ static void gaudi2_execute_hard_reset(struct hl_device *hdev)
 	WREG32(mmPSOC_RESET_CONF_SW_ALL_RST, 1);
 }
 
-static int gaudi2_get_soft_rst_done_indication(struct hl_device *hdev, u32 poll_timeout_us)
-{
-	int i, rc = 0;
-	u32 reg_val;
-
-	for (i = 0 ; i < GAUDI2_RESET_POLL_CNT ; i++)
-		rc = hl_poll_timeout(
-			hdev,
-			mmCPU_RST_STATUS_TO_HOST,
-			reg_val,
-			reg_val == CPU_RST_STATUS_SOFT_RST_DONE,
-			1000,
-			poll_timeout_us);
-
-	if (rc)
-		dev_err(hdev->dev, "Timeout while waiting for FW to complete soft reset (0x%x)\n",
-				reg_val);
-	return rc;
-}
-
 /**
  * gaudi2_execute_soft_reset - execute soft reset by driver/FW
  *
@@ -6346,23 +6326,8 @@ static int gaudi2_get_soft_rst_done_indication(struct hl_device *hdev, u32 poll_
 static int gaudi2_execute_soft_reset(struct hl_device *hdev, bool driver_performs_reset,
 						u32 poll_timeout_us)
 {
-	int rc;
-
-	if (!driver_performs_reset) {
-		if (hl_is_fw_sw_ver_below(hdev, 1, 10)) {
-			/* set SP to indicate reset request sent to FW */
-			WREG32(mmCPU_RST_STATUS_TO_HOST, CPU_RST_STATUS_NA);
-
-			WREG32(mmGIC_HOST_SOFT_RST_IRQ_POLL_REG,
-				gaudi2_irq_map_table[GAUDI2_EVENT_CPU_SOFT_RESET].cpu_id);
-
-			/* wait for f/w response */
-			rc = gaudi2_get_soft_rst_done_indication(hdev, poll_timeout_us);
-		} else {
-			rc = hl_fw_send_soft_reset(hdev);
-		}
-		return rc;
-	}
+	if (!driver_performs_reset)
+		return hl_fw_send_soft_reset(hdev);
 
 	/* Block access to engines, QMANs and SM during reset, these
 	 * RRs will be reconfigured after soft reset.
@@ -7914,7 +7879,7 @@ static bool gaudi2_handle_ecc_event(struct hl_device *hdev, u16 event_type,
 	bool has_block_id = false;
 	u16 block_id;
 
-	if (!hl_is_fw_sw_ver_below(hdev, 1, 12))
+	if (hl_fw_version_cmp(hdev, 1, 12, 0) >= 0)
 		has_block_id = true;
 
 	ecc_address = le64_to_cpu(ecc_data->ecc_address);
@@ -8165,13 +8130,7 @@ static void gaudi2_ack_module_razwi_event_handler(struct hl_device *hdev,
 		}
 
 		hbw_rtr_id = gaudi2_tpc_initiator_hbw_rtr_id[module_idx];
-
-		if (hl_is_fw_sw_ver_below(hdev, 1, 9) &&
-				!hdev->asic_prop.fw_security_enabled &&
-				((module_idx == 0) || (module_idx == 1)))
-			lbw_rtr_id = DCORE0_RTR0;
-		else
-			lbw_rtr_id = gaudi2_tpc_initiator_lbw_rtr_id[module_idx];
+		lbw_rtr_id = gaudi2_tpc_initiator_lbw_rtr_id[module_idx];
 		break;
 	case RAZWI_MME:
 		sprintf(initiator_name, "MME_%u", module_idx);
@@ -8985,9 +8944,6 @@ static int gaudi2_print_pcie_addr_dec_info(struct hl_device *hdev, u16 event_typ
 	u32 error_count = 0;
 	int i;
 
-	gaudi2_print_event(hdev, event_type, true,
-		"intr_cause_data: %#llx", intr_cause_data);
-
 	for (i = 0 ; i < GAUDI2_NUM_OF_PCIE_ADDR_DEC_ERR_CAUSE ; i++) {
 		if (!(intr_cause_data & BIT_ULL(i)))
 			continue;
@@ -8996,14 +8952,15 @@ static int gaudi2_print_pcie_addr_dec_info(struct hl_device *hdev, u16 event_typ
 			"err cause: %s", gaudi2_pcie_addr_dec_error_cause[i]);
 		error_count++;
 
-		/*
-		 * Always check for LBW and HBW additional info as the indication itself is
-		 * sometimes missing
-		 */
+		switch (intr_cause_data & BIT_ULL(i)) {
+		case PCIE_WRAP_PCIE_IC_SEI_INTR_IND_AXI_LBW_ERR_INTR_MASK:
+			hl_check_for_glbl_errors(hdev);
+			break;
+		case PCIE_WRAP_PCIE_IC_SEI_INTR_IND_BAD_ACCESS_INTR_MASK:
+			gaudi2_print_pcie_mstr_rr_mstr_if_razwi_info(hdev, event_mask);
+			break;
+		}
 	}
-
-	hl_check_for_glbl_errors(hdev);
-	gaudi2_print_pcie_mstr_rr_mstr_if_razwi_info(hdev, event_mask);
 
 	return error_count;
 }
@@ -9591,25 +9548,17 @@ static int gaudi2_handle_pcie_p2p_msix(struct hl_device *hdev, u16 event_type)
 static int gaudi2_handle_pcie_drain(struct hl_device *hdev,
 			struct hl_eq_pcie_drain_ind_data *drain_data)
 {
-	u64 lbw_rd, lbw_wr, hbw_rd, hbw_wr, cause, error_count = 0;
+	u64 cause, error_count = 0;
 
 	cause = le64_to_cpu(drain_data->intr_cause.intr_cause_data);
-	lbw_rd = le64_to_cpu(drain_data->drain_rd_addr_lbw);
-	lbw_wr = le64_to_cpu(drain_data->drain_wr_addr_lbw);
-	hbw_rd = le64_to_cpu(drain_data->drain_rd_addr_hbw);
-	hbw_wr = le64_to_cpu(drain_data->drain_wr_addr_hbw);
 
 	if (cause & BIT_ULL(0)) {
-		dev_err_ratelimited(hdev->dev,
-			"PCIE AXI drain LBW completed, read_err %u, write_err %u\n",
-			!!lbw_rd, !!lbw_wr);
+		dev_err_ratelimited(hdev->dev, "PCIE AXI drain LBW completed\n");
 		error_count++;
 	}
 
 	if (cause & BIT_ULL(1)) {
-		dev_err_ratelimited(hdev->dev,
-			"PCIE AXI drain HBW completed, raddr %#llx, waddr %#llx\n",
-			hbw_rd, hbw_wr);
+		dev_err_ratelimited(hdev->dev, "PCIE AXI drain HBW completed\n");
 		error_count++;
 	}
 
@@ -10080,7 +10029,7 @@ static void gaudi2_handle_eqe(struct hl_device *hdev, struct hl_eq_entry *eq_ent
 		error_count = gaudi2_handle_pcie_drain(hdev, &eq_entry->pcie_drain_ind_data);
 		reset_flags |= HL_DRV_RESET_FW_FATAL_ERR;
 		event_mask |= HL_NOTIFIER_EVENT_GENERAL_HW_ERR;
-		if (hl_is_fw_sw_ver_equal_or_greater(hdev, 1, 13))
+		if (hl_fw_version_cmp(hdev, 1, 13, 0) >= 0)
 			is_critical = true;
 		break;
 

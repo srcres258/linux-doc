@@ -808,7 +808,7 @@ static bool
 scmi_powercap_notify_supported(const struct scmi_protocol_handle *ph,
 			       u8 evt_id, u32 src_id)
 {
-	bool supported;
+	bool supported = false;
 	const struct scmi_powercap_info *dom_info;
 	struct powercap_info *pi = ph->get_priv(ph);
 

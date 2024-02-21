@@ -51,9 +51,7 @@ enum board_ids {
 	board_ahci_43bit_dma,
 	board_ahci_ign_iferr,
 	board_ahci_no_debounce_delay,
-	board_ahci_nomsi,
-	board_ahci_noncq,
-	board_ahci_nosntf,
+	board_ahci_no_msi,
 	/*
 	 * board_ahci_pcs_quirk is for legacy Intel platforms.
 	 * Modern Intel platforms should use board_ahci instead.
@@ -62,6 +60,8 @@ enum board_ids {
 	 * without testing that the platform actually works without the quirk.)
 	 */
 	board_ahci_pcs_quirk,
+	board_ahci_pcs_quirk_no_devslp,
+	board_ahci_pcs_quirk_no_sntf,
 	board_ahci_yes_fbs,
 
 	/* board IDs for specific chipsets in alphabetical order */
@@ -151,23 +151,8 @@ static const struct ata_port_info ahci_port_info[] = {
 		.udma_mask	= ATA_UDMA6,
 		.port_ops	= &ahci_ops,
 	},
-	[board_ahci_nomsi] = {
+	[board_ahci_no_msi] = {
 		AHCI_HFLAGS	(AHCI_HFLAG_NO_MSI),
-		.flags		= AHCI_FLAG_COMMON,
-		.pio_mask	= ATA_PIO4,
-		.udma_mask	= ATA_UDMA6,
-		.port_ops	= &ahci_ops,
-	},
-	[board_ahci_noncq] = {
-		AHCI_HFLAGS	(AHCI_HFLAG_NO_NCQ),
-		.flags		= AHCI_FLAG_COMMON,
-		.pio_mask	= ATA_PIO4,
-		.udma_mask	= ATA_UDMA6,
-		.port_ops	= &ahci_ops,
-	},
-	[board_ahci_nosntf] = {
-		AHCI_HFLAGS	(AHCI_HFLAG_NO_SNTF |
-				 AHCI_HFLAG_INTEL_PCS_QUIRK),
 		.flags		= AHCI_FLAG_COMMON,
 		.pio_mask	= ATA_PIO4,
 		.udma_mask	= ATA_UDMA6,
@@ -175,6 +160,22 @@ static const struct ata_port_info ahci_port_info[] = {
 	},
 	[board_ahci_pcs_quirk] = {
 		AHCI_HFLAGS	(AHCI_HFLAG_INTEL_PCS_QUIRK),
+		.flags		= AHCI_FLAG_COMMON,
+		.pio_mask	= ATA_PIO4,
+		.udma_mask	= ATA_UDMA6,
+		.port_ops	= &ahci_ops,
+	},
+	[board_ahci_pcs_quirk_no_devslp] = {
+		AHCI_HFLAGS	(AHCI_HFLAG_INTEL_PCS_QUIRK |
+				 AHCI_HFLAG_NO_DEVSLP),
+		.flags		= AHCI_FLAG_COMMON,
+		.pio_mask	= ATA_PIO4,
+		.udma_mask	= ATA_UDMA6,
+		.port_ops	= &ahci_ops,
+	},
+	[board_ahci_pcs_quirk_no_sntf] = {
+		AHCI_HFLAGS	(AHCI_HFLAG_INTEL_PCS_QUIRK |
+				 AHCI_HFLAG_NO_SNTF),
 		.flags		= AHCI_FLAG_COMMON,
 		.pio_mask	= ATA_PIO4,
 		.udma_mask	= ATA_UDMA6,
@@ -271,7 +272,7 @@ static const struct pci_device_id ahci_pci_tbl[] = {
 	{ PCI_VDEVICE(INTEL, 0x2683), board_ahci_pcs_quirk }, /* ESB2 */
 	{ PCI_VDEVICE(INTEL, 0x27c6), board_ahci_pcs_quirk }, /* ICH7-M DH */
 	{ PCI_VDEVICE(INTEL, 0x2821), board_ahci_pcs_quirk }, /* ICH8 */
-	{ PCI_VDEVICE(INTEL, 0x2822), board_ahci_nosntf }, /* ICH8/Lewisburg RAID*/
+	{ PCI_VDEVICE(INTEL, 0x2822), board_ahci_pcs_quirk_no_sntf }, /* ICH8/Lewisburg RAID*/
 	{ PCI_VDEVICE(INTEL, 0x2824), board_ahci_pcs_quirk }, /* ICH8 */
 	{ PCI_VDEVICE(INTEL, 0x2829), board_ahci_pcs_quirk }, /* ICH8M */
 	{ PCI_VDEVICE(INTEL, 0x282a), board_ahci_pcs_quirk }, /* ICH8M */
@@ -420,7 +421,7 @@ static const struct pci_device_id ahci_pci_tbl[] = {
 	{ PCI_VDEVICE(INTEL, 0x06d7), board_ahci_pcs_quirk }, /* Comet Lake-H RAID */
 	{ PCI_VDEVICE(INTEL, 0xa386), board_ahci_pcs_quirk }, /* Comet Lake PCH-V RAID */
 	{ PCI_VDEVICE(INTEL, 0x0f22), board_ahci_pcs_quirk }, /* Bay Trail AHCI */
-	{ PCI_VDEVICE(INTEL, 0x0f23), board_ahci_pcs_quirk }, /* Bay Trail AHCI */
+	{ PCI_VDEVICE(INTEL, 0x0f23), board_ahci_pcs_quirk_no_devslp }, /* Bay Trail AHCI */
 	{ PCI_VDEVICE(INTEL, 0x22a3), board_ahci_pcs_quirk }, /* Cherry Tr. AHCI */
 	{ PCI_VDEVICE(INTEL, 0x5ae3), board_ahci_pcs_quirk }, /* ApolloLake AHCI */
 	{ PCI_VDEVICE(INTEL, 0x34d3), board_ahci_pcs_quirk }, /* Ice Lake LP AHCI */
@@ -620,8 +621,8 @@ static const struct pci_device_id ahci_pci_tbl[] = {
 	 * Samsung SSDs found on some macbooks.  NCQ times out if MSI is
 	 * enabled.  https://bugzilla.kernel.org/show_bug.cgi?id=60731
 	 */
-	{ PCI_VDEVICE(SAMSUNG, 0x1600), board_ahci_nomsi },
-	{ PCI_VDEVICE(SAMSUNG, 0xa800), board_ahci_nomsi },
+	{ PCI_VDEVICE(SAMSUNG, 0x1600), board_ahci_no_msi },
+	{ PCI_VDEVICE(SAMSUNG, 0xa800), board_ahci_no_msi },
 
 	/* Enmotus */
 	{ PCI_DEVICE(0x1c44, 0x8000), board_ahci },
@@ -668,9 +669,17 @@ MODULE_PARM_DESC(mobile_lpm_policy, "Default LPM policy for mobile chipsets");
 static void ahci_pci_save_initial_config(struct pci_dev *pdev,
 					 struct ahci_host_priv *hpriv)
 {
-	if (pdev->vendor == PCI_VENDOR_ID_ASMEDIA && pdev->device == 0x1166) {
-		dev_info(&pdev->dev, "ASM1166 has only six ports\n");
-		hpriv->saved_port_map = 0x3f;
+	if (pdev->vendor == PCI_VENDOR_ID_ASMEDIA) {
+		switch (pdev->device) {
+		case 0x1166:
+			dev_info(&pdev->dev, "ASM1166 has only six ports\n");
+			hpriv->saved_port_map = 0x3f;
+			break;
+		case 0x1064:
+			dev_info(&pdev->dev, "ASM1064 has only four ports\n");
+			hpriv->saved_port_map = 0xf;
+			break;
+		}
 	}
 
 	if (pdev->vendor == PCI_VENDOR_ID_JMICRON && pdev->device == 0x2361) {
@@ -1420,17 +1429,6 @@ static bool ahci_broken_online(struct pci_dev *pdev)
 	return pdev->bus->number == (val >> 8) && pdev->devfn == (val & 0xff);
 }
 
-static bool ahci_broken_devslp(struct pci_dev *pdev)
-{
-	/* device with broken DEVSLP but still showing SDS capability */
-	static const struct pci_device_id ids[] = {
-		{ PCI_VDEVICE(INTEL, 0x0f23)}, /* Valleyview SoC */
-		{}
-	};
-
-	return pci_match_id(ids, pdev);
-}
-
 #ifdef CONFIG_ATA_ACPI
 static void ahci_gtf_filter_workaround(struct ata_host *host)
 {
@@ -1822,10 +1820,6 @@ static int ahci_init_one(struct pci_dev *pdev, const struct pci_device_id *ent)
 	sysfs_add_file_to_group(&pdev->dev.kobj,
 				&dev_attr_remapped_nvme.attr,
 				NULL);
-
-	/* must set flag prior to save config in order to take effect */
-	if (ahci_broken_devslp(pdev))
-		hpriv->flags |= AHCI_HFLAG_NO_DEVSLP;
 
 #ifdef CONFIG_ARM64
 	if (pdev->vendor == PCI_VENDOR_ID_HUAWEI &&

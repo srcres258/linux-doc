@@ -307,7 +307,7 @@ scmi_clk_ops_alloc(struct scmi_clk *sclk, bool atomic_capable,
 static int scmi_clocks_probe(struct scmi_device *sdev)
 {
 	int idx, count, err;
-	unsigned int atomic_threshold;
+	unsigned int atomic_threshold = 0;
 	bool is_atomic;
 	struct clk_hw **hws;
 	struct clk_hw_onecell_data *clk_data;

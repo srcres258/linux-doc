@@ -42,6 +42,7 @@
 #include <linux/sched/signal.h>
 #include <linux/sched/task.h>
 #include <linux/idr.h>
+#include <linux/pidfs.h>
 #include <net/sock.h>
 #include <uapi/linux/pidfd.h>
 
@@ -65,6 +66,9 @@ int pid_max = PID_MAX_DEFAULT;
 
 int pid_max_min = RESERVED_PIDS + 1;
 int pid_max_max = PID_MAX_LIMIT;
+#ifdef CONFIG_FS_PID
+static u64 pidfs_ino = 0;
+#endif
 
 /*
  * PID-map pages start out as NULL, they get allocated upon
@@ -272,6 +276,10 @@ struct pid *alloc_pid(struct pid_namespace *ns, pid_t *set_tid,
 	spin_lock_irq(&pidmap_lock);
 	if (!(ns->pid_allocated & PIDNS_ADDING))
 		goto out_unlock;
+#ifdef CONFIG_FS_PID
+	pid->stashed = NULL;
+	pid->ino = ++pidfs_ino;
+#endif
 	for ( ; upid >= pid->numbers; --upid) {
 		/* Make the PID visible to find_pid_ns. */
 		idr_replace(&upid->ns->idr, pid, upid->nr);

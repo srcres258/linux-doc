@@ -55,6 +55,10 @@ struct pid
 	refcount_t count;
 	unsigned int level;
 	spinlock_t lock;
+#ifdef CONFIG_FS_PID
+	struct dentry *stashed;
+	unsigned long ino;
+#endif
 	/* lists of tasks that use this pid */
 	struct hlist_head tasks[PIDTYPE_MAX];
 	struct hlist_head inodes;
@@ -65,8 +69,6 @@ struct pid
 };
 
 extern struct pid init_struct_pid;
-
-extern const struct file_operations pidfd_fops;
 
 struct file;
 

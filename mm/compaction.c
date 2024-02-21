@@ -40,9 +40,22 @@ static inline void count_compact_events(enum vm_event_item item, long delta)
 {
 	count_vm_events(item, delta);
 }
+
+/*
+ * order == -1 is expected when compacting proactively via
+ * 1. /proc/sys/vm/compact_memory
+ * 2. /sys/devices/system/node/nodex/compact
+ * 3. /proc/sys/vm/compaction_proactiveness
+ */
+static inline bool is_via_compact_memory(int order)
+{
+	return order == -1;
+}
+
 #else
 #define count_compact_event(item) do { } while (0)
 #define count_compact_events(item, delta) do { } while (0)
+static inline bool is_via_compact_memory(int order) { return false; }
 #endif
 
 #if defined CONFIG_COMPACTION || defined CONFIG_CMA
@@ -66,23 +79,14 @@ static inline void count_compact_events(enum vm_event_item item, long delta)
 #define COMPACTION_HPAGE_ORDER	(PMD_SHIFT - PAGE_SHIFT)
 #endif
 
-static void init_page_list(struct page_list *p)
+static void split_map_pages(struct list_head *freepages)
 {
-	INIT_LIST_HEAD(&p->pages);
-	p->nr_pages = 0;
-}
-
-static void split_map_pages(struct page_list *freepages)
-{
-	unsigned int i, order, total_nr_pages;
+	unsigned int i, order;
 	struct page *page, *next;
 	LIST_HEAD(tmp_list);
 
 	for (order = 0; order < NR_PAGE_ORDERS; order++) {
-		total_nr_pages = freepages[order].nr_pages * (1 << order);
-		freepages[order].nr_pages = 0;
-
-		list_for_each_entry_safe(page, next, &freepages[order].pages, lru) {
+		list_for_each_entry_safe(page, next, &freepages[order], lru) {
 			unsigned int nr_pages;
 
 			list_del(&page->lru);
@@ -98,12 +102,11 @@ static void split_map_pages(struct page_list *freepages)
 				page++;
 			}
 		}
-		freepages[0].nr_pages += total_nr_pages;
-		list_splice_init(&tmp_list, &freepages[0].pages);
+		list_splice_init(&tmp_list, &freepages[0]);
 	}
 }
 
-static unsigned long release_free_list(struct page_list *freepages)
+static unsigned long release_free_list(struct list_head *freepages)
 {
 	int order;
 	unsigned long high_pfn = 0;
@@ -111,7 +114,7 @@ static unsigned long release_free_list(struct page_list *freepages)
 	for (order = 0; order < NR_PAGE_ORDERS; order++) {
 		struct page *page, *next;
 
-		list_for_each_entry_safe(page, next, &freepages[order].pages, lru) {
+		list_for_each_entry_safe(page, next, &freepages[order], lru) {
 			unsigned long pfn = page_to_pfn(page);
 
 			list_del(&page->lru);
@@ -124,7 +127,8 @@ static unsigned long release_free_list(struct page_list *freepages)
 			if (pfn > high_pfn)
 				high_pfn = pfn;
 		}
-		freepages[order].nr_pages = 0;
+		freepages[0].nr_pages += total_nr_pages;
+		list_splice_init(&tmp_list, &freepages[0].pages);
 	}
 	return high_pfn;
 }
@@ -679,8 +683,7 @@ static unsigned long isolate_freepages_block(struct compact_control *cc,
 		nr_scanned += isolated - 1;
 		total_isolated += isolated;
 		cc->nr_freepages += isolated;
-		list_add_tail(&page->lru, &freelist[order].pages);
-		freelist[order].nr_pages++;
+		list_add_tail(&page->lru, &freelist[order]);
 
 		if (!strict && cc->nr_migratepages <= cc->nr_freepages) {
 			blockpfn += isolated;
@@ -746,10 +749,10 @@ isolate_freepages_range(struct compact_control *cc,
 {
 	unsigned long isolated, pfn, block_start_pfn, block_end_pfn;
 	int order;
-	struct page_list tmp_freepages[NR_PAGE_ORDERS];
+	struct list_head tmp_freepages[NR_PAGE_ORDERS];
 
 	for (order = 0; order < NR_PAGE_ORDERS; order++)
-		init_page_list(&tmp_freepages[order]);
+		INIT_LIST_HEAD(&tmp_freepages[order]);
 
 	pfn = start_pfn;
 	block_start_pfn = pageblock_start_pfn(pfn);
@@ -856,6 +859,32 @@ static bool skip_isolation_on_order(int order, int target_order)
 {
 	return (target_order != -1 && order >= target_order) ||
 		order >= pageblock_order;
+}
+
+/**
+ * skip_isolation_on_order() - determine when to skip folio isolation based on
+ *			       folio order and compaction target order
+ * @order:		to-be-isolated folio order
+ * @target_order:	compaction target order
+ *
+ * This avoids unnecessary folio isolations during compaction.
+ */
+static bool skip_isolation_on_order(int order, int target_order)
+{
+	/*
+	 * Unless we are performing global compaction (i.e.,
+	 * is_via_compact_memory), skip any folios that are larger than the
+	 * target order: we wouldn't be here if we'd have a free folio with
+	 * the desired target_order, so migrating this folio would likely fail
+	 * later.
+	 */
+	if (!is_via_compact_memory(target_order) && order >= target_order)
+		return true;
+	/*
+	 * We limit memory compaction to pageblocks and won't try
+	 * creating free blocks of memory that are larger than that.
+	 */
+	return order >= pageblock_order;
 }
 
 /**
@@ -989,7 +1018,22 @@ isolate_migratepages_block(struct compact_control *cc, unsigned long low_pfn,
 			valid_page = page;
 		}
 
-		if (PageHuge(page) && cc->alloc_contig) {
+		if (PageHuge(page)) {
+			/*
+			 * skip hugetlbfs if we are not compacting for pages
+			 * bigger than its order. THPs and other compound pages
+			 * are handled below.
+			 */
+			if (!cc->alloc_contig) {
+				const unsigned int order = compound_order(page);
+
+				if (order <= MAX_PAGE_ORDER) {
+					low_pfn += (1UL << order) - 1;
+					nr_scanned += (1UL << order) - 1;
+				}
+				goto isolate_fail;
+			}
+			/* for alloc_contig case */
 			if (locked) {
 				unlock_page_lruvec_irqrestore(locked, flags);
 				locked = NULL;
@@ -1050,22 +1094,18 @@ isolate_migratepages_block(struct compact_control *cc, unsigned long low_pfn,
 		}
 
 		/*
-		 * Regardless of being on LRU, compound pages such as THP and
-		 * hugetlbfs are not to be compacted unless we are attempting
-		 * an allocation larger than the compound page size.
-		 * We can potentially save a lot of iterations if we skip them
-		 * at once. The check is racy, but we can consider only valid
-		 * values and the only danger is skipping too much.
+		 * Regardless of being on LRU, compound pages such as THP
+		 * (hugetlbfs is handled above) are not to be compacted unless
+		 * we are attempting an allocation larger than the compound
+		 * page size. We can potentially save a lot of iterations if we
+		 * skip them at once. The check is racy, but we can consider
+		 * only valid values and the only danger is skipping too much.
 		 */
 		if (PageCompound(page) && !cc->alloc_contig) {
 			const unsigned int order = compound_order(page);
 
-			/*
-			 * Skip based on page order and compaction target order
-			 * and skip hugetlbfs pages.
-			 */
-			if (skip_isolation_on_order(order, cc->order) ||
-			    PageHuge(page)) {
+			/* Skip based on page order and compaction target order. */
+			if (skip_isolation_on_order(order, cc->order)) {
 				if (order <= MAX_PAGE_ORDER) {
 					low_pfn += (1UL << order) - 1;
 					nr_scanned += (1UL << order) - 1;
@@ -1639,8 +1679,7 @@ static void fast_isolate_freepages(struct compact_control *cc)
 				nr_scanned += nr_isolated - 1;
 				total_isolated += nr_isolated;
 				cc->nr_freepages += nr_isolated;
-				list_add_tail(&page->lru, &cc->freepages[order].pages);
-				cc->freepages[order].nr_pages++;
+				list_add_tail(&page->lru, &cc->freepages[order]);
 				count_compact_events(COMPACTISOLATED, nr_isolated);
 			} else {
 				/* If isolation fails, abort the search */
@@ -1835,53 +1874,45 @@ static struct folio *compaction_alloc(struct folio *src, unsigned long data)
 	struct folio *dst;
 	int order = folio_order(src);
 	bool has_isolated_pages = false;
+	int start_order;
+	struct page *freepage;
+	unsigned long size;
 
 again:
-	if (!cc->freepages[order].nr_pages) {
-		int i;
+	for (start_order = order; start_order < NR_PAGE_ORDERS; start_order++)
+		if (!list_empty(&cc->freepages[start_order]))
+			break;
 
-		for (i = order + 1; i < NR_PAGE_ORDERS; i++) {
-			if (cc->freepages[i].nr_pages) {
-				struct page *freepage =
-					list_first_entry(&cc->freepages[i].pages,
-							 struct page, lru);
-
-				int start_order = i;
-				unsigned long size = 1 << start_order;
-
-				list_del(&freepage->lru);
-				cc->freepages[i].nr_pages--;
-
-				while (start_order > order) {
-					start_order--;
-					size >>= 1;
-
-					list_add(&freepage[size].lru,
-						&cc->freepages[start_order].pages);
-					cc->freepages[start_order].nr_pages++;
-					set_page_private(&freepage[size], start_order);
-				}
-				dst = (struct folio *)freepage;
-				goto done;
-			}
-		}
-		if (!has_isolated_pages) {
-			isolate_freepages(cc);
-			has_isolated_pages = true;
-			goto again;
-		}
-
-		if (!cc->freepages[order].nr_pages)
+	/* no free pages in the list */
+	if (start_order == NR_PAGE_ORDERS) {
+		if (has_isolated_pages)
 			return NULL;
+		isolate_freepages(cc);
+		has_isolated_pages = true;
+		goto again;
 	}
 
-	dst = list_first_entry(&cc->freepages[order].pages, struct folio, lru);
-	cc->freepages[order].nr_pages--;
-	list_del(&dst->lru);
-	cc->nr_freepages--;
-	cc->nr_migratepages -= 1 << folio_order(src);
+	freepage = list_first_entry(&cc->freepages[start_order], struct page,
+				lru);
+	size = 1 << start_order;
 
-	return dst;
+	list_del(&freepage->lru);
+
+	while (start_order > order) {
+		start_order--;
+		size >>= 1;
+
+		list_add(&freepage[size].lru, &cc->freepages[start_order]);
+		set_page_private(&freepage[size], start_order);
+	}
+	dst = (struct folio *)freepage;
+
+	post_alloc_hook(&dst->page, order, __GFP_MOVABLE);
+	if (order)
+		prep_compound_page(&dst->page, order);
+	cc->nr_freepages -= 1 << order;
+	cc->nr_migratepages -= 1 << order;
+	return page_rmappable_folio(&dst->page);
 }
 
 /*
@@ -1895,9 +1926,16 @@ static void compaction_free(struct folio *dst, unsigned long data)
 	int order = folio_order(dst);
 	struct page *page = &dst->page;
 
-	list_add(&dst->lru, &cc->freepages);
-	cc->nr_freepages++;
-	cc->nr_migratepages += 1 << folio_order(dst);
+	if (folio_put_testzero(dst)) {
+		free_pages_prepare(page, order);
+		list_add(&dst->lru, &cc->freepages[order]);
+		cc->nr_freepages += 1 << order;
+	}
+	cc->nr_migratepages += 1 << order;
+	/*
+	 * someone else has referenced the page, we cannot take it back to our
+	 * free list.
+	 */
 }
 
 /* possible outcome of isolate_migratepages */
@@ -2171,17 +2209,6 @@ static isolate_migrate_t isolate_migratepages(struct compact_control *cc)
 	}
 
 	return cc->nr_migratepages ? ISOLATE_SUCCESS : ISOLATE_NONE;
-}
-
-/*
- * order == -1 is expected when compacting proactively via
- * 1. /proc/sys/vm/compact_memory
- * 2. /sys/devices/system/node/nodex/compact
- * 3. /proc/sys/vm/compaction_proactiveness
- */
-static inline bool is_via_compact_memory(int order)
-{
-	return order == -1;
 }
 
 /*
@@ -2520,7 +2547,7 @@ compact_zone(struct compact_control *cc, struct capture_control *capc)
 	unsigned long last_migrated_pfn;
 	const bool sync = cc->mode != MIGRATE_ASYNC;
 	bool update_cached;
-	unsigned int nr_succeeded = 0;
+	unsigned int nr_succeeded = 0, nr_migratepages;
 	int order;
 
 	/*
@@ -2532,7 +2559,7 @@ compact_zone(struct compact_control *cc, struct capture_control *capc)
 	cc->nr_migratepages = 0;
 	cc->nr_freepages = 0;
 	for (order = 0; order < NR_PAGE_ORDERS; order++)
-		init_page_list(&cc->freepages[order]);
+		INIT_LIST_HEAD(&cc->freepages[order]);
 	INIT_LIST_HEAD(&cc->migratepages);
 
 	cc->migratetype = gfp_migratetype(cc->gfp_mask);
@@ -2640,11 +2667,17 @@ rescan:
 				pageblock_start_pfn(cc->migrate_pfn - 1));
 		}
 
+		/*
+		 * Record the number of pages to migrate since the
+		 * compaction_alloc/free() will update cc->nr_migratepages
+		 * properly.
+		 */
+		nr_migratepages = cc->nr_migratepages;
 		err = migrate_pages(&cc->migratepages, compaction_alloc,
 				compaction_free, (unsigned long)cc, cc->mode,
 				MR_COMPACTION, &nr_succeeded);
 
-		trace_mm_compaction_migratepages(cc, nr_succeeded);
+		trace_mm_compaction_migratepages(nr_migratepages, nr_succeeded);
 
 		/* All pages were either migrated or will be released */
 		cc->nr_migratepages = 0;

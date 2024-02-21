@@ -158,7 +158,7 @@ static void pd_release(struct dtpm *dtpm)
 
 		cpufreq_cpu_put(policy);
 	}
-	
+
 	kfree(dtpm_cpu);
 }
 
@@ -238,7 +238,7 @@ static int __dtpm_cpu_setup(int cpu, struct dtpm *parent)
 				   &dtpm_cpu->qos_req, FREQ_QOS_MAX,
 				   table[pd->nr_perf_states - 1].frequency);
 	rcu_read_unlock();
-	if (ret)
+	if (ret < 0)
 		goto out_dtpm_unregister;
 
 	cpufreq_cpu_put(policy);

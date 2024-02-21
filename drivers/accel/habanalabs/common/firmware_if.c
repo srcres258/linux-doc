@@ -40,6 +40,31 @@ static char *comms_sts_str_arr[COMMS_STS_INVLD_LAST] = {
 	[COMMS_STS_TIMEOUT_ERR] = __stringify(COMMS_STS_TIMEOUT_ERR),
 };
 
+/**
+ * hl_fw_version_cmp() - compares the FW version to a specific version
+ *
+ * @hdev: pointer to hl_device structure
+ * @major: major number of a reference version
+ * @minor: minor number of a reference version
+ * @subminor: sub-minor number of a reference version
+ *
+ * Return 1 if FW version greater than the reference version, -1 if it's
+ *         smaller and 0 if versions are identical.
+ */
+int hl_fw_version_cmp(struct hl_device *hdev, u32 major, u32 minor, u32 subminor)
+{
+	if (hdev->fw_sw_major_ver != major)
+		return (hdev->fw_sw_major_ver > major) ? 1 : -1;
+
+	if (hdev->fw_sw_minor_ver != minor)
+		return (hdev->fw_sw_minor_ver > minor) ? 1 : -1;
+
+	if (hdev->fw_sw_sub_minor_ver != subminor)
+		return (hdev->fw_sw_sub_minor_ver > subminor) ? 1 : -1;
+
+	return 0;
+}
+
 static char *extract_fw_ver_from_str(const char *fw_str)
 {
 	char *str, *fw_ver, *whitespace;
@@ -501,7 +526,7 @@ int hl_fw_unmask_irq(struct hl_device *hdev, u16 event_type)
 						0, &result);
 
 	if (rc)
-		dev_err(hdev->dev, "failed to unmask RAZWI IRQ %d", event_type);
+		dev_err(hdev->dev, "failed to unmask event %d", event_type);
 
 	return rc;
 }
@@ -540,7 +565,7 @@ int hl_fw_unmask_irq_arr(struct hl_device *hdev, const u32 *irq_arr,
 						total_pkt_size, 0, &result);
 
 	if (rc)
-		dev_err(hdev->dev, "failed to unmask IRQ array\n");
+		dev_err(hdev->dev, "failed to unmask event array\n");
 
 	kfree(pkt);
 
@@ -2718,18 +2743,20 @@ static int hl_fw_dynamic_init_cpu(struct hl_device *hdev,
 		hdev->reset_info.curr_reset_cause = HL_RESET_CAUSE_UNKNOWN;
 	}
 
+	rc = hl_fw_dynamic_request_descriptor(hdev, fw_loader, sizeof(struct lkd_msg_comms));
+	if (rc)
+		goto protocol_err;
+
+	if (hdev->asic_prop.support_dynamic_resereved_fw_size)
+		hdev->asic_prop.reserved_fw_mem_size =
+			le32_to_cpu(fw_loader->dynamic_loader.comm_desc.rsvd_mem_size_mb) * SZ_1M;
+
 	if (!(hdev->fw_components & FW_TYPE_BOOT_CPU)) {
 		struct lkd_fw_binning_info *binning_info;
-
-		rc = hl_fw_dynamic_request_descriptor(hdev, fw_loader,
-							sizeof(struct lkd_msg_comms));
-		if (rc)
-			goto protocol_err;
 
 		/* read preboot version */
 		rc = hl_fw_dynamic_read_device_fw_version(hdev, FW_COMP_PREBOOT,
 				fw_loader->dynamic_loader.comm_desc.cur_fw_ver);
-
 		if (rc)
 			return rc;
 
@@ -2754,11 +2781,6 @@ static int hl_fw_dynamic_init_cpu(struct hl_device *hdev,
 				"Read binning masks: tpc: 0x%llx, dram: 0x%llx, edma: 0x%x, dec: 0x%x, rot:0x%x\n",
 				hdev->tpc_binning, hdev->dram_binning, hdev->edma_binning,
 				hdev->decoder_binning, hdev->rotator_binning);
-		}
-
-		if (hdev->asic_prop.support_dynamic_resereved_fw_size) {
-			hdev->asic_prop.reserved_fw_mem_size =
-				le32_to_cpu(fw_loader->dynamic_loader.comm_desc.rsvd_mem_size_mb);
 		}
 
 		return 0;
@@ -2795,7 +2817,7 @@ static int hl_fw_dynamic_init_cpu(struct hl_device *hdev,
 	hdev->asic_funcs->init_cpu_scrambler_dram(hdev);
 
 	if (!(hdev->fw_components & FW_TYPE_LINUX)) {
-		dev_info(hdev->dev, "Skip loading Linux F/W\n");
+		dev_dbg(hdev->dev, "Skip loading Linux F/W\n");
 		return 0;
 	}
 
