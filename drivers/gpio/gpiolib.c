@@ -1056,6 +1056,7 @@ err_remove_irqchip_mask:
 	gpiochip_irqchip_free_valid_mask(gc);
 err_remove_acpi_chip:
 	acpi_gpiochip_remove(gc);
+	gpiochip_remove_pin_ranges(gc);
 err_remove_of_chip:
 	gpiochip_free_hogs(gc);
 	of_gpiochip_remove(gc);
@@ -1063,7 +1064,6 @@ err_cleanup_desc_srcu:
 	for (i = 0; i < gdev->ngpio; i++)
 		cleanup_srcu_struct(&gdev->descs[i].srcu);
 err_free_gpiochip_mask:
-	gpiochip_remove_pin_ranges(gc);
 	gpiochip_free_valid_mask(gc);
 err_cleanup_gdev_srcu:
 	cleanup_srcu_struct(&gdev->srcu);
