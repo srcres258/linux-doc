@@ -1311,6 +1311,8 @@ patternProperties:
     description: Skyworks Solutions, Inc.
   "^smartlabs,.*":
     description: SmartLabs LLC
+  "^smartrg,.*":
+    description: SmartRG, Inc.
   "^smi,.*":
     description: Silicon Motion Technology Corporation
   "^smsc,.*":
