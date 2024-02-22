@@ -18,6 +18,8 @@
 #include <linux/slab.h>
 #include <linux/string.h>
 #include <linux/string_helpers.h>
+#include <kunit/test.h>
+#include <kunit/test-bug.h>
 
 /**
  * string_get_size - get the size in the specified units
@@ -826,40 +828,6 @@ char **devm_kasprintf_strarray(struct device *dev, const char *prefix, size_t n)
 EXPORT_SYMBOL_GPL(devm_kasprintf_strarray);
 
 /**
- * strscpy_pad() - Copy a C-string into a sized buffer
- * @dest: Where to copy the string to
- * @src: Where to copy the string from
- * @count: Size of destination buffer
- *
- * Copy the string, or as much of it as fits, into the dest buffer.  The
- * behavior is undefined if the string buffers overlap.  The destination
- * buffer is always %NUL terminated, unless it's zero-sized.
- *
- * If the source string is shorter than the destination buffer, zeros
- * the tail of the destination buffer.
- *
- * For full explanation of why you may want to consider using the
- * 'strscpy' functions please see the function docstring for strscpy().
- *
- * Returns:
- * * The number of characters copied (not including the trailing %NUL)
- * * -E2BIG if count is 0 or @src was truncated.
- */
-ssize_t strscpy_pad(char *dest, const char *src, size_t count)
-{
-	ssize_t written;
-
-	written = strscpy(dest, src, count);
-	if (written < 0 || written == count - 1)
-		return written;
-
-	memset(dest + written + 1, 0, count - written - 1);
-
-	return written;
-}
-EXPORT_SYMBOL(strscpy_pad);
-
-/**
  * skip_spaces - Removes leading whitespace from @str.
  * @str: The string to be stripped.
  *
@@ -1042,10 +1010,28 @@ EXPORT_SYMBOL(__read_overflow2_field);
 void __write_overflow_field(size_t avail, size_t wanted) { }
 EXPORT_SYMBOL(__write_overflow_field);
 
-void fortify_panic(const char *name)
+static const char * const fortify_func_name[] = {
+#define MAKE_FORTIFY_FUNC_NAME(func)	[MAKE_FORTIFY_FUNC(func)] = #func
+	EACH_FORTIFY_FUNC(MAKE_FORTIFY_FUNC_NAME)
+#undef  MAKE_FORTIFY_FUNC_NAME
+};
+
+void __fortify_report(const u8 reason, const size_t avail, const size_t size)
 {
-	pr_emerg("detected buffer overflow in %s\n", name);
+	const u8 func = FORTIFY_REASON_FUNC(reason);
+	const bool write = FORTIFY_REASON_DIR(reason);
+	const char *name;
+
+	name = fortify_func_name[umin(func, FORTIFY_FUNC_UNKNOWN)];
+	WARN(1, "%s: detected buffer overflow: %zu byte %s of buffer size %zu\n",
+		 name, size, str_read_write(!write), avail);
+}
+EXPORT_SYMBOL(__fortify_report);
+
+void __fortify_panic(const u8 reason, const size_t avail, const size_t size)
+{
+	__fortify_report(reason, avail, size);
 	BUG();
 }
-EXPORT_SYMBOL(fortify_panic);
+EXPORT_SYMBOL(__fortify_panic);
 #endif /* CONFIG_FORTIFY_SOURCE */
