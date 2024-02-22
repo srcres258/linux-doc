@@ -109,7 +109,7 @@ xfs_attr_shortform_list(
 	 * It didn't all fit, so we have to sort everything on hashval.
 	 */
 	sbsize = sf->count * sizeof(*sbuf);
-	sbp = sbuf = kmem_alloc(sbsize, KM_NOFS);
+	sbp = sbuf = kmalloc(sbsize, GFP_KERNEL | __GFP_NOFAIL);
 
 	/*
 	 * Scan the attribute list for the rest of the entries, storing
@@ -124,7 +124,7 @@ xfs_attr_shortform_list(
 					     XFS_ERRLEVEL_LOW,
 					     context->dp->i_mount, sfe,
 					     sizeof(*sfe));
-			kmem_free(sbuf);
+			kfree(sbuf);
 			return -EFSCORRUPTED;
 		}
 
@@ -188,7 +188,7 @@ xfs_attr_shortform_list(
 		cursor->offset++;
 	}
 out:
-	kmem_free(sbuf);
+	kfree(sbuf);
 	return error;
 }
 
@@ -504,7 +504,7 @@ xfs_attr_list_ilocked(
 {
 	struct xfs_inode		*dp = context->dp;
 
-	ASSERT(xfs_isilocked(dp, XFS_ILOCK_SHARED | XFS_ILOCK_EXCL));
+	xfs_assert_ilocked(dp, XFS_ILOCK_SHARED | XFS_ILOCK_EXCL);
 
 	/*
 	 * Decide on what work routines to call based on the inode size.

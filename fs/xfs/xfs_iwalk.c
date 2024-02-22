@@ -160,7 +160,7 @@ xfs_iwalk_alloc(
 
 	/* Allocate a prefetch buffer for inobt records. */
 	size = iwag->sz_recs * sizeof(struct xfs_inobt_rec_incore);
-	iwag->recs = kmem_alloc(size, KM_MAYFAIL);
+	iwag->recs = kmalloc(size, GFP_KERNEL | __GFP_RETRY_MAYFAIL);
 	if (iwag->recs == NULL)
 		return -ENOMEM;
 
@@ -172,7 +172,7 @@ STATIC void
 xfs_iwalk_free(
 	struct xfs_iwalk_ag	*iwag)
 {
-	kmem_free(iwag->recs);
+	kfree(iwag->recs);
 	iwag->recs = NULL;
 }
 
@@ -627,7 +627,7 @@ xfs_iwalk_ag_work(
 	xfs_iwalk_free(iwag);
 out:
 	xfs_perag_put(iwag->pag);
-	kmem_free(iwag);
+	kfree(iwag);
 	return error;
 }
 
@@ -663,7 +663,8 @@ xfs_iwalk_threaded(
 		if (xfs_pwork_ctl_want_abort(&pctl))
 			break;
 
-		iwag = kmem_zalloc(sizeof(struct xfs_iwalk_ag), 0);
+		iwag = kzalloc(sizeof(struct xfs_iwalk_ag),
+				GFP_KERNEL | __GFP_NOFAIL);
 		iwag->mp = mp;
 
 		/*

@@ -85,7 +85,8 @@ xfs_da_state_alloc(
 {
 	struct xfs_da_state	*state;
 
-	state = kmem_cache_zalloc(xfs_da_state_cache, GFP_NOFS | __GFP_NOFAIL);
+	state = kmem_cache_zalloc(xfs_da_state_cache,
+			GFP_KERNEL | __GFP_NOLOCKDEP | __GFP_NOFAIL);
 	state->args = args;
 	state->mp = args->dp->i_mount;
 	return state;
@@ -2182,7 +2183,8 @@ xfs_da_grow_inode_int(
 		 * If we didn't get it and the block might work if fragmented,
 		 * try without the CONTIG flag.  Loop until we get it all.
 		 */
-		mapp = kmem_alloc(sizeof(*mapp) * count, 0);
+		mapp = kmalloc(sizeof(*mapp) * count,
+				GFP_KERNEL | __GFP_NOFAIL);
 		for (b = *bno, mapi = 0; b < *bno + count; ) {
 			c = (int)(*bno + count - b);
 			nmap = min(XFS_BMAP_MAX_NMAP, c);
@@ -2219,7 +2221,7 @@ xfs_da_grow_inode_int(
 
 out_free_map:
 	if (mapp != &map)
-		kmem_free(mapp);
+		kfree(mapp);
 	return error;
 }
 
@@ -2518,7 +2520,8 @@ xfs_dabuf_map(
 	int			error = 0, nirecs, i;
 
 	if (nfsb > 1)
-		irecs = kmem_zalloc(sizeof(irec) * nfsb, KM_NOFS);
+		irecs = kzalloc(sizeof(irec) * nfsb,
+				GFP_KERNEL | __GFP_NOLOCKDEP | __GFP_NOFAIL);
 
 	nirecs = nfsb;
 	error = xfs_bmapi_read(dp, bno, nfsb, irecs, &nirecs,
@@ -2531,7 +2534,8 @@ xfs_dabuf_map(
 	 * larger one that needs to be free by the caller.
 	 */
 	if (nirecs > 1) {
-		map = kmem_zalloc(nirecs * sizeof(struct xfs_buf_map), KM_NOFS);
+		map = kzalloc(nirecs * sizeof(struct xfs_buf_map),
+				GFP_KERNEL | __GFP_NOLOCKDEP | __GFP_NOFAIL);
 		if (!map) {
 			error = -ENOMEM;
 			goto out_free_irecs;
@@ -2557,7 +2561,7 @@ xfs_dabuf_map(
 	*nmaps = nirecs;
 out_free_irecs:
 	if (irecs != &irec)
-		kmem_free(irecs);
+		kfree(irecs);
 	return error;
 
 invalid_mapping:
@@ -2613,7 +2617,7 @@ xfs_da_get_buf(
 
 out_free:
 	if (mapp != &map)
-		kmem_free(mapp);
+		kfree(mapp);
 
 	return error;
 }
@@ -2654,7 +2658,7 @@ xfs_da_read_buf(
 	*bpp = bp;
 out_free:
 	if (mapp != &map)
-		kmem_free(mapp);
+		kfree(mapp);
 
 	return error;
 }
@@ -2685,7 +2689,7 @@ xfs_da_reada_buf(
 
 out_free:
 	if (mapp != &map)
-		kmem_free(mapp);
+		kfree(mapp);
 
 	return error;
 }
