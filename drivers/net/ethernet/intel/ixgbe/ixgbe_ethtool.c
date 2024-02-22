@@ -459,7 +459,7 @@ static int ixgbe_set_link_ksettings(struct net_device *netdev,
 	struct ixgbe_adapter *adapter = netdev_priv(netdev);
 	struct ixgbe_hw *hw = &adapter->hw;
 	u32 advertised, old;
-	s32 err = 0;
+	int err = 0;
 
 	if ((hw->phy.media_type == ixgbe_media_type_copper) ||
 	    (hw->phy.multispeed_fiber)) {
@@ -3326,9 +3326,9 @@ static int ixgbe_get_module_info(struct net_device *dev,
 {
 	struct ixgbe_adapter *adapter = netdev_priv(dev);
 	struct ixgbe_hw *hw = &adapter->hw;
-	s32 status;
 	u8 sff8472_rev, addr_mode;
 	bool page_swap = false;
+	int status;
 
 	if (hw->phy.type == ixgbe_phy_fw)
 		return -ENXIO;
@@ -3372,7 +3372,7 @@ static int ixgbe_get_module_eeprom(struct net_device *dev,
 {
 	struct ixgbe_adapter *adapter = netdev_priv(dev);
 	struct ixgbe_hw *hw = &adapter->hw;
-	s32 status = -EFAULT;
+	int status = -EFAULT;
 	u8 databyte = 0xFF;
 	int i = 0;
 
@@ -3425,44 +3425,44 @@ static const struct {
 };
 
 static int
-ixgbe_get_eee_fw(struct ixgbe_adapter *adapter, struct ethtool_eee *edata)
+ixgbe_get_eee_fw(struct ixgbe_adapter *adapter, struct ethtool_keee *edata)
 {
 	u32 info[FW_PHY_ACT_DATA_COUNT] = { 0 };
 	struct ixgbe_hw *hw = &adapter->hw;
-	s32 rc;
+	int rc;
 	u16 i;
 
 	rc = ixgbe_fw_phy_activity(hw, FW_PHY_ACT_UD_2, &info);
 	if (rc)
 		return rc;
 
-	edata->lp_advertised = 0;
+	edata->lp_advertised_u32 = 0;
 	for (i = 0; i < ARRAY_SIZE(ixgbe_lp_map); ++i) {
 		if (info[0] & ixgbe_lp_map[i].lp_advertised)
-			edata->lp_advertised |= ixgbe_lp_map[i].mac_speed;
+			edata->lp_advertised_u32 |= ixgbe_lp_map[i].mac_speed;
 	}
 
-	edata->supported = 0;
+	edata->supported_u32 = 0;
 	for (i = 0; i < ARRAY_SIZE(ixgbe_ls_map); ++i) {
 		if (hw->phy.eee_speeds_supported & ixgbe_ls_map[i].mac_speed)
-			edata->supported |= ixgbe_ls_map[i].supported;
+			edata->supported_u32 |= ixgbe_ls_map[i].supported;
 	}
 
-	edata->advertised = 0;
+	edata->advertised_u32 = 0;
 	for (i = 0; i < ARRAY_SIZE(ixgbe_ls_map); ++i) {
 		if (hw->phy.eee_speeds_advertised & ixgbe_ls_map[i].mac_speed)
-			edata->advertised |= ixgbe_ls_map[i].supported;
+			edata->advertised_u32 |= ixgbe_ls_map[i].supported;
 	}
 
-	edata->eee_enabled = !!edata->advertised;
+	edata->eee_enabled = !!edata->advertised_u32;
 	edata->tx_lpi_enabled = edata->eee_enabled;
-	if (edata->advertised & edata->lp_advertised)
+	if (edata->advertised_u32 & edata->lp_advertised_u32)
 		edata->eee_active = true;
 
 	return 0;
 }
 
-static int ixgbe_get_eee(struct net_device *netdev, struct ethtool_eee *edata)
+static int ixgbe_get_eee(struct net_device *netdev, struct ethtool_keee *edata)
 {
 	struct ixgbe_adapter *adapter = netdev_priv(netdev);
 	struct ixgbe_hw *hw = &adapter->hw;
@@ -3476,17 +3476,17 @@ static int ixgbe_get_eee(struct net_device *netdev, struct ethtool_eee *edata)
 	return -EOPNOTSUPP;
 }
 
-static int ixgbe_set_eee(struct net_device *netdev, struct ethtool_eee *edata)
+static int ixgbe_set_eee(struct net_device *netdev, struct ethtool_keee *edata)
 {
 	struct ixgbe_adapter *adapter = netdev_priv(netdev);
 	struct ixgbe_hw *hw = &adapter->hw;
-	struct ethtool_eee eee_data;
-	s32 ret_val;
+	struct ethtool_keee eee_data;
+	int ret_val;
 
 	if (!(adapter->flags2 & IXGBE_FLAG2_EEE_CAPABLE))
 		return -EOPNOTSUPP;
 
-	memset(&eee_data, 0, sizeof(struct ethtool_eee));
+	memset(&eee_data, 0, sizeof(struct ethtool_keee));
 
 	ret_val = ixgbe_get_eee(netdev, &eee_data);
 	if (ret_val)
@@ -3504,7 +3504,7 @@ static int ixgbe_set_eee(struct net_device *netdev, struct ethtool_eee *edata)
 			return -EINVAL;
 		}
 
-		if (eee_data.advertised != edata->advertised) {
+		if (eee_data.advertised_u32 != edata->advertised_u32) {
 			e_err(drv,
 			      "Setting EEE advertised speeds is not supported\n");
 			return -EINVAL;

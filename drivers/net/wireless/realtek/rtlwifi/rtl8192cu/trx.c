@@ -79,68 +79,75 @@ static int configvernoutep(struct ieee80211_hw *hw)
 static void twooutepmapping(struct ieee80211_hw *hw, bool is_chip8,
 			     bool  bwificfg, struct rtl_ep_map *ep_map)
 {
+	struct rtl_usb_priv *usb_priv = rtl_usbpriv(hw);
+	struct rtl_usb *rtlusb = rtl_usbdev(usb_priv);
 	struct rtl_priv *rtlpriv = rtl_priv(hw);
 
 	if (bwificfg) { /* for WMM */
 		rtl_dbg(rtlpriv, COMP_INIT, DBG_DMESG,
 			"USB Chip-B & WMM Setting.....\n");
-		ep_map->ep_mapping[RTL_TXQ_BE]	= 2;
-		ep_map->ep_mapping[RTL_TXQ_BK]	= 3;
-		ep_map->ep_mapping[RTL_TXQ_VI]	= 3;
-		ep_map->ep_mapping[RTL_TXQ_VO] = 2;
-		ep_map->ep_mapping[RTL_TXQ_MGT] = 2;
-		ep_map->ep_mapping[RTL_TXQ_BCN] = 2;
-		ep_map->ep_mapping[RTL_TXQ_HI]	= 2;
+		ep_map->ep_mapping[RTL_TXQ_BE]	= rtlusb->out_eps[0];
+		ep_map->ep_mapping[RTL_TXQ_BK]	= rtlusb->out_eps[1];
+		ep_map->ep_mapping[RTL_TXQ_VI]	= rtlusb->out_eps[1];
+		ep_map->ep_mapping[RTL_TXQ_VO]	= rtlusb->out_eps[0];
+		ep_map->ep_mapping[RTL_TXQ_MGT] = rtlusb->out_eps[0];
+		ep_map->ep_mapping[RTL_TXQ_BCN] = rtlusb->out_eps[0];
+		ep_map->ep_mapping[RTL_TXQ_HI]	= rtlusb->out_eps[0];
 	} else { /* typical setting */
 		rtl_dbg(rtlpriv, COMP_INIT, DBG_DMESG,
 			"USB typical Setting.....\n");
-		ep_map->ep_mapping[RTL_TXQ_BE]	= 3;
-		ep_map->ep_mapping[RTL_TXQ_BK]	= 3;
-		ep_map->ep_mapping[RTL_TXQ_VI]	= 2;
-		ep_map->ep_mapping[RTL_TXQ_VO]	= 2;
-		ep_map->ep_mapping[RTL_TXQ_MGT] = 2;
-		ep_map->ep_mapping[RTL_TXQ_BCN] = 2;
-		ep_map->ep_mapping[RTL_TXQ_HI]	= 2;
+		ep_map->ep_mapping[RTL_TXQ_BE]	= rtlusb->out_eps[1];
+		ep_map->ep_mapping[RTL_TXQ_BK]	= rtlusb->out_eps[1];
+		ep_map->ep_mapping[RTL_TXQ_VI]	= rtlusb->out_eps[0];
+		ep_map->ep_mapping[RTL_TXQ_VO]	= rtlusb->out_eps[0];
+		ep_map->ep_mapping[RTL_TXQ_MGT] = rtlusb->out_eps[0];
+		ep_map->ep_mapping[RTL_TXQ_BCN] = rtlusb->out_eps[0];
+		ep_map->ep_mapping[RTL_TXQ_HI]	= rtlusb->out_eps[0];
 	}
 }
 
 static void threeoutepmapping(struct ieee80211_hw *hw, bool  bwificfg,
 			       struct rtl_ep_map *ep_map)
 {
+	struct rtl_usb_priv *usb_priv = rtl_usbpriv(hw);
+	struct rtl_usb *rtlusb = rtl_usbdev(usb_priv);
 	struct rtl_priv *rtlpriv = rtl_priv(hw);
 
 	if (bwificfg) { /* for WMM */
 		rtl_dbg(rtlpriv, COMP_INIT, DBG_DMESG,
 			"USB 3EP Setting for WMM.....\n");
-		ep_map->ep_mapping[RTL_TXQ_BE]	= 5;
-		ep_map->ep_mapping[RTL_TXQ_BK]	= 3;
-		ep_map->ep_mapping[RTL_TXQ_VI]	= 3;
-		ep_map->ep_mapping[RTL_TXQ_VO]	= 2;
-		ep_map->ep_mapping[RTL_TXQ_MGT] = 2;
-		ep_map->ep_mapping[RTL_TXQ_BCN] = 2;
-		ep_map->ep_mapping[RTL_TXQ_HI]	= 2;
+		ep_map->ep_mapping[RTL_TXQ_BE]	= rtlusb->out_eps[2];
+		ep_map->ep_mapping[RTL_TXQ_BK]	= rtlusb->out_eps[1];
+		ep_map->ep_mapping[RTL_TXQ_VI]	= rtlusb->out_eps[1];
+		ep_map->ep_mapping[RTL_TXQ_VO]	= rtlusb->out_eps[0];
+		ep_map->ep_mapping[RTL_TXQ_MGT] = rtlusb->out_eps[0];
+		ep_map->ep_mapping[RTL_TXQ_BCN] = rtlusb->out_eps[0];
+		ep_map->ep_mapping[RTL_TXQ_HI]	= rtlusb->out_eps[0];
 	} else { /* typical setting */
 		rtl_dbg(rtlpriv, COMP_INIT, DBG_DMESG,
 			"USB 3EP Setting for typical.....\n");
-		ep_map->ep_mapping[RTL_TXQ_BE]	= 5;
-		ep_map->ep_mapping[RTL_TXQ_BK]	= 5;
-		ep_map->ep_mapping[RTL_TXQ_VI]	= 3;
-		ep_map->ep_mapping[RTL_TXQ_VO]	= 2;
-		ep_map->ep_mapping[RTL_TXQ_MGT] = 2;
-		ep_map->ep_mapping[RTL_TXQ_BCN] = 2;
-		ep_map->ep_mapping[RTL_TXQ_HI]	= 2;
+		ep_map->ep_mapping[RTL_TXQ_BE]	= rtlusb->out_eps[2];
+		ep_map->ep_mapping[RTL_TXQ_BK]	= rtlusb->out_eps[2];
+		ep_map->ep_mapping[RTL_TXQ_VI]	= rtlusb->out_eps[1];
+		ep_map->ep_mapping[RTL_TXQ_VO]	= rtlusb->out_eps[0];
+		ep_map->ep_mapping[RTL_TXQ_MGT] = rtlusb->out_eps[0];
+		ep_map->ep_mapping[RTL_TXQ_BCN] = rtlusb->out_eps[0];
+		ep_map->ep_mapping[RTL_TXQ_HI]	= rtlusb->out_eps[0];
 	}
 }
 
 static void oneoutepmapping(struct ieee80211_hw *hw, struct rtl_ep_map *ep_map)
 {
-	ep_map->ep_mapping[RTL_TXQ_BE]	= 2;
-	ep_map->ep_mapping[RTL_TXQ_BK]	= 2;
-	ep_map->ep_mapping[RTL_TXQ_VI]	= 2;
-	ep_map->ep_mapping[RTL_TXQ_VO] = 2;
-	ep_map->ep_mapping[RTL_TXQ_MGT] = 2;
-	ep_map->ep_mapping[RTL_TXQ_BCN] = 2;
-	ep_map->ep_mapping[RTL_TXQ_HI]	= 2;
+	struct rtl_usb_priv *usb_priv = rtl_usbpriv(hw);
+	struct rtl_usb *rtlusb = rtl_usbdev(usb_priv);
+
+	ep_map->ep_mapping[RTL_TXQ_BE]	= rtlusb->out_eps[0];
+	ep_map->ep_mapping[RTL_TXQ_BK]	= rtlusb->out_eps[0];
+	ep_map->ep_mapping[RTL_TXQ_VI]	= rtlusb->out_eps[0];
+	ep_map->ep_mapping[RTL_TXQ_VO]	= rtlusb->out_eps[0];
+	ep_map->ep_mapping[RTL_TXQ_MGT] = rtlusb->out_eps[0];
+	ep_map->ep_mapping[RTL_TXQ_BCN] = rtlusb->out_eps[0];
+	ep_map->ep_mapping[RTL_TXQ_HI]	= rtlusb->out_eps[0];
 }
 
 static int _out_ep_mapping(struct ieee80211_hw *hw)
@@ -475,7 +482,6 @@ void rtl92cu_tx_fill_desc(struct ieee80211_hw *hw,
 	struct rtl_priv *rtlpriv = rtl_priv(hw);
 	struct rtl_mac *mac = rtl_mac(rtl_priv(hw));
 	struct rtl_ps_ctl *ppsc = rtl_psc(rtl_priv(hw));
-	bool defaultadapter = true;
 	u8 *qc = ieee80211_get_qos_ctl(hdr);
 	u8 tid = qc[0] & IEEE80211_QOS_CTL_TID_MASK;
 	u16 seq_number;
@@ -587,8 +593,6 @@ void rtl92cu_tx_fill_desc(struct ieee80211_hw *hw,
 	      ppsc->fwctrl_lps) {
 		set_tx_desc_hwseq_en(txdesc, 1);
 		set_tx_desc_pkt_id(txdesc, 8);
-		if (!defaultadapter)
-			set_tx_desc_qos(txdesc, 1);
 	}
 	if (ieee80211_has_morefrags(fc))
 		set_tx_desc_more_frag(txdesc, 1);
