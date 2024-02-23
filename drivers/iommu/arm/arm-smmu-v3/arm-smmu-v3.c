@@ -29,7 +29,6 @@
 
 #include "arm-smmu-v3.h"
 #include "../../dma-iommu.h"
-#include "../../iommu-sva.h"
 
 static bool disable_bypass = true;
 module_param(disable_bypass, bool, 0444);
@@ -921,31 +920,29 @@ static int arm_smmu_cmdq_batch_submit(struct arm_smmu_device *smmu,
 	return arm_smmu_cmdq_issue_cmdlist(smmu, cmds->cmds, cmds->num, true);
 }
 
-static int arm_smmu_page_response(struct device *dev,
-				  struct iommu_fault_event *unused,
-				  struct iommu_page_response *resp)
+static void arm_smmu_page_response(struct device *dev, struct iopf_fault *unused,
+				   struct iommu_page_response *resp)
 {
 	struct arm_smmu_cmdq_ent cmd = {0};
 	struct arm_smmu_master *master = dev_iommu_priv_get(dev);
 	int sid = master->streams[0].id;
 
-	if (master->stall_enabled) {
-		cmd.opcode		= CMDQ_OP_RESUME;
-		cmd.resume.sid		= sid;
-		cmd.resume.stag		= resp->grpid;
-		switch (resp->code) {
-		case IOMMU_PAGE_RESP_INVALID:
-		case IOMMU_PAGE_RESP_FAILURE:
-			cmd.resume.resp = CMDQ_RESUME_0_RESP_ABORT;
-			break;
-		case IOMMU_PAGE_RESP_SUCCESS:
-			cmd.resume.resp = CMDQ_RESUME_0_RESP_RETRY;
-			break;
-		default:
-			return -EINVAL;
-		}
-	} else {
-		return -ENODEV;
+	if (WARN_ON(!master->stall_enabled))
+		return;
+
+	cmd.opcode		= CMDQ_OP_RESUME;
+	cmd.resume.sid		= sid;
+	cmd.resume.stag		= resp->grpid;
+	switch (resp->code) {
+	case IOMMU_PAGE_RESP_INVALID:
+	case IOMMU_PAGE_RESP_FAILURE:
+		cmd.resume.resp = CMDQ_RESUME_0_RESP_ABORT;
+		break;
+	case IOMMU_PAGE_RESP_SUCCESS:
+		cmd.resume.resp = CMDQ_RESUME_0_RESP_RETRY;
+		break;
+	default:
+		break;
 	}
 
 	arm_smmu_cmdq_issue_cmd(master->smmu, &cmd);
@@ -955,8 +952,6 @@ static int arm_smmu_page_response(struct device *dev,
 	 * terminated... at some point in the future. PRI_RESP is fire and
 	 * forget.
 	 */
-
-	return 0;
 }
 
 /* Context descriptor manipulation functions */
@@ -1460,27 +1455,19 @@ arm_smmu_find_master(struct arm_smmu_device *smmu, u32 sid)
 /* IRQ and event handlers */
 static int arm_smmu_handle_evt(struct arm_smmu_device *smmu, u64 *evt)
 {
-	int ret;
-	u32 reason;
+	int ret = 0;
 	u32 perm = 0;
 	struct arm_smmu_master *master;
 	bool ssid_valid = evt[0] & EVTQ_0_SSV;
 	u32 sid = FIELD_GET(EVTQ_0_SID, evt[0]);
-	struct iommu_fault_event fault_evt = { };
+	struct iopf_fault fault_evt = { };
 	struct iommu_fault *flt = &fault_evt.fault;
 
 	switch (FIELD_GET(EVTQ_0_ID, evt[0])) {
 	case EVT_ID_TRANSLATION_FAULT:
-		reason = IOMMU_FAULT_REASON_PTE_FETCH;
-		break;
 	case EVT_ID_ADDR_SIZE_FAULT:
-		reason = IOMMU_FAULT_REASON_OOR_ADDRESS;
-		break;
 	case EVT_ID_ACCESS_FAULT:
-		reason = IOMMU_FAULT_REASON_ACCESS;
-		break;
 	case EVT_ID_PERMISSION_FAULT:
-		reason = IOMMU_FAULT_REASON_PERMISSION;
 		break;
 	default:
 		return -EOPNOTSUPP;
@@ -1489,6 +1476,9 @@ static int arm_smmu_handle_evt(struct arm_smmu_device *smmu, u64 *evt)
 	/* Stage-2 is always pinned at the moment */
 	if (evt[1] & EVTQ_1_S2)
 		return -EFAULT;
+
+	if (!(evt[1] & EVTQ_1_STALL))
+		return -EOPNOTSUPP;
 
 	if (evt[1] & EVTQ_1_RnW)
 		perm |= IOMMU_FAULT_PERM_READ;
@@ -1501,32 +1491,17 @@ static int arm_smmu_handle_evt(struct arm_smmu_device *smmu, u64 *evt)
 	if (evt[1] & EVTQ_1_PnU)
 		perm |= IOMMU_FAULT_PERM_PRIV;
 
-	if (evt[1] & EVTQ_1_STALL) {
-		flt->type = IOMMU_FAULT_PAGE_REQ;
-		flt->prm = (struct iommu_fault_page_request) {
-			.flags = IOMMU_FAULT_PAGE_REQUEST_LAST_PAGE,
-			.grpid = FIELD_GET(EVTQ_1_STAG, evt[1]),
-			.perm = perm,
-			.addr = FIELD_GET(EVTQ_2_ADDR, evt[2]),
-		};
+	flt->type = IOMMU_FAULT_PAGE_REQ;
+	flt->prm = (struct iommu_fault_page_request) {
+		.flags = IOMMU_FAULT_PAGE_REQUEST_LAST_PAGE,
+		.grpid = FIELD_GET(EVTQ_1_STAG, evt[1]),
+		.perm = perm,
+		.addr = FIELD_GET(EVTQ_2_ADDR, evt[2]),
+	};
 
-		if (ssid_valid) {
-			flt->prm.flags |= IOMMU_FAULT_PAGE_REQUEST_PASID_VALID;
-			flt->prm.pasid = FIELD_GET(EVTQ_0_SSID, evt[0]);
-		}
-	} else {
-		flt->type = IOMMU_FAULT_DMA_UNRECOV;
-		flt->event = (struct iommu_fault_unrecoverable) {
-			.reason = reason,
-			.flags = IOMMU_FAULT_UNRECOV_ADDR_VALID,
-			.perm = perm,
-			.addr = FIELD_GET(EVTQ_2_ADDR, evt[2]),
-		};
-
-		if (ssid_valid) {
-			flt->event.flags |= IOMMU_FAULT_UNRECOV_PASID_VALID;
-			flt->event.pasid = FIELD_GET(EVTQ_0_SSID, evt[0]);
-		}
+	if (ssid_valid) {
+		flt->prm.flags |= IOMMU_FAULT_PAGE_REQUEST_PASID_VALID;
+		flt->prm.pasid = FIELD_GET(EVTQ_0_SSID, evt[0]);
 	}
 
 	mutex_lock(&smmu->streams_mutex);
@@ -1536,17 +1511,7 @@ static int arm_smmu_handle_evt(struct arm_smmu_device *smmu, u64 *evt)
 		goto out_unlock;
 	}
 
-	ret = iommu_report_device_fault(master->dev, &fault_evt);
-	if (ret && flt->type == IOMMU_FAULT_PAGE_REQ) {
-		/* Nobody cared, abort the access */
-		struct iommu_page_response resp = {
-			.pasid		= flt->prm.pasid,
-			.grpid		= flt->prm.grpid,
-			.code		= IOMMU_PAGE_RESP_FAILURE,
-		};
-		arm_smmu_page_response(master->dev, &fault_evt, &resp);
-	}
-
+	iommu_report_device_fault(master->dev, &fault_evt);
 out_unlock:
 	mutex_unlock(&smmu->streams_mutex);
 	return ret;
