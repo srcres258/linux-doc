@@ -7,10 +7,6 @@
 #include <dt-bindings/gpio/gpio.h>
 #include <dt-bindings/gpio/meson-g12a-gpio.h>
 
-/ {
-	compatible = "freebox,fbx8am-realtek", "freebox,fbx8am", "amlogic,g12a";
-};
-
 &uart_A {
 	bluetooth {
 		compatible = "realtek,rtl8822cs-bt";

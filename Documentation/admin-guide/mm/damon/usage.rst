@@ -184,7 +184,7 @@ and three directories (``monitoring_attrs``, ``targets``, and ``schemes``)
 exist.
 
 DAMON supports multiple types of :ref:`monitoring operations
-<damon_design_confiurable_operations_set>`, including those for virtual address
+<damon_design_configurable_operations_set>`, including those for virtual address
 space and the physical address space.  You can get the list of available
 monitoring operations set on the currently running kernel by reading
 ``avail_operations`` file.  Based on the kernel configuration, the file will
@@ -369,7 +369,7 @@ Among the multiple feedback, the best one is used.
 Each goal directory contains three files, namely ``target_metric``,
 ``target_value`` and ``current_value``.  Users can set and get the three
 parameters for the quota auto-tuning goals that specified on the :ref:`design
-doc <damon_design_damos_quota_auto_tuning>` by writing to and reading from each
+doc <damon_design_damos_quotas_auto_tuning>` by writing to and reading from each
 of the files.  Note that users should further write
 ``commit_schemes_quota_goals`` to the ``state`` file of the :ref:`kdamond
 directory <sysfs_kdamond>` to pass the feedback to DAMON.

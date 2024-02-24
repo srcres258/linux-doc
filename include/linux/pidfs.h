@@ -2,8 +2,6 @@
 #ifndef _LINUX_PID_FS_H
 #define _LINUX_PID_FS_H
 
-extern const struct file_operations pidfd_fops;
-
 struct file *pidfs_alloc_file(struct pid *pid, unsigned int flags);
 void __init pidfs_init(void);
 

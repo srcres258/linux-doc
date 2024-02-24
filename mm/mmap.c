@@ -958,10 +958,19 @@ static struct vm_area_struct
 	} else if (merge_prev) {			/* case 2 */
 		if (curr) {
 			vma_start_write(curr);
-			err = dup_anon_vma(prev, curr, &anon_dup);
 			if (end == curr->vm_end) {	/* case 7 */
+				/*
+				 * can_vma_merge_after() assumed we would not be
+				 * removing prev vma, so it skipped the check
+				 * for vm_ops->close, but we are removing curr
+				 */
+				if (curr->vm_ops && curr->vm_ops->close)
+					err = -EINVAL;
+				else
+					err = dup_anon_vma(prev, curr, &anon_dup);
 				remove = curr;
 			} else {			/* case 5 */
+				err = dup_anon_vma(prev, curr, &anon_dup);
 				adjust = curr;
 				adj_start = (end - curr->vm_start);
 			}

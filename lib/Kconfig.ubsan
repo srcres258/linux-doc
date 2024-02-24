@@ -87,7 +87,6 @@ config UBSAN_LOCAL_BOUNDS
 
 config UBSAN_SHIFT
 	bool "Perform checking for bit-shift overflows"
-	default UBSAN
 	depends on $(cc-option,-fsanitize=shift)
 	help
 	  This option enables -fsanitize=shift which checks for bit-shift

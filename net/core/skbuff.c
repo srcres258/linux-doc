@@ -968,7 +968,7 @@ int skb_pp_cow_data(struct page_pool *pool, struct sk_buff **pskb,
 		truesize = size;
 
 		page = page_pool_dev_alloc(pool, &page_off, &truesize);
-		if (!data) {
+		if (!page) {
 			consume_skb(nskb);
 			return -ENOMEM;
 		}
@@ -6848,6 +6848,14 @@ static struct skb_ext *skb_ext_maybe_cow(struct skb_ext *old,
 
 		for (i = 0; i < sp->len; i++)
 			xfrm_state_hold(sp->xvec[i]);
+	}
+#endif
+#ifdef CONFIG_MCTP_FLOWS
+	if (old_active & (1 << SKB_EXT_MCTP)) {
+		struct mctp_flow *flow = skb_ext_get_ptr(old, SKB_EXT_MCTP);
+
+		if (flow->key)
+			refcount_inc(&flow->key->refs);
 	}
 #endif
 	__skb_ext_put(old);

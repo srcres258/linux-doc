@@ -2203,7 +2203,9 @@ static long btrfs_control_ioctl(struct file *file, unsigned int cmd,
 	vol = memdup_user((void __user *)arg, sizeof(*vol));
 	if (IS_ERR(vol))
 		return PTR_ERR(vol);
-	vol->name[BTRFS_PATH_NAME_MAX] = '\0';
+	ret = btrfs_check_ioctl_vol_args_path(vol);
+	if (ret < 0)
+		goto out;
 
 	switch (cmd) {
 	case BTRFS_IOC_SCAN_DEV:
@@ -2245,6 +2247,7 @@ static long btrfs_control_ioctl(struct file *file, unsigned int cmd,
 		break;
 	}
 
+out:
 	kfree(vol);
 	return ret;
 }

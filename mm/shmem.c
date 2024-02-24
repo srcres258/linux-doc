@@ -2138,22 +2138,27 @@ unlock:
 }
 
 /**
- * shmem_get_folio - find and get a reference to a shmem folio.
+ * shmem_get_folio - find, and lock a shmem folio.
  * @inode:	inode to search
  * @index:	the page index.
- * @foliop:	pointer to the found folio if one was found
+ * @foliop:	pointer to the folio if found
  * @sgp:	SGP_* flags to control behavior
  *
- * Looks up the page cache entry at @inode & @index.
- *
- * If this function returns a folio, it is returned with an increased refcount.
+ * Looks up the page cache entry at @inode & @index.  If a folio is
+ * present, it is returned locked with an increased refcount.
  *
  * If the caller modifies data in the folio, it must call folio_mark_dirty()
  * before unlocking the folio to ensure that the folio is not reclaimed.
- * These is no need to reserve space before calling folio_mark_dirty().
+ * There is no need to reserve space before calling folio_mark_dirty().
  *
- * Return: The found folio, %NULL if SGP_READ or SGP_NOALLOC was passed in @sgp
- * and no folio was found at @index, or an ERR_PTR() otherwise.
+ * When no folio is found, the behavior depends on @sgp:
+ *  - for SGP_READ, *foliop is %NULL and 0 is returned
+ *  - for SGP_NOALLOC, *foliop is %NULL and -ENOENT is returned
+ *  - for all other flags a new folio is allocated, inserted into the
+ *    page cache and returned locked in @foliop.
+ *
+ * Context: May sleep.
+ * Return: 0 if successful, else a negative error code.
  */
 int shmem_get_folio(struct inode *inode, pgoff_t index, struct folio **foliop,
 		enum sgp_type sgp)
@@ -3402,7 +3407,7 @@ static int shmem_unlink(struct inode *dir, struct dentry *dentry)
 
 static int shmem_rmdir(struct inode *dir, struct dentry *dentry)
 {
-	if (!simple_empty(dentry))
+	if (!simple_offset_empty(dentry))
 		return -ENOTEMPTY;
 
 	drop_nlink(d_inode(dentry));
@@ -3459,7 +3464,7 @@ static int shmem_rename2(struct mnt_idmap *idmap,
 		return simple_offset_rename_exchange(old_dir, old_dentry,
 						     new_dir, new_dentry);
 
-	if (!simple_empty(new_dentry))
+	if (!simple_offset_empty(new_dentry))
 		return -ENOTEMPTY;
 
 	if (flags & RENAME_WHITEOUT) {

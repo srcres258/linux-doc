@@ -3400,8 +3400,7 @@ static void __init prep_and_add_bootmem_folios(struct hstate *h,
  * Put bootmem huge pages into the standard lists after mem_map is up.
  * Note: This only applies to gigantic (order > MAX_PAGE_ORDER) pages.
  */
-static void __init gather_bootmem_prealloc_node(unsigned long start, unsigned long end, void *arg)
-
+static void __init gather_bootmem_prealloc_node(unsigned long nid)
 {
 	int nid = start;
 	LIST_HEAD(folio_list);
@@ -3441,10 +3440,19 @@ static void __init gather_bootmem_prealloc_node(unsigned long start, unsigned lo
 	prep_and_add_bootmem_folios(h, &folio_list);
 }
 
+static void __init gather_bootmem_prealloc_parallel(unsigned long start,
+						    unsigned long end, void *arg)
+{
+	int nid;
+
+	for (nid = start; nid < end; nid++)
+		gather_bootmem_prealloc_node(nid);
+}
+
 static void __init gather_bootmem_prealloc(void)
 {
 	struct padata_mt_job job = {
-		.thread_fn	= gather_bootmem_prealloc_node,
+		.thread_fn	= gather_bootmem_prealloc_parallel,
 		.fn_arg		= NULL,
 		.start		= 0,
 		.size		= num_node_state(N_MEMORY),
@@ -3604,7 +3612,7 @@ static unsigned long __init hugetlb_pages_alloc_boot(struct hstate *h)
 static void __init hugetlb_hstate_alloc_pages(struct hstate *h)
 {
 	unsigned long allocated;
-	static bool initialied __initdata;
+	static bool initialized __initdata;
 
 	/* skip gigantic hugepages allocation if hugetlb_cma enabled */
 	if (hstate_is_gigantic(h) && hugetlb_cma_size) {
@@ -3613,12 +3621,12 @@ static void __init hugetlb_hstate_alloc_pages(struct hstate *h)
 	}
 
 	/* hugetlb_hstate_alloc_pages will be called many times, initialize huge_boot_pages once */
-	if (!initialied) {
+	if (!initialized) {
 		int i = 0;
 
 		for (i = 0; i < MAX_NUMNODES; i++)
 			INIT_LIST_HEAD(&huge_boot_pages[i]);
-		initialied = true;
+		initialized = true;
 	}
 
 	/* do node specific alloc */

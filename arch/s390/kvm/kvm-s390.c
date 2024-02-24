@@ -3951,6 +3951,7 @@ int kvm_arch_vcpu_create(struct kvm_vcpu *vcpu)
 				    KVM_SYNC_ARCH0 |
 				    KVM_SYNC_PFAULT |
 				    KVM_SYNC_DIAG318;
+	vcpu->arch.acrs_loaded = false;
 	kvm_s390_set_prefix(vcpu, 0);
 	if (test_kvm_facility(vcpu->kvm, 64))
 		vcpu->run->kvm_valid_regs |= KVM_SYNC_RICCB;
@@ -4949,11 +4950,8 @@ static void sync_regs(struct kvm_vcpu *vcpu)
 	}
 	save_access_regs(vcpu->arch.host_acrs);
 	restore_access_regs(vcpu->run->s.regs.acrs);
-	fpu_lfpc_safe(&vcpu->run->s.regs.fpc);
-	if (cpu_has_vx())
-		load_vx_regs((__vector128 *)&vcpu->run->s.regs.vrs);
-	else
-		load_fp_regs((freg_t *)&vcpu->run->s.regs.fprs);
+	vcpu->arch.acrs_loaded = true;
+	kvm_s390_fpu_load(vcpu->run);
 	/* Sync fmt2 only data */
 	if (likely(!kvm_s390_pv_cpu_is_protected(vcpu))) {
 		sync_regs_fmt2(vcpu);
@@ -5014,11 +5012,8 @@ static void store_regs(struct kvm_vcpu *vcpu)
 	kvm_run->s.regs.pfc = vcpu->arch.pfault_compare;
 	save_access_regs(vcpu->run->s.regs.acrs);
 	restore_access_regs(vcpu->arch.host_acrs);
-	fpu_stfpc(&vcpu->run->s.regs.fpc);
-	if (cpu_has_vx())
-		save_vx_regs((__vector128 *)&vcpu->run->s.regs.vrs);
-	else
-		save_fp_regs((freg_t *)&vcpu->run->s.regs.fprs);
+	vcpu->arch.acrs_loaded = false;
+	kvm_s390_fpu_store(vcpu->run);
 	if (likely(!kvm_s390_pv_cpu_is_protected(vcpu)))
 		store_regs_fmt2(vcpu);
 }
@@ -5167,11 +5162,7 @@ int kvm_s390_vcpu_store_status(struct kvm_vcpu *vcpu, unsigned long addr)
 	 * switch in the run ioctl. Let's update our copies before we save
 	 * it into the save area
 	 */
-	fpu_stfpc(&vcpu->run->s.regs.fpc);
-	if (cpu_has_vx())
-		save_vx_regs((__vector128 *)&vcpu->run->s.regs.vrs);
-	else
-		save_fp_regs((freg_t *)&vcpu->run->s.regs.fprs);
+	kvm_s390_fpu_store(vcpu->run);
 	save_access_regs(vcpu->run->s.regs.acrs);
 
 	return kvm_s390_store_status_unloaded(vcpu, addr);

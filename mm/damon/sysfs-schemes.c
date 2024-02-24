@@ -1961,10 +1961,6 @@ int damos_sysfs_set_quota_scores(struct damon_sysfs_schemes *sysfs_schemes,
 		if (i >= sysfs_schemes->nr)
 			break;
 
-		/* user could have removed the scheme sysfs dir */
-		if (i >= sysfs_schemes->nr)
-			break;
-
 		sysfs_scheme = sysfs_schemes->schemes_arr[i];
 		err = damos_sysfs_set_quota_score(sysfs_scheme->quotas->goals,
 				&scheme->quota);

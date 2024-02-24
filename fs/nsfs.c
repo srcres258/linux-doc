@@ -34,22 +34,10 @@ static char *ns_dname(struct dentry *dentry, char *buffer, int buflen)
 		ns_ops->name, inode->i_ino);
 }
 
-static void ns_prune_dentry(struct dentry *dentry)
-{
-	struct inode *inode;
-
-	inode = d_inode(dentry);
-	if (inode) {
-		struct ns_common *ns = inode->i_private;
-		prune_stashed_dentry(&ns->stashed, dentry);
-	}
-}
-
-const struct dentry_operations ns_dentry_operations =
-{
-	.d_prune	= ns_prune_dentry,
+const struct dentry_operations ns_dentry_operations = {
 	.d_delete	= always_delete_dentry,
 	.d_dname	= ns_dname,
+	.d_prune	= stashed_dentry_prune,
 };
 
 static void nsfs_evict(struct inode *inode)
@@ -69,7 +57,7 @@ int ns_get_path_cb(struct path *path, ns_get_path_helper_t *ns_get_cb,
 	if (!ns)
 		return -ENOENT;
 	ret = path_from_stashed(&ns->stashed, ns->inum, nsfs_mnt,
-				&ns_file_operations, ns, path);
+				&ns_file_operations, NULL, ns, path);
 	if (ret <= 0)
 		ns->ops->put(ns);
 	if (ret < 0)
@@ -120,7 +108,7 @@ int open_related_ns(struct ns_common *ns,
 	}
 
 	err = path_from_stashed(&relative->stashed, relative->inum, nsfs_mnt,
-				&ns_file_operations, relative, &path);
+				&ns_file_operations, NULL, relative, &path);
 	if (err <= 0)
 		relative->ops->put(relative);
 	if (err < 0) {

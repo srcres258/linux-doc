@@ -23,6 +23,7 @@ use strict;
 use POSIX;
 use File::Basename;
 use File::Spec;
+use File::Temp qw/tempfile/;
 use Cwd 'abs_path';
 use Term::ANSIColor qw(:constants);
 use Getopt::Long qw(:config no_auto_abbrev);
@@ -167,11 +168,11 @@ if ($kallsyms_file) {
 		chomp;
 		my @entry = split / /, $_;
 		my $addr_text = $entry[0];
-		# TODO: Why is hex() so impossibly slow?
-		my $addr = hex($addr_text);
-		my $symbol = $entry[2];
-		# Only keep kernel text addresses.
 		if ($addr_text !~ /^0/) {
+			# TODO: Why is hex() so impossibly slow?
+			my $addr = hex($addr_text);
+			my $symbol = $entry[2];
+			# Only keep kernel text addresses.
 			my $long = pack("J", $addr);
 			my $entry = [$long, $symbol];
 			push @kallsyms, $entry;
@@ -246,6 +247,7 @@ sub get_kernel_config_option
 {
 	my ($option) = @_;
 	my $value = "";
+	my $tmp_fh;
 	my $tmp_file = "";
 	my @config_files;
 
@@ -253,7 +255,8 @@ sub get_kernel_config_option
 	if ($kernel_config_file ne "") {
 		@config_files = ($kernel_config_file);
 	} elsif (-R "/proc/config.gz") {
-		my $tmp_file = "/tmp/tmpkconf";
+		($tmp_fh, $tmp_file) = tempfile("config.gz-XXXXXX",
+						UNLINK => 1);
 
 		if (system("gunzip < /proc/config.gz > $tmp_file")) {
 			dprint("system(gunzip < /proc/config.gz) failed\n");
@@ -273,10 +276,6 @@ sub get_kernel_config_option
 		if ($value ne "") {
 			last;
 		}
-	}
-
-	if ($tmp_file ne "") {
-		system("rm -f $tmp_file");
 	}
 
 	return $value;
@@ -310,9 +309,10 @@ sub is_false_positive
 		return is_false_positive_32bit($match);
 	}
 
-	# 64 bit false positives.
-
-	if ($match =~ '\b(0x)?(f|F){16}\b' or
+	# Ignore 64 bit false positives:
+	# 0xfffffffffffffff[0-f]
+	# 0x0000000000000000
+	if ($match =~ '\b(0x)?(f|F){15}[0-9a-f]\b' or
 	    $match =~ '\b(0x)?0{16}\b') {
 		return 1;
 	}
@@ -329,7 +329,7 @@ sub is_false_positive_32bit
        my ($match) = @_;
        state $page_offset = get_page_offset();
 
-       if ($match =~ '\b(0x)?(f|F){8}\b') {
+       if ($match =~ '\b(0x)?(f|F){7}[0-9a-f]\b') {
                return 1;
        }
 
@@ -372,18 +372,23 @@ sub is_in_vsyscall_memory_region
 # True if argument potentially contains a kernel address.
 sub may_leak_address
 {
-	my ($line) = @_;
+	my ($path, $line) = @_;
 	my $address_re;
 
-	# Signal masks.
+	# Ignore Signal masks.
 	if ($line =~ '^SigBlk:' or
 	    $line =~ '^SigIgn:' or
 	    $line =~ '^SigCgt:') {
 		return 0;
 	}
 
-	if ($line =~ '\bKEY=[[:xdigit:]]{14} [[:xdigit:]]{16} [[:xdigit:]]{16}\b' or
-	    $line =~ '\b[[:xdigit:]]{14} [[:xdigit:]]{16} [[:xdigit:]]{16}\b') {
+	# Ignore input device reporting.
+	# /proc/bus/input/devices: B: KEY=402000000 3803078f800d001 feffffdfffefffff fffffffffffffffe
+	# /sys/devices/platform/i8042/serio0/input/input1/uevent: KEY=402000000 3803078f800d001 feffffdfffefffff fffffffffffffffe
+	# /sys/devices/platform/i8042/serio0/input/input1/capabilities/key: 402000000 3803078f800d001 feffffdfffefffff fffffffffffffffe
+	if ($line =~ '\bKEY=[[:xdigit:]]{9,14} [[:xdigit:]]{16} [[:xdigit:]]{16}\b' or
+            ($path =~ '\bkey$' and
+             $line =~ '\b[[:xdigit:]]{9,14} [[:xdigit:]]{16} [[:xdigit:]]{16}\b')) {
 		return 0;
 	}
 
@@ -426,7 +431,7 @@ sub parse_dmesg
 {
 	open my $cmd, '-|', 'dmesg';
 	while (<$cmd>) {
-		if (may_leak_address($_)) {
+		if (may_leak_address("dmesg", $_)) {
 			print 'dmesg: ' . $_;
 		}
 	}
@@ -510,7 +515,7 @@ sub parse_file
 	open my $fh, "<", $file or return;
 	while ( <$fh> ) {
 		chomp;
-		if (may_leak_address($_)) {
+		if (may_leak_address($file, $_)) {
 			printf("$file: $_\n");
 		}
 	}
@@ -522,7 +527,7 @@ sub check_path_for_leaks
 {
 	my ($path) = @_;
 
-	if (may_leak_address($path)) {
+	if (may_leak_address($path, $path)) {
 		printf("Path name may contain address: $path\n");
 	}
 }

@@ -1418,7 +1418,7 @@ static bool lookup_backref_cache(u64 leaf_bytenr, void *ctx,
 	struct btrfs_lru_cache_entry *raw_entry;
 	struct backref_cache_entry *entry;
 
-	if (btrfs_lru_cache_size(&sctx->backref_cache) == 0)
+	if (sctx->backref_cache.size == 0)
 		return false;
 
 	/*
@@ -1516,7 +1516,7 @@ static void store_backref_cache(u64 leaf_bytenr, const struct ulist *root_ids,
 	 * transaction handle or holding fs_info->commit_root_sem, so no need
 	 * to take any lock here.
 	 */
-	if (btrfs_lru_cache_size(&sctx->backref_cache) == 1)
+	if (sctx->backref_cache.size == 1)
 		sctx->backref_cache_last_reloc_trans = fs_info->last_reloc_trans;
 }
 
@@ -2821,8 +2821,7 @@ static int cache_dir_utimes(struct send_ctx *sctx, u64 dir, u64 gen)
 
 static int trim_dir_utimes_cache(struct send_ctx *sctx)
 {
-	while (btrfs_lru_cache_size(&sctx->dir_utimes_cache) >
-	       SEND_MAX_DIR_UTIMES_CACHE_SIZE) {
+	while (sctx->dir_utimes_cache.size > SEND_MAX_DIR_UTIMES_CACHE_SIZE) {
 		struct btrfs_lru_cache_entry *lru;
 		int ret;
 
@@ -6478,21 +6477,18 @@ static int maybe_send_hole(struct send_ctx *sctx, struct btrfs_path *path,
 	if (sctx->cur_ino != key->objectid || !need_send_hole(sctx))
 		return 0;
 
-	if (sctx->cur_inode_last_extent == (u64)-1) {
-		ret = get_last_extent(sctx, key->offset - 1);
-		if (ret)
-			return ret;
-	}
-
-	if (path->slots[0] == 0 &&
-	    sctx->cur_inode_last_extent < key->offset) {
-		/*
-		 * We might have skipped entire leafs that contained only
-		 * file extent items for our current inode. These leafs have
-		 * a generation number smaller (older) than the one in the
-		 * current leaf and the leaf our last extent came from, and
-		 * are located between these 2 leafs.
-		 */
+	/*
+	 * Get last extent's end offset (exclusive) if we haven't determined it
+	 * yet (we're processing the first file extent item that is new), or if
+	 * we're at the first slot of a leaf and the last extent's end is less
+	 * than the current extent's offset, because we might have skipped
+	 * entire leaves that contained only file extent items for our current
+	 * inode. These leaves have a generation number smaller (older) than the
+	 * one in the current leaf and the leaf our last extent came from, and
+	 * are located between these 2 leaves.
+	 */
+	if ((sctx->cur_inode_last_extent == (u64)-1) ||
+	    (path->slots[0] == 0 && sctx->cur_inode_last_extent < key->offset)) {
 		ret = get_last_extent(sctx, key->offset - 1);
 		if (ret)
 			return ret;
@@ -6725,11 +6721,20 @@ static int finish_inode_if_needed(struct send_ctx *sctx, int at_end)
 				if (ret)
 					goto out;
 			}
-			if (sctx->cur_inode_last_extent <
-			    sctx->cur_inode_size) {
-				ret = send_hole(sctx, sctx->cur_inode_size);
-				if (ret)
+			if (sctx->cur_inode_last_extent < sctx->cur_inode_size) {
+				ret = range_is_hole_in_parent(sctx,
+						      sctx->cur_inode_last_extent,
+						      sctx->cur_inode_size);
+				if (ret < 0) {
 					goto out;
+				} else if (ret == 0) {
+					ret = send_hole(sctx, sctx->cur_inode_size);
+					if (ret < 0)
+						goto out;
+				} else {
+					/* Range is already a hole, skip. */
+					ret = 0;
+				}
 			}
 		}
 		if (need_truncate) {

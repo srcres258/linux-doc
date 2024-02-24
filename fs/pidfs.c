@@ -16,17 +16,6 @@
 
 #include "internal.h"
 
-struct pid *pidfd_pid(const struct file *file)
-{
-	if (file->f_op != &pidfd_fops)
-		return ERR_PTR(-EBADF);
-#ifdef CONFIG_FS_PID
-	return file_inode(file)->i_private;
-#else
-	return file->private_data;
-#endif
-}
-
 static int pidfd_release(struct inode *inode, struct file *file)
 {
 #ifndef CONFIG_FS_PID
@@ -130,7 +119,7 @@ static __poll_t pidfd_poll(struct file *file, struct poll_table_struct *pts)
 	return poll_flags;
 }
 
-const struct file_operations pidfd_fops = {
+static const struct file_operations pidfs_file_operations = {
 	.release	= pidfd_release,
 	.poll		= pidfd_poll,
 #ifdef CONFIG_PROC_FS
@@ -138,8 +127,45 @@ const struct file_operations pidfd_fops = {
 #endif
 };
 
+struct pid *pidfd_pid(const struct file *file)
+{
+	if (file->f_op != &pidfs_file_operations)
+		return ERR_PTR(-EBADF);
+#ifdef CONFIG_FS_PID
+	return file_inode(file)->i_private;
+#else
+	return file->private_data;
+#endif
+}
+
 #ifdef CONFIG_FS_PID
 static struct vfsmount *pidfs_mnt __ro_after_init;
+
+/*
+ * The vfs falls back to simple_setattr() if i_op->setattr() isn't
+ * implemented. Let's reject it completely until we have a clean
+ * permission concept for pidfds.
+ */
+static int pidfs_setattr(struct mnt_idmap *idmap, struct dentry *dentry,
+			 struct iattr *attr)
+{
+	return -EOPNOTSUPP;
+}
+
+static int pidfs_getattr(struct mnt_idmap *idmap, const struct path *path,
+			 struct kstat *stat, u32 request_mask,
+			 unsigned int query_flags)
+{
+	struct inode *inode = d_inode(path->dentry);
+
+	generic_fillattr(&nop_mnt_idmap, request_mask, inode, stat);
+	return 0;
+}
+
+static const struct inode_operations pidfs_inode_operations = {
+	.getattr = pidfs_getattr,
+	.setattr = pidfs_setattr,
+};
 
 static void pidfs_evict_inode(struct inode *inode)
 {
@@ -161,21 +187,10 @@ static char *pidfs_dname(struct dentry *dentry, char *buffer, int buflen)
 			     d_inode(dentry)->i_ino);
 }
 
-static void pidfdfs_prune_dentry(struct dentry *dentry)
-{
-	struct inode *inode;
-
-	inode = d_inode(dentry);
-	if (inode) {
-		struct pid *pid = inode->i_private;
-		prune_stashed_dentry(&pid->stashed, dentry);
-	}
-}
-
 const struct dentry_operations pidfs_dentry_operations = {
 	.d_delete	= always_delete_dentry,
 	.d_dname	= pidfs_dname,
-	.d_prune	= pidfdfs_prune_dentry,
+	.d_prune	= stashed_dentry_prune,
 };
 
 static int pidfs_init_fs_context(struct fs_context *fc)
@@ -205,7 +220,8 @@ struct file *pidfs_alloc_file(struct pid *pid, unsigned int flags)
 	int ret;
 
 	ret = path_from_stashed(&pid->stashed, pid->ino, pidfs_mnt,
-				&pidfd_fops, get_pid(pid), &path);
+				&pidfs_file_operations, &pidfs_inode_operations,
+				get_pid(pid), &path);
 	if (ret <= 0)
 		put_pid(pid);
 	if (ret < 0)
@@ -235,7 +251,7 @@ struct file *pidfs_alloc_file(struct pid *pid, unsigned int flags)
 {
 	struct file *pidfd_file;
 
-	pidfd_file = anon_inode_getfile("[pidfd]", &pidfd_fops, pid,
+	pidfd_file = anon_inode_getfile("[pidfd]", &pidfs_file_operations, pid,
 					flags | O_RDWR);
 	if (IS_ERR(pidfd_file))
 		return pidfd_file;
