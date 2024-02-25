@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 
+#include <linux/minmax.h>
 #include "misc.h"
 #include "ctree.h"
 #include "space-info.h"
@@ -9,7 +10,6 @@
 #include "ordered-data.h"
 #include "transaction.h"
 #include "block-group.h"
-#include "zoned.h"
 #include "fs.h"
 #include "accessors.h"
 #include "extent-tree.h"
@@ -191,6 +191,8 @@ void btrfs_clear_space_info_full(struct btrfs_fs_info *info)
  */
 #define BTRFS_DEFAULT_ZONED_RECLAIM_THRESH			(75)
 
+#define BTRFS_DYNAMIC_RECLAIM_THRESH_MAX			(90)
+
 /*
  * Calculate chunk size depending on volume type (regular or zoned).
  */
@@ -233,6 +235,7 @@ static int create_space_info(struct btrfs_fs_info *info, u64 flags)
 	if (!space_info)
 		return -ENOMEM;
 
+	space_info->fs_info = info;
 	for (i = 0; i < BTRFS_NR_RAID_TYPES; i++)
 		INIT_LIST_HEAD(&space_info->block_groups[i]);
 	init_rwsem(&space_info->groups_sem);
@@ -856,7 +859,7 @@ btrfs_calc_reclaim_metadata_size(struct btrfs_fs_info *fs_info,
 static bool need_preemptive_reclaim(struct btrfs_fs_info *fs_info,
 				    struct btrfs_space_info *space_info)
 {
-	u64 global_rsv_size = fs_info->global_block_rsv.reserved;
+	const u64 global_rsv_size = btrfs_block_rsv_reserved(&fs_info->global_block_rsv);
 	u64 ordered, delalloc;
 	u64 thresh;
 	u64 used;
@@ -956,8 +959,8 @@ static bool need_preemptive_reclaim(struct btrfs_fs_info *fs_info,
 	ordered = percpu_counter_read_positive(&fs_info->ordered_bytes) >> 1;
 	delalloc = percpu_counter_read_positive(&fs_info->delalloc_bytes);
 	if (ordered >= delalloc)
-		used += fs_info->delayed_refs_rsv.reserved +
-			fs_info->delayed_block_rsv.reserved;
+		used += btrfs_block_rsv_reserved(&fs_info->delayed_refs_rsv) +
+			btrfs_block_rsv_reserved(&fs_info->delayed_block_rsv);
 	else
 		used += space_info->bytes_may_use - global_rsv_size;
 
@@ -1173,7 +1176,7 @@ static void btrfs_preempt_reclaim_metadata_space(struct work_struct *work)
 		enum btrfs_flush_state flush;
 		u64 delalloc_size = 0;
 		u64 to_reclaim, block_rsv_size;
-		u64 global_rsv_size = global_rsv->reserved;
+		const u64 global_rsv_size = btrfs_block_rsv_reserved(global_rsv);
 
 		loops++;
 
@@ -1185,9 +1188,9 @@ static void btrfs_preempt_reclaim_metadata_space(struct work_struct *work)
 		 * assume it's tied up in delalloc reservations.
 		 */
 		block_rsv_size = global_rsv_size +
-			delayed_block_rsv->reserved +
-			delayed_refs_rsv->reserved +
-			trans_rsv->reserved;
+			btrfs_block_rsv_reserved(delayed_block_rsv) +
+			btrfs_block_rsv_reserved(delayed_refs_rsv) +
+			btrfs_block_rsv_reserved(trans_rsv);
 		if (block_rsv_size < space_info->bytes_may_use)
 			delalloc_size = space_info->bytes_may_use - block_rsv_size;
 
@@ -1207,16 +1210,16 @@ static void btrfs_preempt_reclaim_metadata_space(struct work_struct *work)
 			to_reclaim = delalloc_size;
 			flush = FLUSH_DELALLOC;
 		} else if (space_info->bytes_pinned >
-			   (delayed_block_rsv->reserved +
-			    delayed_refs_rsv->reserved)) {
+			   (btrfs_block_rsv_reserved(delayed_block_rsv) +
+			    btrfs_block_rsv_reserved(delayed_refs_rsv))) {
 			to_reclaim = space_info->bytes_pinned;
 			flush = COMMIT_TRANS;
-		} else if (delayed_block_rsv->reserved >
-			   delayed_refs_rsv->reserved) {
-			to_reclaim = delayed_block_rsv->reserved;
+		} else if (btrfs_block_rsv_reserved(delayed_block_rsv) >
+			   btrfs_block_rsv_reserved(delayed_refs_rsv)) {
+			to_reclaim = btrfs_block_rsv_reserved(delayed_block_rsv);
 			flush = FLUSH_DELAYED_ITEMS_NR;
 		} else {
-			to_reclaim = delayed_refs_rsv->reserved;
+			to_reclaim = btrfs_block_rsv_reserved(delayed_refs_rsv);
 			flush = FLUSH_DELAYED_REFS_NR;
 		}
 
@@ -1868,4 +1871,165 @@ u64 btrfs_account_ro_block_groups_free_space(struct btrfs_space_info *sinfo)
 	spin_unlock(&sinfo->lock);
 
 	return free_bytes;
+}
+
+static u64 calc_pct_ratio(u64 x, u64 y)
+{
+	int err;
+
+	if (!y)
+		return 0;
+again:
+	err = check_mul_overflow(100, x, &x);
+	if (err)
+		goto lose_precision;
+	return div64_u64(x, y);
+lose_precision:
+	x >>= 10;
+	y >>= 10;
+	if (!y)
+		y = 1;
+	goto again;
+}
+
+/*
+ * The dynamic threshold formula is:
+ * (unused / allocated) * (unused / unallocated) or equivalently
+ * unused^2 / (allocated * unallocated)
+ *
+ * The fundamental goal of automatic reclaim is to protect the filesystem's
+ * unallocated space and thus minimize the probability of the filesystem going
+ * read only when a metadata allocation failure causes a transaction abort.
+ *
+ * However, relocations happen into the space_info's unused space, therefore
+ * automatic reclaim must also back off as that space runs low. There is no
+ * value in doing trivial "relocations" of re-writing the same block group
+ * into a fresh one.
+ *
+ * unused / allocated sets a baseline, very conservative threshold which
+ * properly goes to 0 as unused goes to a small portion of the allocated space.
+ *
+ * On its own, this would likely do very little reclaim, so include
+ * unused / unallocated (which can be greatly in excess of 100%) to bias heavily
+ * towards reclaim when unallocated goes low or unused goes high.
+ */
+
+static int calc_dynamic_reclaim_threshold(struct btrfs_space_info *space_info)
+{
+	struct btrfs_fs_info *fs_info = space_info->fs_info;
+	u64 unalloc = atomic64_read(&fs_info->free_chunk_space);
+	u64 alloc = space_info->total_bytes;
+	u64 used = btrfs_space_info_used(space_info, false);
+	u64 unused = alloc - used;
+	/* unused <= alloc; clamped to 100 */
+	int unused_pct = calc_pct_ratio(unused, alloc);
+	u64 unused_unalloc_ratio = calc_pct_ratio(unused, unalloc);
+	int err;
+	u64 thresh;
+
+	err = check_mul_overflow(unused_pct, unused_unalloc_ratio, &thresh);
+	if (err)
+		return BTRFS_DYNAMIC_RECLAIM_THRESH_MAX;
+	/* Both quantities are percentages; remove the squared factor of 100. */
+	thresh = div64_u64(thresh, 100);
+	return clamp_val(thresh, 0, BTRFS_DYNAMIC_RECLAIM_THRESH_MAX);
+}
+
+int btrfs_calc_reclaim_threshold(struct btrfs_space_info *space_info)
+{
+	lockdep_assert_held(&space_info->lock);
+
+	if (READ_ONCE(space_info->dynamic_reclaim))
+		return calc_dynamic_reclaim_threshold(space_info);
+	return READ_ONCE(space_info->bg_reclaim_threshold);
+}
+
+/*
+ * Under "urgent" reclaim, we will reclaim even fresh block groups that have
+ * recently seen successful allocations, as we are desperate to reclaim
+ * whatever we can to avoid ENOSPC in a transaction leading to a readonly fs.
+ */
+static bool is_reclaim_urgent(struct btrfs_space_info *space_info)
+{
+	struct btrfs_fs_info *fs_info = space_info->fs_info;
+	u64 unalloc = atomic64_read(&fs_info->free_chunk_space);
+	u64 chunk_size = min(READ_ONCE(space_info->chunk_size), SZ_1G);
+
+	return unalloc < chunk_size;
+}
+
+static int do_reclaim_sweep(struct btrfs_fs_info *fs_info,
+			    struct btrfs_space_info *space_info, int raid)
+{
+	struct btrfs_block_group *bg;
+	int thresh_pct;
+	bool try_again = true;
+	bool urgent;
+
+	spin_lock(&space_info->lock);
+	if (space_info->periodic_reclaim_ready) {
+		space_info->periodic_reclaim_ready = false;
+	} else {
+		spin_unlock(&space_info->lock);
+		return 0;
+	}
+	urgent = is_reclaim_urgent(space_info);
+	thresh_pct = btrfs_calc_reclaim_threshold(space_info);
+	spin_unlock(&space_info->lock);
+
+	down_read(&space_info->groups_sem);
+again:
+	list_for_each_entry(bg, &space_info->block_groups[raid], list) {
+		u64 thresh;
+		bool reclaim = false;
+
+		btrfs_get_block_group(bg);
+		spin_lock(&bg->lock);
+		thresh = mult_perc(bg->length, thresh_pct);
+		if (bg->used < thresh && bg->reclaim_mark) {
+			try_again = false;
+			reclaim = true;
+		}
+		bg->reclaim_mark++;
+		spin_unlock(&bg->lock);
+		if (reclaim)
+			btrfs_mark_bg_to_reclaim(bg);
+		btrfs_put_block_group(bg);
+	}
+
+	/*
+	 * In situations where we are very motivated to reclaim (low unalloc)
+	 * use two passes to make the reclaim mark check best effort.
+	 *
+	 * If we have any staler groups, we don't touch the fresher ones, but if we
+	 * really need a block group, do take a fresh one.
+	 */
+	if (try_again && urgent) {
+		try_again = false;
+		goto again;
+	}
+
+	up_read(&space_info->groups_sem);
+	return 0;
+}
+
+int btrfs_reclaim_sweep(struct btrfs_fs_info *fs_info)
+{
+	int ret;
+	int raid;
+	struct btrfs_space_info *space_info;
+
+	list_for_each_entry(space_info, &fs_info->space_info, list) {
+		if (space_info->flags & BTRFS_BLOCK_GROUP_SYSTEM)
+			continue;
+		if (!READ_ONCE(space_info->periodic_reclaim))
+			continue;
+		for (raid = 0; raid < BTRFS_NR_RAID_TYPES; raid++) {
+			ret = do_reclaim_sweep(fs_info, space_info, raid);
+			if (ret)
+				return ret;
+		}
+	}
+
+	return ret;
 }
