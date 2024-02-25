@@ -282,7 +282,7 @@ struct file *alloc_empty_backing_file(int flags, const struct cred *cred)
  * @flags: O_... flags with which the new file will be opened
  * @fop: the 'struct file_operations' for the new file
  */
-static struct file *alloc_file(const struct path *path, int flags,
+struct file *alloc_file(const struct path *path, int flags,
 		const struct file_operations *fop)
 {
 	struct file *file;
