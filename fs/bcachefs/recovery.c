@@ -57,8 +57,8 @@ static void drop_alloc_keys(struct journal_keys *keys)
 	size_t src, dst;
 
 	for (src = 0, dst = 0; src < keys->nr; src++)
-		if (!btree_id_is_alloc(keys->d[src].btree_id))
-			keys->d[dst++] = keys->d[src];
+		if (!btree_id_is_alloc(keys->data[src].btree_id))
+			keys->data[dst++] = keys->data[src];
 
 	keys->nr = dst;
 }
@@ -70,9 +70,7 @@ static void drop_alloc_keys(struct journal_keys *keys)
  */
 static void zero_out_btree_mem_ptr(struct journal_keys *keys)
 {
-	struct journal_key *i;
-
-	for (i = keys->d; i < keys->d + keys->nr; i++)
+	darray_for_each(*keys, i)
 		if (i->k->k.type == KEY_TYPE_btree_ptr_v2)
 			bkey_i_to_btree_ptr_v2(i->k)->v.mem_ptr = 0;
 }
@@ -166,10 +164,8 @@ static int bch2_journal_replay(struct bch_fs *c)
 	 * efficient - better locality of btree access -  but some might fail if
 	 * that would cause a journal deadlock.
 	 */
-	for (size_t i = 0; i < keys->nr; i++) {
+	darray_for_each(*keys, k) {
 		cond_resched();
-
-		struct journal_key *k = keys->d + i;
 
 		/* Skip fastpath if we're low on space in the journal */
 		ret = c->journal.watermark ? -1 :
@@ -264,7 +260,7 @@ static int journal_replay_entry_early(struct bch_fs *c,
 			bkey_copy(&r->key, (struct bkey_i *) entry->start);
 			r->error = 0;
 		} else {
-			r->error = -EIO;
+			r->error = -BCH_ERR_btree_node_read_error;
 		}
 		r->alive = true;
 		break;
@@ -524,8 +520,7 @@ static int bch2_set_may_go_rw(struct bch_fs *c)
 	 * setting journal_key->overwritten: it will be accessed by multiple
 	 * threads
 	 */
-	move_gap(keys->d, keys->nr, keys->size, keys->gap, keys->nr);
-	keys->gap = keys->nr;
+	move_gap(keys, keys->nr);
 
 	set_bit(BCH_FS_may_go_rw, &c->flags);
 
