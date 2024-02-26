@@ -304,19 +304,25 @@ __kfifo_uint_must_check_helper( \
 )
 
 /**
- * kfifo_skip - skip output data
+ * kfifo_skip_count - skip output data
  * @fifo: address of the fifo to be used
+ * @count: count of data to skip
  */
-#define	kfifo_skip(fifo) \
-(void)({ \
+#define	kfifo_skip_count(fifo, count) do { \
 	typeof((fifo) + 1) __tmp = (fifo); \
 	const size_t __recsize = sizeof(*__tmp->rectype); \
 	struct __kfifo *__kfifo = &__tmp->kfifo; \
 	if (__recsize) \
 		__kfifo_skip_r(__kfifo, __recsize); \
 	else \
-		__kfifo->out++; \
-})
+		__kfifo->out += (count); \
+} while(0)
+
+/**
+ * kfifo_skip - skip output data
+ * @fifo: address of the fifo to be used
+ */
+#define	kfifo_skip(fifo)	kfifo_skip_count(fifo, 1)
 
 /**
  * kfifo_peek_len - gets the size of the next fifo record
@@ -578,7 +584,7 @@ __kfifo_uint_must_check_helper( \
  * @buf: pointer to the storage buffer
  * @n: max. number of elements to get
  *
- * This macro get some data from the fifo and return the numbers of elements
+ * This macro gets some data from the fifo and returns the numbers of elements
  * copied.
  *
  * Note that with only one concurrent reader and one concurrent
@@ -605,7 +611,7 @@ __kfifo_uint_must_check_helper( \
  * @n: max. number of elements to get
  * @lock: pointer to the spinlock to use for locking
  *
- * This macro get the data from the fifo and return the numbers of elements
+ * This macro gets the data from the fifo and returns the numbers of elements
  * copied.
  */
 #define	kfifo_out_spinlocked(fifo, buf, n, lock) \
@@ -733,7 +739,7 @@ __kfifo_int_must_check_helper( \
  * @fifo: address of the fifo to be used
  * @len: number of bytes to received
  *
- * This macro finish a DMA IN operation. The in counter will be updated by
+ * This macro finishes a DMA IN operation. The in counter will be updated by
  * the len parameter. No error checking will be done.
  *
  * Note that with only one concurrent reader and one concurrent
@@ -784,23 +790,16 @@ __kfifo_int_must_check_helper( \
  * @fifo: address of the fifo to be used
  * @len: number of bytes transferred
  *
- * This macro finish a DMA OUT operation. The out counter will be updated by
+ * This macro finishes a DMA OUT operation. The out counter will be updated by
  * the len parameter. No error checking will be done.
  *
  * Note that with only one concurrent reader and one concurrent
  * writer, you don't need extra locking to use these macros.
  */
-#define kfifo_dma_out_finish(fifo, len) \
-(void)({ \
+#define kfifo_dma_out_finish(fifo, len) do { \
 	typeof((fifo) + 1) __tmp = (fifo); \
-	unsigned int __len = (len); \
-	const size_t __recsize = sizeof(*__tmp->rectype); \
-	struct __kfifo *__kfifo = &__tmp->kfifo; \
-	if (__recsize) \
-		__kfifo_dma_out_finish_r(__kfifo, __recsize); \
-	else \
-		__kfifo->out += __len / sizeof(*__tmp->type); \
-})
+	kfifo_skip_count(__tmp, (len) / sizeof(*__tmp->type)); \
+} while (0)
 
 /**
  * kfifo_out_peek - gets some data from the fifo
@@ -808,7 +807,7 @@ __kfifo_int_must_check_helper( \
  * @buf: pointer to the storage buffer
  * @n: max. number of elements to get
  *
- * This macro get the data from the fifo and return the numbers of elements
+ * This macro gets the data from the fifo and returns the numbers of elements
  * copied. The data is not removed from the fifo.
  *
  * Note that with only one concurrent reader and one concurrent
@@ -827,6 +826,64 @@ __kfifo_uint_must_check_helper( \
 	__kfifo_out_peek(__kfifo, __buf, __n); \
 }) \
 )
+
+/**
+ * kfifo_out_linear - gets a tail of/offset to available data
+ * @fifo: address of the fifo to be used
+ * @tail: pointer to an unsigned int to store the value of tail
+ * @n: max. number of elements to point at
+ *
+ * This macro obtains the offset (tail) to the available data in the fifo
+ * buffer and returns the
+ * numbers of elements available. It returns the available count till the end
+ * of data or till the end of the buffer. So that it can be used for linear
+ * data processing (like memcpy() of (@fifo->data + @tail) with count
+ * returned).
+ *
+ * Note that with only one concurrent reader and one concurrent
+ * writer, you don't need extra locking to use these macro.
+ */
+#define kfifo_out_linear(fifo, tail, n) \
+__kfifo_uint_must_check_helper( \
+({ \
+	typeof((fifo) + 1) __tmp = (fifo); \
+	unsigned int *__tail = (tail); \
+	unsigned long __n = (n); \
+	const size_t __recsize = sizeof(*__tmp->rectype); \
+	struct __kfifo *__kfifo = &__tmp->kfifo; \
+	(__recsize) ? \
+	__kfifo_out_linear_r(__kfifo, __tail, __n, __recsize) : \
+	__kfifo_out_linear(__kfifo, __tail, __n); \
+}) \
+)
+
+/**
+ * kfifo_out_linear_ptr - gets a pointer to the available data
+ * @fifo: address of the fifo to be used
+ * @ptr: pointer to data to store the pointer to tail
+ * @n: max. number of elements to point at
+ *
+ * Similarly to kfifo_out_linear(), this macro obtains the pointer to the
+ * available data in the fifo buffer and returns the numbers of elements
+ * available. It returns the available count till the end of available data or
+ * till the end of the buffer. So that it can be used for linear data
+ * processing (like memcpy() of @ptr with count returned).
+ *
+ * Note that with only one concurrent reader and one concurrent
+ * writer, you don't need extra locking to use these macro.
+ */
+#define kfifo_out_linear_ptr(fifo, ptr, n) \
+__kfifo_uint_must_check_helper( \
+({ \
+	typeof((fifo) + 1) ___tmp = (fifo); \
+	unsigned int ___tail; \
+	unsigned int ___n = kfifo_out_linear(___tmp, &___tail, (n)); \
+	struct __kfifo *___kfifo = &___tmp->kfifo; \
+	*(ptr) = ___kfifo->data + ___tail * kfifo_esize(___tmp); \
+	___n; \
+}) \
+)
+
 
 extern int __kfifo_alloc(struct __kfifo *fifo, unsigned int size,
 	size_t esize, gfp_t gfp_mask);
@@ -857,6 +914,9 @@ extern unsigned int __kfifo_dma_out_prepare(struct __kfifo *fifo,
 extern unsigned int __kfifo_out_peek(struct __kfifo *fifo,
 	void *buf, unsigned int len);
 
+extern unsigned int __kfifo_out_linear(struct __kfifo *fifo,
+	unsigned int *tail, unsigned int n);
+
 extern unsigned int __kfifo_in_r(struct __kfifo *fifo,
 	const void *buf, unsigned int len, size_t recsize);
 
@@ -879,14 +939,15 @@ extern void __kfifo_dma_in_finish_r(struct __kfifo *fifo,
 extern unsigned int __kfifo_dma_out_prepare_r(struct __kfifo *fifo,
 	struct scatterlist *sgl, int nents, unsigned int len, size_t recsize);
 
-extern void __kfifo_dma_out_finish_r(struct __kfifo *fifo, size_t recsize);
-
 extern unsigned int __kfifo_len_r(struct __kfifo *fifo, size_t recsize);
 
 extern void __kfifo_skip_r(struct __kfifo *fifo, size_t recsize);
 
 extern unsigned int __kfifo_out_peek_r(struct __kfifo *fifo,
 	void *buf, unsigned int len, size_t recsize);
+
+extern unsigned int __kfifo_out_linear_r(struct __kfifo *fifo,
+	unsigned int *tail, unsigned int n, size_t recsize);
 
 extern unsigned int __kfifo_max_r(unsigned int len, size_t recsize);
 
