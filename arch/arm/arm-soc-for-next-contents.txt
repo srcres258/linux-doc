@@ -1,0 +1,50 @@
+soc/arm
+
+soc/dt
+	patch
+		dtc: Enable dtc interrupt_provider check
+
+soc/drivers
+	mediatek/soc-drivers
+		https://git.kernel.org/pub/scm/linux/kernel/git/mediatek/linux tags/mtk-soc-for-v6.9
+	renesas/drivers
+		git://git.kernel.org/pub/scm/linux/kernel/git/geert/renesas-devel tags/renesas-drivers-for-v6.9-tag1
+	samsung/drivers
+		https://git.kernel.org/pub/scm/linux/kernel/git/krzk/linux tags/samsung-drivers-6.9
+	drivers/memory
+		https://git.kernel.org/pub/scm/linux/kernel/git/krzk/linux-mem-ctrl tags/memory-controller-drv-6.9
+
+soc/defconfig
+	patch
+		ARM: multi_v7_defconfig: Add more TI Keystone support
+		ARM: multi_v7_defconfig: Enable BACKLIGHT_CLASS_DEVICE
+		arm64: config: disable new platforms in virt.config
+	renesas/defconfig
+		git://git.kernel.org/pub/scm/linux/kernel/git/geert/renesas-devel tags/renesas-arm-defconfig-for-v6.9-tag1
+
+soc/late
+
+arm/fixes
+	patch
+		ARM: ep93xx: Add terminator to gpiod_lookup_table
+	<no branch> (7bca405c986075c99b9f729d3587b5c45db39d01)
+		git://git.kernel.org/pub/scm/linux/kernel/git/shawnguo/linux tags/imx-fixes-6.8
+	<no branch> (c22d03a95b0d815cd186302fdd93f74d99f1c914)
+		git://git.kernel.org/pub/scm/linux/kernel/git/mmind/linux-rockchip tags/v6.8-rockchip-dtsfixes1
+	patch
+		arm64: dts: freescale: Disable interrupt_map check
+		arm: dts: Fix dtc interrupt_provider warnings
+		arm64: dts: Fix dtc interrupt_provider warnings
+		arm: dts: Fix dtc interrupt_map warnings
+		arm64: dts: qcom: Fix interrupt-map cell sizes
+	<no branch> (9bd405c48b0ac4de087c0c4440fd79597201b8a7)
+		https://git.kernel.org/pub/scm/linux/kernel/git/conor/linux tags/riscv-cache-fixes-for-v6.8-rc6
+	<no branch> (0abcac4fe3ca3aeaef40ad53c0b295b2d5f8cbf1)
+		https://git.kernel.org/pub/scm/linux/kernel/git/conor/linux tags/riscv-firmware-fixes-for-v6.8-rc6
+	<no branch> (6dd9a236042e305d7b69ee92db7347bf5943e7d3)
+		https://git.kernel.org/pub/scm/linux/kernel/git/conor/linux tags/riscv-soc-drivers-fixes-for-v6.8-rc6
+	<no branch> (ce6b6d1513965f500a05f3facf223fa01fd74920)
+		https://git.kernel.org/pub/scm/linux/kernel/git/conor/linux tags/riscv-dt-fixes-for-v6.8-rc6
+	<no branch> (8c987693dc2d292d777f1be63cb35233049ae25e)
+		git://git.kernel.org/pub/scm/linux/kernel/git/geert/renesas-devel tags/renesas-fixes-for-v6.8-tag1
+
