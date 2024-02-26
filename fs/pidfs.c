@@ -187,7 +187,7 @@ static char *pidfs_dname(struct dentry *dentry, char *buffer, int buflen)
 			     d_inode(dentry)->i_ino);
 }
 
-const struct dentry_operations pidfs_dentry_operations = {
+static const struct dentry_operations pidfs_dentry_operations = {
 	.d_delete	= always_delete_dentry,
 	.d_dname	= pidfs_dname,
 	.d_prune	= stashed_dentry_prune,
@@ -227,19 +227,14 @@ struct file *pidfs_alloc_file(struct pid *pid, unsigned int flags)
 	if (ret < 0)
 		return ERR_PTR(ret);
 
-	pidfd_file = dentry_open(&path, flags, current_cred());
-	path_put(&path);
+	pidfd_file = alloc_file(&path, flags, &pidfs_file_operations);
+	if (IS_ERR(pidfd_file))
+		path_put(&path);
 	return pidfd_file;
 }
 
 void __init pidfs_init(void)
 {
-	int err;
-
-	err = register_filesystem(&pidfs_type);
-	if (err)
-		panic("Failed to register pidfs pseudo filesystem");
-
 	pidfs_mnt = kern_mount(&pidfs_type);
 	if (IS_ERR(pidfs_mnt))
 		panic("Failed to mount pidfs pseudo filesystem");

@@ -300,6 +300,9 @@ static int _kvm_setcsr(struct kvm_vcpu *vcpu, unsigned int id, u64 val)
 
 static int _kvm_get_cpucfg_mask(int id, u64 *v)
 {
+	if (id < 0 || id >= KVM_MAX_CPUCFG_REGS)
+		return -EINVAL;
+
 	switch (id) {
 	case 2:
 		/* CPUCFG2 features unconditionally supported by KVM */
@@ -316,13 +319,14 @@ static int _kvm_get_cpucfg_mask(int id, u64 *v)
 			*v |= CPUCFG2_LASX;
 
 		return 0;
-	case 0 ... 1:
-	case 3 ... KVM_MAX_CPUCFG_REGS - 1:
-		/* No restrictions on other CPUCFG IDs' values */
+	default:
+		/*
+		 * No restrictions on other valid CPUCFG IDs' values, but
+		 * CPUCFG data is limited to 32 bits as the LoongArch ISA
+		 * manual says (Volume 1, Section 2.2.10.5 "CPUCFG").
+		 */
 		*v = U32_MAX;
 		return 0;
-	default:
-		return -EINVAL;
 	}
 }
 
@@ -336,7 +340,7 @@ static int kvm_check_cpucfg(int id, u64 val)
 		return ret;
 
 	if (val & ~mask)
-		/* Unsupported features should not be set */
+		/* Unsupported features and/or the higher 32 bits should not be set */
 		return -EINVAL;
 
 	switch (id) {

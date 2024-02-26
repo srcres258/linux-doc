@@ -322,3 +322,5 @@ int path_from_stashed(struct dentry **stashed, unsigned long ino,
 		      const struct inode_operations *iops, void *data,
 		      struct path *path);
 void stashed_dentry_prune(struct dentry *dentry);
+struct file *alloc_file(const struct path *path, int flags,
+			const struct file_operations *fop);

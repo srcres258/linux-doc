@@ -187,9 +187,6 @@ static int coda_fill_super(struct super_block *sb, struct fs_context *fc)
 	struct CodaFid fid;
 	int error;
 
-	if (task_active_pid_ns(current) != &init_pid_ns)
-		return -EINVAL;
-
 	infof(fc, "coda: device index: %i\n", ctx->idx);
 
 	vc = &coda_comms[ctx->idx];

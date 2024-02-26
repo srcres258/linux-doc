@@ -966,14 +966,14 @@ static struct vm_area_struct
 				 */
 				if (curr->vm_ops && curr->vm_ops->close)
 					err = -EINVAL;
-				else
-					err = dup_anon_vma(prev, curr, &anon_dup);
 				remove = curr;
 			} else {			/* case 5 */
 				err = dup_anon_vma(prev, curr, &anon_dup);
 				adjust = curr;
 				adj_start = (end - curr->vm_start);
 			}
+			if (!err)
+				err = dup_anon_vma(prev, curr, &anon_dup);
 		}
 	} else { /* merge_next */
 		vma_start_write(next);

@@ -250,6 +250,42 @@ static int get_bit_mask(const char *filename, unsigned long *mask)
 }
 
 /*
+ * resource_info_unsigned_get - Read an unsigned value from
+ * /sys/fs/resctrl/info/@resource/@filename
+ * @resource:	Resource name that matches directory name in
+ *		/sys/fs/resctrl/info
+ * @filename:	File in /sys/fs/resctrl/info/@resource
+ * @val:	Contains read value on success.
+ *
+ * Return: = 0 on success, < 0 on failure. On success the read
+ * value is saved into @val.
+ */
+int resource_info_unsigned_get(const char *resource, const char *filename,
+			       unsigned int *val)
+{
+	char file_path[PATH_MAX];
+	FILE *fp;
+
+	snprintf(file_path, sizeof(file_path), "%s/%s/%s", INFO_PATH, resource,
+		 filename);
+
+	fp = fopen(file_path, "r");
+	if (!fp) {
+		ksft_print_msg("Error opening %s: %m\n", file_path);
+		return -1;
+	}
+
+	if (fscanf(fp, "%u", val) <= 0) {
+		ksft_print_msg("Could not get contents of %s: %m\n", file_path);
+		fclose(fp);
+		return -1;
+	}
+
+	fclose(fp);
+	return 0;
+}
+
+/*
  * create_bit_mask- Create bit mask from start, len pair
  * @start:	LSB of the mask
  * @len		Number of bits in the mask
@@ -672,20 +708,16 @@ char *fgrep(FILE *inf, const char *str)
 }
 
 /*
- * validate_resctrl_feature_request - Check if requested feature is valid.
- * @resource:	Required resource (e.g., MB, L3, L2, L3_MON, etc.)
- * @feature:	Required monitor feature (in mon_features file). Can only be
- *		set for L3_MON. Must be NULL for all other resources.
+ * resctrl_resource_exists - Check if a resource is supported.
+ * @resource:	Resctrl resource (e.g., MB, L3, L2, L3_MON, etc.)
  *
- * Return: True if the resource/feature is supported, else false. False is
+ * Return: True if the resource is supported, else false. False is
  *         also returned if resctrl FS is not mounted.
  */
-bool validate_resctrl_feature_request(const char *resource, const char *feature)
+bool resctrl_resource_exists(const char *resource)
 {
 	char res_path[PATH_MAX];
 	struct stat statbuf;
-	char *res;
-	FILE *inf;
 	int ret;
 
 	if (!resource)
@@ -700,8 +732,25 @@ bool validate_resctrl_feature_request(const char *resource, const char *feature)
 	if (stat(res_path, &statbuf))
 		return false;
 
-	if (!feature)
-		return true;
+	return true;
+}
+
+/*
+ * resctrl_mon_feature_exists - Check if requested monitoring feature is valid.
+ * @resource:	Resource that uses the mon_features file. Currently only L3_MON
+ *		is valid.
+ * @feature:	Required monitor feature (in mon_features file).
+ *
+ * Return: True if the feature is supported, else false.
+ */
+bool resctrl_mon_feature_exists(const char *resource, const char *feature)
+{
+	char res_path[PATH_MAX];
+	char *res;
+	FILE *inf;
+
+	if (!feature || !resource)
+		return false;
 
 	snprintf(res_path, sizeof(res_path), "%s/%s/mon_features", INFO_PATH, resource);
 	inf = fopen(res_path, "r");
@@ -715,9 +764,34 @@ bool validate_resctrl_feature_request(const char *resource, const char *feature)
 	return !!res;
 }
 
+/*
+ * resource_info_file_exists - Check if a file is present inside
+ * /sys/fs/resctrl/info/@resource.
+ * @resource:	Required resource (Eg: MB, L3, L2, etc.)
+ * @file:	Required file.
+ *
+ * Return: True if the /sys/fs/resctrl/info/@resource/@file exists, else false.
+ */
+bool resource_info_file_exists(const char *resource, const char *file)
+{
+	char res_path[PATH_MAX];
+	struct stat statbuf;
+
+	if (!file || !resource)
+		return false;
+
+	snprintf(res_path, sizeof(res_path), "%s/%s/%s", INFO_PATH, resource,
+		 file);
+
+	if (stat(res_path, &statbuf))
+		return false;
+
+	return true;
+}
+
 bool test_resource_feature_check(const struct resctrl_test *test)
 {
-	return validate_resctrl_feature_request(test->resource, NULL);
+	return resctrl_resource_exists(test->resource);
 }
 
 int filter_dmesg(void)

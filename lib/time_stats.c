@@ -313,7 +313,7 @@ void time_stats_to_json(struct seq_buf *out, struct time_stats *stats,
 	seq_buf_printf(out, "    \"stddev\":    %llu\n", d_stddev);
 	seq_buf_printf(out, "  },\n");
 
-	seq_buf_printf(out, "  \"frequency_ns\": {\n");
+	seq_buf_printf(out, "  \"between_ns\": {\n");
 	seq_buf_printf(out, "    \"min\":       %llu,\n", stats->min_freq);
 	seq_buf_printf(out, "    \"max\":       %llu,\n", stats->max_freq);
 	seq_buf_printf(out, "    \"mean\":      %llu,\n", f_mean);
@@ -323,14 +323,14 @@ void time_stats_to_json(struct seq_buf *out, struct time_stats *stats,
 	f_mean = mean_and_variance_weighted_get_mean(stats->freq_stats_weighted, TIME_STATS_MV_WEIGHT);
 	f_stddev = mean_and_variance_weighted_get_stddev(stats->freq_stats_weighted, TIME_STATS_MV_WEIGHT);
 
-	seq_buf_printf(out, "  \"frequency_ewma_ns\": {\n");
+	seq_buf_printf(out, "  \"between_ewma_ns\": {\n");
 	seq_buf_printf(out, "    \"mean\":      %llu,\n", f_mean);
 	seq_buf_printf(out, "    \"stddev\":    %llu\n", f_stddev);
 
 	if (quantiles) {
 		u64 last_q = 0;
 
-		/* close frequency_ewma_ns but signal more items */
+		/* close between_ewma_ns but signal more items */
 		seq_buf_printf(out, "  },\n");
 
 		seq_buf_printf(out, "  \"quantiles_ns\": [\n");
@@ -345,7 +345,7 @@ void time_stats_to_json(struct seq_buf *out, struct time_stats *stats,
 		}
 		seq_buf_printf(out, "  ]\n");
 	} else {
-		/* close frequency_ewma_ns without dumping further */
+		/* close between_ewma_ns without dumping further */
 		seq_buf_printf(out, "  }\n");
 	}
 

@@ -433,15 +433,16 @@ static int cxl_parse_cfmws(union acpi_subtable_headers *header, void *arg,
 	struct device *dev = ctx->dev;
 	int rc;
 
-	dev_dbg(dev, "decode range: node: %d range [%#llx - %#llx]\n",
-		phys_to_target_node(cfmws->base_hpa), cfmws->base_hpa,
-		cfmws->base_hpa + cfmws->window_size - 1);
 	rc = __cxl_parse_cfmws(cfmws, ctx);
 	if (rc)
 		dev_err(dev,
 			"Failed to add decode range: [%#llx - %#llx] (%d)\n",
 			cfmws->base_hpa,
 			cfmws->base_hpa + cfmws->window_size - 1, rc);
+	else
+		dev_dbg(dev, "decode range: node: %d range [%#llx - %#llx]\n",
+			phys_to_target_node(cfmws->base_hpa), cfmws->base_hpa,
+			cfmws->base_hpa + cfmws->window_size - 1);
 
 	/* never fail cxl_acpi load for a single window failure */
 	return 0;

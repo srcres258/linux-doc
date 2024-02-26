@@ -913,6 +913,32 @@ static bool skip_isolation_on_order(int order, int target_order)
 }
 
 /**
+ * skip_isolation_on_order() - determine when to skip folio isolation based on
+ *			       folio order and compaction target order
+ * @order:		to-be-isolated folio order
+ * @target_order:	compaction target order
+ *
+ * This avoids unnecessary folio isolations during compaction.
+ */
+static bool skip_isolation_on_order(int order, int target_order)
+{
+	/*
+	 * Unless we are performing global compaction (i.e.,
+	 * is_via_compact_memory), skip any folios that are larger than the
+	 * target order: we wouldn't be here if we'd have a free folio with
+	 * the desired target_order, so migrating this folio would likely fail
+	 * later.
+	 */
+	if (!is_via_compact_memory(target_order) && order >= target_order)
+		return true;
+	/*
+	 * We limit memory compaction to pageblocks and won't try
+	 * creating free blocks of memory that are larger than that.
+	 */
+	return order >= pageblock_order;
+}
+
+/**
  * isolate_migratepages_block() - isolate all migrate-able pages within
  *				  a single pageblock
  * @cc:		Compaction control structure.

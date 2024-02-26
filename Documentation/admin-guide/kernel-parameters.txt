@@ -1754,6 +1754,17 @@
 				(that will set all pages holding image data
 				during restoration read-only).
 
+	hibernate.compressor= 	[HIBERNATION] Compression algorithm to be
+				used with hibernation.
+				Format: { lzo | lz4 }
+				Default: lzo
+
+				lzo: Select LZO compression algorithm to
+				compress/decompress hibernation image.
+
+				lz4: Select LZ4 compression algorithm to
+				compress/decompress hibernation image.
+
 	highmem=nn[KMG]	[KNL,BOOT,EARLY] forces the highmem zone to have an exact
 			size of <nn>. This works even on boxes that have no
 			highmem otherwise. This also works to reduce highmem
@@ -5057,6 +5068,20 @@
 			To save power, batch RCU callbacks and flush after
 			delay, memory pressure or callback list growing too
 			big.
+
+	rcutree.rcu_normal_wake_from_gp= [KNL]
+			Reduces a latency of synchronize_rcu() call. This approach
+			maintains its own track of synchronize_rcu() callers, so it
+			does not interact with regular callbacks because it does not
+			use a call_rcu[_hurry]() path. Please note, this is for a
+			normal grace period.
+
+			How to enable it:
+
+			echo 1 > /sys/module/rcutree/parameters/rcu_normal_wake_from_gp
+			or pass a boot parameter "rcutree.rcu_normal_wake_from_gp=1"
+
+			Default is 0.
 
 	rcuscale.gp_async= [KNL]
 			Measure performance of asynchronous

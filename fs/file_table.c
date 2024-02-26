@@ -275,16 +275,15 @@ struct file *alloc_empty_backing_file(int flags, const struct cred *cred)
 }
 
 /**
- * file_init - initialize a 'struct file'
+ * file_init_path - initialize a 'struct file' based on path
  *
  * @file: the file to set up
  * @path: the (dentry, vfsmount) pair for the new file
- * @flags: O_... flags with which the new file will be opened
  * @fop: the 'struct file_operations' for the new file
  * @noaccount: whether this is an internal open that shouldn't be counted
  */
-static void file_init(struct file *file, const struct path *path, int flags,
-		      const struct file_operations *fop)
+static void file_init_path(struct file *file, const struct path *path,
+			   const struct file_operations *fop)
 {
 	file->f_path = *path;
 	file->f_inode = path->dentry->d_inode;
@@ -304,6 +303,24 @@ static void file_init(struct file *file, const struct path *path, int flags,
 	file->f_op = fop;
 	if ((file->f_mode & (FMODE_READ | FMODE_WRITE)) == FMODE_READ)
 		i_readcount_inc(path->dentry->d_inode);
+}
+
+/**
+ * alloc_file - allocate and initialize a 'struct file'
+ *
+ * @path: the (dentry, vfsmount) pair for the new file
+ * @flags: O_... flags with which the new file will be opened
+ * @fop: the 'struct file_operations' for the new file
+ */
+struct file *alloc_file(const struct path *path, int flags,
+		const struct file_operations *fop)
+{
+	struct file *file;
+
+	file = alloc_empty_file(flags, current_cred());
+	if (!IS_ERR(file))
+		file_init_path(file, path, fop);
+	return file;
 }
 
 static inline int alloc_path_pseudo(const char *name, struct inode *inode,
@@ -331,7 +348,7 @@ struct file *alloc_file_pseudo(struct inode *inode, struct vfsmount *mnt,
 	if (ret)
 		return ERR_PTR(ret);
 
-	file = alloc_empty_file(flags, current_cred());
+	file = alloc_file(&path, flags, fops);
 	if (IS_ERR(file)) {
 		ihold(inode);
 		path_put(&path);
@@ -340,14 +357,7 @@ struct file *alloc_file_pseudo(struct inode *inode, struct vfsmount *mnt,
 	file_init(file, &path, flags, fops);
 	return file;
 }
-
-struct file *alloc_file_pseudo(struct inode *inode, struct vfsmount *mnt,
-				const char *name, int flags,
-				const struct file_operations *fops)
-{
-	return __alloc_file_pseudo(inode, mnt, name, flags, fops, false);
-}
-EXPORT_SYMBOL(alloc_file_pseudo);
+EXPORT_SYMBOL_GPL(alloc_file_pseudo_noaccount);
 
 struct file *alloc_file_pseudo_noaccount(struct inode *inode,
 					 struct vfsmount *mnt, const char *name,
@@ -368,7 +378,7 @@ struct file *alloc_file_pseudo_noaccount(struct inode *inode,
 		path_put(&path);
 		return file;
 	}
-	file_init(file, &path, flags, fops);
+	file_init_path(file, &path, fops);
 	return file;
 }
 EXPORT_SYMBOL_GPL(alloc_file_pseudo_noaccount);

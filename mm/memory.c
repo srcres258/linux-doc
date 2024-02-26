@@ -1663,7 +1663,7 @@ static unsigned long zap_pte_range(struct mmu_gather *tlb,
 	arch_enter_lazy_mmu_mode();
 	do {
 		pte_t ptent = ptep_get(pte);
-		struct folio *folio = NULL;
+		struct folio *folio;
 		struct page *page;
 		int max_nr;
 
@@ -3283,7 +3283,7 @@ static inline vm_fault_t vmf_can_call_fault(const struct vm_fault *vmf)
 	return VM_FAULT_RETRY;
 }
 
-static vm_fault_t vmf_anon_prepare(struct vm_fault *vmf)
+vm_fault_t vmf_anon_prepare(struct vm_fault *vmf)
 {
 	struct vm_area_struct *vma = vmf->vma;
 

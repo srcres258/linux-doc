@@ -1878,10 +1878,11 @@ static void bch2_do_discards_fast_work(struct work_struct *work)
 		if (!got_bucket)
 			break;
 
-		blkdev_issue_discard(ca->disk_sb.bdev,
-				     bucket.offset * ca->mi.bucket_size,
-				     ca->mi.bucket_size,
-				     GFP_KERNEL);
+		if (ca->mi.discard && !c->opts.nochanges)
+			blkdev_issue_discard(ca->disk_sb.bdev,
+					     bucket.offset * ca->mi.bucket_size,
+					     ca->mi.bucket_size,
+					     GFP_KERNEL);
 
 		int ret = bch2_trans_do(c, NULL, NULL,
 					BCH_WATERMARK_btree|

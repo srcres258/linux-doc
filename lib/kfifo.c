@@ -163,6 +163,21 @@ unsigned int __kfifo_out_peek(struct __kfifo *fifo,
 }
 EXPORT_SYMBOL(__kfifo_out_peek);
 
+unsigned int __kfifo_out_linear(struct __kfifo *fifo,
+		unsigned int *tail, unsigned int n)
+{
+	unsigned int size = fifo->mask + 1;
+	unsigned int off = fifo->out & fifo->mask;
+
+	n = min3(n, fifo->in - fifo->out, size - off);
+
+	if (tail)
+		*tail = off;
+
+	return n;
+}
+EXPORT_SYMBOL(__kfifo_out_linear);
+
 unsigned int __kfifo_out(struct __kfifo *fifo,
 		void *buf, unsigned int len)
 {
@@ -473,6 +488,19 @@ unsigned int __kfifo_out_peek_r(struct __kfifo *fifo, void *buf,
 }
 EXPORT_SYMBOL(__kfifo_out_peek_r);
 
+unsigned int __kfifo_out_linear_r(struct __kfifo *fifo,
+		unsigned int *tail, unsigned int n, size_t recsize)
+{
+	if (fifo->in == fifo->out)
+		return 0;
+
+	if (tail)
+		*tail = fifo->out + recsize;
+
+	return min(n, __kfifo_peek_n(fifo, recsize));
+}
+EXPORT_SYMBOL(__kfifo_out_linear_r);
+
 unsigned int __kfifo_out_r(struct __kfifo *fifo, void *buf,
 		unsigned int len, size_t recsize)
 {
@@ -581,12 +609,3 @@ unsigned int __kfifo_dma_out_prepare_r(struct __kfifo *fifo,
 	return setup_sgl(fifo, sgl, nents, len, fifo->out + recsize);
 }
 EXPORT_SYMBOL(__kfifo_dma_out_prepare_r);
-
-void __kfifo_dma_out_finish_r(struct __kfifo *fifo, size_t recsize)
-{
-	unsigned int len;
-
-	len = __kfifo_peek_n(fifo, recsize);
-	fifo->out += len + recsize;
-}
-EXPORT_SYMBOL(__kfifo_dma_out_finish_r);

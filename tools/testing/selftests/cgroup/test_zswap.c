@@ -71,7 +71,7 @@ static int allocate_and_read_bytes(const char *cgroup, void *arg)
 	for (int i = 0; i < size; i += 4095)
 		mem[i] = 'a';
 
-	/* go through the allocated memory to (z)swap in and out pages */
+	/* Go through the allocated memory to (z)swap in and out pages */
 	for (int i = 0; i < size; i += 4095) {
 		if (mem[i] != 'a')
 			ret = -1;
@@ -184,8 +184,8 @@ static int test_swapin_nozswap(const char *root)
 		goto out;
 	}
 
-	if (swap_peak == 0) {
-		ksft_print_msg("pages should be swapped out\n");
+	if (swap_peak < MB(24)) {
+		ksft_print_msg("at least 24MB of memory should be swapped out\n");
 		goto out;
 	}
 
@@ -215,7 +215,6 @@ static int test_zswapin(const char *root)
 	char *test_group;
 	long zswpin;
 
-	/* Set up */
 	test_group = cg_name(root, "zswapin_test");
 	if (!test_group)
 		goto out;
@@ -236,8 +235,8 @@ static int test_zswapin(const char *root)
 		goto out;
 	}
 
-	if (zswpin == 0) {
-		ksft_print_msg("zswpin should not be 0\n");
+	if (zswpin < MB(24) / PAGE_SIZE) {
+		ksft_print_msg("at least 24MB should be brought back from zswap\n");
 		goto out;
 	}
 
@@ -260,7 +259,6 @@ static int test_no_invasive_cgroup_shrink(const char *root)
 	size_t control_allocation_size = MB(10);
 	char *control_allocation, *wb_group = NULL, *control_group = NULL;
 
-	/* Set up */
 	wb_group = setup_test_group_1M(root, "per_memcg_wb_test1");
 	if (!wb_group)
 		return KSFT_FAIL;

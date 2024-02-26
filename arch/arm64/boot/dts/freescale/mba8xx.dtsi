@@ -240,6 +240,7 @@
 		interrupt-parent = <&lsio_gpio4>;
 		interrupts = <19 IRQ_TYPE_LEVEL_LOW>;
 		interrupt-controller;
+		#interrupt-cells = <2>;
 		vcc-supply = <&reg_1v8>;
 
 		gpio-line-names = "", "LED_A",
@@ -466,7 +467,7 @@
 		fsl,pins = <IMX8QXP_USDHC1_RESET_B_LSIO_GPIO4_IO19	0x00000020>;
 	};
 
-	pinctrl_pcieb: pcieagrp{
+	pinctrl_pcieb: pcieagrp {
 		fsl,pins = <IMX8QXP_PCIE_CTRL0_PERST_B_LSIO_GPIO4_IO00	0x06000041>,
 			   <IMX8QXP_PCIE_CTRL0_CLKREQ_B_LSIO_GPIO4_IO01	0x06000041>,
 			   <IMX8QXP_PCIE_CTRL0_WAKE_B_LSIO_GPIO4_IO02	0x04000041>;
