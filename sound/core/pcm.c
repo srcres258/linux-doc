@@ -225,9 +225,11 @@ static const char * const snd_pcm_format_names[] = {
  */
 const char *snd_pcm_format_name(snd_pcm_format_t format)
 {
-	if ((__force unsigned int)format >= ARRAY_SIZE(snd_pcm_format_names))
+	unsigned int format_num = (__force unsigned int)format;
+
+	if (format_num >= ARRAY_SIZE(snd_pcm_format_names) || !snd_pcm_format_names[format_num])
 		return "Unknown";
-	return snd_pcm_format_names[(__force unsigned int)format];
+	return snd_pcm_format_names[format_num];
 }
 EXPORT_SYMBOL_GPL(snd_pcm_format_name);
 
@@ -340,7 +342,7 @@ static const char *snd_pcm_oss_format_name(int format)
 static void snd_pcm_proc_info_read(struct snd_pcm_substream *substream,
 				   struct snd_info_buffer *buffer)
 {
-	struct snd_pcm_info *info;
+	struct snd_pcm_info *info __free(kfree) = NULL;
 	int err;
 
 	if (! substream)
@@ -353,7 +355,6 @@ static void snd_pcm_proc_info_read(struct snd_pcm_substream *substream,
 	err = snd_pcm_info(substream, info);
 	if (err < 0) {
 		snd_iprintf(buffer, "error %d\n", err);
-		kfree(info);
 		return;
 	}
 	snd_iprintf(buffer, "card: %d\n", info->card);
@@ -367,7 +368,6 @@ static void snd_pcm_proc_info_read(struct snd_pcm_substream *substream,
 	snd_iprintf(buffer, "subclass: %d\n", info->dev_subclass);
 	snd_iprintf(buffer, "subdevices_count: %d\n", info->subdevices_count);
 	snd_iprintf(buffer, "subdevices_avail: %d\n", info->subdevices_avail);
-	kfree(info);
 }
 
 static void snd_pcm_stream_proc_info_read(struct snd_info_entry *entry,
