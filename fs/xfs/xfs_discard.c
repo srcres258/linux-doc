@@ -19,6 +19,7 @@
 #include "xfs_trace.h"
 #include "xfs_log.h"
 #include "xfs_ag.h"
+#include "xfs_health.h"
 
 /*
  * Notes on an efficient, low latency fstrim algorithm
@@ -178,7 +179,7 @@ xfs_trim_gather_extents(
 	if (error)
 		goto out_trans_cancel;
 
-	cur = xfs_allocbt_init_cursor(mp, tp, agbp, pag, XFS_BTNUM_CNT);
+	cur = xfs_cntbt_init_cursor(mp, tp, agbp, pag);
 
 	/*
 	 * Look up the extent length requested in the AGF and start with it.
@@ -210,6 +211,7 @@ xfs_trim_gather_extents(
 		if (error)
 			break;
 		if (XFS_IS_CORRUPT(mp, i != 1)) {
+			xfs_btree_mark_sick(cur);
 			error = -EFSCORRUPTED;
 			break;
 		}

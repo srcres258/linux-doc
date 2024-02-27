@@ -174,6 +174,7 @@ static int fuse_backing_id_alloc(struct fuse_conn *fc, struct fuse_backing *fb)
 
 	idr_preload(GFP_KERNEL);
 	spin_lock(&fc->lock);
+	/* FIXME: xarray might be space inefficient */
 	id = idr_alloc_cyclic(&fc->backing_files_map, fb, 1, 0, GFP_ATOMIC);
 	spin_unlock(&fc->lock);
 	idr_preload_end();

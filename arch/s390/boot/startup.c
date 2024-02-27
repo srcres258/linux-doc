@@ -142,7 +142,7 @@ static void copy_bootdata(void)
 }
 
 #ifdef CONFIG_PIE_BUILD
-static void kaslr_adjust_relocs(unsigned long min_addr, unsigned long offset)
+static void kaslr_adjust_relocs(unsigned long min_addr, unsigned long max_addr, unsigned long offset)
 {
 	Elf64_Rela *rela_start, *rela_end, *rela;
 	int r_type, r_sym, rc;
@@ -177,18 +177,16 @@ static void kaslr_adjust_got(unsigned long offset) {}
 static void rescue_relocs(void) {}
 static void free_relocs(void) {}
 #else
-int *vmlinux_relocs_64_start;
-int *vmlinux_relocs_64_end;
+static int *vmlinux_relocs_64_start;
+static int *vmlinux_relocs_64_end;
 
 static void rescue_relocs(void)
 {
-	unsigned long size, nrelocs;
+	unsigned long size = __vmlinux_relocs_64_end - __vmlinux_relocs_64_start;
 
-	nrelocs = __vmlinux_relocs_64_end - __vmlinux_relocs_64_start;
-	size = nrelocs * sizeof(uint32_t);
 	vmlinux_relocs_64_start = (void *)physmem_alloc_top_down(RR_RELOC, size, 0);
-	memmove(vmlinux_relocs_64_start, (void *)__vmlinux_relocs_64_start, size);
-	vmlinux_relocs_64_end = vmlinux_relocs_64_start + nrelocs;
+	vmlinux_relocs_64_end = (void *)vmlinux_relocs_64_start + size;
+	memmove(vmlinux_relocs_64_start, __vmlinux_relocs_64_start, size);
 }
 
 static void free_relocs(void)
@@ -196,16 +194,13 @@ static void free_relocs(void)
 	physmem_free(RR_RELOC);
 }
 
-static void kaslr_adjust_relocs(unsigned long min_addr, unsigned long offset)
+static void kaslr_adjust_relocs(unsigned long min_addr, unsigned long max_addr, unsigned long offset)
 {
 	int *reloc;
-	unsigned long max_addr = min_addr + vmlinux.image_size;
 	long loc;
 
 	/* Adjust R_390_64 relocations */
-	for (reloc = vmlinux_relocs_64_start;
-		reloc < vmlinux_relocs_64_end && *reloc;
-		reloc++) {
+	for (reloc = vmlinux_relocs_64_start; reloc < vmlinux_relocs_64_end; reloc++) {
 		loc = (long)*reloc + offset;
 		if (loc < min_addr || loc > max_addr)
 			error("64-bit relocation outside of kernel!\n");
@@ -219,13 +214,10 @@ static void kaslr_adjust_got(unsigned long offset)
 
 	/*
 	 * Even without -fPIE, Clang still uses a global offset table for some
-	 * reason.  Adjust the GOT entries.
+	 * reason. Adjust the GOT entries.
 	 */
-	for (entry = (u64 *)vmlinux.got_off;
-	     entry < (u64 *)(vmlinux.got_off + vmlinux.got_size);
-	     entry++) {
+	for (entry = (u64 *)vmlinux.got_start; entry < (u64 *)vmlinux.got_end; entry++)
 		*entry += offset;
-	}
 }
 #endif
 
@@ -366,7 +358,8 @@ static void kaslr_adjust_vmlinux_info(unsigned long offset)
 	vmlinux.rela_dyn_end += offset;
 	vmlinux.dynsym_start += offset;
 #else
-	vmlinux.got_off += offset;
+	vmlinux.got_start += offset;
+	vmlinux.got_end += offset;
 #endif
 	vmlinux.init_mm_off += offset;
 	vmlinux.swapper_pg_dir_off += offset;
@@ -455,8 +448,8 @@ void startup_kernel(void)
 	/*
 	 * The order of the following operations is important:
 	 *
-	 * - kaslr_adjust_relocs() must follow clear_bss_section() to establish static
-	 *   memory references to data in .bss to be used by setup_vmem()
+	 * - kaslr_adjust_relocs() must follow clear_bss_section() to establish
+	 *   static memory references to data in .bss to be used by setup_vmem()
 	 *   (i.e init_mm.pgd)
 	 *
 	 * - setup_vmem() must follow kaslr_adjust_relocs() to be able using
@@ -466,7 +459,7 @@ void startup_kernel(void)
 	 *   to bootdata made by setup_vmem()
 	 */
 	clear_bss_section(vmlinux_lma);
-	kaslr_adjust_relocs(vmlinux_lma, __kaslr_offset);
+	kaslr_adjust_relocs(vmlinux_lma, vmlinux_lma + vmlinux.image_size, __kaslr_offset);
 	kaslr_adjust_got(__kaslr_offset);
 	free_relocs();
 	setup_vmem(asce_limit);

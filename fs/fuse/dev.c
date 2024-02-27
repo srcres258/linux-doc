@@ -2290,7 +2290,7 @@ static long fuse_dev_ioctl_backing_open(struct file *file,
 	struct fuse_backing_map map;
 
 	if (!fud)
-		return -EINVAL;
+		return -EPERM;
 
 	if (!IS_ENABLED(CONFIG_FUSE_PASSTHROUGH))
 		return -EOPNOTSUPP;

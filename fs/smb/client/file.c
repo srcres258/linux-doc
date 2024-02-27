@@ -3667,7 +3667,8 @@ bool is_size_safe_to_change(struct cifsInodeInfo *cifsInode, __u64 end_of_file)
 	if (!cifsInode)
 		return true;
 
-	if (is_inode_writable(cifsInode)) {
+	if (is_inode_writable(cifsInode) ||
+			((cifsInode->oplock & CIFS_CACHE_RW_FLG) != 0)) {
 		/* This inode is open for write at least once */
 		struct cifs_sb_info *cifs_sb;
 

@@ -106,8 +106,8 @@ static int check_wsl_eas(struct kvec *rsp_iov)
 	struct smb2_query_info_rsp *rsp = rsp_iov->iov_base;
 	unsigned long addr;
 	u32 outlen, next;
-	u8 nlen;
 	u16 vlen;
+	u8 nlen;
 	u8 *end;
 
 	outlen = le32_to_cpu(rsp->OutputBufferLength);
@@ -248,16 +248,8 @@ replay_again:
 		}
 	}
 
-	vars->oparms = (struct cifs_open_parms) {
-		.tcon = tcon,
-		.path = full_path,
-		.desired_access = desired_access,
-		.disposition = create_disposition,
-		.create_options = cifs_create_options(cifs_sb, create_options),
-		.fid = &fid,
-		.mode = mode,
-		.cifs_sb = cifs_sb,
-	};
+	vars->oparms = *oparms;
+	vars->oparms.fid = &fid;
 
 	rqst[num_rqst].rq_iov = &vars->open_iov[0];
 	rqst[num_rqst].rq_nvec = SMB2_CREATE_IOV_SIZE;
@@ -918,9 +910,8 @@ int smb2_query_path_info(const unsigned int xid,
 	oparms = CIFS_OPARMS(cifs_sb, tcon, full_path, FILE_READ_ATTRIBUTES,
 			     FILE_OPEN, create_options, ACL_NO_MODE);
 	rc = smb2_compound_op(xid, tcon, cifs_sb, full_path,
-			      FILE_READ_ATTRIBUTES, FILE_OPEN,
-			      create_options, ACL_NO_MODE, in_iov,
-			      cmds, 1, cfile, out_iov, out_buftype, NULL);
+			      &oparms, in_iov, cmds, num_cmds,
+			      cfile, out_iov, out_buftype, NULL);
 	hdr = out_iov[0].iov_base;
 	/*
 	 * If first iov is unset, then SMB session was dropped or we've got a
@@ -954,9 +945,8 @@ int smb2_query_path_info(const unsigned int xid,
 				     OPEN_REPARSE_POINT, ACL_NO_MODE);
 		cifs_get_readable_path(tcon, full_path, &cfile);
 		rc = smb2_compound_op(xid, tcon, cifs_sb, full_path,
-				      FILE_READ_ATTRIBUTES, FILE_OPEN,
-				      create_options, ACL_NO_MODE, in_iov,
-				      cmds, num_cmds, cfile, NULL, NULL, NULL);
+				      &oparms, in_iov, cmds, num_cmds,
+				      cfile, NULL, NULL, NULL);
 		break;
 	case -EREMOTE:
 		break;
@@ -984,10 +974,13 @@ smb2_mkdir(const unsigned int xid, struct inode *parent_inode, umode_t mode,
 	   struct cifs_tcon *tcon, const char *name,
 	   struct cifs_sb_info *cifs_sb)
 {
-	return smb2_compound_op(xid, tcon, cifs_sb, name,
-				FILE_WRITE_ATTRIBUTES, FILE_CREATE,
-				CREATE_NOT_FILE, mode,
-				NULL, &(int){SMB2_OP_MKDIR}, 1,
+	struct cifs_open_parms oparms;
+
+	oparms = CIFS_OPARMS(cifs_sb, tcon, name, FILE_WRITE_ATTRIBUTES,
+			     FILE_CREATE, CREATE_NOT_FILE, mode);
+	return smb2_compound_op(xid, tcon, cifs_sb,
+				name, &oparms, NULL,
+				&(int){SMB2_OP_MKDIR}, 1,
 				NULL, NULL, NULL, NULL);
 }
 
@@ -1039,18 +1032,20 @@ int
 smb2_unlink(const unsigned int xid, struct cifs_tcon *tcon, const char *name,
 	    struct cifs_sb_info *cifs_sb, struct dentry *dentry)
 {
-	int rc = smb2_compound_op(xid, tcon, cifs_sb, name, DELETE, FILE_OPEN,
-				CREATE_DELETE_ON_CLOSE | OPEN_REPARSE_POINT,
-				ACL_NO_MODE, NULL,
-				&(int){SMB2_OP_DELETE}, 1,
-				NULL, NULL, NULL, dentry);
+	struct cifs_open_parms oparms;
+
+	oparms = CIFS_OPARMS(cifs_sb, tcon, name,
+			     DELETE, FILE_OPEN,
+			     CREATE_DELETE_ON_CLOSE | OPEN_REPARSE_POINT,
+			     ACL_NO_MODE);
+	int rc = smb2_compound_op(xid, tcon, cifs_sb, name, &oparms,
+				  NULL, &(int){SMB2_OP_DELETE}, 1,
+				  NULL, NULL, NULL, dentry);
 	if (rc == -EINVAL) {
 		cifs_dbg(FYI, "invalid lease key, resending request without lease");
-		rc = smb2_compound_op(xid, tcon, cifs_sb, name, DELETE, FILE_OPEN,
-				CREATE_DELETE_ON_CLOSE | OPEN_REPARSE_POINT,
-				ACL_NO_MODE, NULL,
-				&(int){SMB2_OP_DELETE}, 1,
-				NULL, NULL, NULL, NULL);
+		rc = smb2_compound_op(xid, tcon, cifs_sb, name, &oparms,
+				      NULL, &(int){SMB2_OP_DELETE}, 1,
+				      NULL, NULL, NULL, NULL);
 	}
 	return rc;
 }
@@ -1074,9 +1069,11 @@ static int smb2_set_path_attr(const unsigned int xid, struct cifs_tcon *tcon,
 	}
 	in_iov.iov_base = smb2_to_name;
 	in_iov.iov_len = 2 * UniStrnlen((wchar_t *)smb2_to_name, PATH_MAX);
-	rc = smb2_compound_op(xid, tcon, cifs_sb, from_name, access,
-			      FILE_OPEN, create_options, ACL_NO_MODE,
-			      &in_iov, &command, 1, cfile, NULL, NULL, dentry);
+	oparms = CIFS_OPARMS(cifs_sb, tcon, from_name, access, FILE_OPEN,
+			     create_options, ACL_NO_MODE);
+	rc = smb2_compound_op(xid, tcon, cifs_sb, from_name,
+			      &oparms, &in_iov, &command, 1,
+			      cfile, NULL, NULL, dentry);
 smb2_rename_path:
 	kfree(smb2_to_name);
 	return rc;
@@ -1128,22 +1125,24 @@ smb2_set_path_size(const unsigned int xid, struct cifs_tcon *tcon,
 	struct cifsFileInfo *cfile;
 	struct kvec in_iov;
 	__le64 eof = cpu_to_le64(size);
+	int rc;
 
 	in_iov.iov_base = &eof;
 	in_iov.iov_len = sizeof(eof);
 	cifs_get_writable_path(tcon, full_path, FIND_WR_ANY, &cfile);
-	int rc = smb2_compound_op(xid, tcon, cifs_sb, full_path,
-				FILE_WRITE_DATA, FILE_OPEN,
-				0, ACL_NO_MODE, &in_iov,
-				&(int){SMB2_OP_SET_EOF}, 1,
-				cfile, NULL, NULL, dentry);
+
+	oparms = CIFS_OPARMS(cifs_sb, tcon, full_path, FILE_WRITE_DATA,
+			     FILE_OPEN, 0, ACL_NO_MODE);
+	rc = smb2_compound_op(xid, tcon, cifs_sb,
+			      full_path, &oparms, &in_iov,
+			      &(int){SMB2_OP_SET_EOF}, 1,
+			      cfile, NULL, NULL, dentry);
 	if (rc == -EINVAL) {
 		cifs_dbg(FYI, "invalid lease key, resending request without lease");
-		rc = smb2_compound_op(xid, tcon, cifs_sb, full_path,
-				FILE_WRITE_DATA, FILE_OPEN,
-				0, ACL_NO_MODE, &in_iov,
-				&(int){SMB2_OP_SET_EOF}, 1,
-				cfile, NULL, NULL, NULL);
+		rc = smb2_compound_op(xid, tcon, cifs_sb,
+				      full_path, &oparms, &in_iov,
+				      &(int){SMB2_OP_SET_EOF}, 1,
+				      cfile, NULL, NULL, NULL);
 	}
 	return rc;
 }
@@ -1215,9 +1214,8 @@ struct inode *smb2_get_reparse_inode(struct cifs_open_info_data *data,
 	if (tcon->posix_extensions) {
 		cmds[1] = SMB2_OP_POSIX_QUERY_INFO;
 		cifs_get_writable_path(tcon, full_path, FIND_WR_ANY, &cfile);
-		rc = smb2_compound_op(xid, tcon, cifs_sb, full_path,
-				      da, cd, co, ACL_NO_MODE, in_iov,
-				      cmds, 2, cfile, NULL, NULL, NULL);
+		rc = smb2_compound_op(xid, tcon, cifs_sb, full_path, &oparms,
+				      in_iov, cmds, 2, cfile, NULL, NULL, NULL);
 		if (!rc) {
 			rc = smb311_posix_get_inode_info(&new, full_path,
 							 data, sb, xid);
@@ -1225,9 +1223,8 @@ struct inode *smb2_get_reparse_inode(struct cifs_open_info_data *data,
 	} else {
 		cmds[1] = SMB2_OP_QUERY_INFO;
 		cifs_get_writable_path(tcon, full_path, FIND_WR_ANY, &cfile);
-		rc = smb2_compound_op(xid, tcon, cifs_sb, full_path,
-				      da, cd, co, ACL_NO_MODE, in_iov,
-				      cmds, 2, cfile, NULL, NULL, NULL);
+		rc = smb2_compound_op(xid, tcon, cifs_sb, full_path, &oparms,
+				      in_iov, cmds, 2, cfile, NULL, NULL, NULL);
 		if (!rc) {
 			rc = cifs_get_inode_info(&new, full_path,
 						 data, sb, xid, NULL);

@@ -185,7 +185,7 @@ static int emulate_ldd(struct pt_regs *regs, int toreg, int flop)
 
 #ifdef CONFIG_64BIT
 	__asm__ __volatile__  (
-"	depd,z	%4,60,3,%3\n"		/* shift=(ofs&7)*8 */
+"	depd,z	%2,60,3,%3\n"		/* shift=(ofs&7)*8 */
 "	mtsp	%5, %%sr1\n"
 "	depd	%%r0,63,3,%2\n"
 "1:	ldd	0(%%sr1,%2),%0\n"
