@@ -2089,7 +2089,7 @@ static void update_sb_metadata(struct f2fs_sb_info *sbi, int secs)
 static void update_fs_metadata(struct f2fs_sb_info *sbi, int secs)
 {
 	int segs = secs * SEGS_PER_SEC(sbi);
-	long long blks = (long long)(segs << sbi->log_blocks_per_seg);
+	long long blks = (long long)segs << sbi->log_blocks_per_seg;
 	long long user_block_count =
 				le64_to_cpu(F2FS_CKPT(sbi)->user_block_count);
 

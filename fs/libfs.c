@@ -1867,7 +1867,9 @@ static int generic_ci_d_revalidate(struct dentry *dentry,
 static const struct dentry_operations generic_encrypted_ci_dentry_ops = {
 	.d_hash = generic_ci_d_hash,
 	.d_compare = generic_ci_d_compare,
-	.d_revalidate = generic_ci_d_revalidate,
+#ifdef CONFIG_FS_ENCRYPTION
+	.d_revalidate = fscrypt_d_revalidate,
+#endif
 };
 #endif
 
@@ -1878,44 +1880,32 @@ static const struct dentry_operations generic_encrypted_dentry_ops = {
 #endif
 
 /**
- * generic_set_encrypted_ci_d_ops - helper for setting d_ops for given dentry
- * @dentry:	dentry to set ops on
+ * generic_set_sb_d_ops - helper for choosing the set of
+ * filesystem-wide dentry operations for the enabled features
+ * @sb: superblock to be configured
  *
- * Casefolded directories need some dentry_operations set, so that the dentries
- * contained in them are handled case-insensitively.  Note that d_hash and
- * d_compare are needed on the parent directory rather than on the dentries in
- * it, and while the casefolding flag can be toggled on and off on an empty
- * directory, dentry_operations can't be changed later.  As a result, if the
- * filesystem has casefolding support enabled at all, we have to give all
- * dentries the casefolding operations even if their inode doesn't have the
- * casefolding flag currently (and thus the casefolding ops would be no-ops for
- * now).
- *
- * Encryption works differently in that the only dentry operation it needs is
- * d_revalidate, which it only needs on dentries that have the no-key name flag.
- * The no-key flag can't be set "later", so we don't have to worry about that.
- *
- * Finally, to maximize compatibility with overlayfs (which isn't compatible
- * with certain dentry operations) and to avoid taking an unnecessary
- * performance hit, we use custom dentry_operations for each possible
- * combination of operations rather than always installing them.
+ * Filesystems supporting casefolding and/or fscrypt can call this
+ * helper at mount-time to configure sb->s_d_op to best set of dentry
+ * operations required for the enabled features. The helper must be
+ * called after these have been configured, but before the root dentry
+ * is created.
  */
-void generic_set_encrypted_ci_d_ops(struct dentry *dentry)
+void generic_set_sb_d_ops(struct super_block *sb)
 {
 #if IS_ENABLED(CONFIG_UNICODE)
-	if (dentry->d_sb->s_encoding) {
-		d_set_d_op(dentry, &generic_encrypted_ci_dentry_ops);
+	if (sb->s_encoding) {
+		sb->s_d_op = &generic_ci_dentry_ops;
 		return;
 	}
 #endif
 #ifdef CONFIG_FS_ENCRYPTION
-	if (dentry->d_flags & DCACHE_NOKEY_NAME) {
-		d_set_d_op(dentry, &generic_encrypted_dentry_ops);
+	if (sb->s_cop) {
+		sb->s_d_op = &generic_encrypted_dentry_ops;
 		return;
 	}
 #endif
 }
-EXPORT_SYMBOL(generic_set_encrypted_ci_d_ops);
+EXPORT_SYMBOL(generic_set_sb_d_ops);
 
 /**
  * inode_maybe_inc_iversion - increments i_version
