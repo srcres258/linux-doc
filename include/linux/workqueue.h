@@ -458,6 +458,7 @@ extern struct workqueue_struct *system_bh_wq;
 extern struct workqueue_struct *system_bh_highpri_wq;
 
 void workqueue_softirq_action(bool highpri);
+void workqueue_softirq_dead(unsigned int cpu);
 
 /**
  * alloc_workqueue - allocate a workqueue
@@ -521,6 +522,9 @@ alloc_workqueue(const char *fmt, unsigned int flags, int max_active, ...);
 			WQ_MEM_RECLAIM, 1, (name))
 #define create_singlethread_workqueue(name)				\
 	alloc_ordered_workqueue("%s", __WQ_LEGACY | WQ_MEM_RECLAIM, name)
+
+#define from_work(var, callback_work, work_fieldname)	\
+	container_of(callback_work, typeof(*var), work_fieldname)
 
 extern void destroy_workqueue(struct workqueue_struct *wq);
 

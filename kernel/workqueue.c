@@ -81,6 +81,7 @@ enum worker_pool_flags {
 	POOL_BH			= 1 << 0,	/* is a BH pool */
 	POOL_MANAGER_ACTIVE	= 1 << 1,	/* being managed */
 	POOL_DISASSOCIATED	= 1 << 2,	/* cpu can't serve workers */
+	POOL_BH_DRAINING	= 1 << 3,	/* draining after CPU offline */
 };
 
 enum worker_flags {
@@ -409,6 +410,10 @@ static const char *wq_affn_names[WQ_AFFN_NR_TYPES] = {
  */
 static unsigned long wq_cpu_intensive_thresh_us = ULONG_MAX;
 module_param_named(cpu_intensive_thresh_us, wq_cpu_intensive_thresh_us, ulong, 0644);
+#ifdef CONFIG_WQ_CPU_INTENSIVE_REPORT
+static unsigned int wq_cpu_intensive_warning_thresh = 4;
+module_param_named(cpu_intensive_warning_thresh, wq_cpu_intensive_warning_thresh, uint, 0644);
+#endif
 
 /* see the comment above the definition of WQ_POWER_EFFICIENT */
 static bool wq_power_efficient = IS_ENABLED(CONFIG_WQ_POWER_EFFICIENT_DEFAULT);
@@ -1214,7 +1219,9 @@ static struct irq_work *bh_pool_irq_work(struct worker_pool *pool)
 static void kick_bh_pool(struct worker_pool *pool)
 {
 #ifdef CONFIG_SMP
-	if (unlikely(pool->cpu != smp_processor_id())) {
+	/* see drain_dead_softirq_workfn() for BH_DRAINING */
+	if (unlikely(pool->cpu != smp_processor_id() &&
+		     !(pool->flags & POOL_BH_DRAINING))) {
 		irq_work_queue_on(bh_pool_irq_work(pool), pool->cpu);
 		return;
 	}
@@ -1327,11 +1334,13 @@ restart:
 		u64 cnt;
 
 		/*
-		 * Start reporting from the fourth time and back off
+		 * Start reporting from the warning_thresh and back off
 		 * exponentially.
 		 */
 		cnt = atomic64_inc_return_relaxed(&ent->cnt);
-		if (cnt >= 4 && is_power_of_2(cnt))
+		if (wq_cpu_intensive_warning_thresh &&
+		    cnt >= wq_cpu_intensive_warning_thresh &&
+		    is_power_of_2(cnt + 1 - wq_cpu_intensive_warning_thresh))
 			printk_deferred(KERN_WARNING "workqueue: %ps hogged CPU for >%luus %llu times, consider switching to WQ_UNBOUND\n",
 					ent->func, wq_cpu_intensive_thresh_us,
 					atomic64_read(&ent->cnt));
@@ -1360,10 +1369,12 @@ restart:
 
 	ent = &wci_ents[wci_nr_ents++];
 	ent->func = func;
-	atomic64_set(&ent->cnt, 1);
+	atomic64_set(&ent->cnt, 0);
 	hash_add_rcu(wci_hash, &ent->hash_node, (unsigned long)func);
 
 	raw_spin_unlock(&wci_lock);
+
+	goto restart;
 }
 
 #else	/* CONFIG_WQ_CPU_INTENSIVE_REPORT */
@@ -3147,6 +3158,7 @@ __acquires(&pool->lock)
 	struct worker_pool *pool = worker->pool;
 	unsigned long work_data;
 	int lockdep_start_depth, rcu_start_depth;
+	bool bh_draining = pool->flags & POOL_BH_DRAINING;
 #ifdef CONFIG_LOCKDEP
 	/*
 	 * It is permissible to free the struct work_struct from
@@ -3212,7 +3224,9 @@ __acquires(&pool->lock)
 
 	rcu_start_depth = rcu_preempt_depth();
 	lockdep_start_depth = lockdep_depth(current);
-	lock_map_acquire(&pwq->wq->lockdep_map);
+	/* see drain_dead_softirq_workfn() */
+	if (!bh_draining)
+		lock_map_acquire(&pwq->wq->lockdep_map);
 	lock_map_acquire(&lockdep_map);
 	/*
 	 * Strictly speaking we should mark the invariant state without holding
@@ -3245,7 +3259,8 @@ __acquires(&pool->lock)
 	trace_workqueue_execute_end(work, worker->current_func);
 	pwq->stats[PWQ_STAT_COMPLETED]++;
 	lock_map_release(&lockdep_map);
-	lock_map_release(&pwq->wq->lockdep_map);
+	if (!bh_draining)
+		lock_map_release(&pwq->wq->lockdep_map);
 
 	if (unlikely((worker->task && in_atomic()) ||
 		     lockdep_depth(current) != lockdep_start_depth ||
@@ -3605,6 +3620,84 @@ void workqueue_softirq_action(bool highpri)
 		&per_cpu(bh_worker_pools, smp_processor_id())[highpri];
 	if (need_more_worker(pool))
 		bh_worker(list_first_entry(&pool->workers, struct worker, node));
+}
+
+struct wq_drain_dead_softirq_work {
+	struct work_struct	work;
+	struct worker_pool	*pool;
+	struct completion	done;
+};
+
+static void drain_dead_softirq_workfn(struct work_struct *work)
+{
+	struct wq_drain_dead_softirq_work *dead_work =
+		container_of(work, struct wq_drain_dead_softirq_work, work);
+	struct worker_pool *pool = dead_work->pool;
+	bool repeat;
+
+	/*
+	 * @pool's CPU is dead and we want to execute its still pending work
+	 * items from this BH work item which is running on a different CPU. As
+	 * its CPU is dead, @pool can't be kicked and, as work execution path
+	 * will be nested, a lockdep annotation needs to be suppressed. Mark
+	 * @pool with %POOL_BH_DRAINING for the special treatments.
+	 */
+	raw_spin_lock_irq(&pool->lock);
+	pool->flags |= POOL_BH_DRAINING;
+	raw_spin_unlock_irq(&pool->lock);
+
+	bh_worker(list_first_entry(&pool->workers, struct worker, node));
+
+	raw_spin_lock_irq(&pool->lock);
+	pool->flags &= ~POOL_BH_DRAINING;
+	repeat = need_more_worker(pool);
+	raw_spin_unlock_irq(&pool->lock);
+
+	/*
+	 * bh_worker() might hit consecutive execution limit and bail. If there
+	 * still are pending work items, reschedule self and return so that we
+	 * don't hog this CPU's BH.
+	 */
+	if (repeat) {
+		if (pool->attrs->nice == HIGHPRI_NICE_LEVEL)
+			queue_work(system_bh_highpri_wq, work);
+		else
+			queue_work(system_bh_wq, work);
+	} else {
+		complete(&dead_work->done);
+	}
+}
+
+/*
+ * @cpu is dead. Drain the remaining BH work items on the current CPU. It's
+ * possible to allocate dead_work per CPU and avoid flushing. However, then we
+ * have to worry about draining overlapping with CPU coming back online or
+ * nesting (one CPU's dead_work queued on another CPU which is also dead and so
+ * on). Let's keep it simple and drain them synchronously. These are BH work
+ * items which shouldn't be requeued on the same pool. Shouldn't take long.
+ */
+void workqueue_softirq_dead(unsigned int cpu)
+{
+	int i;
+
+	for (i = 0; i < NR_STD_WORKER_POOLS; i++) {
+		struct worker_pool *pool = &per_cpu(bh_worker_pools, cpu)[i];
+		struct wq_drain_dead_softirq_work dead_work;
+
+		if (!need_more_worker(pool))
+			continue;
+
+		INIT_WORK(&dead_work.work, drain_dead_softirq_workfn);
+		dead_work.pool = pool;
+		init_completion(&dead_work.done);
+
+		if (pool->attrs->nice == HIGHPRI_NICE_LEVEL)
+			queue_work(system_bh_highpri_wq, &dead_work.work);
+		else
+			queue_work(system_bh_wq, &dead_work.work);
+
+		wait_for_completion(&dead_work.done);
+	}
 }
 
 /**
