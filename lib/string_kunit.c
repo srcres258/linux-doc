@@ -1,17 +1,23 @@
 // SPDX-License-Identifier: GPL-2.0-only
+/*
+ * Test cases for string functions.
+ */
+
+#define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
+
+#include <kunit/test.h>
 #include <linux/module.h>
 #include <linux/printk.h>
 #include <linux/slab.h>
 #include <linux/string.h>
 
-static __init int memset16_selftest(void)
+static void test_memset16(struct kunit *test)
 {
 	unsigned i, j, k;
 	u16 v, *p;
 
 	p = kmalloc(256 * 2 * 2, GFP_KERNEL);
-	if (!p)
-		return -1;
+	KUNIT_ASSERT_NOT_NULL(test, p);
 
 	for (i = 0; i < 256; i++) {
 		for (j = 0; j < 256; j++) {
@@ -20,34 +26,28 @@ static __init int memset16_selftest(void)
 			for (k = 0; k < 512; k++) {
 				v = p[k];
 				if (k < i) {
-					if (v != 0xa1a1)
-						goto fail;
+					KUNIT_EXPECT_EQ(test, v, 0xa1a1);
 				} else if (k < i + j) {
-					if (v != 0xb1b2)
-						goto fail;
+					KUNIT_EXPECT_EQ(test, v, 0xb1b2);
 				} else {
-					if (v != 0xa1a1)
-						goto fail;
+					KUNIT_EXPECT_EQ(test, v, 0xa1a1);
 				}
 			}
 		}
 	}
 
-fail:
 	kfree(p);
 	if (i < 256)
-		return (i << 24) | (j << 16) | k | 0x8000;
-	return 0;
+		KUNIT_EXPECT_EQ(test, 0, (i << 24) | (j << 16) | k | 0x8000);
 }
 
-static __init int memset32_selftest(void)
+static void test_memset32(struct kunit *test)
 {
 	unsigned i, j, k;
 	u32 v, *p;
 
 	p = kmalloc(256 * 2 * 4, GFP_KERNEL);
-	if (!p)
-		return -1;
+	KUNIT_ASSERT_NOT_NULL(test, p);
 
 	for (i = 0; i < 256; i++) {
 		for (j = 0; j < 256; j++) {
@@ -56,34 +56,28 @@ static __init int memset32_selftest(void)
 			for (k = 0; k < 512; k++) {
 				v = p[k];
 				if (k < i) {
-					if (v != 0xa1a1a1a1)
-						goto fail;
+					KUNIT_EXPECT_EQ(test, v, 0xa1a1a1a1);
 				} else if (k < i + j) {
-					if (v != 0xb1b2b3b4)
-						goto fail;
+					KUNIT_EXPECT_EQ(test, v, 0xb1b2b3b4);
 				} else {
-					if (v != 0xa1a1a1a1)
-						goto fail;
+					KUNIT_EXPECT_EQ(test, v, 0xa1a1a1a1);
 				}
 			}
 		}
 	}
 
-fail:
 	kfree(p);
 	if (i < 256)
-		return (i << 24) | (j << 16) | k | 0x8000;
-	return 0;
+		KUNIT_EXPECT_EQ(test, 0, (i << 24) | (j << 16) | k | 0x8000);
 }
 
-static __init int memset64_selftest(void)
+static void test_memset64(struct kunit *test)
 {
 	unsigned i, j, k;
 	u64 v, *p;
 
 	p = kmalloc(256 * 2 * 8, GFP_KERNEL);
-	if (!p)
-		return -1;
+	KUNIT_ASSERT_NOT_NULL(test, p);
 
 	for (i = 0; i < 256; i++) {
 		for (j = 0; j < 256; j++) {
@@ -92,27 +86,22 @@ static __init int memset64_selftest(void)
 			for (k = 0; k < 512; k++) {
 				v = p[k];
 				if (k < i) {
-					if (v != 0xa1a1a1a1a1a1a1a1ULL)
-						goto fail;
+					KUNIT_EXPECT_EQ(test, v, 0xa1a1a1a1a1a1a1a1ULL);
 				} else if (k < i + j) {
-					if (v != 0xb1b2b3b4b5b6b7b8ULL)
-						goto fail;
+					KUNIT_EXPECT_EQ(test, v, 0xb1b2b3b4b5b6b7b8ULL);
 				} else {
-					if (v != 0xa1a1a1a1a1a1a1a1ULL)
-						goto fail;
+					KUNIT_EXPECT_EQ(test, v, 0xa1a1a1a1a1a1a1a1ULL);
 				}
 			}
 		}
 	}
 
-fail:
 	kfree(p);
 	if (i < 256)
-		return (i << 24) | (j << 16) | k | 0x8000;
-	return 0;
+		KUNIT_EXPECT_EQ(test, 0, (i << 24) | (j << 16) | k | 0x8000);
 }
 
-static __init int strchr_selftest(void)
+static void test_strchr(struct kunit *test)
 {
 	const char *test_string = "abcdefghijkl";
 	const char *empty_string = "";
@@ -121,26 +110,20 @@ static __init int strchr_selftest(void)
 
 	for (i = 0; i < strlen(test_string) + 1; i++) {
 		result = strchr(test_string, test_string[i]);
-		if (result - test_string != i)
-			return i + 'a';
+		KUNIT_ASSERT_EQ(test, result - test_string, i);
 	}
 
 	result = strchr(empty_string, '\0');
-	if (result != empty_string)
-		return 0x101;
+	KUNIT_ASSERT_PTR_EQ(test, result, empty_string);
 
 	result = strchr(empty_string, 'a');
-	if (result)
-		return 0x102;
+	KUNIT_ASSERT_NULL(test, result);
 
 	result = strchr(test_string, 'z');
-	if (result)
-		return 0x103;
-
-	return 0;
+	KUNIT_ASSERT_NULL(test, result);
 }
 
-static __init int strnchr_selftest(void)
+static void test_strnchr(struct kunit *test)
 {
 	const char *test_string = "abcdefghijkl";
 	const char *empty_string = "";
@@ -153,33 +136,27 @@ static __init int strnchr_selftest(void)
 			if (j <= i) {
 				if (!result)
 					continue;
-				return ((i + 'a') << 8) | j;
+				KUNIT_ASSERT_EQ(test, 0, 1);
 			}
 			if (result - test_string != i)
-				return ((i + 'a') << 8) | j;
+				KUNIT_ASSERT_EQ(test, 0, 1);
 		}
 	}
 
 	result = strnchr(empty_string, 0, '\0');
-	if (result)
-		return 0x10001;
+	KUNIT_ASSERT_NULL(test, result);
 
 	result = strnchr(empty_string, 1, '\0');
-	if (result != empty_string)
-		return 0x10002;
+	KUNIT_ASSERT_PTR_EQ(test, result, empty_string);
 
 	result = strnchr(empty_string, 1, 'a');
-	if (result)
-		return 0x10003;
+	KUNIT_ASSERT_NULL(test, result);
 
 	result = strnchr(NULL, 0, '\0');
-	if (result)
-		return 0x10004;
-
-	return 0;
+	KUNIT_ASSERT_NULL(test, result);
 }
 
-static __init int strspn_selftest(void)
+static void test_strspn(struct kunit *test)
 {
 	static const struct strspn_test {
 		const char str[16];
@@ -187,7 +164,7 @@ static __init int strspn_selftest(void)
 		const char reject[16];
 		unsigned a;
 		unsigned r;
-	} tests[] __initconst = {
+	} tests[] = {
 		{ "foobar", "", "", 0, 6 },
 		{ "abba", "abc", "ABBA", 4, 4 },
 		{ "abba", "a", "b", 1, 1 },
@@ -198,60 +175,27 @@ static __init int strspn_selftest(void)
 
 	for (i = 0; i < ARRAY_SIZE(tests); ++i, ++s) {
 		res = strspn(s->str, s->accept);
-		if (res != s->a)
-			return 0x100 + 2*i;
+		KUNIT_ASSERT_EQ(test, res, s->a);
 		res = strcspn(s->str, s->reject);
-		if (res != s->r)
-			return 0x100 + 2*i + 1;
+		KUNIT_ASSERT_EQ(test, res, s->r);
 	}
-	return 0;
 }
 
-static __exit void string_selftest_remove(void)
-{
-}
+static struct kunit_case string_test_cases[] = {
+	KUNIT_CASE(test_memset16),
+	KUNIT_CASE(test_memset32),
+	KUNIT_CASE(test_memset64),
+	KUNIT_CASE(test_strchr),
+	KUNIT_CASE(test_strnchr),
+	KUNIT_CASE(test_strspn),
+	{}
+};
 
-static __init int string_selftest_init(void)
-{
-	int test, subtest;
+static struct kunit_suite string_test_suite = {
+	.name = "string",
+	.test_cases = string_test_cases,
+};
 
-	test = 1;
-	subtest = memset16_selftest();
-	if (subtest)
-		goto fail;
+kunit_test_suites(&string_test_suite);
 
-	test = 2;
-	subtest = memset32_selftest();
-	if (subtest)
-		goto fail;
-
-	test = 3;
-	subtest = memset64_selftest();
-	if (subtest)
-		goto fail;
-
-	test = 4;
-	subtest = strchr_selftest();
-	if (subtest)
-		goto fail;
-
-	test = 5;
-	subtest = strnchr_selftest();
-	if (subtest)
-		goto fail;
-
-	test = 6;
-	subtest = strspn_selftest();
-	if (subtest)
-		goto fail;
-
-	pr_info("String selftests succeeded\n");
-	return 0;
-fail:
-	pr_crit("String selftest failure %d.%08x\n", test, subtest);
-	return 0;
-}
-
-module_init(string_selftest_init);
-module_exit(string_selftest_remove);
 MODULE_LICENSE("GPL v2");

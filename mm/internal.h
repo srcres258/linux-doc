@@ -83,6 +83,8 @@ static inline void *folio_raw_mapping(struct folio *folio)
 	return (void *)(mapping & ~PAGE_MAPPING_FLAGS);
 }
 
+#ifdef CONFIG_MMU
+
 /* Flags for folio_pte_batch(). */
 typedef int __bitwise fpb_t;
 
@@ -172,6 +174,7 @@ static inline int folio_pte_batch(struct folio *folio, unsigned long addr,
 
 	return min(ptep - start_ptep, max_nr);
 }
+#endif /* CONFIG_MMU */
 
 void __acct_reclaim_writeback(pg_data_t *pgdat, struct folio *folio,
 						int nr_throttled);

@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
-#ifndef _TOOLS_LINUX_ASM_X86_KVM_HOST_H
-#define _TOOLS_LINUX_ASM_X86_KVM_HOST_H
+#ifndef SELFTEST_KVM_UTIL_ARCH_H
+#define SELFTEST_KVM_UTIL_ARCH_H
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -20,4 +20,4 @@ static inline bool __vm_arch_has_protected_memory(struct kvm_vm_arch *arch)
 #define vm_arch_has_protected_memory(vm) \
 	__vm_arch_has_protected_memory(&(vm)->arch)
 
-#endif  // _TOOLS_LINUX_ASM_X86_KVM_HOST_H
+#endif  // SELFTEST_KVM_UTIL_ARCH_H

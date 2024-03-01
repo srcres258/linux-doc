@@ -461,7 +461,7 @@ static void __zswap_pool_empty(struct percpu_ref *ref)
 
 	pool = container_of(ref, typeof(*pool), ref);
 
-	spin_lock(&zswap_pools_lock);
+	spin_lock_bh(&zswap_pools_lock);
 
 	WARN_ON(pool == zswap_pool_current());
 
@@ -470,7 +470,7 @@ static void __zswap_pool_empty(struct percpu_ref *ref)
 	INIT_WORK(&pool->release_work, __zswap_pool_release);
 	schedule_work(&pool->release_work);
 
-	spin_unlock(&zswap_pools_lock);
+	spin_unlock_bh(&zswap_pools_lock);
 }
 
 static int __must_check zswap_pool_get(struct zswap_pool *pool)
@@ -600,7 +600,7 @@ static int __zswap_param_set(const char *val, const struct kernel_param *kp,
 		return -EINVAL;
 	}
 
-	spin_lock(&zswap_pools_lock);
+	spin_lock_bh(&zswap_pools_lock);
 
 	pool = zswap_pool_find_get(type, compressor);
 	if (pool) {
@@ -609,7 +609,7 @@ static int __zswap_param_set(const char *val, const struct kernel_param *kp,
 		list_del_rcu(&pool->list);
 	}
 
-	spin_unlock(&zswap_pools_lock);
+	spin_unlock_bh(&zswap_pools_lock);
 
 	if (!pool)
 		pool = zswap_pool_create(type, compressor);
@@ -630,7 +630,7 @@ static int __zswap_param_set(const char *val, const struct kernel_param *kp,
 	else
 		ret = -EINVAL;
 
-	spin_lock(&zswap_pools_lock);
+	spin_lock_bh(&zswap_pools_lock);
 
 	if (!ret) {
 		put_pool = zswap_pool_current();
@@ -645,7 +645,7 @@ static int __zswap_param_set(const char *val, const struct kernel_param *kp,
 		put_pool = pool;
 	}
 
-	spin_unlock(&zswap_pools_lock);
+	spin_unlock_bh(&zswap_pools_lock);
 
 	if (!zswap_has_pool && !pool) {
 		/* if initial pool creation failed, and this pool creation also

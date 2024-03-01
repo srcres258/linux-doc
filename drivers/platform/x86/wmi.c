@@ -57,6 +57,7 @@ static_assert(__alignof__(struct guid_block) == 1);
 
 enum {	/* wmi_block flags */
 	WMI_READ_TAKES_NO_ARGS,
+	WMI_GUID_DUPLICATED,
 	WMI_NO_EVENT_DATA,
 };
 
@@ -88,16 +89,6 @@ static const struct acpi_device_id wmi_device_ids[] = {
 	{ }
 };
 MODULE_DEVICE_TABLE(acpi, wmi_device_ids);
-
-/* allow duplicate GUIDs as these device drivers use struct wmi_driver */
-static const char * const allow_duplicates[] = {
-	"05901221-D566-11D1-B2F0-00A0C9062910",	/* wmi-bmof */
-	"8A42EA14-4F2A-FD45-6422-0087F7A7E608",	/* dell-wmi-ddv */
-	"44FADEB1-B204-40F2-8581-394BBDC1B651",	/* intel-wmi-sbl-fw-update */
-	"86CCFD48-205E-4A77-9C48-2021CBEDE341",	/* intel-wmi-thunderbolt */
-	"F1DDEE52-063C-4784-A11E-8A06684B9B01",	/* dell-smm-hwmon */
-	NULL
-};
 
 #define dev_to_wblock(__dev)	container_of_const(__dev, struct wmi_block, dev.dev)
 #define dev_to_wdev(__dev)	container_of_const(__dev, struct wmi_device, dev)
@@ -196,6 +187,12 @@ static int wmidev_match_guid(struct device *dev, const void *data)
 	struct wmi_block *wblock = dev_to_wblock(dev);
 	const guid_t *guid = data;
 
+	/* Legacy GUID-based functions are restricted to only see
+	 * a single WMI device for each GUID.
+	 */
+	if (test_bit(WMI_GUID_DUPLICATED, &wblock->flags))
+		return 0;
+
 	if (guid_equal(guid, &wblock->gblock.guid))
 		return 1;
 
@@ -206,6 +203,12 @@ static int wmidev_match_notify_id(struct device *dev, const void *data)
 {
 	struct wmi_block *wblock = dev_to_wblock(dev);
 	const u32 *notify_id = data;
+
+	/* Legacy GUID-based functions are restricted to only see
+	 * a single WMI device for each GUID.
+	 */
+	if (test_bit(WMI_GUID_DUPLICATED, &wblock->flags))
+		return 0;
 
 	if (wblock->gblock.flags & ACPI_WMI_EVENT && wblock->gblock.notify_id == *notify_id)
 		return 1;
@@ -870,6 +873,18 @@ static int wmi_dev_probe(struct device *dev)
 	struct wmi_driver *wdriver = drv_to_wdrv(dev->driver);
 	int ret = 0;
 
+	/* Some older WMI drivers will break if instantiated multiple times,
+	 * so they are blocked from probing WMI devices with a duplicated GUID.
+	 *
+	 * New WMI drivers should support being instantiated multiple times.
+	 */
+	if (test_bit(WMI_GUID_DUPLICATED, &wblock->flags) && !wdriver->no_singleton) {
+		dev_warn(dev, "Legacy driver %s cannot be instantiated multiple times\n",
+			 dev->driver->name);
+
+		return -ENODEV;
+	}
+
 	if (wdriver->notify) {
 		if (test_bit(WMI_NO_EVENT_DATA, &wblock->flags) && !wdriver->no_notify_data)
 			return -ENODEV;
@@ -1036,10 +1051,12 @@ static int wmi_create_device(struct device *wmi_bus_dev,
 	wblock->dev.dev.parent = wmi_bus_dev;
 
 	count = guid_count(&wblock->gblock.guid);
-	if (count)
+	if (count) {
 		dev_set_name(&wblock->dev.dev, "%pUL-%d", &wblock->gblock.guid, count);
-	else
+		set_bit(WMI_GUID_DUPLICATED, &wblock->flags);
+	} else {
 		dev_set_name(&wblock->dev.dev, "%pUL", &wblock->gblock.guid);
+	}
 
 	device_initialize(&wblock->dev.dev);
 
@@ -1064,32 +1081,6 @@ static int wmi_add_device(struct platform_device *pdev, struct wmi_device *wdev)
 		return -EINVAL;
 
 	return device_add(&wdev->dev);
-}
-
-static bool guid_already_parsed_for_legacy(struct acpi_device *device, const guid_t *guid)
-{
-	struct wmi_block *wblock;
-
-	list_for_each_entry(wblock, &wmi_block_list, list) {
-		/* skip warning and register if we know the driver will use struct wmi_driver */
-		for (int i = 0; allow_duplicates[i] != NULL; i++) {
-			if (guid_parse_and_compare(allow_duplicates[i], guid))
-				return false;
-		}
-		if (guid_equal(&wblock->gblock.guid, guid)) {
-			/*
-			 * Because we historically didn't track the relationship
-			 * between GUIDs and ACPI nodes, we don't know whether
-			 * we need to suppress GUIDs that are unique on a
-			 * given node but duplicated across nodes.
-			 */
-			dev_warn(&device->dev, "duplicate WMI GUID %pUL (first instance was on %s)\n",
-				 guid, dev_name(&wblock->acpi_device->dev));
-			return true;
-		}
-	}
-
-	return false;
 }
 
 /*
@@ -1129,9 +1120,6 @@ static int parse_wdg(struct device *wmi_bus_dev, struct platform_device *pdev)
 			dev_info(wmi_bus_dev, FW_INFO "%pUL has zero instances\n", &gblock[i].guid);
 			continue;
 		}
-
-		if (guid_already_parsed_for_legacy(device, &gblock[i].guid))
-			continue;
 
 		wblock = kzalloc(sizeof(*wblock), GFP_KERNEL);
 		if (!wblock)

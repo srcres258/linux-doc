@@ -308,30 +308,29 @@ TRACE_EVENT(mm_alloc_contig_migrate_range_info,
 
 	TP_PROTO(unsigned long start,
 		 unsigned long end,
-		 int migratetype,
 		 unsigned long nr_migrated,
 		 unsigned long nr_reclaimed,
-		 unsigned long nr_mapped),
+		 unsigned long nr_mapped,
+		 int migratetype),
 
-	TP_ARGS(start, end, migratetype,
-		nr_migrated, nr_reclaimed, nr_mapped),
+	TP_ARGS(start, end, nr_migrated, nr_reclaimed, nr_mapped, migratetype),
 
 	TP_STRUCT__entry(
 		__field(unsigned long, start)
 		__field(unsigned long, end)
-		__field(int, migratetype)
 		__field(unsigned long, nr_migrated)
 		__field(unsigned long, nr_reclaimed)
 		__field(unsigned long, nr_mapped)
+		__field(int, migratetype)
 	),
 
 	TP_fast_assign(
 		__entry->start = start;
 		__entry->end = end;
-		__entry->migratetype = migratetype;
 		__entry->nr_migrated = nr_migrated;
 		__entry->nr_reclaimed = nr_reclaimed;
 		__entry->nr_mapped = nr_mapped;
+		__entry->migratetype = migratetype;
 	),
 
 	TP_printk("start=0x%lx end=0x%lx migratetype=%d nr_migrated=%lu nr_reclaimed=%lu nr_mapped=%lu",

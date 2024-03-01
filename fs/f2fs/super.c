@@ -63,6 +63,7 @@ const char *f2fs_fault_name[FAULT_MAX] = {
 	[FAULT_LOCK_OP]			= "lock_op",
 	[FAULT_BLKADDR_VALIDITY]	= "invalid blkaddr",
 	[FAULT_BLKADDR_CONSISTENCE]	= "inconsistent blkaddr",
+	[FAULT_NO_SEGMENT]		= "no free segment",
 };
 
 void f2fs_build_fault_attr(struct f2fs_sb_info *sbi, unsigned int rate,
@@ -2190,6 +2191,7 @@ static int f2fs_disable_checkpoint(struct f2fs_sb_info *sbi)
 			.init_gc_type = FG_GC,
 			.should_migrate_blocks = false,
 			.err_gc_skipped = true,
+			.no_bg_gc = true,
 			.nr_free_secs = 1 };
 
 		f2fs_down_write(&sbi->gc_lock);
@@ -4673,11 +4675,16 @@ reset_checkpoint:
 	 * If the f2fs is not readonly and fsync data recovery succeeds,
 	 * check zoned block devices' write pointer consistency.
 	 */
-	if (!err && !f2fs_readonly(sb) && f2fs_sb_has_blkzoned(sbi)) {
-		err = f2fs_check_write_pointer(sbi);
-		if (err)
-			goto free_meta;
+	if (f2fs_sb_has_blkzoned(sbi) && !f2fs_readonly(sb)) {
+		int err2;
+
+		f2fs_notice(sbi, "Checking entire write pointers");
+		err2 = f2fs_check_write_pointer(sbi);
+		if (err2)
+			err = err2;
 	}
+	if (err)
+		goto free_meta;
 
 	f2fs_init_inmem_curseg(sbi);
 

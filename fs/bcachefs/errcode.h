@@ -5,6 +5,9 @@
 #define BCH_ERRCODES()								\
 	x(ERANGE,			ERANGE_option_too_small)		\
 	x(ERANGE,			ERANGE_option_too_big)			\
+	x(EINVAL,			mount_option)				\
+	x(BCH_ERR_mount_option,		option_name)				\
+	x(BCH_ERR_mount_option,		option_value)				\
 	x(ENOMEM,			ENOMEM_stripe_buf)			\
 	x(ENOMEM,			ENOMEM_replicas_table)			\
 	x(ENOMEM,			ENOMEM_cpu_replicas)			\
@@ -247,7 +250,8 @@
 	x(BCH_ERR_nopromote,		nopromote_congested)			\
 	x(BCH_ERR_nopromote,		nopromote_in_flight)			\
 	x(BCH_ERR_nopromote,		nopromote_no_writes)			\
-	x(BCH_ERR_nopromote,		nopromote_enomem)
+	x(BCH_ERR_nopromote,		nopromote_enomem)			\
+	x(0,				need_inode_lock)
 
 enum bch_errcode {
 	BCH_ERR_START		= 2048,

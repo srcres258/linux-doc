@@ -23,6 +23,7 @@
 #include <linux/fsnotify.h>
 #include <linux/unicode.h>
 #include <linux/fscrypt.h>
+#include <linux/pidfs.h>
 
 #include <linux/uaccess.h>
 
@@ -2082,6 +2083,8 @@ static struct dentry *prepare_anon_dentry(struct dentry **stashed,
 
 	inode->i_ino = ino;
 	inode->i_flags |= S_IMMUTABLE;
+	if (is_pidfs_sb(sb))
+		inode->i_flags |= S_PRIVATE;
 	inode->i_mode = S_IFREG | S_IRUGO;
 	if (iops)
 		inode->i_op = iops;

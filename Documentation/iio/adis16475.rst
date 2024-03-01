@@ -314,10 +314,11 @@ measurements using buffers.
 
 The following device families also support retrieving the delta velocity, delta
 angle and temperature measurements using buffers:
- - ADIS16477
- - ADIS16500
- - ADIS16505
- - ADIS16507
+
+- ADIS16477
+- ADIS16500
+- ADIS16505
+- ADIS16507
 
 However, when retrieving acceleration or gyroscope data using buffers, delta
 readings will not be available and vice versa.

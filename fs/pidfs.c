@@ -227,9 +227,8 @@ struct file *pidfs_alloc_file(struct pid *pid, unsigned int flags)
 	if (ret < 0)
 		return ERR_PTR(ret);
 
-	pidfd_file = alloc_file(&path, flags, &pidfs_file_operations);
-	if (IS_ERR(pidfd_file))
-		path_put(&path);
+	pidfd_file = dentry_open(&path, flags, current_cred());
+	path_put(&path);
 	return pidfd_file;
 }
 
@@ -238,6 +237,11 @@ void __init pidfs_init(void)
 	pidfs_mnt = kern_mount(&pidfs_type);
 	if (IS_ERR(pidfs_mnt))
 		panic("Failed to mount pidfs pseudo filesystem");
+}
+
+bool is_pidfs_sb(const struct super_block *sb)
+{
+	return sb == pidfs_mnt->mnt_sb;
 }
 
 #else /* !CONFIG_FS_PID */
@@ -256,4 +260,8 @@ struct file *pidfs_alloc_file(struct pid *pid, unsigned int flags)
 }
 
 void __init pidfs_init(void) { }
+bool is_pidfs_sb(const struct super_block *sb)
+{
+	return false;
+}
 #endif
