@@ -5,22 +5,20 @@
 
 #include "config.h"
 
-#include "../logger.h"
-#include "../memory-alloc.h"
-#include "../numeric.h"
-#include "../string-utils.h"
-#include "../thread-utils.h"
+#include "logger.h"
+#include "memory-alloc.h"
+#include "numeric.h"
+#include "string-utils.h"
+#include "thread-utils.h"
 
 static const u8 INDEX_CONFIG_MAGIC[] = "ALBIC";
 static const u8 INDEX_CONFIG_VERSION_6_02[] = "06.02";
 static const u8 INDEX_CONFIG_VERSION_8_02[] = "08.02";
 
-enum {
-	DEFAULT_VOLUME_READ_THREADS = 2,
-	MAX_VOLUME_READ_THREADS = 16,
-	INDEX_CONFIG_MAGIC_LENGTH = sizeof(INDEX_CONFIG_MAGIC) - 1,
-	INDEX_CONFIG_VERSION_LENGTH = sizeof(INDEX_CONFIG_VERSION_6_02) - 1,
-};
+#define DEFAULT_VOLUME_READ_THREADS 2
+#define MAX_VOLUME_READ_THREADS 16
+#define INDEX_CONFIG_MAGIC_LENGTH (sizeof(INDEX_CONFIG_MAGIC) - 1)
+#define INDEX_CONFIG_VERSION_LENGTH ((int)(sizeof(INDEX_CONFIG_VERSION_6_02) - 1))
 
 static bool is_version(const u8 *version, u8 *buffer)
 {
@@ -136,10 +134,10 @@ int uds_validate_config_contents(struct buffered_reader *reader,
 	decode_u32_le(buffer, &offset, &config.sparse_sample_rate);
 	decode_u64_le(buffer, &offset, &config.nonce);
 
-	result = ASSERT(offset == sizeof(struct uds_configuration_6_02),
-			"%zu bytes read but not decoded",
-			sizeof(struct uds_configuration_6_02) - offset);
-	if (result != UDS_SUCCESS)
+	result = VDO_ASSERT(offset == sizeof(struct uds_configuration_6_02),
+			    "%zu bytes read but not decoded",
+			    sizeof(struct uds_configuration_6_02) - offset);
+	if (result != VDO_SUCCESS)
 		return UDS_CORRUPT_DATA;
 
 	if (is_version(INDEX_CONFIG_VERSION_6_02, version_buffer)) {
@@ -212,10 +210,10 @@ int uds_write_config_contents(struct buffered_writer *writer,
 	encode_u32_le(buffer, &offset, config->sparse_sample_rate);
 	encode_u64_le(buffer, &offset, config->nonce);
 
-	result = ASSERT(offset == sizeof(struct uds_configuration_6_02),
-			"%zu bytes encoded, of %zu expected", offset,
-			sizeof(struct uds_configuration_6_02));
-	if (result != UDS_SUCCESS)
+	result = VDO_ASSERT(offset == sizeof(struct uds_configuration_6_02),
+			    "%zu bytes encoded, of %zu expected", offset,
+			    sizeof(struct uds_configuration_6_02));
+	if (result != VDO_SUCCESS)
 		return result;
 
 	if (version >= 4) {
@@ -357,7 +355,7 @@ int uds_make_configuration(const struct uds_parameters *params,
 void vdo_free_configuration(struct uds_configuration *config)
 {
 	if (config != NULL) {
-		vdo_free_index_geometry(config->geometry);
+		uds_free_index_geometry(config->geometry);
 		vdo_free(config);
 	}
 }

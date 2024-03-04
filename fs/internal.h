@@ -317,8 +317,10 @@ ssize_t do_iter_writev(struct file *file, struct iov_iter *iter, loff_t *ppos,
 struct mnt_idmap *alloc_mnt_idmap(struct user_namespace *mnt_userns);
 struct mnt_idmap *mnt_idmap_get(struct mnt_idmap *idmap);
 void mnt_idmap_put(struct mnt_idmap *idmap);
+struct stashed_operations {
+	void (*put_data)(void *data);
+	void (*init_inode)(struct inode *inode, void *data);
+};
 int path_from_stashed(struct dentry **stashed, unsigned long ino,
-		      struct vfsmount *mnt, const struct file_operations *fops,
-		      const struct inode_operations *iops, void *data,
-		      struct path *path);
+		      struct vfsmount *mnt, void *data, struct path *path);
 void stashed_dentry_prune(struct dentry *dentry);

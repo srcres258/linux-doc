@@ -3,6 +3,7 @@
  */
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
 
+#include <linux/array_size.h>
 #include <linux/init.h>
 #include <kunit/test.h>
 #include <linux/array_size.h>
@@ -512,7 +513,7 @@ static void test_string_get_size_check(struct kunit *test,
 	pr_warn("expected: '%s', got '%s'\n", exp, res);
 }
 
-static void __strchrcut(char *dst, const char *src, const char *cut)
+static __init void __strchrcut(char *dst, const char *src, const char *cut)
 {
 	const char *from = src;
 	size_t len;
@@ -526,12 +527,11 @@ static void __strchrcut(char *dst, const char *src, const char *cut)
 	*dst = '\0';
 }
 
-static void __test_string_get_size_one(struct kunit *test,
-				       const u64 size, const u64 blk_size,
-				       const char *exp_result10,
-				       const char *exp_result2,
-				       enum string_size_units units,
-				       const char *cut)
+static __init void __test_string_get_size_one(const u64 size, const u64 blk_size,
+					      const char *exp_result10,
+					      const char *exp_result2,
+					      enum string_size_units units,
+					      const char *cut)
 {
 	char buf10[string_get_size_maxbuf];
 	char buf2[string_get_size_maxbuf];
@@ -549,8 +549,29 @@ static void __test_string_get_size_one(struct kunit *test,
 	string_get_size(size, blk_size, STRING_UNITS_10 | units, buf10, sizeof(buf10));
 	string_get_size(size, blk_size, STRING_UNITS_2 | units, buf2, sizeof(buf2));
 
-	test_string_get_size_check(test, prefix10, exp10, buf10, size, blk_size);
-	test_string_get_size_check(test, prefix2, exp2, buf2, size, blk_size);
+	test_string_get_size_check(prefix10, exp10, buf10, size, blk_size);
+	test_string_get_size_check(prefix2, exp2, buf2, size, blk_size);
+}
+
+static __init void __test_string_get_size(const u64 size, const u64 blk_size,
+					  const char *exp_result10,
+					  const char *exp_result2)
+{
+	struct {
+		enum string_size_units units;
+		const char *cut;
+	} get_size_test_cases[] = {
+		{ 0, "" },
+		{ STRING_UNITS_NO_SPACE, " " },
+		{ STRING_UNITS_NO_SPACE | STRING_UNITS_NO_BYTES, " B" },
+		{ STRING_UNITS_NO_BYTES, "B" },
+	};
+	int i;
+
+	for (i = 0; i < ARRAY_SIZE(get_size_test_cases); i++)
+		__test_string_get_size_one(size, blk_size, exp_result10, exp_result2,
+					   get_size_test_cases[i].units,
+					   get_size_test_cases[i].cut);
 }
 
 static void __test_string_get_size(struct kunit *test,

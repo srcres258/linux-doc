@@ -115,9 +115,7 @@ static blk_opf_t PASSTHROUGH_FLAGS = (REQ_PRIO | REQ_META | REQ_SYNC | REQ_RAHEA
  * them are awakened.
  */
 
-enum {
-	DATA_VIO_RELEASE_BATCH_SIZE = 128,
-};
+#define DATA_VIO_RELEASE_BATCH_SIZE 128
 
 static const unsigned int VDO_SECTORS_PER_BLOCK_MASK = VDO_SECTORS_PER_BLOCK - 1;
 static const u32 COMPRESSION_STATUS_MASK = 0xff;
@@ -454,10 +452,11 @@ static void attempt_logical_block_lock(struct vdo_completion *completion)
 
 	/*
 	 * If the new request is a pure read request (not read-modify-write) and the lock_holder is
-	 * writing and has received an allocation (VDO-2683), service the read request immediately
-	 * by copying data from the lock_holder to avoid having to flush the write out of the
-	 * packer just to prevent the read from waiting indefinitely. If the lock_holder does not
-	 * yet have an allocation, prevent it from blocking in the packer and wait on it.
+	 * writing and has received an allocation, service the read request immediately by copying
+	 * data from the lock_holder to avoid having to flush the write out of the packer just to
+	 * prevent the read from waiting indefinitely. If the lock_holder does not yet have an
+	 * allocation, prevent it from blocking in the packer and wait on it. This is necessary in
+	 * order to prevent returning data that may not have actually been written.
 	 */
 	if (!data_vio->write && READ_ONCE(lock_holder->allocation_succeeded)) {
 		copy_to_bio(data_vio->user_bio, lock_holder->vio.data + data_vio->offset);
@@ -1044,8 +1043,8 @@ void dump_data_vio_pool(struct data_vio_pool *pool, bool dump_vios)
 	 * In order that syslog can empty its buffer, sleep after 35 elements for 4ms (till the
 	 * second clock tick).  These numbers were picked based on experiments with lab machines.
 	 */
-	enum { ELEMENTS_PER_BATCH = 35 };
-	enum { SLEEP_FOR_SYSLOG = 4000 };
+	static const int ELEMENTS_PER_BATCH = 35;
+	static const int SLEEP_FOR_SYSLOG = 4000;
 
 	if (pool == NULL)
 		return;

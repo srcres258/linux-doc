@@ -67,7 +67,11 @@ int pid_max = PID_MAX_DEFAULT;
 int pid_max_min = RESERVED_PIDS + 1;
 int pid_max_max = PID_MAX_LIMIT;
 #ifdef CONFIG_FS_PID
-static u64 pidfs_ino = 0;
+/*
+ * Pseudo filesystems start inode numbering after one. We use Reserved
+ * PIDs as a natural offset.
+ */
+static u64 pidfs_ino = RESERVED_PIDS;
 #endif
 
 /*

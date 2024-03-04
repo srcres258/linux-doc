@@ -7,8 +7,8 @@
 #define UDS_CONFIG_H
 
 #include "geometry.h"
-#include "io-factory.h"
 #include "indexer.h"
+#include "io-factory.h"
 
 /*
  * The uds_configuration records a variety of parameters used to configure a new UDS index. Some

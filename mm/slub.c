@@ -1498,16 +1498,8 @@ static inline void inc_slabs_node(struct kmem_cache *s, int node, int objects)
 {
 	struct kmem_cache_node *n = get_node(s, node);
 
-	/*
-	 * May be called early in order to allocate a slab for the
-	 * kmem_cache_node structure. Solve the chicken-egg
-	 * dilemma by deferring the increment of the count during
-	 * bootstrap (see early_kmem_cache_node_alloc).
-	 */
-	if (likely(n)) {
-		atomic_long_inc(&n->nr_slabs);
-		atomic_long_add(objects, &n->total_objects);
-	}
+	atomic_long_inc(&n->nr_slabs);
+	atomic_long_add(objects, &n->total_objects);
 }
 static inline void dec_slabs_node(struct kmem_cache *s, int node, int objects)
 {
@@ -4851,7 +4843,6 @@ static void early_kmem_cache_node_alloc(int node)
 	slab = new_slab(kmem_cache_node, GFP_NOWAIT, node);
 
 	BUG_ON(!slab);
-	inc_slabs_node(kmem_cache_node, slab_nid(slab), slab->objects);
 	if (slab_nid(slab) != node) {
 		pr_err("SLUB: Unable to allocate memory from node %d\n", node);
 		pr_err("SLUB: Allocating a useless per node structure in order to be able to continue\n");
@@ -6790,14 +6781,12 @@ out_del_kobj:
 
 void sysfs_slab_unlink(struct kmem_cache *s)
 {
-	if (slab_state >= FULL)
-		kobject_del(&s->kobj);
+	kobject_del(&s->kobj);
 }
 
 void sysfs_slab_release(struct kmem_cache *s)
 {
-	if (slab_state >= FULL)
-		kobject_put(&s->kobj);
+	kobject_put(&s->kobj);
 }
 
 /*

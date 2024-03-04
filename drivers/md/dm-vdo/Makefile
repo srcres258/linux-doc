@@ -1,5 +1,7 @@
 # SPDX-License-Identifier: GPL-2.0-only
 
+ccflags-y := -I$(srctree)/$(src) -I$(srctree)/$(src)/indexer
+
 obj-$(CONFIG_DM_VDO) += dm-vdo.o
 
 dm-vdo-objs := \
@@ -22,6 +24,7 @@ dm-vdo-objs := \
 	logical-zone.o \
 	memory-alloc.o \
 	message-stats.o \
+	murmurhash3.o \
 	packer.o \
 	permassert.o \
 	physical-zone.o \
@@ -47,7 +50,6 @@ dm-vdo-objs := \
 	indexer/index-page-map.o \
 	indexer/index-session.o \
 	indexer/io-factory.o \
-	indexer/murmurhash3.o \
 	indexer/open-chapter.o \
 	indexer/radix-sort.o \
 	indexer/sparse-cache.o \

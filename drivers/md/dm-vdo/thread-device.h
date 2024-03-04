@@ -3,8 +3,8 @@
  * Copyright 2023 Red Hat
  */
 
-#ifndef UDS_THREAD_DEVICE_H
-#define UDS_THREAD_DEVICE_H
+#ifndef VDO_THREAD_DEVICE_H
+#define VDO_THREAD_DEVICE_H
 
 #include "thread-registry.h"
 
@@ -17,4 +17,4 @@ int vdo_get_thread_device_id(void);
 
 void vdo_initialize_thread_device_registry(void);
 
-#endif /* UDS_THREAD_DEVICE_H */
+#endif /* VDO_THREAD_DEVICE_H */

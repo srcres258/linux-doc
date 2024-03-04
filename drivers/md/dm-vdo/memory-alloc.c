@@ -233,8 +233,8 @@ int vdo_allocate_memory(size_t size, size_t align, const char *what, void *ptr)
 		if (p == NULL) {
 			/*
 			 * It is possible for kmalloc to fail to allocate memory because there is
-			 * no page available (see VDO-3688). A short sleep may allow the page
-			 * reclaimer to free a page.
+			 * no page available. A short sleep may allow the page reclaimer to
+			 * free a page.
 			 */
 			fsleep(1000);
 			p = kmalloc(size, gfp_flags);
@@ -248,8 +248,8 @@ int vdo_allocate_memory(size_t size, size_t align, const char *what, void *ptr)
 		if (vdo_allocate(1, struct vmalloc_block_info, __func__, &block) == VDO_SUCCESS) {
 			/*
 			 * It is possible for __vmalloc to fail to allocate memory because there
-			 * are no pages available (see VDO-3661). A short sleep may allow the page
-			 * reclaimer to free enough pages for a small allocation.
+			 * are no pages available. A short sleep may allow the page reclaimer
+			 * to free enough pages for a small allocation.
 			 *
 			 * For larger allocations, the page_alloc code is racing against the page
 			 * reclaimer. If the page reclaimer can stay ahead of page_alloc, the

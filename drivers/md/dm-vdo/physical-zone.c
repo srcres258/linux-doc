@@ -23,10 +23,8 @@
 #include "status-codes.h"
 #include "vdo.h"
 
-enum {
-	/* Each user data_vio needs a PBN read lock and write lock. */
-	LOCK_POOL_CAPACITY = 2 * MAXIMUM_VDO_USER_VIOS,
-};
+/* Each user data_vio needs a PBN read lock and write lock. */
+#define LOCK_POOL_CAPACITY (2 * MAXIMUM_VDO_USER_VIOS)
 
 struct pbn_lock_implementation {
 	enum pbn_lock_type type;
@@ -258,7 +256,7 @@ static int make_pbn_lock_pool(size_t capacity, struct pbn_lock_pool **pool_ptr)
 }
 
 /**
- * vdo_free_pbn_lock_pool() - Free a PBN lock pool.
+ * free_pbn_lock_pool() - Free a PBN lock pool.
  * @pool: The lock pool to free.
  *
  * This also frees all the PBN locks it allocated, so the caller must ensure that all locks have

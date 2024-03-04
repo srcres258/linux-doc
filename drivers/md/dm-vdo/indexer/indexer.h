@@ -6,9 +6,9 @@
 #ifndef INDEXER_H
 #define INDEXER_H
 
-#include <linux/types.h>
 #include <linux/mutex.h>
 #include <linux/sched.h>
+#include <linux/types.h>
 #include <linux/wait.h>
 
 #include "../funnel-queue.h"
@@ -348,6 +348,6 @@ static inline void uds_broadcast_cond(struct cond_var *cv)
 	wake_up_all(&cv->wait_queue);
 }
 
-void uds_wait_cond(struct cond_var *cond, struct mutex *mutex);
+void uds_wait_cond(struct cond_var *cv, struct mutex *mutex);
 
 #endif /* INDEXER_H */

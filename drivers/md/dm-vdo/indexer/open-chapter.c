@@ -7,13 +7,13 @@
 
 #include <linux/log2.h>
 
+#include "logger.h"
+#include "memory-alloc.h"
+#include "numeric.h"
+#include "permassert.h"
+
 #include "config.h"
 #include "hash-utils.h"
-
-#include "../logger.h"
-#include "../memory-alloc.h"
-#include "../numeric.h"
-#include "../permassert.h"
 
 /*
  * Each index zone has a dedicated open chapter zone structure which gets an equal share of the
@@ -46,11 +46,9 @@
 static const u8 OPEN_CHAPTER_MAGIC[] = "ALBOC";
 static const u8 OPEN_CHAPTER_VERSION[] = "02.00";
 
-enum {
-	OPEN_CHAPTER_MAGIC_LENGTH = sizeof(OPEN_CHAPTER_MAGIC) - 1,
-	OPEN_CHAPTER_VERSION_LENGTH = sizeof(OPEN_CHAPTER_VERSION) - 1,
-	LOAD_RATIO = 2,
-};
+#define OPEN_CHAPTER_MAGIC_LENGTH (sizeof(OPEN_CHAPTER_MAGIC) - 1)
+#define OPEN_CHAPTER_VERSION_LENGTH (sizeof(OPEN_CHAPTER_VERSION) - 1)
+#define LOAD_RATIO 2
 
 static inline size_t records_size(const struct open_chapter_zone *open_chapter)
 {
@@ -81,7 +79,7 @@ int uds_make_open_chapter(const struct index_geometry *geometry, unsigned int zo
 	result = vdo_allocate_cache_aligned(records_size(open_chapter), "record pages",
 					    &open_chapter->records);
 	if (result != VDO_SUCCESS) {
-		vdo_free_open_chapter(open_chapter);
+		uds_free_open_chapter(open_chapter);
 		return result;
 	}
 

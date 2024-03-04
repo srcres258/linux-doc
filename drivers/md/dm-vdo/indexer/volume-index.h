@@ -8,7 +8,7 @@
 
 #include <linux/limits.h>
 
-#include "../thread-utils.h"
+#include "thread-utils.h"
 
 #include "config.h"
 #include "delta-index.h"

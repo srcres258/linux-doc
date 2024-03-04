@@ -114,10 +114,8 @@ const struct block_map_entry UNMAPPED_BLOCK_MAP_ENTRY = {
 	.pbn_low_word = __cpu_to_le32(VDO_ZERO_BLOCK & UINT_MAX),
 };
 
-enum {
-	LOG_INTERVAL = 4000,
-	DISPLAY_INTERVAL = 100000,
-};
+#define LOG_INTERVAL 4000
+#define DISPLAY_INTERVAL 100000
 
 /*
  * For adjusting VDO page cache statistic fields which are only mutated on the logical zone thread.
@@ -542,7 +540,7 @@ static unsigned int distribute_page_over_waitq(struct page_info *info,
 
 	/*
 	 * Increment the busy count once for each pending completion so that this page does not
-	 * stop being busy until all completions have been processed (VDO-83).
+	 * stop being busy until all completions have been processed.
 	 */
 	info->busy += num_pages;
 
@@ -1097,9 +1095,9 @@ static void write_pages(struct vdo_completion *flush_completion)
 	struct vdo_page_cache *cache = ((struct page_info *) flush_completion->parent)->cache;
 
 	/*
-	 * We need to cache these two values on the stack since in the error case below, it is
-	 * possible for the last page info to cause the page cache to get freed. Hence once we
-	 * launch the last page, it may be unsafe to dereference the cache [VDO-4724].
+	 * We need to cache these two values on the stack since it is possible for the last
+	 * page info to cause the page cache to get freed. Hence once we launch the last page,
+	 * it may be unsafe to dereference the cache.
 	 */
 	bool has_unflushed_pages = (cache->pages_to_flush > 0);
 	page_count_t pages_in_flush = cache->pages_in_flush;

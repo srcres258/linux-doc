@@ -16,15 +16,15 @@
 #include "thread-device.h"
 #include "thread-utils.h"
 
-int log_level = VDO_LOG_DEFAULT;
+int vdo_log_level = VDO_LOG_DEFAULT;
 
 int vdo_get_log_level(void)
 {
-	int log_level_latch = READ_ONCE(log_level);
+	int log_level_latch = READ_ONCE(vdo_log_level);
 
 	if (unlikely(log_level_latch > VDO_LOG_MAX)) {
 		log_level_latch = VDO_LOG_DEFAULT;
-		WRITE_ONCE(log_level, log_level_latch);
+		WRITE_ONCE(vdo_log_level, log_level_latch);
 	}
 	return log_level_latch;
 }

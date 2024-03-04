@@ -10,14 +10,14 @@
 #include <linux/limits.h>
 #include <linux/log2.h>
 
-#include "../cpu.h"
-#include "../errors.h"
-#include "../logger.h"
-#include "../memory-alloc.h"
-#include "../numeric.h"
-#include "../permassert.h"
-#include "../string-utils.h"
-#include "../time-utils.h"
+#include "cpu.h"
+#include "errors.h"
+#include "logger.h"
+#include "memory-alloc.h"
+#include "numeric.h"
+#include "permassert.h"
+#include "string-utils.h"
+#include "time-utils.h"
 
 #include "config.h"
 #include "indexer.h"
@@ -35,7 +35,7 @@
  *
  * Each delta list is stored as a bit stream. Within the delta list encoding, bits and bytes are
  * numbered in little endian order. Within a byte, bit 0 is the least significant bit (0x1), and
- * bit 7 is the most significant bit (0x80). Within a bit stream, bit 7 is the most signficant bit
+ * bit 7 is the most significant bit (0x80). Within a bit stream, bit 7 is the most significant bit
  * of byte 0, and bit 8 is the least significant bit of byte 1. Within a byte array, a byte's
  * number corresponds to its index in the array.
  *
@@ -70,17 +70,13 @@
  * This is the largest field size supported by get_field() and set_field(). Any field that is
  * larger is not guaranteed to fit in a single byte-aligned u32.
  */
-enum {
-	MAX_FIELD_BITS = (sizeof(u32) - 1) * BITS_PER_BYTE + 1,
-};
+#define MAX_FIELD_BITS ((sizeof(u32) - 1) * BITS_PER_BYTE + 1)
 
 /*
  * This is the largest field size supported by get_big_field() and set_big_field(). Any field that
  * is larger is not guaranteed to fit in a single byte-aligned u64.
  */
-enum {
-	MAX_BIG_FIELD_BITS = (sizeof(u64) - 1) * BITS_PER_BYTE + 1,
-};
+#define MAX_BIG_FIELD_BITS ((sizeof(u64) - 1) * BITS_PER_BYTE + 1)
 
 /*
  * This is the number of guard bytes needed at the end of the memory byte array when using the bit
@@ -88,45 +84,33 @@ enum {
  * bytes beyond the end of the desired field. The definition is written to make it clear how this
  * value is derived.
  */
-enum {
-	POST_FIELD_GUARD_BYTES = sizeof(u64) - 1,
-};
+#define POST_FIELD_GUARD_BYTES (sizeof(u64) - 1)
 
 /* The number of guard bits that are needed in the tail guard list */
-enum {
-	GUARD_BITS = POST_FIELD_GUARD_BYTES * BITS_PER_BYTE
-};
+#define GUARD_BITS (POST_FIELD_GUARD_BYTES * BITS_PER_BYTE)
 
 /*
  * The maximum size of a single delta list in bytes. We count guard bytes in this value because a
  * buffer of this size can be used with move_bits().
  */
-enum {
-	DELTA_LIST_MAX_BYTE_COUNT =
-		((U16_MAX + BITS_PER_BYTE) / BITS_PER_BYTE + POST_FIELD_GUARD_BYTES)
-};
+#define DELTA_LIST_MAX_BYTE_COUNT					\
+	((U16_MAX + BITS_PER_BYTE) / BITS_PER_BYTE + POST_FIELD_GUARD_BYTES)
 
 /* The number of extra bytes and bits needed to store a collision entry */
-enum {
-	COLLISION_BYTES = UDS_RECORD_NAME_SIZE,
-	COLLISION_BITS = COLLISION_BYTES * BITS_PER_BYTE
-};
+#define COLLISION_BYTES UDS_RECORD_NAME_SIZE
+#define COLLISION_BITS (COLLISION_BYTES * BITS_PER_BYTE)
 
 /*
  * Immutable delta lists are packed into pages containing a header that encodes the delta list
  * information into 19 bits per list (64KB bit offset).
  */
-
-enum { IMMUTABLE_HEADER_SIZE = 19 };
+#define IMMUTABLE_HEADER_SIZE 19
 
 /*
  * Constants and structures for the saved delta index. "DI" is for delta_index, and -##### is a
  * number to increment when the format of the data changes.
  */
-
-enum {
-	MAGIC_SIZE = 8,
-};
+#define MAGIC_SIZE 8
 
 static const char DELTA_INDEX_MAGIC[] = "DI-00002";
 
@@ -216,9 +200,7 @@ static void rebalance_delta_zone(const struct delta_zone *delta_zone, u32 first,
 static inline size_t get_zone_memory_size(unsigned int zone_count, size_t memory_size)
 {
 	/* Round up so that each zone is a multiple of 64K in size. */
-	enum {
-		ALLOC_BOUNDARY = 64 * 1024,
-	};
+	size_t ALLOC_BOUNDARY = 64 * 1024;
 
 	return (memory_size / zone_count + ALLOC_BOUNDARY - 1) & -ALLOC_BOUNDARY;
 }
@@ -874,10 +856,10 @@ int uds_start_restoring_delta_index(struct delta_index *delta_index,
 		decode_u64_le(buffer, &offset, &header.record_count);
 		decode_u64_le(buffer, &offset, &header.collision_count);
 
-		result = ASSERT(offset == sizeof(struct delta_index_header),
-				"%zu bytes decoded of %zu expected", offset,
-				sizeof(struct delta_index_header));
-		if (result != UDS_SUCCESS) {
+		result = VDO_ASSERT(offset == sizeof(struct delta_index_header),
+				    "%zu bytes decoded of %zu expected", offset,
+				    sizeof(struct delta_index_header));
+		if (result != VDO_SUCCESS) {
 			return vdo_log_warning_strerror(result,
 							"failed to read delta index header");
 		}
@@ -1154,10 +1136,10 @@ int uds_start_saving_delta_index(const struct delta_index *delta_index,
 	encode_u64_le(buffer, &offset, delta_zone->record_count);
 	encode_u64_le(buffer, &offset, delta_zone->collision_count);
 
-	result = ASSERT(offset == sizeof(struct delta_index_header),
-			"%zu bytes encoded of %zu expected", offset,
-			sizeof(struct delta_index_header));
-	if (result != UDS_SUCCESS)
+	result = VDO_ASSERT(offset == sizeof(struct delta_index_header),
+			    "%zu bytes encoded of %zu expected", offset,
+			    sizeof(struct delta_index_header));
+	if (result != VDO_SUCCESS)
 		return result;
 
 	result = uds_write_to_buffered_writer(buffered_writer, buffer, offset);
@@ -1230,9 +1212,9 @@ size_t uds_compute_delta_index_save_bytes(u32 list_count, size_t memory_size)
 
 static int assert_not_at_end(const struct delta_index_entry *delta_entry)
 {
-	int result = ASSERT(!delta_entry->at_end,
-			    "operation is invalid because the list entry is at the end of the delta list");
-	if (result != UDS_SUCCESS)
+	int result = VDO_ASSERT(!delta_entry->at_end,
+				"operation is invalid because the list entry is at the end of the delta list");
+	if (result != VDO_SUCCESS)
 		result = UDS_BAD_STATE;
 
 	return result;
@@ -1254,19 +1236,19 @@ int uds_start_delta_index_search(const struct delta_index *delta_index, u32 list
 	struct delta_zone *delta_zone;
 	struct delta_list *delta_list;
 
-	result = ASSERT((list_number < delta_index->list_count),
-			"Delta list number (%u) is out of range (%u)", list_number,
-			delta_index->list_count);
-	if (result != UDS_SUCCESS)
+	result = VDO_ASSERT((list_number < delta_index->list_count),
+			    "Delta list number (%u) is out of range (%u)", list_number,
+			    delta_index->list_count);
+	if (result != VDO_SUCCESS)
 		return UDS_CORRUPT_DATA;
 
 	zone_number = list_number / delta_index->lists_per_zone;
 	delta_zone = &delta_index->delta_zones[zone_number];
 	list_number -= delta_zone->first_list;
-	result = ASSERT((list_number < delta_zone->list_count),
-			"Delta list number (%u) is out of range (%u) for zone (%u)",
-			list_number, delta_zone->list_count, zone_number);
-	if (result != UDS_SUCCESS)
+	result = VDO_ASSERT((list_number < delta_zone->list_count),
+			    "Delta list number (%u) is out of range (%u) for zone (%u)",
+			    list_number, delta_zone->list_count, zone_number);
+	if (result != VDO_SUCCESS)
 		return UDS_CORRUPT_DATA;
 
 	if (delta_index->mutable) {
@@ -1380,9 +1362,9 @@ noinline int uds_next_delta_index_entry(struct delta_index_entry *delta_entry)
 		delta_entry->at_end = true;
 		delta_entry->delta = 0;
 		delta_entry->is_collision = false;
-		result = ASSERT((delta_entry->offset == size),
-				"next offset past end of delta list");
-		if (result != UDS_SUCCESS)
+		result = VDO_ASSERT((delta_entry->offset == size),
+				    "next offset past end of delta list");
+		if (result != VDO_SUCCESS)
 			result = UDS_CORRUPT_DATA;
 
 		return result;
@@ -1408,8 +1390,8 @@ int uds_remember_delta_index_offset(const struct delta_index_entry *delta_entry)
 	int result;
 	struct delta_list *delta_list = delta_entry->delta_list;
 
-	result = ASSERT(!delta_entry->is_collision, "entry is not a collision");
-	if (result != UDS_SUCCESS)
+	result = VDO_ASSERT(!delta_entry->is_collision, "entry is not a collision");
+	if (result != VDO_SUCCESS)
 		return result;
 
 	delta_list->save_key = delta_entry->key - delta_entry->delta;
@@ -1507,9 +1489,9 @@ int uds_get_delta_entry_collision(const struct delta_index_entry *delta_entry, u
 	if (result != UDS_SUCCESS)
 		return result;
 
-	result = ASSERT(delta_entry->is_collision,
-			"Cannot get full block name from a non-collision delta index entry");
-	if (result != UDS_SUCCESS)
+	result = VDO_ASSERT(delta_entry->is_collision,
+			    "Cannot get full block name from a non-collision delta index entry");
+	if (result != VDO_SUCCESS)
 		return UDS_BAD_STATE;
 
 	get_collision_name(delta_entry, name);
@@ -1524,9 +1506,9 @@ u32 uds_get_delta_entry_value(const struct delta_index_entry *delta_entry)
 
 static int assert_mutable_entry(const struct delta_index_entry *delta_entry)
 {
-	int result = ASSERT((delta_entry->delta_list != &delta_entry->temp_delta_list),
-			    "delta index is mutable");
-	if (result != UDS_SUCCESS)
+	int result = VDO_ASSERT((delta_entry->delta_list != &delta_entry->temp_delta_list),
+			        "delta index is mutable");
+	if (result != VDO_SUCCESS)
 		result = UDS_BAD_STATE;
 
 	return result;
@@ -1545,10 +1527,10 @@ int uds_set_delta_entry_value(const struct delta_index_entry *delta_entry, u32 v
 	if (result != UDS_SUCCESS)
 		return result;
 
-	result = ASSERT((value & value_mask) == value,
-			"Value (%u) being set in a delta index is too large (must fit in %u bits)",
-			value, delta_entry->value_bits);
-	if (result != UDS_SUCCESS)
+	result = VDO_ASSERT((value & value_mask) == value,
+			    "Value (%u) being set in a delta index is too large (must fit in %u bits)",
+			    value, delta_entry->value_bits);
+	if (result != VDO_SUCCESS)
 		return UDS_INVALID_ARGUMENT;
 
 	set_field(value, delta_entry->delta_zone->memory,
@@ -1748,9 +1730,9 @@ int uds_put_delta_index_entry(struct delta_index_entry *delta_entry, u32 key, u3
 		if (result != UDS_SUCCESS)
 			return result;
 
-		result = ASSERT((key == delta_entry->key),
-				"incorrect key for collision entry");
-		if (result != UDS_SUCCESS)
+		result = VDO_ASSERT((key == delta_entry->key),
+				    "incorrect key for collision entry");
+		if (result != VDO_SUCCESS)
 			return result;
 
 		delta_entry->offset += delta_entry->entry_bits;
@@ -1760,8 +1742,8 @@ int uds_put_delta_index_entry(struct delta_index_entry *delta_entry, u32 key, u3
 		result = insert_bits(delta_entry, delta_entry->entry_bits);
 	} else if (delta_entry->at_end) {
 		/* Insert a new entry at the end of the delta list. */
-		result = ASSERT((key >= delta_entry->key), "key past end of list");
-		if (result != UDS_SUCCESS)
+		result = VDO_ASSERT((key >= delta_entry->key), "key past end of list");
+		if (result != VDO_SUCCESS)
 			return result;
 
 		set_delta(delta_entry, key - delta_entry->key);
@@ -1778,14 +1760,14 @@ int uds_put_delta_index_entry(struct delta_index_entry *delta_entry, u32 key, u3
 		 * Insert a new entry which requires the delta in the following entry to be
 		 * updated.
 		 */
-		result = ASSERT((key < delta_entry->key),
-				"key precedes following entry");
-		if (result != UDS_SUCCESS)
+		result = VDO_ASSERT((key < delta_entry->key),
+				    "key precedes following entry");
+		if (result != VDO_SUCCESS)
 			return result;
 
-		result = ASSERT((key >= delta_entry->key - delta_entry->delta),
-				"key effects following entry's delta");
-		if (result != UDS_SUCCESS)
+		result = VDO_ASSERT((key >= delta_entry->key - delta_entry->delta),
+				    "key effects following entry's delta");
+		if (result != VDO_SUCCESS)
 			return result;
 
 		old_entry_size = delta_entry->entry_bits;

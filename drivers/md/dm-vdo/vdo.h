@@ -21,7 +21,6 @@
 #include "statistics.h"
 #include "thread-registry.h"
 #include "types.h"
-#include "indexer/indexer.h"
 
 enum notifier_state {
 	/* Notifications are allowed but not in progress */
@@ -263,7 +262,6 @@ struct vdo {
 	char **compression_context;
 };
 
-
 /**
  * vdo_uses_bio_ack_queue() - Indicate whether the vdo is configured to use a separate work queue
  *                            for acknowledging received and processed bios.
@@ -305,8 +303,6 @@ int __must_check vdo_make(unsigned int instance, struct device_config *config,
 void vdo_destroy(struct vdo *vdo);
 
 void vdo_load_super_block(struct vdo *vdo, struct vdo_completion *parent);
-
-int __must_check vdo_add_sysfs_stats_dir(struct vdo *vdo);
 
 struct block_device * __must_check vdo_get_backing_device(const struct vdo *vdo);
 

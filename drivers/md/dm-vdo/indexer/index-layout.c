@@ -7,8 +7,13 @@
 
 #include <linux/random.h>
 
-#include "config.h"
+#include "logger.h"
+#include "memory-alloc.h"
 #include "murmurhash3.h"
+#include "numeric.h"
+#include "time-utils.h"
+
+#include "config.h"
 #include "open-chapter.h"
 #include "volume-index.h"
 
@@ -54,11 +59,9 @@
  * Each save also has a unique nonce.
  */
 
-enum {
-	MAGIC_SIZE = 32,
-	NONCE_INFO_SIZE = 32,
-	MAX_SAVES = 2,
-};
+#define MAGIC_SIZE 32
+#define NONCE_INFO_SIZE 32
+#define MAX_SAVES 2
 
 enum region_kind {
 	RL_KIND_EMPTY = 0,
@@ -82,9 +85,7 @@ enum region_type {
 	RH_TYPE_UNSAVED = 4,
 };
 
-enum {
-	RL_SOLE_INSTANCE = 65535,
-};
+#define RL_SOLE_INSTANCE 65535
 
 /*
  * Super block version 2 is the first released version.
@@ -98,11 +99,9 @@ enum {
  * order to make room to prepend LVM metadata to a volume originally created without lvm. This
  * allows the index to retain most its deduplication records.
  */
-enum {
-	SUPER_VERSION_MINIMUM = 3,
-	SUPER_VERSION_CURRENT = 3,
-	SUPER_VERSION_MAXIMUM = 7,
-};
+#define SUPER_VERSION_MINIMUM 3
+#define SUPER_VERSION_CURRENT 3
+#define SUPER_VERSION_MAXIMUM 7
 
 static const u8 LAYOUT_MAGIC[MAGIC_SIZE] = "*ALBIREO*SINGLE*FILE*LAYOUT*001*";
 static const u64 REGION_MAGIC = 0x416c6252676e3031; /* 'AlbRgn01' */
@@ -596,7 +595,7 @@ static int write_index_save_layout(struct index_layout *layout,
 
 	result = write_index_save_header(isl, table, writer);
 	vdo_free(table);
-	vdo_free_buffered_writer(writer);
+	uds_free_buffered_writer(writer);
 
 	return result;
 }
@@ -765,13 +764,13 @@ static int __must_check write_uds_index_config(struct index_layout *layout,
 
 	result = uds_write_config_contents(writer, config, layout->super.version);
 	if (result != UDS_SUCCESS) {
-		vdo_free_buffered_writer(writer);
+		uds_free_buffered_writer(writer);
 		return vdo_log_error_strerror(result, "failed to write config region");
 	}
 
 	result = uds_flush_buffered_writer(writer);
 	if (result != UDS_SUCCESS) {
-		vdo_free_buffered_writer(writer);
+		uds_free_buffered_writer(writer);
 		return vdo_log_error_strerror(result, "cannot flush config writer");
 	}
 
@@ -797,7 +796,7 @@ static int __must_check save_layout(struct index_layout *layout, off_t offset)
 
 	result = write_layout_header(layout, table, writer);
 	vdo_free(table);
-	vdo_free_buffered_writer(writer);
+	uds_free_buffered_writer(writer);
 
 	return result;
 }
@@ -843,8 +842,9 @@ static u64 generate_index_save_nonce(u64 volume_nonce, struct index_save_layout 
 	encode_u32_le(buffer, &offset, isl->save_data.version);
 	encode_u32_le(buffer, &offset, 0U);
 	encode_u64_le(buffer, &offset, isl->index_save.start_block);
-	ASSERT_LOG_ONLY(offset == sizeof(nonce_data),
-			"%zu bytes encoded of %zu expected", offset, sizeof(nonce_data));
+	VDO_ASSERT_LOG_ONLY(offset == sizeof(nonce_data),
+			    "%zu bytes encoded of %zu expected",
+			    offset, sizeof(nonce_data));
 	return generate_secondary_nonce(volume_nonce, buffer, sizeof(buffer));
 }
 
@@ -1566,10 +1566,11 @@ static int __must_check load_index_save(struct index_save_layout *isl,
 
 
 	if (table->header.type != RH_TYPE_SAVE) {
+		vdo_log_error_strerror(UDS_CORRUPT_DATA,
+				       "unexpected index save %u header type %u",
+				       instance, table->header.type);
 		vdo_free(table);
-		return vdo_log_error_strerror(UDS_CORRUPT_DATA,
-					      "unexpected index save %u header type %u",
-					      instance, table->header.type);
+		return UDS_CORRUPT_DATA;
 	}
 
 	result = read_index_save_data(reader, isl, table->header.payload);
@@ -1634,7 +1635,7 @@ static int __must_check verify_uds_index_config(struct index_layout *layout,
 
 	result = uds_validate_config_contents(reader, config);
 	if (result != UDS_SUCCESS) {
-		vdo_free_buffered_reader(reader);
+		uds_free_buffered_reader(reader);
 		return vdo_log_error_strerror(result, "failed to read config region");
 	}
 

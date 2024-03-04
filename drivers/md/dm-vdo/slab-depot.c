@@ -334,7 +334,11 @@ static void launch_write(struct slab_summary_block *block)
 
 	/*
 	 * Flush before writing to ensure that the slab journal tail blocks and reference updates
-	 * covered by this summary update are stable (VDO-2332).
+	 * covered by this summary update are stable. Otherwise, a subsequent recovery could
+	 * encounter a slab summary update that refers to a slab journal tail block that has not
+	 * actually been written. In such cases, the slab journal referenced will be treated as
+	 * empty, causing any data within the slab which predates the existing recovery journal
+	 * entries to be lost.
 	 */
 	pbn = (depot->summary_origin +
 	       (VDO_SLAB_SUMMARY_BLOCKS_PER_ZONE * allocator->zone_number) +
@@ -499,7 +503,7 @@ static void reap_slab_journal(struct slab_journal *journal)
 	 * journal block writes can be issued while previous slab summary updates have not yet been
 	 * made. Even though those slab journal block writes will be ignored if the slab summary
 	 * update is not persisted, they may still overwrite the to-be-reaped slab journal block
-	 * resulting in a loss of reference count updates (VDO-2912).
+	 * resulting in a loss of reference count updates.
 	 */
 	journal->flush_waiter.callback = flush_for_reaping;
 	acquire_vio_from_pool(journal->slab->allocator->vio_pool,
@@ -770,7 +774,8 @@ static void write_slab_journal_block(struct vdo_waiter *waiter, void *context)
 
 	/*
 	 * This block won't be read in recovery until the slab summary is updated to refer to it.
-	 * The slab summary update does a flush which is sufficient to protect us from VDO-2331.
+	 * The slab summary update does a flush which is sufficient to protect us from corruption
+	 * due to out of order slab journal, reference block, or block map writes.
 	 */
 	vdo_submit_metadata_vio(vdo_forget(vio), block_number, write_slab_journal_endio,
 				complete_write, REQ_OP_WRITE);
@@ -1201,7 +1206,8 @@ static void write_reference_block(struct vdo_waiter *waiter, void *context)
 
 	/*
 	 * Flush before writing to ensure that the recovery journal and slab journal entries which
-	 * cover this reference update are stable (VDO-2331).
+	 * cover this reference update are stable. This prevents data corruption that can be caused
+	 * by out of order writes.
 	 */
 	WRITE_ONCE(block->slab->allocator->ref_counts_statistics.blocks_written,
 		   block->slab->allocator->ref_counts_statistics.blocks_written + 1);
@@ -1775,7 +1781,7 @@ static void add_entries(struct slab_journal *journal)
 		    (journal->slab->status == VDO_SLAB_REBUILDING)) {
 			/*
 			 * Don't add entries while rebuilding or while a partial write is
-			 * outstanding (VDO-2399).
+			 * outstanding, as it could result in reference count corruption.
 			 */
 			break;
 		}
@@ -2029,8 +2035,8 @@ static inline slab_block_number find_zero_byte_in_word(const u8 *word_ptr,
 }
 
 /**
- * vdo_find_free_block() - Find the first block with a reference count of zero in the specified
- *                         range of reference counter indexes.
+ * find_free_block() - Find the first block with a reference count of zero in the specified
+ *                     range of reference counter indexes.
  * @slab: The slab counters to scan.
  * @index_ptr: A pointer to hold the array index of the free block.
  *
@@ -5026,7 +5032,7 @@ get_ref_counts_statistics(const struct slab_depot *depot)
 }
 
 /**
- * get_depot_slab_journal_statistics() - Get the aggregated slab journal statistics for the depot.
+ * get_slab_journal_statistics() - Get the aggregated slab journal statistics for the depot.
  * @depot: The slab depot.
  *
  * Return: The aggregated statistics for all slab journals in the depot.

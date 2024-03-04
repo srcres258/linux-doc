@@ -33,10 +33,6 @@ static inline int __must_check vdo_must_use(int value)
 /* Log a message if the expression is not true. */
 #define VDO_ASSERT_LOG_ONLY(expr, ...) __VDO_ASSERT(expr, __VA_ARGS__)
 
-/* For use by UDS */
-#define ASSERT(expr, ...) VDO_ASSERT(expr, __VA_ARGS__)
-#define ASSERT_LOG_ONLY(expr, ...) __VDO_ASSERT(expr, __VA_ARGS__)
-
 #define __VDO_ASSERT(expr, ...)				      \
 	(likely(expr) ? VDO_SUCCESS			      \
 		      : vdo_assertion_failed(STRINGIFY(expr), __FILE__, __LINE__, __VA_ARGS__))

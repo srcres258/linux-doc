@@ -10,12 +10,12 @@
 #include <linux/compiler.h>
 #include <linux/log2.h>
 
-#include "../errors.h"
-#include "../logger.h"
-#include "../memory-alloc.h"
-#include "../numeric.h"
-#include "../permassert.h"
-#include "../thread-utils.h"
+#include "errors.h"
+#include "logger.h"
+#include "memory-alloc.h"
+#include "numeric.h"
+#include "permassert.h"
+#include "thread-utils.h"
 
 #include "config.h"
 #include "geometry.h"
@@ -94,7 +94,8 @@ struct chapter_range {
 	u32 chapter_count;
 };
 
-enum { MAGIC_SIZE = 8 };
+#define MAGIC_SIZE 8
+
 static const char MAGIC_START_5[] = "MI5-0005";
 
 struct sub_index_data {
@@ -193,10 +194,11 @@ unsigned int uds_get_volume_index_zone(const struct volume_index *volume_index,
 	return get_volume_sub_index_zone(get_volume_sub_index(volume_index, name), name);
 }
 
+#define DELTA_LIST_SIZE 256
+
 static int compute_volume_sub_index_parameters(const struct uds_configuration *config,
 					       struct sub_index_parameters *params)
 {
-	enum { DELTA_LIST_SIZE = 256 };
 	u64 entries_in_volume_index, address_span;
 	u32 chapters_in_volume_index, invalid_chapters;
 	u32 rounded_chapters;
@@ -830,10 +832,10 @@ static int start_restoring_volume_sub_index(struct volume_sub_index *sub_index,
 		decode_u32_le(buffer, &offset, &header.first_list);
 		decode_u32_le(buffer, &offset, &header.list_count);
 
-		result = ASSERT(offset == sizeof(buffer),
-				"%zu bytes decoded of %zu expected", offset,
-				sizeof(buffer));
-		if (result != UDS_SUCCESS)
+		result = VDO_ASSERT(offset == sizeof(buffer),
+				    "%zu bytes decoded of %zu expected", offset,
+				    sizeof(buffer));
+		if (result != VDO_SUCCESS)
 			result = UDS_CORRUPT_DATA;
 
 		if (memcmp(header.magic, MAGIC_START_5, MAGIC_SIZE) != 0) {
@@ -922,10 +924,10 @@ static int start_restoring_volume_index(struct volume_index *volume_index,
 		offset += MAGIC_SIZE;
 		decode_u32_le(buffer, &offset, &header.sparse_sample_rate);
 
-		result = ASSERT(offset == sizeof(buffer),
-				"%zu bytes decoded of %zu expected", offset,
-				sizeof(buffer));
-		if (result != UDS_SUCCESS)
+		result = VDO_ASSERT(offset == sizeof(buffer),
+				    "%zu bytes decoded of %zu expected", offset,
+				    sizeof(buffer));
+		if (result != VDO_SUCCESS)
 			result = UDS_CORRUPT_DATA;
 
 		if (memcmp(header.magic, MAGIC_START_6, MAGIC_SIZE) != 0)
@@ -1021,10 +1023,10 @@ static int start_saving_volume_sub_index(const struct volume_sub_index *sub_inde
 	encode_u32_le(buffer, &offset, first_list);
 	encode_u32_le(buffer, &offset, list_count);
 
-	result =  ASSERT(offset == sizeof(struct sub_index_data),
-			 "%zu bytes of config written, of %zu expected", offset,
-			 sizeof(struct sub_index_data));
-	if (result != UDS_SUCCESS)
+	result =  VDO_ASSERT(offset == sizeof(struct sub_index_data),
+			     "%zu bytes of config written, of %zu expected", offset,
+			     sizeof(struct sub_index_data));
+	if (result != VDO_SUCCESS)
 		return result;
 
 	result = uds_write_to_buffered_writer(buffered_writer, buffer, offset);
@@ -1064,10 +1066,10 @@ static int start_saving_volume_index(const struct volume_index *volume_index,
 	memcpy(buffer, MAGIC_START_6, MAGIC_SIZE);
 	offset += MAGIC_SIZE;
 	encode_u32_le(buffer, &offset, volume_index->sparse_sample_rate);
-	result = ASSERT(offset == sizeof(struct volume_index_data),
-			"%zu bytes of header written, of %zu expected", offset,
-			sizeof(struct volume_index_data));
-	if (result != UDS_SUCCESS)
+	result = VDO_ASSERT(offset == sizeof(struct volume_index_data),
+			    "%zu bytes of header written, of %zu expected", offset,
+			    sizeof(struct volume_index_data));
+	if (result != VDO_SUCCESS)
 		return result;
 
 	result = uds_write_to_buffered_writer(writer, buffer, offset);
@@ -1250,7 +1252,7 @@ int uds_make_volume_index(const struct uds_configuration *config, u64 volume_non
 	result = vdo_allocate(config->zone_count, struct volume_index_zone,
 			      "volume index zones", &volume_index->zones);
 	if (result != VDO_SUCCESS) {
-		vdo_free_volume_index(volume_index);
+		uds_free_volume_index(volume_index);
 		return result;
 	}
 
@@ -1261,7 +1263,7 @@ int uds_make_volume_index(const struct uds_configuration *config, u64 volume_non
 	result = initialize_volume_sub_index(&split.non_hook_config, volume_nonce, 'd',
 					     &volume_index->vi_non_hook);
 	if (result != UDS_SUCCESS) {
-		vdo_free_volume_index(volume_index);
+		uds_free_volume_index(volume_index);
 		return vdo_log_error_strerror(result,
 					      "Error creating non hook volume index");
 	}
@@ -1269,7 +1271,7 @@ int uds_make_volume_index(const struct uds_configuration *config, u64 volume_non
 	result = initialize_volume_sub_index(&split.hook_config, volume_nonce, 's',
 					     &volume_index->vi_hook);
 	if (result != UDS_SUCCESS) {
-		vdo_free_volume_index(volume_index);
+		uds_free_volume_index(volume_index);
 		return vdo_log_error_strerror(result,
 					      "Error creating hook volume index");
 	}

@@ -12,10 +12,11 @@
 
 struct thread;
 
+
 int __must_check vdo_create_thread(void (*thread_function)(void *), void *thread_data,
 				   const char *name, struct thread **new_thread);
 void vdo_join_threads(struct thread *thread);
 
 void vdo_perform_once(atomic_t *once_state, void (*function) (void));
 
-#endif /* THREAD_UTILS_H */
+#endif /* UDS_THREADS_H */

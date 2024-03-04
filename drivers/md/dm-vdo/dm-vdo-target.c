@@ -40,7 +40,7 @@
 
 #define	CURRENT_VERSION "8.3.0.65"
 
-enum {
+enum admin_phases {
 	GROW_LOGICAL_PHASE_START,
 	GROW_LOGICAL_PHASE_GROW_BLOCK_MAP,
 	GROW_LOGICAL_PHASE_END,
@@ -138,10 +138,8 @@ static const char * const ADMIN_PHASE_NAMES[] = {
 	"SUSPEND_PHASE_END",
 };
 
-enum {
-	/* If we bump this, update the arrays below */
-	TABLE_VERSION = 4,
-};
+/* If we bump this, update the arrays below */
+#define TABLE_VERSION 4
 
 /* arrays for handling different table versions */
 static const u8 REQUIRED_ARGC[] = { 10, 12, 9, 7, 6 };
@@ -155,17 +153,15 @@ static const u8 POOL_NAME_ARG_INDEX[] = { 8, 10, 8 };
  * need to scan 16 words, so it's not likely to be a big deal compared to other resource usage.
  */
 
-enum {
-	/*
-	 * This minimum size for the bit array creates a numbering space of 0-999, which allows
-	 * successive starts of the same volume to have different instance numbers in any
-	 * reasonably-sized test. Changing instances on restart allows vdoMonReport to detect that
-	 * the ephemeral stats have reset to zero.
-	 */
-	BIT_COUNT_MINIMUM = 1000,
-	/** Grow the bit array by this many bits when needed */
-	BIT_COUNT_INCREMENT = 100,
-};
+/*
+ * This minimum size for the bit array creates a numbering space of 0-999, which allows
+ * successive starts of the same volume to have different instance numbers in any
+ * reasonably-sized test. Changing instances on restart allows vdoMonReport to detect that
+ * the ephemeral stats have reset to zero.
+ */
+#define BIT_COUNT_MINIMUM 1000
+/* Grow the bit array by this many bits when needed */
+#define BIT_COUNT_INCREMENT 100
 
 struct instance_tracker {
 	unsigned int bit_count;
@@ -941,16 +937,14 @@ static void vdo_io_hints(struct dm_target *ti, struct queue_limits *limits)
 	 * Sets the maximum discard size that will be passed into VDO. This value comes from a
 	 * table line value passed in during dmsetup create.
 	 *
-	 * The value 1024 is the largest usable value on HD systems.  A 2048 sector discard on a
-	 * busy HD system takes 31 seconds.  We should use a value no higher than 1024, which takes
-	 * 15 to 16 seconds on a busy HD system.
+	 * The value 1024 is the largest usable value on HD systems. A 2048 sector discard on a
+	 * busy HD system takes 31 seconds. We should use a value no higher than 1024, which takes
+	 * 15 to 16 seconds on a busy HD system. However, using large values results in 120 second
+	 * blocked task warnings in kernel logs. In order to avoid these warnings, we choose to
+	 * use the smallest reasonable value.
 	 *
-	 * But using large values results in 120 second blocked task warnings in /var/log/kern.log.
-	 * In order to avoid these warnings, we choose to use the smallest reasonable value.  See
-	 * VDO-3062 and VDO-3087.
-	 *
-	 * The value is displayed in sysfs, and also used by dm-thin to determine whether to pass
-	 * down discards. The block layer splits large discards on this boundary when this is set.
+	 * The value is used by dm-thin to determine whether to pass down discards. The block layer
+	 * splits large discards on this boundary when this is set.
 	 */
 	limits->max_discard_sectors =
 		(vdo->device_config->max_discard_blocks * VDO_SECTORS_PER_BLOCK);
@@ -2202,6 +2196,7 @@ static void load_callback(struct vdo_completion *completion)
 		return;
 
 	case LOAD_PHASE_LOAD_DEPOT:
+		vdo_set_dedupe_state_normal(vdo->hash_zones);
 		if (vdo_is_read_only(vdo)) {
 			/*
 			 * In read-only mode we don't use the allocator and it may not even be
@@ -2838,7 +2833,7 @@ static void vdo_resume(struct dm_target *ti)
 static struct target_type vdo_target_bio = {
 	.features = DM_TARGET_SINGLETON,
 	.name = "vdo",
-	.version = { 8, 2, 0 },
+	.version = { 9, 0, 0 },
 	.module = THIS_MODULE,
 	.ctr = vdo_ctr,
 	.dtr = vdo_dtr,
@@ -2875,16 +2870,13 @@ static int __init vdo_init(void)
 {
 	int result = 0;
 
-	/*
-	 * UDS module level initialization must be done first, as VDO initialization depends on it
-	 */
+	/* Memory tracking must be initialized first for accurate accounting. */
 	vdo_memory_init();
-
 	vdo_initialize_thread_device_registry();
 	vdo_initialize_device_registry_once();
 	vdo_log_info("loaded version %s", CURRENT_VERSION);
 
-	/* Add VDO errors to the already existing set of errors in UDS. */
+	/* Add VDO errors to the set of errors registered by the indexer. */
 	result = vdo_register_status_codes();
 	if (result != VDO_SUCCESS) {
 		vdo_log_error("vdo_register_status_codes failed %d", result);
@@ -2906,18 +2898,15 @@ static int __init vdo_init(void)
 static void __exit vdo_exit(void)
 {
 	vdo_module_destroy();
-	/*
-	 * UDS module level exit processing must be done after all VDO module exit processing is
-	 * complete.
-	 */
+	/* Memory tracking cleanup must be done last. */
 	vdo_memory_exit();
 }
 
 module_init(vdo_init);
 module_exit(vdo_exit);
 
-module_param_named(log_level, log_level, uint, 0644);
-MODULE_PARM_DESC(log_level, "Log-level for log messages");
+module_param_named(log_level, vdo_log_level, uint, 0644);
+MODULE_PARM_DESC(log_level, "Log level for log messages");
 
 MODULE_DESCRIPTION(DM_NAME " target for transparent deduplication");
 MODULE_AUTHOR("Red Hat, Inc.");

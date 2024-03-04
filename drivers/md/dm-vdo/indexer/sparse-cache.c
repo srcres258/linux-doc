@@ -9,13 +9,13 @@
 #include <linux/delay.h>
 #include <linux/dm-bufio.h>
 
+#include "logger.h"
+#include "memory-alloc.h"
+#include "permassert.h"
+
 #include "chapter-index.h"
 #include "config.h"
 #include "index.h"
-
-#include "../logger.h"
-#include "../memory-alloc.h"
-#include "../permassert.h"
 
 /*
  * Since the cache is small, it is implemented as a simple array of cache entries. Searching for a
@@ -77,10 +77,8 @@
  * considered to be a member of the cache for uds_sparse_cache_contains().
  */
 
-enum {
-	SKIP_SEARCH_THRESHOLD = 20000,
-	ZONE_ZERO = 0,
-};
+#define SKIP_SEARCH_THRESHOLD 20000
+#define ZONE_ZERO 0
 
 /*
  * These counters are essentially fields of the struct cached_chapter_index, but are segregated
@@ -192,7 +190,7 @@ static inline void __down(struct semaphore *semaphore)
 		 * happens, sleep briefly to avoid keeping the CPU locked up in
 		 * this loop. We could just call cond_resched, but then we'd
 		 * still keep consuming CPU time slices and swamp other threads
-		 * trying to do computational work. [VDO-4980]
+		 * trying to do computational work.
 		 */
 		fsleep(1000);
 	}
@@ -304,7 +302,7 @@ int uds_make_sparse_cache(const struct index_geometry *geometry, unsigned int ca
 	*cache_ptr = cache;
 	return UDS_SUCCESS;
 out:
-	vdo_free_sparse_cache(cache);
+	uds_free_sparse_cache(cache);
 	return result;
 }
 

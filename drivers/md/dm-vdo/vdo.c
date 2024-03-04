@@ -59,17 +59,14 @@
 #include "status-codes.h"
 #include "vio.h"
 
-enum { PARANOID_THREAD_CONSISTENCY_CHECKS = 0 };
+#define PARANOID_THREAD_CONSISTENCY_CHECKS 0
 
 struct sync_completion {
 	struct vdo_completion vdo_completion;
 	struct completion completion;
 };
 
-/*
- * We don't expect this set to ever get really large, so a linked list is adequate. We can use a
- * pointer_map if we need to later.
- */
+/* A linked list is adequate for the small number of entries we expect. */
 struct device_registry {
 	struct list_head links;
 	/* TODO: Convert to rcu per kernel recommendation. */
@@ -266,8 +263,8 @@ static int __must_check initialize_thread_config(struct thread_count_config coun
 }
 
 /**
- * vdo_read_geometry_block() - Synchronously read the geometry block from a vdo's underlying block
- *                             device.
+ * read_geometry_block() - Synchronously read the geometry block from a vdo's underlying block
+ *                         device.
  * @vdo: The vdo whose geometry is to be read.
  *
  * Return: VDO_SUCCESS or an error code.
@@ -543,7 +540,7 @@ int vdo_make(unsigned int instance, struct device_config *config, char **reason,
 	int result;
 	struct vdo *vdo;
 
-	/* VDO-3769 - Set a generic reason so we don't ever return garbage. */
+	/* Initialize with a generic failure reason to prevent returning garbage. */
 	*reason = "Unspecified error";
 
 	result = vdo_allocate(1, struct vdo, __func__, &vdo);
@@ -727,6 +724,7 @@ void vdo_destroy(struct vdo *vdo)
 
 		vdo_free(vdo_forget(vdo->compression_context));
 	}
+	vdo_free(vdo);
 }
 
 static int initialize_super_block(struct vdo *vdo, struct vdo_super_block *super_block)

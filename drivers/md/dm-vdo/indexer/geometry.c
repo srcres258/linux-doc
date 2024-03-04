@@ -8,10 +8,10 @@
 #include <linux/compiler.h>
 #include <linux/log2.h>
 
-#include "../errors.h"
-#include "../logger.h"
-#include "../memory-alloc.h"
-#include "../permassert.h"
+#include "errors.h"
+#include "logger.h"
+#include "memory-alloc.h"
+#include "permassert.h"
 
 #include "delta-index.h"
 #include "indexer.h"

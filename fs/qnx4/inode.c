@@ -44,7 +44,7 @@ static const struct super_operations qnx4_sops =
 static int qnx4_reconfigure(struct fs_context *fc)
 {
 	struct super_block *sb = fc->root->d_sb;
-	struct qnx4_sb_info *qs = sb->s_fs_info;
+	struct qnx4_sb_info *qs;
 
 	sync_filesystem(sb);
 	qs = qnx4_sb(sb);

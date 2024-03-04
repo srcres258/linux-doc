@@ -27,7 +27,7 @@ enum {
 	VDO_LOG_DEFAULT = VDO_LOG_INFO,
 };
 
-extern int log_level;
+extern int vdo_log_level;
 
 #define DM_MSG_PREFIX "vdo"
 #define VDO_LOGGING_MODULE_NAME DM_NAME ": " DM_MSG_PREFIX
@@ -97,5 +97,4 @@ void __vdo_log_message(int priority, const char *module, const char *format, ...
 #define vdo_log_fatal(...) vdo_log_message(VDO_LOG_CRIT, __VA_ARGS__)
 
 void vdo_pause_for_logger(void);
-
 #endif /* VDO_LOGGER_H */

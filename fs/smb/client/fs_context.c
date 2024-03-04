@@ -832,9 +832,11 @@ static int smb3_verify_reconfigure_ctx(struct fs_context *fc,
 			cifs_errorf(fc,
 				    "can not change password of active session during remount\n");
 			return -EINVAL;
-		} else if (old_ctx->sectype == Kerberos)
+		} else if (old_ctx->sectype == Kerberos) {
 			cifs_errorf(fc,
 				    "can not change password for Kerberos via remount\n");
+			return -EINVAL;
+		}
 	}
 	if (new_ctx->domainname &&
 	    (!old_ctx->domainname || strcmp(new_ctx->domainname, old_ctx->domainname))) {

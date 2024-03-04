@@ -3,8 +3,13 @@
  * Copyright 2023 Red Hat
  */
 
-#include "funnel-requestqueue.h"
+
 #include "index.h"
+
+#include "logger.h"
+#include "memory-alloc.h"
+
+#include "funnel-requestqueue.h"
 #include "hash-utils.h"
 #include "sparse-cache.h"
 
@@ -110,7 +115,7 @@ static void enqueue_barrier_messages(struct uds_index *index, u64 virtual_chapte
 	for (zone = 0; zone < index->zone_count; zone++) {
 		int result = launch_zone_message(message, zone, index);
 
-		ASSERT_LOG_ONLY((result == UDS_SUCCESS), "barrier message allocation");
+		VDO_ASSERT_LOG_ONLY((result == UDS_SUCCESS), "barrier message allocation");
 	}
 }
 
@@ -752,7 +757,7 @@ static void free_chapter_writer(struct chapter_writer *writer)
 		return;
 
 	stop_chapter_writer(writer);
-	vdo_free_open_chapter_index(writer->open_chapter_index);
+	uds_free_open_chapter_index(writer->open_chapter_index);
 	vdo_free(writer->collated_records);
 	vdo_free(writer);
 }
@@ -1114,8 +1119,8 @@ static void free_index_zone(struct index_zone *zone)
 	if (zone == NULL)
 		return;
 
-	vdo_free_open_chapter(zone->open_chapter);
-	vdo_free_open_chapter(zone->writing_chapter);
+	uds_free_open_chapter(zone->open_chapter);
+	uds_free_open_chapter(zone->writing_chapter);
 	vdo_free(zone);
 }
 
@@ -1177,7 +1182,7 @@ int uds_make_index(struct uds_configuration *config, enum uds_open_index_type op
 	result = vdo_allocate(index->zone_count, struct index_zone *, "zones",
 			      &index->zones);
 	if (result != VDO_SUCCESS) {
-		vdo_free_index(index);
+		uds_free_index(index);
 		return result;
 	}
 
@@ -1191,7 +1196,7 @@ int uds_make_index(struct uds_configuration *config, enum uds_open_index_type op
 	for (z = 0; z < index->zone_count; z++) {
 		result = make_index_zone(index, z);
 		if (result != UDS_SUCCESS) {
-			vdo_free_index(index);
+			uds_free_index(index);
 			return vdo_log_error_strerror(result,
 						      "Could not create index zone");
 		}
@@ -1200,7 +1205,7 @@ int uds_make_index(struct uds_configuration *config, enum uds_open_index_type op
 	nonce = uds_get_volume_nonce(index->layout);
 	result = uds_make_volume_index(config, nonce, &index->volume_index);
 	if (result != UDS_SUCCESS) {
-		vdo_free_index(index);
+		uds_free_index(index);
 		return vdo_log_error_strerror(result, "could not make volume index");
 	}
 
@@ -1243,7 +1248,7 @@ int uds_make_index(struct uds_configuration *config, enum uds_open_index_type op
 	}
 
 	if (result != UDS_SUCCESS) {
-		vdo_free_index(index);
+		uds_free_index(index);
 		return vdo_log_error_strerror(result, "fatal error in %s()", __func__);
 	}
 
@@ -1290,8 +1295,8 @@ void vdo_free_index(struct uds_index *index)
 		vdo_free(index->zones);
 	}
 
-	vdo_free_volume(index->volume);
-	vdo_free_index_layout(vdo_forget(index->layout));
+	uds_free_volume(index->volume);
+	uds_free_index_layout(vdo_forget(index->layout));
 	vdo_free(index);
 }
 
@@ -1378,7 +1383,7 @@ void uds_enqueue_request(struct uds_request *request, enum request_stage stage)
 		break;
 
 	default:
-		ASSERT_LOG_ONLY(false, "invalid index stage: %d", stage);
+		VDO_ASSERT_LOG_ONLY(false, "invalid index stage: %d", stage);
 		return;
 	}
 

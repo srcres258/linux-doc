@@ -21,9 +21,7 @@
 #include "physical-zone.h"
 #include "vdo.h"
 
-enum {
-	ALLOCATIONS_PER_ZONE = 128,
-};
+#define ALLOCATIONS_PER_ZONE 128
 
 /**
  * as_logical_zone() - Convert a generic vdo_completion to a logical_zone.
@@ -295,8 +293,8 @@ static void notify_flusher(struct vdo_completion *completion)
 }
 
 /**
- * void attempt_generation_complete_notification() - Notify the flusher if some generation no
- *                                                   longer has active VIOs.
+ * attempt_generation_complete_notification() - Notify the flusher if some generation no
+ *                                              longer has active VIOs.
  * @completion: The zone completion.
  */
 static void attempt_generation_complete_notification(struct vdo_completion *completion)

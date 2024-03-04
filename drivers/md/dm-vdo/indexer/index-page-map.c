@@ -5,13 +5,13 @@
 
 #include "index-page-map.h"
 
-#include "../errors.h"
-#include "../logger.h"
-#include "../memory-alloc.h"
-#include "../numeric.h"
-#include "../permassert.h"
-#include "../string-utils.h"
-#include "../thread-utils.h"
+#include "errors.h"
+#include "logger.h"
+#include "memory-alloc.h"
+#include "numeric.h"
+#include "permassert.h"
+#include "string-utils.h"
+#include "thread-utils.h"
 
 #include "hash-utils.h"
 #include "indexer.h"
@@ -25,9 +25,7 @@
 
 static const u8 PAGE_MAP_MAGIC[] = "ALBIPM02";
 
-enum {
-	PAGE_MAP_MAGIC_LENGTH = sizeof(PAGE_MAP_MAGIC) - 1,
-};
+#define PAGE_MAP_MAGIC_LENGTH (sizeof(PAGE_MAP_MAGIC) - 1)
 
 static inline u32 get_entry_count(const struct index_geometry *geometry)
 {
@@ -49,7 +47,7 @@ int uds_make_index_page_map(const struct index_geometry *geometry,
 	result = vdo_allocate(get_entry_count(geometry), u16, "Index Page Map Entries",
 			      &map->entries);
 	if (result != VDO_SUCCESS) {
-		vdo_free_index_page_map(map);
+		uds_free_index_page_map(map);
 		return result;
 	}
 

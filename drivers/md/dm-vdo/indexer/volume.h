@@ -11,18 +11,17 @@
 #include <linux/dm-bufio.h>
 #include <linux/limits.h>
 
-#include "../permassert.h"
-#include "../thread-utils.h"
+#include "permassert.h"
+#include "thread-utils.h"
 
 #include "chapter-index.h"
 #include "config.h"
 #include "geometry.h"
+#include "indexer.h"
 #include "index-layout.h"
 #include "index-page-map.h"
 #include "radix-sort.h"
 #include "sparse-cache.h"
-#include "indexer.h"
-
 
 /*
  * The volume manages deduplication records on permanent storage. The term "volume" can also refer

@@ -402,7 +402,7 @@ static void virtio_fs_hiprio_done_work(struct work_struct *work)
 			kfree(req);
 			dec_in_flight_req(fsvq);
 		}
-	} while (!virtqueue_enable_cb(vq) && likely(!virtqueue_is_broken(vq)));
+	} while (!virtqueue_enable_cb(vq));
 	spin_unlock(&fsvq->lock);
 }
 
@@ -684,7 +684,7 @@ static void virtio_fs_requests_done_work(struct work_struct *work)
 			list_move_tail(&req->list, &reqs);
 			spin_unlock(&fpq->lock);
 		}
-	} while (!virtqueue_enable_cb(vq) && likely(!virtqueue_is_broken(vq)));
+	} while (!virtqueue_enable_cb(vq));
 	spin_unlock(&fsvq->lock);
 
 	/* End requests */

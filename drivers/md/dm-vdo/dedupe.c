@@ -131,7 +131,7 @@
 #include "permassert.h"
 #include "string-utils.h"
 
-#include "indexer/indexer.h"
+#include "indexer.h"
 
 #include "action-manager.h"
 #include "admin-state.h"
@@ -153,11 +153,9 @@ struct uds_attribute {
 	const char *(*show_string)(struct hash_zones *hash_zones);
 };
 
-enum timer_state {
-	DEDUPE_QUERY_TIMER_IDLE,
-	DEDUPE_QUERY_TIMER_RUNNING,
-	DEDUPE_QUERY_TIMER_FIRED,
-};
+#define DEDUPE_QUERY_TIMER_IDLE 0
+#define DEDUPE_QUERY_TIMER_RUNNING 1
+#define DEDUPE_QUERY_TIMER_FIRED 2
 
 enum dedupe_context_state {
 	DEDUPE_CONTEXT_IDLE,
@@ -184,11 +182,9 @@ static const char *SUSPENDED = "suspended";
 static const char *UNKNOWN = "unknown";
 
 /* Version 2 uses the kernel space UDS index and is limited to 16 bytes */
-enum {
-	UDS_ADVICE_VERSION = 2,
-	/* version byte + state byte + 64-bit little-endian PBN */
-	UDS_ADVICE_SIZE = 1 + 1 + sizeof(u64),
-};
+#define UDS_ADVICE_VERSION 2
+/* version byte + state byte + 64-bit little-endian PBN */
+#define UDS_ADVICE_SIZE (1 + 1 + sizeof(u64))
 
 enum hash_lock_state {
 	/* State for locks that are not in use or are being initialized. */
@@ -278,9 +274,7 @@ struct hash_lock {
 	struct vdo_wait_queue waiters;
 };
 
-enum {
-	LOCK_POOL_CAPACITY = MAXIMUM_VDO_USER_VIOS,
-};
+#define LOCK_POOL_CAPACITY MAXIMUM_VDO_USER_VIOS
 
 struct hash_zones {
 	struct action_manager *manager;
@@ -2026,8 +2020,6 @@ void vdo_share_compressed_write_lock(struct data_vio *data_vio,
 	VDO_ASSERT_LOG_ONLY(claimed, "impossible to fail to claim an initial increment");
 }
 
-/*----------------------------------------------------------------------*/
-
 static void start_uds_queue(void *ptr)
 {
 	/*
@@ -2492,8 +2484,7 @@ void vdo_free_hash_zones(struct hash_zones *zones)
 		vdo_finish_dedupe_index(zones);
 
 	ratelimit_state_exit(&zones->ratelimiter);
-	if (vdo_get_admin_state_code(&zones->state) == VDO_ADMIN_STATE_NEW)
-		vdo_free(zones);
+	vdo_free(zones);
 }
 
 static void initiate_suspend_index(struct admin_state *state)
@@ -2785,7 +2776,7 @@ static const char *index_state_to_string(struct hash_zones *zones,
 }
 
 /**
- * vdo_dump_hash_zone() - Dump information about a hash zone to the log for debugging.
+ * dump_hash_zone() - Dump information about a hash zone to the log for debugging.
  * @zone: The zone to dump.
  */
 static void dump_hash_zone(const struct hash_zone *zone)
@@ -2998,6 +2989,11 @@ int vdo_message_dedupe_index(struct hash_zones *zones, const char *name)
 	}
 
 	return -EINVAL;
+}
+
+void vdo_set_dedupe_state_normal(struct hash_zones *zones)
+{
+	vdo_set_admin_state_code(&zones->state, VDO_ADMIN_STATE_NORMAL_OPERATION);
 }
 
 /* If create_flag, create a new index without first attempting to load an existing index. */

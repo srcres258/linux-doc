@@ -9,7 +9,7 @@
 #include <linux/atomic.h>
 #include <linux/cache.h>
 
-#include "../thread-utils.h"
+#include "thread-utils.h"
 
 #include "config.h"
 #include "indexer.h"
