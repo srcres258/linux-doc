@@ -2413,7 +2413,7 @@ static void btrfs_add_delalloc_inode(struct btrfs_inode *inode)
 	spin_unlock(&root->delalloc_lock);
 }
 
-void __btrfs_del_delalloc_inode(struct btrfs_inode *inode)
+void btrfs_del_delalloc_inode(struct btrfs_inode *inode)
 {
 	struct btrfs_root *root = inode->root;
 	struct btrfs_fs_info *fs_info = root->fs_info;
@@ -2437,13 +2437,6 @@ void __btrfs_del_delalloc_inode(struct btrfs_inode *inode)
 			spin_unlock(&fs_info->delalloc_root_lock);
 		}
 	}
-}
-
-static void btrfs_del_delalloc_inode(struct btrfs_inode *inode)
-{
-	spin_lock(&inode->root->delalloc_lock);
-	__btrfs_del_delalloc_inode(inode);
-	spin_unlock(&inode->root->delalloc_lock);
 }
 
 /*
@@ -2568,8 +2561,11 @@ void btrfs_clear_delalloc_extent(struct btrfs_inode *inode,
 		 * and are therefore protected against concurrent calls of this
 		 * function and btrfs_set_delalloc_extent().
 		 */
-		if (!btrfs_is_free_space_inode(inode) && new_delalloc_bytes == 0)
+		if (!btrfs_is_free_space_inode(inode) && new_delalloc_bytes == 0) {
+			spin_lock(&root->delalloc_lock);
 			btrfs_del_delalloc_inode(inode);
+			spin_unlock(&root->delalloc_lock);
+		}
 	}
 
 	if ((state->state & EXTENT_DELALLOC_NEW) &&
@@ -8739,7 +8735,7 @@ int __init btrfs_init_cachep(void)
 {
 	btrfs_inode_cachep = kmem_cache_create("btrfs_inode",
 			sizeof(struct btrfs_inode), 0,
-			SLAB_RECLAIM_ACCOUNT | SLAB_MEM_SPREAD | SLAB_ACCOUNT,
+			SLAB_RECLAIM_ACCOUNT | SLAB_ACCOUNT,
 			init_once);
 	if (!btrfs_inode_cachep)
 		goto fail;

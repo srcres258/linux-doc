@@ -71,6 +71,9 @@
 
 #include "cpu.h"
 
+DEFINE_PER_CPU_READ_MOSTLY(struct cpuinfo_x86, cpu_info);
+EXPORT_PER_CPU_SYMBOL(cpu_info);
+
 u32 elf_hwcap2 __read_mostly;
 
 /* Number of siblings per CPU package */
@@ -1853,8 +1856,6 @@ static void identify_cpu(struct cpuinfo_x86 *c)
 	/* Init Machine Check Exception if available. */
 	mcheck_cpu_init(c);
 
-	select_idle_routine(c);
-
 #ifdef CONFIG_NUMA
 	numa_add_cpu(smp_processor_id());
 #endif
@@ -2275,6 +2276,8 @@ void arch_smt_update(void)
 void __init arch_cpu_finalize_init(void)
 {
 	identify_boot_cpu();
+
+	select_idle_routine();
 
 	/*
 	 * identify_boot_cpu() initialized SMT support information, let the

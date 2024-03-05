@@ -198,10 +198,7 @@ static struct kmem_cache *btrfs_prelim_ref_cache;
 int __init btrfs_prelim_ref_init(void)
 {
 	btrfs_prelim_ref_cache = kmem_cache_create("btrfs_prelim_ref",
-					sizeof(struct prelim_ref),
-					0,
-					SLAB_MEM_SPREAD,
-					NULL);
+					sizeof(struct prelim_ref), 0, 0, NULL);
 	if (!btrfs_prelim_ref_cache)
 		return -ENOMEM;
 	return 0;
@@ -2848,6 +2845,16 @@ int btrfs_backref_iter_init(struct btrfs_fs_info *fs_info,
 	iter->fs_info = fs_info;
 
 	return 0;
+}
+
+static void btrfs_backref_iter_release(struct btrfs_backref_iter *iter)
+{
+	iter->bytenr = 0;
+	iter->item_ptr = 0;
+	iter->cur_ptr = 0;
+	iter->end_ptr = 0;
+	btrfs_release_path(iter->path);
+	memset(&iter->cur_key, 0, sizeof(iter->cur_key));
 }
 
 static void btrfs_backref_iter_release(struct btrfs_backref_iter *iter)
