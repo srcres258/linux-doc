@@ -906,22 +906,8 @@ static int exynos5_i2c_probe(struct platform_device *pdev)
 	i2c->adap.algo_data = i2c;
 	i2c->adap.dev.parent = &pdev->dev;
 
-	/* Clear pending interrupts from u-boot or misc causes */
-	exynos5_i2c_clr_pend_irq(i2c);
-
 	spin_lock_init(&i2c->lock);
 	init_completion(&i2c->msg_complete);
-
-	i2c->irq = ret = platform_get_irq(pdev, 0);
-	if (ret < 0)
-		goto err_clk;
-
-	ret = devm_request_irq(&pdev->dev, i2c->irq, exynos5_i2c_irq,
-			       IRQF_NO_SUSPEND, dev_name(&pdev->dev), i2c);
-	if (ret != 0) {
-		dev_err(&pdev->dev, "cannot request HS-I2C IRQ %d\n", i2c->irq);
-		goto err_clk;
-	}
 
 	i2c->variant = of_device_get_match_data(&pdev->dev);
 
@@ -939,6 +925,21 @@ static int exynos5_i2c_probe(struct platform_device *pdev)
 
 	clk_disable(i2c->clk);
 	clk_disable(i2c->pclk);
+
+	/* Clear pending interrupts from u-boot or misc causes */
+	exynos5_i2c_clr_pend_irq(i2c);
+
+	ret = platform_get_irq(pdev, 0);
+	if (ret < 0)
+		goto err_clk;
+	i2c->irq = ret;
+
+	ret = devm_request_irq(&pdev->dev, i2c->irq, exynos5_i2c_irq,
+			       IRQF_NO_SUSPEND, dev_name(&pdev->dev), i2c);
+	if (ret != 0) {
+		dev_err(&pdev->dev, "cannot request HS-I2C IRQ %d\n", i2c->irq);
+		goto err_clk;
+	}
 
 	return 0;
 
