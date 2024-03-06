@@ -1286,7 +1286,9 @@ struct swap_info_struct *get_swap_device(swp_entry_t entry)
 	smp_rmb();
 	offset = swp_offset(entry);
 	if (offset >= si->max)
-		goto put_out;
+		goto bad_offset;
+	if (data_race(!si->swap_map[swp_offset(entry)]))
+		goto bad_free;
 
 	return si;
 bad_nofile:
@@ -1294,9 +1296,14 @@ bad_nofile:
 out:
 	return NULL;
 put_out:
-	pr_err("%s: %s%08lx\n", __func__, Bad_offset, entry.val);
 	percpu_ref_put(&si->users);
 	return NULL;
+bad_offset:
+	pr_err("%s: %s%08lx\n", __func__, Bad_offset, entry.val);
+	goto put_out;
+bad_free:
+	pr_err("%s: %s%08lx\n", __func__, Unused_offset, entry.val);
+	goto put_out;
 }
 
 static unsigned char __swap_entry_free(struct swap_info_struct *p,
