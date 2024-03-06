@@ -1214,6 +1214,8 @@ int btrfs_read_folio(struct file *file, struct folio *folio)
 	btrfs_lock_and_flush_ordered_range(inode, start, end, NULL);
 
 	ret = btrfs_do_readpage(page, &em_cached, &bio_ctrl, NULL);
+	free_extent_map(em_cached);
+
 	/*
 	 * If btrfs_do_readpage() failed we will want to submit the assembled
 	 * bio to do the cleanup.

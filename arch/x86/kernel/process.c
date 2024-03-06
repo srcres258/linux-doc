@@ -963,7 +963,7 @@ void __init arch_post_acpi_subsys_init(void)
 	if (!boot_cpu_has(X86_FEATURE_NONSTOP_TSC))
 		mark_tsc_unstable("TSC halt in AMD C1E");
 
-	if (IS_ENABLED(GENERIC_CLOCKEVENTS_BROADCAST_IDLE))
+	if (IS_ENABLED(CONFIG_GENERIC_CLOCKEVENTS_BROADCAST_IDLE))
 		static_branch_enable(&arch_needs_tick_broadcast);
 	pr_info("System has AMD C1E erratum E400. Workaround enabled.\n");
 }

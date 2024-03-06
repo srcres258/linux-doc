@@ -1,15 +1,12 @@
+// SPDX-License-Identifier: GPL-2.0 OR BSD-3-Clause
 /*
  * Test cases for lib/string_helpers.c module.
  */
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
 
-#include <linux/array_size.h>
-#include <linux/init.h>
 #include <kunit/test.h>
 #include <linux/array_size.h>
 #include <linux/kernel.h>
-#include <linux/slab.h>
-#include <linux/module.h>
 #include <linux/random.h>
 #include <linux/string.h>
 #include <linux/string_helpers.h>
@@ -20,24 +17,9 @@ static void test_string_check_buf(struct kunit *test,
 				  char *out_real, size_t q_real,
 				  char *out_test, size_t q_test)
 {
-	int result;
-
-	KUNIT_EXPECT_EQ(test, q_real, q_test);
-
-	result = memcmp(out_test, out_real, q_test);
-	KUNIT_EXPECT_EQ(test, 0, result);
-
-	if (q_real == q_test && result == 0)
-		return;
-
-	pr_warn("Test '%s' failed: flags = %#x\n", name, flags);
-
-	print_hex_dump(KERN_WARNING, "Input: ", DUMP_PREFIX_NONE, 16, 1,
-		       in, p, true);
-	print_hex_dump(KERN_WARNING, "Expected: ", DUMP_PREFIX_NONE, 16, 1,
-		       out_test, q_test, true);
-	print_hex_dump(KERN_WARNING, "Got: ", DUMP_PREFIX_NONE, 16, 1,
-		       out_real, q_real, true);
+	KUNIT_ASSERT_EQ_MSG(test, q_real, q_test, "name:%s", name);
+	KUNIT_EXPECT_MEMEQ_MSG(test, out_test, out_real, q_test,
+			       "name:%s", name);
 }
 
 struct test_string {
@@ -74,13 +56,14 @@ static void test_string_unescape(struct kunit *test,
 				 bool inplace)
 {
 	int q_real = 256;
-	char *in = kmalloc(q_real, GFP_KERNEL);
-	char *out_test = kmalloc(q_real, GFP_KERNEL);
-	char *out_real = kmalloc(q_real, GFP_KERNEL);
+	char *in = kunit_kzalloc(test, q_real, GFP_KERNEL);
+	char *out_test = kunit_kzalloc(test, q_real, GFP_KERNEL);
+	char *out_real = kunit_kzalloc(test, q_real, GFP_KERNEL);
 	int i, p = 0, q_test = 0;
 
-	if (!in || !out_test || !out_real)
-		goto out;
+	KUNIT_ASSERT_NOT_ERR_OR_NULL(test, in);
+	KUNIT_ASSERT_NOT_ERR_OR_NULL(test, out_test);
+	KUNIT_ASSERT_NOT_ERR_OR_NULL(test, out_real);
 
 	for (i = 0; i < ARRAY_SIZE(strings); i++) {
 		const char *s = strings[i].in;
@@ -115,10 +98,6 @@ static void test_string_unescape(struct kunit *test,
 
 	test_string_check_buf(test, name, flags, in, p - 1, out_real, q_real,
 			      out_test, q_test);
-out:
-	kfree(out_real);
-	kfree(out_test);
-	kfree(in);
 }
 
 struct test_string_1 {
@@ -420,7 +399,7 @@ test_string_escape_overflow(struct kunit *test,
 	int q_real;
 
 	q_real = string_escape_mem(in, p, NULL, 0, flags, esc);
-	KUNIT_EXPECT_EQ(test, q_real, q_test);
+	KUNIT_EXPECT_EQ_MSG(test, q_real, q_test, "name:%s: flags:%#x", name, flags);
 }
 
 static void test_string_escape(struct kunit *test, const char *name,
@@ -428,14 +407,15 @@ static void test_string_escape(struct kunit *test, const char *name,
 			       unsigned int flags, const char *esc)
 {
 	size_t out_size = 512;
-	char *out_test = kmalloc(out_size, GFP_KERNEL);
-	char *out_real = kmalloc(out_size, GFP_KERNEL);
-	char *in = kmalloc(256, GFP_KERNEL);
+	char *out_test = kunit_kzalloc(test, out_size, GFP_KERNEL);
+	char *out_real = kunit_kzalloc(test, out_size, GFP_KERNEL);
+	char *in = kunit_kzalloc(test, 256, GFP_KERNEL);
 	int p = 0, q_test = 0;
 	int q_real;
 
-	if (!out_test || !out_real || !in)
-		goto out;
+	KUNIT_ASSERT_NOT_ERR_OR_NULL(test, out_test);
+	KUNIT_ASSERT_NOT_ERR_OR_NULL(test, out_real);
+	KUNIT_ASSERT_NOT_ERR_OR_NULL(test, in);
 
 	for (; s2->in; s2++) {
 		const char *out;
@@ -475,11 +455,6 @@ static void test_string_escape(struct kunit *test, const char *name,
 			      q_test);
 
 	test_string_escape_overflow(test, in, p, flags, esc, q_test, name);
-
-out:
-	kfree(in);
-	kfree(out_real);
-	kfree(out_test);
 }
 
 #define string_get_size_maxbuf 16
@@ -499,21 +474,12 @@ static void test_string_get_size_check(struct kunit *test,
 				       const u64 size,
 				       const u64 blk_size)
 {
-	int result = memcmp(res, exp, strlen(exp) + 1);
-
-	KUNIT_EXPECT_EQ(test, 0, result);
-	if (!result)
-		return;
-
-	res[string_get_size_maxbuf - 1] = '\0';
-
-	pr_warn("Test 'test_string_get_size' failed!\n");
-	pr_warn("string_get_size(size = %llu, blk_size = %llu, units = %s)\n",
+	KUNIT_EXPECT_MEMEQ_MSG(test, res, exp, strlen(exp) + 1,
+		"string_get_size(size = %llu, blk_size = %llu, units = %s)",
 		size, blk_size, units);
-	pr_warn("expected: '%s', got '%s'\n", exp, res);
 }
 
-static __init void __strchrcut(char *dst, const char *src, const char *cut)
+static void __strchrcut(char *dst, const char *src, const char *cut)
 {
 	const char *from = src;
 	size_t len;
@@ -527,11 +493,12 @@ static __init void __strchrcut(char *dst, const char *src, const char *cut)
 	*dst = '\0';
 }
 
-static __init void __test_string_get_size_one(const u64 size, const u64 blk_size,
-					      const char *exp_result10,
-					      const char *exp_result2,
-					      enum string_size_units units,
-					      const char *cut)
+static void __test_string_get_size_one(struct kunit *test,
+				       const u64 size, const u64 blk_size,
+				       const char *exp_result10,
+				       const char *exp_result2,
+				       enum string_size_units units,
+				       const char *cut)
 {
 	char buf10[string_get_size_maxbuf];
 	char buf2[string_get_size_maxbuf];
@@ -549,29 +516,8 @@ static __init void __test_string_get_size_one(const u64 size, const u64 blk_size
 	string_get_size(size, blk_size, STRING_UNITS_10 | units, buf10, sizeof(buf10));
 	string_get_size(size, blk_size, STRING_UNITS_2 | units, buf2, sizeof(buf2));
 
-	test_string_get_size_check(prefix10, exp10, buf10, size, blk_size);
-	test_string_get_size_check(prefix2, exp2, buf2, size, blk_size);
-}
-
-static __init void __test_string_get_size(const u64 size, const u64 blk_size,
-					  const char *exp_result10,
-					  const char *exp_result2)
-{
-	struct {
-		enum string_size_units units;
-		const char *cut;
-	} get_size_test_cases[] = {
-		{ 0, "" },
-		{ STRING_UNITS_NO_SPACE, " " },
-		{ STRING_UNITS_NO_SPACE | STRING_UNITS_NO_BYTES, " B" },
-		{ STRING_UNITS_NO_BYTES, "B" },
-	};
-	int i;
-
-	for (i = 0; i < ARRAY_SIZE(get_size_test_cases); i++)
-		__test_string_get_size_one(size, blk_size, exp_result10, exp_result2,
-					   get_size_test_cases[i].units,
-					   get_size_test_cases[i].cut);
+	test_string_get_size_check(test, prefix10, exp10, buf10, size, blk_size);
+	test_string_get_size_check(test, prefix2, exp2, buf2, size, blk_size);
 }
 
 static void __test_string_get_size(struct kunit *test,
@@ -631,11 +577,7 @@ static void test_upper_lower(struct kunit *test)
 		KUNIT_ASSERT_NOT_NULL(test, dst);
 
 		string_upper(dst, s);
-		result = memcmp(dst, strings_upper[i].out, len);
-		KUNIT_EXPECT_EQ(test, 0, result);
-		if (result)
-			pr_warn("Test 'string_upper' failed : expected %s, got %s!\n",
-				strings_upper[i].out, dst);
+		KUNIT_EXPECT_STREQ(test, dst, strings_upper[i].out);
 		kfree(dst);
 	}
 
@@ -648,11 +590,7 @@ static void test_upper_lower(struct kunit *test)
 		KUNIT_ASSERT_NOT_NULL(test, dst);
 
 		string_lower(dst, s);
-		result = memcmp(dst, strings_lower[i].out, len);
-		KUNIT_EXPECT_EQ(test, 0, result);
-		if (result)
-			pr_warn("Test 'string_lower failed : : expected %s, got %s!\n",
-				strings_lower[i].out, dst);
+		KUNIT_EXPECT_STREQ(test, dst, strings_lower[i].out);
 		kfree(dst);
 	}
 }

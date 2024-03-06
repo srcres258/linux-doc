@@ -20,6 +20,7 @@
 #include <linux/fs.h>
 #include <linux/filelock.h>
 #include <linux/splice.h>
+#include <linux/task_io_accounting_ops.h>
 
 static int fuse_send_open(struct fuse_mount *fm, u64 nodeid,
 			  unsigned int open_flags, int opcode,
@@ -1405,7 +1406,7 @@ static ssize_t fuse_cache_write_iter(struct kiocb *iocb, struct iov_iter *from)
 	struct address_space *mapping = file->f_mapping;
 	ssize_t written = 0;
 	struct inode *inode = mapping->host;
-	ssize_t err;
+	ssize_t err, count;
 	struct fuse_conn *fc = get_fuse_conn(inode);
 
 	if (fc->writeback_cache) {
@@ -1427,9 +1428,11 @@ static ssize_t fuse_cache_write_iter(struct kiocb *iocb, struct iov_iter *from)
 writethrough:
 	inode_lock(inode);
 
-	err = generic_write_checks(iocb, from);
+	err = count = generic_write_checks(iocb, from);
 	if (err <= 0)
 		goto out;
+
+	task_io_account_write(count);
 
 	err = file_remove_privs(file);
 	if (err)
@@ -1668,6 +1671,7 @@ static ssize_t fuse_direct_write_iter(struct kiocb *iocb, struct iov_iter *from)
 	fuse_dio_lock(iocb, from, &exclusive);
 	res = generic_write_checks(iocb, from);
 	if (res > 0) {
+		task_io_account_write(res);
 		if (!is_sync_kiocb(iocb) && iocb->ki_flags & IOCB_DIRECT) {
 			res = fuse_direct_IO(iocb, from);
 		} else {
@@ -2040,26 +2044,26 @@ static void fuse_writepage_add_to_bucket(struct fuse_conn *fc,
 	rcu_read_unlock();
 }
 
-static int fuse_writepage_locked(struct page *page)
+static int fuse_writepage_locked(struct folio *folio)
 {
-	struct address_space *mapping = page->mapping;
+	struct address_space *mapping = folio->mapping;
 	struct inode *inode = mapping->host;
 	struct fuse_conn *fc = get_fuse_conn(inode);
 	struct fuse_inode *fi = get_fuse_inode(inode);
 	struct fuse_writepage_args *wpa;
 	struct fuse_args_pages *ap;
-	struct page *tmp_page;
+	struct folio *tmp_folio;
 	int error = -ENOMEM;
 
-	set_page_writeback(page);
+	folio_start_writeback(folio);
 
 	wpa = fuse_writepage_args_alloc();
 	if (!wpa)
 		goto err;
 	ap = &wpa->ia.ap;
 
-	tmp_page = alloc_page(GFP_NOFS | __GFP_HIGHMEM);
-	if (!tmp_page)
+	tmp_folio = folio_alloc(GFP_NOFS | __GFP_HIGHMEM, 0);
+	if (!tmp_folio)
 		goto err_free;
 
 	error = -EIO;
@@ -2068,21 +2072,21 @@ static int fuse_writepage_locked(struct page *page)
 		goto err_nofile;
 
 	fuse_writepage_add_to_bucket(fc, wpa);
-	fuse_write_args_fill(&wpa->ia, wpa->ia.ff, page_offset(page), 0);
+	fuse_write_args_fill(&wpa->ia, wpa->ia.ff, folio_pos(folio), 0);
 
-	copy_highpage(tmp_page, page);
+	folio_copy(tmp_folio, folio);
 	wpa->ia.write.in.write_flags |= FUSE_WRITE_CACHE;
 	wpa->next = NULL;
 	ap->args.in_pages = true;
 	ap->num_pages = 1;
-	ap->pages[0] = tmp_page;
+	ap->pages[0] = &tmp_folio->page;
 	ap->descs[0].offset = 0;
 	ap->descs[0].length = PAGE_SIZE;
 	ap->args.end = fuse_writepage_end;
 	wpa->inode = inode;
 
 	inc_wb_stat(&inode_to_bdi(inode)->wb, WB_WRITEBACK);
-	inc_node_page_state(tmp_page, NR_WRITEBACK_TEMP);
+	node_stat_add_folio(tmp_folio, NR_WRITEBACK_TEMP);
 
 	spin_lock(&fi->lock);
 	tree_insert(&fi->writepages, wpa);
@@ -2090,46 +2094,18 @@ static int fuse_writepage_locked(struct page *page)
 	fuse_flush_writepages(inode);
 	spin_unlock(&fi->lock);
 
-	end_page_writeback(page);
+	folio_end_writeback(folio);
 
 	return 0;
 
 err_nofile:
-	__free_page(tmp_page);
+	folio_put(tmp_folio);
 err_free:
 	kfree(wpa);
 err:
-	mapping_set_error(page->mapping, error);
-	end_page_writeback(page);
+	mapping_set_error(folio->mapping, error);
+	folio_end_writeback(folio);
 	return error;
-}
-
-static int fuse_writepage(struct page *page, struct writeback_control *wbc)
-{
-	struct fuse_conn *fc = get_fuse_conn(page->mapping->host);
-	int err;
-
-	if (fuse_page_is_writeback(page->mapping->host, page->index)) {
-		/*
-		 * ->writepages() should be called for sync() and friends.  We
-		 * should only get here on direct reclaim and then we are
-		 * allowed to skip a page which is already in flight
-		 */
-		WARN_ON(wbc->sync_mode == WB_SYNC_ALL);
-
-		redirty_page_for_writepage(wbc, page);
-		unlock_page(page);
-		return 0;
-	}
-
-	if (wbc->sync_mode == WB_SYNC_NONE &&
-	    fc->num_background >= fc->congestion_threshold)
-		return AOP_WRITEPAGE_ACTIVATE;
-
-	err = fuse_writepage_locked(page);
-	unlock_page(page);
-
-	return err;
 }
 
 struct fuse_fill_wb_data {
@@ -2494,7 +2470,7 @@ static int fuse_launder_folio(struct folio *folio)
 
 		/* Serialize with pending writeback for the same page */
 		fuse_wait_on_page_writeback(inode, folio->index);
-		err = fuse_writepage_locked(&folio->page);
+		err = fuse_writepage_locked(folio);
 		if (!err)
 			fuse_wait_on_page_writeback(inode, folio->index);
 	}
@@ -3347,10 +3323,10 @@ static const struct file_operations fuse_file_operations = {
 static const struct address_space_operations fuse_file_aops  = {
 	.read_folio	= fuse_read_folio,
 	.readahead	= fuse_readahead,
-	.writepage	= fuse_writepage,
 	.writepages	= fuse_writepages,
 	.launder_folio	= fuse_launder_folio,
 	.dirty_folio	= filemap_dirty_folio,
+	.migrate_folio	= filemap_migrate_folio,
 	.bmap		= fuse_bmap,
 	.direct_IO	= fuse_direct_IO,
 	.write_begin	= fuse_write_begin,
