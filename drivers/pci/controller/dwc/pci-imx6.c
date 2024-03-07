@@ -1330,6 +1330,7 @@ static int imx6_pcie_probe(struct platform_device *pdev)
 	case IMX7D:
 		if (dbi_base->start == IMX8MQ_PCIE2_BASE_ADDR)
 			imx6_pcie->controller_id = 1;
+		break;
 	default:
 		break;
 	}

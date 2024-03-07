@@ -354,7 +354,7 @@ static void _rtl92e_dm_check_rate_adaptive(struct net_device *dev)
 			}
 		}
 
-		if (priv->rtllib->GetHalfNmodeSupportByAPsHandler(dev))
+		if (priv->rtllib->get_half_nmode_support_by_aps_handler(dev))
 			target_ratr &=  0xf00fffff;
 
 		current_ratr = rtl92e_readl(dev, RATR0);
@@ -1523,7 +1523,7 @@ static void _rtl92e_dm_init_fsync(struct net_device *dev)
 	priv->rtllib->fsync_multiple_timeinterval = 3;
 	priv->rtllib->fsync_firstdiff_ratethreshold = 100;
 	priv->rtllib->fsync_seconddiff_ratethreshold = 200;
-	priv->rtllib->fsync_state = Default_Fsync;
+	priv->rtllib->fsync_state = DEFAULT_FSYNC;
 
 	timer_setup(&priv->fsync_timer, _rtl92e_dm_fsync_timer_callback, 0);
 }
@@ -1716,31 +1716,29 @@ static void _rtl92e_dm_check_fsync(struct net_device *dev)
 	    priv->rtllib->ht_info->iot_peer == HT_IOT_PEER_BROADCOM) {
 		if (priv->rtllib->bfsync_enable == 0) {
 			switch (priv->rtllib->fsync_state) {
-			case Default_Fsync:
+			case DEFAULT_FSYNC:
 				_rtl92e_dm_start_hw_fsync(dev);
-				priv->rtllib->fsync_state = HW_Fsync;
+				priv->rtllib->fsync_state = HW_FSYNC;
 				break;
-			case SW_Fsync:
+			case SW_FSYNC:
 				_rtl92e_dm_end_sw_fsync(dev);
 				_rtl92e_dm_start_hw_fsync(dev);
-				priv->rtllib->fsync_state = HW_Fsync;
+				priv->rtllib->fsync_state = HW_FSYNC;
 				break;
-			case HW_Fsync:
 			default:
 				break;
 			}
 		} else {
 			switch (priv->rtllib->fsync_state) {
-			case Default_Fsync:
+			case DEFAULT_FSYNC:
 				_rtl92e_dm_start_sw_fsync(dev);
-				priv->rtllib->fsync_state = SW_Fsync;
+				priv->rtllib->fsync_state = SW_FSYNC;
 				break;
-			case HW_Fsync:
+			case HW_FSYNC:
 				_rtl92e_dm_end_hw_fsync(dev);
 				_rtl92e_dm_start_sw_fsync(dev);
-				priv->rtllib->fsync_state = SW_Fsync;
+				priv->rtllib->fsync_state = SW_FSYNC;
 				break;
-			case SW_Fsync:
 			default:
 				break;
 			}
@@ -1752,15 +1750,14 @@ static void _rtl92e_dm_check_fsync(struct net_device *dev)
 		}
 	} else {
 		switch (priv->rtllib->fsync_state) {
-		case HW_Fsync:
+		case HW_FSYNC:
 			_rtl92e_dm_end_hw_fsync(dev);
-			priv->rtllib->fsync_state = Default_Fsync;
+			priv->rtllib->fsync_state = DEFAULT_FSYNC;
 			break;
-		case SW_Fsync:
+		case SW_FSYNC:
 			_rtl92e_dm_end_sw_fsync(dev);
-			priv->rtllib->fsync_state = Default_Fsync;
+			priv->rtllib->fsync_state = DEFAULT_FSYNC;
 			break;
-		case Default_Fsync:
 		default:
 			break;
 		}

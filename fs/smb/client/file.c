@@ -2886,13 +2886,13 @@ static ssize_t cifs_write_back_from_locked_folio(struct address_space *mapping,
 	struct cifsFileInfo *cfile = NULL;
 	unsigned long long i_size = i_size_read(inode), max_len;
 	unsigned int xid, wsize;
-	size_t len = 0;
+	size_t len = folio_size(folio);
 	long count = wbc->nr_to_write;
 	int rc;
 
 	/* The folio should be locked, dirty and not undergoing writeback. */
 	if (!folio_clear_dirty_for_io(folio))
-		BUG();
+		WARN_ON_ONCE(1);
 	folio_start_writeback(folio);
 
 	count -= folio_nr_pages(folio);

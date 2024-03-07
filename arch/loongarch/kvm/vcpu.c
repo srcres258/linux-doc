@@ -304,6 +304,9 @@ static int _kvm_get_cpucfg_mask(int id, u64 *v)
 		return -EINVAL;
 
 	switch (id) {
+	case LOONGARCH_CPUCFG0:
+		*v = GENMASK(31, 0);
+		return 0;
 	case LOONGARCH_CPUCFG1:
 		/* CPUCFG1_MSGINT is not supported by KVM */
 		*v = GENMASK(25, 0);

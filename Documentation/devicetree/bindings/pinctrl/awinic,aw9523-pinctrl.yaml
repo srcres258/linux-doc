@@ -46,14 +46,14 @@ properties:
   reset-gpios:
     maxItems: 1
 
-#PIN CONFIGURATION NODES
+# PIN CONFIGURATION NODES
 patternProperties:
   '-pins$':
     type: object
     description:
       Pinctrl node's client devices use subnodes for desired pin configuration.
       Client device subnodes use below standard properties.
-    $ref: "/schemas/pinctrl/pincfg-node.yaml"
+    $ref: /schemas/pinctrl/pincfg-node.yaml
 
     properties:
       pins:

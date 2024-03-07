@@ -911,28 +911,28 @@ static struct page *dump_page_copy(struct page *src, struct page *dst)
 {
 	void *buf = kmap_local_page(src);
 	size_t left = copy_mc_to_kernel(page_address(dst), buf, PAGE_SIZE);
-
 	kunmap_local(buf);
 	return left ? NULL : dst;
 }
 
 #else
 
-#define dump_page_alloc() ((struct page *)8) // Not NULL
-#define dump_page_free(x) do { } while (0)
-static struct page *dump_page_copy(struct page *src, struct page *dst)
+/* We just want to return non-NULL; it's never used. */
+#define dump_page_alloc() ERR_PTR(-EINVAL)
+#define dump_page_free(x) ((void)(x))
+static inline struct page *dump_page_copy(struct page *src, struct page *dst)
 {
-        return src;
+	return src;
 }
-
 #endif
 
 int dump_user_range(struct coredump_params *cprm, unsigned long start,
 		    unsigned long len)
 {
 	unsigned long addr;
-	struct page *dump_page = dump_page_alloc();
+	struct page *dump_page;
 
+	dump_page = dump_page_alloc();
 	if (!dump_page)
 		return 0;
 

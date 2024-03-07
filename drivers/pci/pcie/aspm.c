@@ -24,126 +24,6 @@
 
 #include "../pci.h"
 
-void pci_aspm_get_l1ss(struct pci_dev *pdev)
-{
-	/* Read L1 PM substate capabilities */
-	pdev->l1ss = pci_find_ext_capability(pdev, PCI_EXT_CAP_ID_L1SS);
-}
-
-void pci_save_aspm_state(struct pci_dev *pdev)
-{
-	struct pci_cap_saved_state *save_state;
-	u16 l1ss = pdev->l1ss;
-	u32 *cap;
-
-	/*
-	 * Save L1 substate configuration. The ASPM L0s/L1 configuration
-	 * is already saved in pci_save_pcie_state().
-	 */
-	if (!l1ss)
-		return;
-
-	save_state = pci_find_saved_ext_cap(pdev, PCI_EXT_CAP_ID_L1SS);
-	if (!save_state)
-		return;
-
-	cap = &save_state->cap.data[0];
-	pci_read_config_dword(pdev, l1ss + PCI_L1SS_CTL2, cap++);
-	pci_read_config_dword(pdev, l1ss + PCI_L1SS_CTL1, cap++);
-}
-
-static void pcie_restore_aspm_l1ss(struct pci_dev *pdev)
-{
-	struct pci_cap_saved_state *pl_save_state, *cl_save_state;
-	struct pci_dev *parent = pdev->bus->self;
-	u32 *cap, pl_ctl1, pl_ctl2, pl_l1_2_enable;
-	u32 cl_ctl1, cl_ctl2, cl_l1_2_enable;
-
-	/*
-	 * In case BIOS enabled L1.2 after resume, we need to disable it first
-	 * on the downstream component before the upstream. So, don't attempt to
-	 * restore either until we are at the downstream component.
-	 */
-	if (pcie_downstream_port(pdev) || !parent)
-		return;
-
-	if (!pdev->l1ss || !parent->l1ss)
-		return;
-
-	cl_save_state = pci_find_saved_ext_cap(pdev, PCI_EXT_CAP_ID_L1SS);
-	pl_save_state = pci_find_saved_ext_cap(parent, PCI_EXT_CAP_ID_L1SS);
-	if (!cl_save_state || !pl_save_state)
-		return;
-
-	cap = &cl_save_state->cap.data[0];
-	cl_ctl2 = *cap++;
-	cl_ctl1 = *cap;
-	cap = &pl_save_state->cap.data[0];
-	pl_ctl2 = *cap++;
-	pl_ctl1 = *cap;
-
-
-	/*
-	 * Disable L1.2 on this downstream endpoint device first, followed
-	 * by the upstream
-	 */
-	pci_clear_and_set_config_dword(pdev, pdev->l1ss + PCI_L1SS_CTL1,
-				       PCI_L1SS_CTL1_L1_2_MASK, 0);
-	pci_clear_and_set_config_dword(parent, parent->l1ss + PCI_L1SS_CTL1,
-				       PCI_L1SS_CTL1_L1_2_MASK, 0);
-
-	/*
-	 * In addition, Common_Mode_Restore_Time and LTR_L1.2_THRESHOLD
-	 * in PCI_L1SS_CTL1 must be programmed *before* setting the L1.2
-	 * enable bits, even though they're all in PCI_L1SS_CTL1.
-	 */
-	pl_l1_2_enable = pl_ctl1 & PCI_L1SS_CTL1_L1_2_MASK;
-	pl_ctl1 &= ~PCI_L1SS_CTL1_L1_2_MASK;
-	cl_l1_2_enable = cl_ctl1 & PCI_L1SS_CTL1_L1_2_MASK;
-	cl_ctl1 &= ~PCI_L1SS_CTL1_L1_2_MASK;
-
-	/* Write back without enables first (above we cleared them in ctl1) */
-	pci_write_config_dword(parent, parent->l1ss + PCI_L1SS_CTL2, pl_ctl2);
-	pci_write_config_dword(pdev, pdev->l1ss + PCI_L1SS_CTL2, cl_ctl2);
-	pci_write_config_dword(parent, parent->l1ss + PCI_L1SS_CTL1, pl_ctl1);
-	pci_write_config_dword(pdev, pdev->l1ss + PCI_L1SS_CTL1, cl_ctl1);
-
-
-	/* Then write back the enables */
-	if (pl_l1_2_enable || cl_l1_2_enable) {
-		pci_write_config_dword(parent, parent->l1ss + PCI_L1SS_CTL1,
-				       pl_ctl1 | pl_l1_2_enable);
-		pci_write_config_dword(pdev, pdev->l1ss + PCI_L1SS_CTL1,
-				       cl_ctl1 | cl_l1_2_enable);
-	}
-}
-
-void pci_restore_aspm_state(struct pci_dev *pdev)
-{
-	struct pci_cap_saved_state *save_state;
-	u16 *cap, val;
-
-	save_state = pci_find_saved_cap(pdev, PCI_CAP_ID_EXP);
-
-	if (!save_state)
-		return;
-
-	cap = (u16 *)&save_state->cap.data[0];
-	/* Must match the ordering in pci_save/restore_pcie_state() */
-	val = cap[1] & PCI_EXP_LNKCTL_ASPMC;
-	if (!val)
-		return;
-
-	/*
-	 * We restore L1 substate configuration first before enabling L1
-	 * as the PCIe spec 6.1 sec 5.5.4 suggests.
-	 */
-	pcie_restore_aspm_l1ss(pdev);
-
-	/* Re-enable L0s/L1 */
-	pcie_capability_set_word(pdev, PCI_EXP_LNKCTL, val);
-}
-
 void pci_save_ltr_state(struct pci_dev *dev)
 {
 	int ltr;
@@ -182,6 +62,124 @@ void pci_restore_ltr_state(struct pci_dev *dev)
 	/* Some broken devices only support dword access to LTR */
 	cap = &save_state->cap.data[0];
 	pci_write_config_dword(dev, ltr + PCI_LTR_MAX_SNOOP_LAT, *cap);
+}
+
+void pci_configure_aspm_l1ss(struct pci_dev *pdev)
+{
+	int rc;
+
+	pdev->l1ss = pci_find_ext_capability(pdev, PCI_EXT_CAP_ID_L1SS);
+
+	rc = pci_add_ext_cap_save_buffer(pdev, PCI_EXT_CAP_ID_L1SS,
+					 2 * sizeof(u32));
+	if (rc)
+		pci_err(pdev, "unable to allocate ASPM L1SS save buffer (%pe)\n",
+			ERR_PTR(rc));
+}
+
+void pci_save_aspm_l1ss_state(struct pci_dev *pdev)
+{
+	struct pci_cap_saved_state *save_state;
+	u16 l1ss = pdev->l1ss;
+	u32 *cap;
+
+	/*
+	 * Save L1 substate configuration. The ASPM L0s/L1 configuration
+	 * in PCI_EXP_LNKCTL_ASPMC is saved by pci_save_pcie_state().
+	 */
+	if (!l1ss)
+		return;
+
+	save_state = pci_find_saved_ext_cap(pdev, PCI_EXT_CAP_ID_L1SS);
+	if (!save_state)
+		return;
+
+	cap = &save_state->cap.data[0];
+	pci_read_config_dword(pdev, l1ss + PCI_L1SS_CTL2, cap++);
+	pci_read_config_dword(pdev, l1ss + PCI_L1SS_CTL1, cap++);
+}
+
+void pci_restore_aspm_l1ss_state(struct pci_dev *pdev)
+{
+	struct pci_cap_saved_state *pl_save_state, *cl_save_state;
+	struct pci_dev *parent = pdev->bus->self;
+	u32 *cap, pl_ctl1, pl_ctl2, pl_l1_2_enable;
+	u32 cl_ctl1, cl_ctl2, cl_l1_2_enable;
+	u16 clnkctl, plnkctl;
+
+	/*
+	 * In case BIOS enabled L1.2 when resuming, we need to disable it first
+	 * on the downstream component before the upstream. So, don't attempt to
+	 * restore either until we are at the downstream component.
+	 */
+	if (pcie_downstream_port(pdev) || !parent)
+		return;
+
+	if (!pdev->l1ss || !parent->l1ss)
+		return;
+
+	cl_save_state = pci_find_saved_ext_cap(pdev, PCI_EXT_CAP_ID_L1SS);
+	pl_save_state = pci_find_saved_ext_cap(parent, PCI_EXT_CAP_ID_L1SS);
+	if (!cl_save_state || !pl_save_state)
+		return;
+
+	cap = &cl_save_state->cap.data[0];
+	cl_ctl2 = *cap++;
+	cl_ctl1 = *cap;
+	cap = &pl_save_state->cap.data[0];
+	pl_ctl2 = *cap++;
+	pl_ctl1 = *cap;
+
+	/* Make sure L0s/L1 are disabled before updating L1SS config */
+	pcie_capability_read_word(pdev, PCI_EXP_LNKCTL, &clnkctl);
+	pcie_capability_read_word(parent, PCI_EXP_LNKCTL, &plnkctl);
+	if (FIELD_GET(PCI_EXP_LNKCTL_ASPMC, clnkctl) ||
+	    FIELD_GET(PCI_EXP_LNKCTL_ASPMC, plnkctl)) {
+		pcie_capability_write_word(pdev, PCI_EXP_LNKCTL,
+					   clnkctl & ~PCI_EXP_LNKCTL_ASPMC);
+		pcie_capability_write_word(parent, PCI_EXP_LNKCTL,
+					   plnkctl & ~PCI_EXP_LNKCTL_ASPMC);
+	}
+
+	/*
+	 * Disable L1.2 on this downstream endpoint device first, followed
+	 * by the upstream
+	 */
+	pci_clear_and_set_config_dword(pdev, pdev->l1ss + PCI_L1SS_CTL1,
+				       PCI_L1SS_CTL1_L1_2_MASK, 0);
+	pci_clear_and_set_config_dword(parent, parent->l1ss + PCI_L1SS_CTL1,
+				       PCI_L1SS_CTL1_L1_2_MASK, 0);
+
+	/*
+	 * In addition, Common_Mode_Restore_Time and LTR_L1.2_THRESHOLD
+	 * in PCI_L1SS_CTL1 must be programmed *before* setting the L1.2
+	 * enable bits, even though they're all in PCI_L1SS_CTL1.
+	 */
+	pl_l1_2_enable = pl_ctl1 & PCI_L1SS_CTL1_L1_2_MASK;
+	pl_ctl1 &= ~PCI_L1SS_CTL1_L1_2_MASK;
+	cl_l1_2_enable = cl_ctl1 & PCI_L1SS_CTL1_L1_2_MASK;
+	cl_ctl1 &= ~PCI_L1SS_CTL1_L1_2_MASK;
+
+	/* Write back without enables first (above we cleared them in ctl1) */
+	pci_write_config_dword(parent, parent->l1ss + PCI_L1SS_CTL2, pl_ctl2);
+	pci_write_config_dword(pdev, pdev->l1ss + PCI_L1SS_CTL2, cl_ctl2);
+	pci_write_config_dword(parent, parent->l1ss + PCI_L1SS_CTL1, pl_ctl1);
+	pci_write_config_dword(pdev, pdev->l1ss + PCI_L1SS_CTL1, cl_ctl1);
+
+	/* Then write back the enables */
+	if (pl_l1_2_enable || cl_l1_2_enable) {
+		pci_write_config_dword(parent, parent->l1ss + PCI_L1SS_CTL1,
+				       pl_ctl1 | pl_l1_2_enable);
+		pci_write_config_dword(pdev, pdev->l1ss + PCI_L1SS_CTL1,
+				       cl_ctl1 | cl_l1_2_enable);
+	}
+
+	/* Restore L0s/L1 if they were enabled */
+	if (FIELD_GET(PCI_EXP_LNKCTL_ASPMC, clnkctl) ||
+	    FIELD_GET(PCI_EXP_LNKCTL_ASPMC, plnkctl)) {
+		pcie_capability_write_word(parent, PCI_EXP_LNKCTL, clnkctl);
+		pcie_capability_write_word(pdev, PCI_EXP_LNKCTL, plnkctl);
+	}
 }
 
 #ifdef CONFIG_PCIEASPM
@@ -303,16 +301,35 @@ static int policy_to_clkpm_state(struct pcie_link_state *link)
 	return 0;
 }
 
+static void pci_update_aspm_saved_state(struct pci_dev *dev)
+{
+	struct pci_cap_saved_state *save_state;
+	u16 *cap, lnkctl, aspmc;
+
+	save_state = pci_find_saved_cap(dev, PCI_CAP_ID_EXP);
+	if (!save_state)
+		return;
+
+	/* Depends on pci_save_pcie_state(): cap[1] is LNKCTL */
+	cap = (u16 *)&save_state->cap.data[0];
+	pcie_capability_read_word(dev, PCI_EXP_LNKCTL, &lnkctl);
+	aspmc = FIELD_GET(PCI_EXP_LNKCTL_ASPMC, lnkctl);
+	cap[1] = (lnkctl & ~PCI_EXP_LNKCTL_ASPMC) |
+		FIELD_PREP(PCI_EXP_LNKCTL_ASPMC, aspmc);
+}
+
 static void pcie_set_clkpm_nocheck(struct pcie_link_state *link, int enable)
 {
 	struct pci_dev *child;
 	struct pci_bus *linkbus = link->pdev->subordinate;
 	u32 val = enable ? PCI_EXP_LNKCTL_CLKREQ_EN : 0;
 
-	list_for_each_entry(child, &linkbus->devices, bus_list)
+	list_for_each_entry(child, &linkbus->devices, bus_list) {
 		pcie_capability_clear_and_set_word(child, PCI_EXP_LNKCTL,
 						   PCI_EXP_LNKCTL_CLKREQ_EN,
 						   val);
+		pci_update_aspm_saved_state(child);
+	}
 	link->clkpm_enabled = !!enable;
 }
 
@@ -931,6 +948,12 @@ static void pcie_config_aspm_link(struct pcie_link_state *link, u32 state)
 		pcie_config_aspm_dev(parent, upstream);
 
 	link->aspm_enabled = state;
+
+	/* Update latest ASPM configuration in saved context */
+	pci_save_aspm_l1ss_state(link->downstream);
+	pci_update_aspm_saved_state(link->downstream);
+	pci_save_aspm_l1ss_state(parent);
+	pci_update_aspm_saved_state(parent);
 }
 
 static void pcie_config_aspm_path(struct pcie_link_state *link)
@@ -1681,4 +1704,5 @@ bool pcie_aspm_support_enabled(void)
 {
 	return aspm_support_enabled;
 }
+
 #endif /* CONFIG_PCIEASPM */
