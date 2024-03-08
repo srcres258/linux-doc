@@ -71,8 +71,8 @@ int main(int argc, char **argv)
 
 	free_hugepages = get_free_hugepages();
 	if (free_hugepages < MIN_FREE_PAGES) {
-		ksft_print_msg("Not enough free huge pages to test, exiting!\n");
-		ksft_finished();
+		printf("Not enough free huge pages to test, exiting!\n");
+		exit(KSFT_SKIP);
 	}
 
 	fd = memfd_create(argv[0], MFD_HUGETLB);

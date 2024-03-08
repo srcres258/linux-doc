@@ -304,18 +304,25 @@ static int policy_to_clkpm_state(struct pcie_link_state *link)
 static void pci_update_aspm_saved_state(struct pci_dev *dev)
 {
 	struct pci_cap_saved_state *save_state;
-	u16 *cap, lnkctl, aspmc;
+	u16 *cap, lnkctl, aspm_ctl;
 
 	save_state = pci_find_saved_cap(dev, PCI_CAP_ID_EXP);
 	if (!save_state)
 		return;
 
+	pcie_capability_read_word(dev, PCI_EXP_LNKCTL, &lnkctl);
+
+	/*
+	 * Update ASPM and CLKREQ bits of LNKCTL in save_state. We only
+	 * write PCI_EXP_LNKCTL_CCC during enumeration, so it shouldn't
+	 * change after being captured in save_state.
+	 */
+	aspm_ctl = lnkctl & (PCI_EXP_LNKCTL_ASPMC | PCI_EXP_LNKCTL_CLKREQ_EN);
+	lnkctl &= ~(PCI_EXP_LNKCTL_ASPMC | PCI_EXP_LNKCTL_CLKREQ_EN);
+
 	/* Depends on pci_save_pcie_state(): cap[1] is LNKCTL */
 	cap = (u16 *)&save_state->cap.data[0];
-	pcie_capability_read_word(dev, PCI_EXP_LNKCTL, &lnkctl);
-	aspmc = FIELD_GET(PCI_EXP_LNKCTL_ASPMC, lnkctl);
-	cap[1] = (lnkctl & ~PCI_EXP_LNKCTL_ASPMC) |
-		FIELD_PREP(PCI_EXP_LNKCTL_ASPMC, aspmc);
+	cap[1] = lnkctl | aspm_ctl;
 }
 
 static void pcie_set_clkpm_nocheck(struct pcie_link_state *link, int enable)

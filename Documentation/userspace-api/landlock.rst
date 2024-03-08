@@ -607,7 +607,7 @@ Boot time configuration
 
 If the running kernel does not have ``landlock`` in ``CONFIG_LSM``, then we can
 enable Landlock by adding ``lsm=landlock,[...]`` to
-Documentation/admin-guide/kernel-parameters.rst thanks to the bootloader
+Documentation/admin-guide/kernel-parameters.rst in the boot loader
 configuration.
 
 For example, if the current built-in configuration is:
@@ -624,7 +624,7 @@ For example, if the current built-in configuration is:
     $ sed -n 's/.*\(\<lsm=\S\+\).*/\1/p' /proc/cmdline
     lsm=lockdown,yama,integrity,apparmor
 
-...we should configure the bootloader to set a cmdline extending the ``lsm``
+...we should configure the boot loader to set a cmdline extending the ``lsm``
 list with the ``landlock,`` prefix::
 
   lsm=landlock,lockdown,yama,integrity,apparmor
@@ -640,10 +640,10 @@ kernel logs:
     [    0.000000] LSM: initializing lsm=lockdown,capability,landlock,yama,integrity,apparmor
     [    0.000000] landlock: Up and running.
 
-Note that according to the built time kernel configuration,
-``lockdown,capability,`` may always stay at the beginning of the ``LSM:
-initializing lsm=`` list even if they are not configured with the bootloader,
-which is OK.
+The kernel may be configured at build time to always load the ``lockdown`` and
+``capability`` LSMs.  In that case, these LSMs will appear at the beginning of
+the ``LSM: initializing`` log line as well, even if they are not configured in
+the boot loader.
 
 Network support
 ---------------

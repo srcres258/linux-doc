@@ -38,6 +38,7 @@
 #include "arch/common.h"
 #include "namespaces.h"
 #include "thread.h"
+#include "hashmap.h"
 #include <regex.h>
 #include <linux/bitops.h>
 #include <linux/kernel.h>
@@ -863,6 +864,17 @@ bool arch__is(struct arch *arch, const char *name)
 	return !strcmp(arch->name, name);
 }
 
+/* symbol histogram: key = offset << 16 | evsel->core.idx */
+static size_t sym_hist_hash(long key, void *ctx __maybe_unused)
+{
+	return (key >> 16) + (key & 0xffff);
+}
+
+static bool sym_hist_equal(long key1, long key2, void *ctx __maybe_unused)
+{
+	return key1 == key2;
+}
+
 static struct annotated_source *annotated_source__new(void)
 {
 	struct annotated_source *src = zalloc(sizeof(*src));
@@ -877,38 +889,25 @@ static __maybe_unused void annotated_source__delete(struct annotated_source *src
 {
 	if (src == NULL)
 		return;
+
+	hashmap__free(src->samples);
 	zfree(&src->histograms);
 	free(src);
 }
 
 static int annotated_source__alloc_histograms(struct annotated_source *src,
-					      size_t size, int nr_hists)
+					      int nr_hists)
 {
-	size_t sizeof_sym_hist;
-
-	/*
-	 * Add buffer of one element for zero length symbol.
-	 * When sample is taken from first instruction of
-	 * zero length symbol, perf still resolves it and
-	 * shows symbol name in perf report and allows to
-	 * annotate it.
-	 */
-	if (size == 0)
-		size = 1;
-
-	/* Check for overflow when calculating sizeof_sym_hist */
-	if (size > (SIZE_MAX - sizeof(struct sym_hist)) / sizeof(struct sym_hist_entry))
-		return -1;
-
-	sizeof_sym_hist = (sizeof(struct sym_hist) + size * sizeof(struct sym_hist_entry));
-
-	/* Check for overflow in zalloc argument */
-	if (sizeof_sym_hist > SIZE_MAX / nr_hists)
-		return -1;
-
-	src->sizeof_sym_hist = sizeof_sym_hist;
 	src->nr_histograms   = nr_hists;
-	src->histograms	     = calloc(nr_hists, sizeof_sym_hist) ;
+	src->histograms	     = calloc(nr_hists, sizeof(*src->histograms));
+
+	if (src->histograms == NULL)
+		return -1;
+
+	src->samples = hashmap__new(sym_hist_hash, sym_hist_equal, NULL);
+	if (src->samples == NULL)
+		zfree(&src->histograms);
+
 	return src->histograms ? 0 : -1;
 }
 
@@ -919,7 +918,8 @@ void symbol__annotate_zero_histograms(struct symbol *sym)
 	annotation__lock(notes);
 	if (notes->src != NULL) {
 		memset(notes->src->histograms, 0,
-		       notes->src->nr_histograms * notes->src->sizeof_sym_hist);
+		       notes->src->nr_histograms * sizeof(*notes->src->histograms));
+		hashmap__clear(notes->src->samples);
 	}
 	if (notes->branch && notes->branch->cycles_hist) {
 		memset(notes->branch->cycles_hist, 0,
@@ -983,8 +983,10 @@ static int __symbol__inc_addr_samples(struct map_symbol *ms,
 				      struct perf_sample *sample)
 {
 	struct symbol *sym = ms->sym;
-	unsigned offset;
+	long hash_key;
+	u64 offset;
 	struct sym_hist *h;
+	struct sym_hist_entry *entry;
 
 	pr_debug3("%s: addr=%#" PRIx64 "\n", __func__, map__unmap_ip(ms->map, addr));
 
@@ -1002,15 +1004,26 @@ static int __symbol__inc_addr_samples(struct map_symbol *ms,
 			 __func__, __LINE__, sym->name, sym->start, addr, sym->end, sym->type == STT_FUNC);
 		return -ENOMEM;
 	}
+
+	hash_key = offset << 16 | evidx;
+	if (!hashmap__find(src->samples, hash_key, &entry)) {
+		entry = zalloc(sizeof(*entry));
+		if (entry == NULL)
+			return -ENOMEM;
+
+		if (hashmap__add(src->samples, hash_key, entry) < 0)
+			return -ENOMEM;
+	}
+
 	h->nr_samples++;
-	h->addr[offset].nr_samples++;
 	h->period += sample->period;
-	h->addr[offset].period += sample->period;
+	entry->nr_samples++;
+	entry->period += sample->period;
 
 	pr_debug3("%#" PRIx64 " %s: period++ [addr: %#" PRIx64 ", %#" PRIx64
 		  ", evidx=%d] => nr_samples: %" PRIu64 ", period: %" PRIu64 "\n",
 		  sym->start, sym->name, addr, addr - sym->start, evidx,
-		  h->addr[offset].nr_samples, h->addr[offset].period);
+		  entry->nr_samples, entry->period);
 	return 0;
 }
 
@@ -1056,8 +1069,7 @@ struct annotated_source *symbol__hists(struct symbol *sym, int nr_hists)
 
 	if (notes->src->histograms == NULL) {
 alloc_histograms:
-		annotated_source__alloc_histograms(notes->src, symbol__size(sym),
-						   nr_hists);
+		annotated_source__alloc_histograms(notes->src, nr_hists);
 	}
 
 	return notes->src;
@@ -2330,17 +2342,25 @@ out_remove_tmp:
 	return err;
 }
 
-static void calc_percent(struct sym_hist *sym_hist,
-			 struct hists *hists,
+static void calc_percent(struct annotation *notes,
+			 struct evsel *evsel,
 			 struct annotation_data *data,
 			 s64 offset, s64 end)
 {
+	struct hists *hists = evsel__hists(evsel);
+	int evidx = evsel->core.idx;
+	struct sym_hist *sym_hist = annotation__histogram(notes, evidx);
 	unsigned int hits = 0;
 	u64 period = 0;
 
 	while (offset < end) {
-		hits   += sym_hist->addr[offset].nr_samples;
-		period += sym_hist->addr[offset].period;
+		struct sym_hist_entry *entry;
+
+		entry = annotated_source__hist_entry(notes->src, evidx, offset);
+		if (entry) {
+			hits   += entry->nr_samples;
+			period += entry->period;
+		}
 		++offset;
 	}
 
@@ -2377,16 +2397,13 @@ static void annotation__calc_percent(struct annotation *notes,
 		end  = next ? next->offset : len;
 
 		for_each_group_evsel(evsel, leader) {
-			struct hists *hists = evsel__hists(evsel);
 			struct annotation_data *data;
-			struct sym_hist *sym_hist;
 
 			BUG_ON(i >= al->data_nr);
 
-			sym_hist = annotation__histogram(notes, evsel->core.idx);
 			data = &al->data[i++];
 
-			calc_percent(sym_hist, hists, data, al->offset, end);
+			calc_percent(notes, evsel, data, al->offset, end);
 		}
 	}
 }
@@ -2581,14 +2598,19 @@ static void print_summary(struct rb_root *root, const char *filename)
 
 static void symbol__annotate_hits(struct symbol *sym, struct evsel *evsel)
 {
+	int evidx = evsel->core.idx;
 	struct annotation *notes = symbol__annotation(sym);
-	struct sym_hist *h = annotation__histogram(notes, evsel->core.idx);
+	struct sym_hist *h = annotation__histogram(notes, evidx);
 	u64 len = symbol__size(sym), offset;
 
-	for (offset = 0; offset < len; ++offset)
-		if (h->addr[offset].nr_samples != 0)
+	for (offset = 0; offset < len; ++offset) {
+		struct sym_hist_entry *entry;
+
+		entry = annotated_source__hist_entry(notes->src, evidx, offset);
+		if (entry && entry->nr_samples != 0)
 			printf("%*" PRIx64 ": %" PRIu64 "\n", BITS_PER_LONG / 2,
-			       sym->start + offset, h->addr[offset].nr_samples);
+			       sym->start + offset, entry->nr_samples);
+	}
 	printf("%*s: %" PRIu64 "\n", BITS_PER_LONG / 2, "h->nr_samples", h->nr_samples);
 }
 
@@ -2806,7 +2828,7 @@ void symbol__annotate_zero_histogram(struct symbol *sym, int evidx)
 	struct annotation *notes = symbol__annotation(sym);
 	struct sym_hist *h = annotation__histogram(notes, evidx);
 
-	memset(h, 0, notes->src->sizeof_sym_hist);
+	memset(h, 0, sizeof(*notes->src->histograms) * notes->src->nr_histograms);
 }
 
 void symbol__annotate_decay_histogram(struct symbol *sym, int evidx)
@@ -2817,8 +2839,14 @@ void symbol__annotate_decay_histogram(struct symbol *sym, int evidx)
 
 	h->nr_samples = 0;
 	for (offset = 0; offset < len; ++offset) {
-		h->addr[offset].nr_samples = h->addr[offset].nr_samples * 7 / 8;
-		h->nr_samples += h->addr[offset].nr_samples;
+		struct sym_hist_entry *entry;
+
+		entry = annotated_source__hist_entry(notes->src, evidx, offset);
+		if (entry == NULL)
+			continue;
+
+		entry->nr_samples = entry->nr_samples * 7 / 8;
+		h->nr_samples += entry->nr_samples;
 	}
 }
 
