@@ -530,11 +530,6 @@ static inline int req_ref_read(struct request *req)
 	return atomic_read(&req->ref);
 }
 
-void bdev_release(struct file *bdev_file);
-int bdev_open(struct block_device *bdev, blk_mode_t mode, void *holder,
-	      const struct blk_holder_ops *hops, struct file *bdev_file);
-int bdev_permission(dev_t dev, blk_mode_t mode, void *holder);
-
 static inline u64 blk_time_get_ns(void)
 {
 	struct blk_plug *plug = current->plug;
@@ -600,5 +595,10 @@ static inline void bio_issue_init(struct bio_issue *issue,
 			(blk_time_get_ns() & BIO_ISSUE_TIME_MASK) |
 			((u64)size << BIO_ISSUE_SIZE_SHIFT));
 }
+
+void bdev_release(struct file *bdev_file);
+int bdev_open(struct block_device *bdev, blk_mode_t mode, void *holder,
+	      const struct blk_holder_ops *hops, struct file *bdev_file);
+int bdev_permission(dev_t dev, blk_mode_t mode, void *holder);
 
 #endif /* BLK_INTERNAL_H */

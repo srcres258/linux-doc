@@ -21,18 +21,31 @@ struct mbt_ctx {
 };
 
 struct mbt_ext4_super_block {
-	struct super_block sb;
+	struct ext4_super_block es;
+	struct ext4_sb_info sbi;
 	struct mbt_ctx mbt_ctx;
 };
 
-#define MBT_CTX(_sb) (&(container_of((_sb), struct mbt_ext4_super_block, sb)->mbt_ctx))
+#define MBT_SB(_sb) (container_of((_sb)->s_fs_info, struct mbt_ext4_super_block, sbi))
+#define MBT_CTX(_sb) (&MBT_SB(_sb)->mbt_ctx)
 #define MBT_GRP_CTX(_sb, _group) (&MBT_CTX(_sb)->grp_ctx[_group])
 
 static const struct super_operations mbt_sops = {
 };
 
+static void mbt_kill_sb(struct super_block *sb)
+{
+	generic_shutdown_super(sb);
+}
+
+static struct file_system_type mbt_fs_type = {
+	.name			= "mballoc test",
+	.kill_sb		= mbt_kill_sb,
+};
+
 static int mbt_mb_init(struct super_block *sb)
 {
+	ext4_fsblk_t block;
 	int ret;
 
 	/* needed by ext4_mb_init->bdev_nonrot(sb->s_bdev) */
@@ -57,8 +70,23 @@ static int mbt_mb_init(struct super_block *sb)
 	if (ret != 0)
 		goto err_out;
 
+	block = ext4_count_free_clusters(sb);
+	ret = percpu_counter_init(&EXT4_SB(sb)->s_freeclusters_counter, block,
+				  GFP_KERNEL);
+	if (ret != 0)
+		goto err_mb_release;
+
+	ret = percpu_counter_init(&EXT4_SB(sb)->s_dirtyclusters_counter, 0,
+				  GFP_KERNEL);
+	if (ret != 0)
+		goto err_freeclusters;
+
 	return 0;
 
+err_freeclusters:
+	percpu_counter_destroy(&EXT4_SB(sb)->s_freeclusters_counter);
+err_mb_release:
+	ext4_mb_release(sb);
 err_out:
 	kfree(sb->s_bdev->bd_queue);
 	kfree(sb->s_bdev);
@@ -67,48 +95,61 @@ err_out:
 
 static void mbt_mb_release(struct super_block *sb)
 {
+	percpu_counter_destroy(&EXT4_SB(sb)->s_dirtyclusters_counter);
+	percpu_counter_destroy(&EXT4_SB(sb)->s_freeclusters_counter);
 	ext4_mb_release(sb);
 	kfree(sb->s_bdev->bd_queue);
 	kfree(sb->s_bdev);
 }
 
+static int mbt_set(struct super_block *sb, void *data)
+{
+	return 0;
+}
+
 static struct super_block *mbt_ext4_alloc_super_block(void)
 {
-	struct ext4_super_block *es = kzalloc(sizeof(*es), GFP_KERNEL);
-	struct ext4_sb_info *sbi = kzalloc(sizeof(*sbi), GFP_KERNEL);
-	struct mbt_ext4_super_block *fsb = kzalloc(sizeof(*fsb), GFP_KERNEL);
+	struct mbt_ext4_super_block *fsb;
+	struct super_block *sb;
+	struct ext4_sb_info *sbi;
 
-	if (fsb == NULL || sbi == NULL || es == NULL)
+	fsb = kzalloc(sizeof(*fsb), GFP_KERNEL);
+	if (fsb == NULL)
+		return NULL;
+
+	sb = sget(&mbt_fs_type, NULL, mbt_set, 0, NULL);
+	if (IS_ERR(sb))
 		goto out;
+
+	sbi = &fsb->sbi;
 
 	sbi->s_blockgroup_lock =
 		kzalloc(sizeof(struct blockgroup_lock), GFP_KERNEL);
 	if (!sbi->s_blockgroup_lock)
-		goto out;
+		goto out_deactivate;
 
 	bgl_lock_init(sbi->s_blockgroup_lock);
 
-	sbi->s_es = es;
-	fsb->sb.s_fs_info = sbi;
+	sbi->s_es = &fsb->es;
+	sb->s_fs_info = sbi;
 
-	return &fsb->sb;
+	up_write(&sb->s_umount);
+	return sb;
 
+out_deactivate:
+	deactivate_locked_super(sb);
 out:
 	kfree(fsb);
-	kfree(sbi);
-	kfree(es);
 	return NULL;
 }
 
 static void mbt_ext4_free_super_block(struct super_block *sb)
 {
-	struct mbt_ext4_super_block *fsb =
-		container_of(sb, struct mbt_ext4_super_block, sb);
+	struct mbt_ext4_super_block *fsb = MBT_SB(sb);
 	struct ext4_sb_info *sbi = EXT4_SB(sb);
 
 	kfree(sbi->s_blockgroup_lock);
-	kfree(sbi->s_es);
-	kfree(sbi);
+	deactivate_super(sb);
 	kfree(fsb);
 }
 
@@ -310,7 +351,7 @@ static int mbt_kunit_init(struct kunit *test)
 				   ext4_mb_mark_context,
 				   ext4_mb_mark_context_stub);
 
-	/* stub function will be called in mt_mb_init->ext4_mb_init */
+	/* stub function will be called in mbt_mb_init->ext4_mb_init */
 	if (mbt_mb_init(sb) != 0) {
 		mbt_ctx_release(sb);
 		mbt_ext4_free_super_block(sb);
@@ -332,14 +373,19 @@ static void mbt_kunit_exit(struct kunit *test)
 static void test_new_blocks_simple(struct kunit *test)
 {
 	struct super_block *sb = (struct super_block *)test->priv;
-	struct inode inode = { .i_sb = sb, };
+	struct inode *inode;
 	struct ext4_allocation_request ar;
 	ext4_group_t i, goal_group = TEST_GOAL_GROUP;
 	int err = 0;
 	ext4_fsblk_t found;
 	struct ext4_sb_info *sbi = EXT4_SB(sb);
 
-	ar.inode = &inode;
+	inode = kunit_kzalloc(test, sizeof(*inode), GFP_KERNEL);
+	if (!inode)
+		return;
+
+	inode->i_sb = sb;
+	ar.inode = inode;
 
 	/* get block at goal */
 	ar.goal = ext4_group_first_block_no(sb, goal_group);
@@ -441,15 +487,20 @@ test_free_blocks_simple_range(struct kunit *test, ext4_group_t goal_group,
 {
 	struct super_block *sb = (struct super_block *)test->priv;
 	struct ext4_sb_info *sbi = EXT4_SB(sb);
-	struct inode inode = { .i_sb = sb, };
+	struct inode *inode;
 	ext4_fsblk_t block;
+
+	inode = kunit_kzalloc(test, sizeof(*inode), GFP_KERNEL);
+	if (!inode)
+		return;
+	inode->i_sb = sb;
 
 	if (len == 0)
 		return;
 
 	block = ext4_group_first_block_no(sb, goal_group) +
 		EXT4_C2B(sbi, start);
-	ext4_free_blocks_simple(&inode, block, len);
+	ext4_free_blocks_simple(inode, block, len);
 	validate_free_blocks_simple(test, sb, goal_group, start, len);
 	mbt_ctx_mark_used(sb, goal_group, 0, EXT4_CLUSTERS_PER_GROUP(sb));
 }
@@ -506,16 +557,21 @@ test_mark_diskspace_used_range(struct kunit *test,
 static void test_mark_diskspace_used(struct kunit *test)
 {
 	struct super_block *sb = (struct super_block *)test->priv;
-	struct inode inode = { .i_sb = sb, };
+	struct inode *inode;
 	struct ext4_allocation_context ac;
 	struct test_range ranges[TEST_RANGE_COUNT];
 	int i;
 
 	mbt_generate_test_ranges(sb, ranges, TEST_RANGE_COUNT);
 
+	inode = kunit_kzalloc(test, sizeof(*inode), GFP_KERNEL);
+	if (!inode)
+		return;
+	inode->i_sb = sb;
+
 	ac.ac_status = AC_STATUS_FOUND;
 	ac.ac_sb = sb;
-	ac.ac_inode = &inode;
+	ac.ac_inode = inode;
 	for (i = 0; i < TEST_RANGE_COUNT; i++)
 		test_mark_diskspace_used_range(test, &ac, ranges[i].start,
 					       ranges[i].len);
@@ -678,7 +734,10 @@ test_mb_mark_used_range(struct kunit *test, struct ext4_buddy *e4b,
 	ex.fe_start = start;
 	ex.fe_len = len;
 	ex.fe_group = TEST_GOAL_GROUP;
+
+	ext4_lock_group(sb, TEST_GOAL_GROUP);
 	mb_mark_used(e4b, &ex);
+	ext4_unlock_group(sb, TEST_GOAL_GROUP);
 
 	mb_set_bits(bitmap, start, len);
 	/* bypass bb_free validatoin in ext4_mb_generate_buddy */
@@ -738,7 +797,9 @@ test_mb_free_blocks_range(struct kunit *test, struct ext4_buddy *e4b,
 	if (len == 0)
 		return;
 
+	ext4_lock_group(sb, e4b->bd_group);
 	mb_free_blocks(NULL, e4b, start, len);
+	ext4_unlock_group(sb, e4b->bd_group);
 
 	mb_clear_bits(bitmap, start, len);
 	/* bypass bb_free validatoin in ext4_mb_generate_buddy */
@@ -782,7 +843,11 @@ static void test_mb_free_blocks(struct kunit *test)
 	ex.fe_start = 0;
 	ex.fe_len = EXT4_CLUSTERS_PER_GROUP(sb);
 	ex.fe_group = TEST_GOAL_GROUP;
+
+	ext4_lock_group(sb, TEST_GOAL_GROUP);
 	mb_mark_used(&e4b, &ex);
+	ext4_unlock_group(sb, TEST_GOAL_GROUP);
+
 	grp->bb_free = 0;
 	memset(bitmap, 0xff, sb->s_blocksize);
 

@@ -57,8 +57,10 @@ void menu_add_entry(struct symbol *sym)
 	*last_entry_ptr = menu;
 	last_entry_ptr = &menu->next;
 	current_entry = menu;
-	if (sym)
+	if (sym) {
 		menu_add_symbol(P_SYMBOL, sym, NULL);
+		list_add_tail(&menu->link, &sym->menus);
+	}
 }
 
 struct menu *menu_add_menu(void)
@@ -769,6 +771,7 @@ static void get_symbol_str(struct gstr *r, struct symbol *sym,
 		    struct list_head *head)
 {
 	struct property *prop;
+	struct menu *menu;
 
 	if (sym && sym->name) {
 		str_printf(r, "Symbol: %s [=%s]\n", sym->name,
@@ -785,17 +788,17 @@ static void get_symbol_str(struct gstr *r, struct symbol *sym,
 	}
 
 	/* Print the definitions with prompts before the ones without */
-	for_all_properties(sym, prop, P_SYMBOL) {
-		if (prop->menu->prompt) {
-			get_def_str(r, prop->menu);
-			get_prompt_str(r, prop->menu->prompt, head);
+	list_for_each_entry(menu, &sym->menus, link) {
+		if (menu->prompt) {
+			get_def_str(r, menu);
+			get_prompt_str(r, menu->prompt, head);
 		}
 	}
 
-	for_all_properties(sym, prop, P_SYMBOL) {
-		if (!prop->menu->prompt) {
-			get_def_str(r, prop->menu);
-			get_dep_str(r, prop->menu->dep, "  Depends on: ");
+	list_for_each_entry(menu, &sym->menus, link) {
+		if (!menu->prompt) {
+			get_def_str(r, menu);
+			get_dep_str(r, menu->dep, "  Depends on: ");
 		}
 	}
 

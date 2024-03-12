@@ -1527,9 +1527,7 @@ static int hook_file_open(struct file *const file)
 {
 	layer_mask_t layer_masks[LANDLOCK_NUM_ACCESS_FS] = {};
 	access_mask_t open_access_request, full_access_request, allowed_access;
-	const access_mask_t optional_access = LANDLOCK_ACCESS_FS_TRUNCATE |
-					      LANDLOCK_ACCESS_FS_IOCTL |
-					      IOCTL_GROUPS;
+	const access_mask_t optional_access = LANDLOCK_ACCESS_FS_TRUNCATE;
 	const struct landlock_ruleset *const dom =
 		get_fs_domain(landlock_cred(file->f_cred)->domain);
 

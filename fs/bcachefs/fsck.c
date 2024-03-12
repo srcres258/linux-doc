@@ -897,49 +897,6 @@ fsck_err:
 	return ret;
 }
 
-static int check_inode_dirent_inode(struct btree_trans *trans, struct bkey_s_c inode_k,
-				    struct bch_inode_unpacked *inode,
-				    u32 inode_snapshot, bool *write_inode)
-{
-	struct bch_fs *c = trans->c;
-	struct printbuf buf = PRINTBUF;
-
-	struct btree_iter dirent_iter = {};
-	struct bkey_s_c_dirent d = inode_get_dirent(trans, &dirent_iter, inode, &inode_snapshot);
-	int ret = bkey_err(d);
-	if (ret && !bch2_err_matches(ret, ENOENT))
-		return ret;
-
-	if (fsck_err_on(ret,
-			c, inode_points_to_missing_dirent,
-			"inode points to missing dirent\n%s",
-			(bch2_bkey_val_to_text(&buf, c, inode_k), buf.buf)) ||
-	    fsck_err_on(!ret && !dirent_points_to_inode(d, inode),
-			c, inode_points_to_wrong_dirent,
-			"inode points to dirent that does not point back:\n%s",
-			(bch2_bkey_val_to_text(&buf, c, inode_k),
-			 prt_newline(&buf),
-			 bch2_bkey_val_to_text(&buf, c, d.s_c), buf.buf))) {
-		/*
-		 * We just clear the backpointer fields for now. If we find a
-		 * dirent that points to this inode in check_dirents(), we'll
-		 * update it then; then when we get to check_path() if the
-		 * backpointer is still 0 we'll reattach it.
-		 */
-		inode->bi_dir = 0;
-		inode->bi_dir_offset = 0;
-		inode->bi_flags &= ~BCH_INODE_backptr_untrusted;
-		*write_inode = true;
-	}
-
-	ret = 0;
-fsck_err:
-	bch2_trans_iter_exit(trans, &dirent_iter);
-	printbuf_exit(&buf);
-	bch_err_fn(c, ret);
-	return ret;
-}
-
 static int check_inode(struct btree_trans *trans,
 		       struct btree_iter *iter,
 		       struct bkey_s_c k,

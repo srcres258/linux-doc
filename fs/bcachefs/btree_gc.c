@@ -1366,11 +1366,10 @@ static int bch2_alloc_write_key(struct btree_trans *trans,
 {
 	struct bch_fs *c = trans->c;
 	struct bch_dev *ca = bch_dev_bkey_exists(c, iter->pos.inode);
-	struct bucket gc, *b;
+	struct bucket old_gc, gc, *b;
 	struct bkey_i_alloc_v4 *a;
 	struct bch_alloc_v4 old_convert, new;
 	const struct bch_alloc_v4 *old;
-	enum bch_data_type type;
 	int ret;
 
 	old = bch2_alloc_to_v4(k, &old_convert);
@@ -1378,29 +1377,30 @@ static int bch2_alloc_write_key(struct btree_trans *trans,
 
 	percpu_down_read(&c->mark_lock);
 	b = gc_bucket(ca, iter->pos.offset);
+	old_gc = *b;
+
+	if ((old->data_type == BCH_DATA_sb ||
+	     old->data_type == BCH_DATA_journal) &&
+	    !bch2_dev_is_online(ca)) {
+		b->data_type = old->data_type;
+		b->dirty_sectors = old->dirty_sectors;
+	}
 
 	/*
 	 * b->data_type doesn't yet include need_discard & need_gc_gen states -
 	 * fix that here:
 	 */
-	type = __alloc_data_type(b->dirty_sectors,
-				 b->cached_sectors,
-				 b->stripe,
-				 *old,
-				 b->data_type);
-	if (b->data_type != type) {
-		struct bch_dev_usage *u;
-
-		preempt_disable();
-		u = this_cpu_ptr(ca->usage_gc);
-		u->d[b->data_type].buckets--;
-		b->data_type = type;
-		u->d[b->data_type].buckets++;
-		preempt_enable();
-	}
-
+	b->data_type = __alloc_data_type(b->dirty_sectors,
+					 b->cached_sectors,
+					 b->stripe,
+					 *old,
+					 b->data_type);
 	gc = *b;
 	percpu_up_read(&c->mark_lock);
+
+	if (gc.data_type != old_gc.data_type ||
+	    gc.dirty_sectors != old_gc.dirty_sectors)
+		bch2_dev_usage_update_m(c, ca, &old_gc, &gc);
 
 	if (metadata_only &&
 	    gc.data_type != BCH_DATA_sb &&
@@ -1586,8 +1586,7 @@ static int bch2_gc_write_reflink_key(struct btree_trans *trans,
 			"  should be %u",
 			(bch2_bkey_val_to_text(&buf, c, k), buf.buf),
 			r->refcount)) {
-		struct bkey_i *new = bch2_bkey_make_mut(trans, iter, &k, 0);
-
+		struct bkey_i *new = bch2_bkey_make_mut_noupdate(trans, k);
 		ret = PTR_ERR_OR_ZERO(new);
 		if (ret)
 			return ret;
@@ -1596,6 +1595,7 @@ static int bch2_gc_write_reflink_key(struct btree_trans *trans,
 			new->k.type = KEY_TYPE_deleted;
 		else
 			*bkey_refcount(bkey_i_to_s(new)) = cpu_to_le64(r->refcount);
+		ret = bch2_trans_update(trans, iter, new, 0);
 	}
 fsck_err:
 	printbuf_exit(&buf);
@@ -1818,10 +1818,10 @@ out:
 	if (!ret) {
 		bch2_journal_block(&c->journal);
 
-		ret   = bch2_gc_stripes_done(c, metadata_only) ?:
-			bch2_gc_reflink_done(c, metadata_only) ?:
-			bch2_gc_alloc_done(c, metadata_only) ?:
-			bch2_gc_done(c, initial, metadata_only);
+		ret   = bch2_gc_alloc_done(c, metadata_only) ?:
+			bch2_gc_done(c, initial, metadata_only) ?:
+			bch2_gc_stripes_done(c, metadata_only) ?:
+			bch2_gc_reflink_done(c, metadata_only);
 
 		bch2_journal_unblock(&c->journal);
 	}

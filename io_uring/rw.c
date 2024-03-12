@@ -275,7 +275,7 @@ static bool __io_complete_rw_common(struct io_kiocb *req, long res)
 			 * current cycle.
 			 */
 			io_req_io_end(req);
-			req->flags |= REQ_F_REISSUE | REQ_F_PARTIAL_IO;
+			req->flags |= REQ_F_REISSUE | REQ_F_BL_NO_RECYCLE;
 			return true;
 		}
 		req_set_fail(req);
@@ -342,7 +342,7 @@ static void io_complete_rw_iopoll(struct kiocb *kiocb, long res)
 		io_req_end_write(req);
 	if (unlikely(res != req->cqe.res)) {
 		if (res == -EAGAIN && io_rw_should_reissue(req)) {
-			req->flags |= REQ_F_REISSUE | REQ_F_PARTIAL_IO;
+			req->flags |= REQ_F_REISSUE | REQ_F_BL_NO_RECYCLE;
 			return;
 		}
 		req->cqe.res = res;
@@ -933,8 +933,6 @@ int io_read_mshot(struct io_kiocb *req, unsigned int issue_flags)
 	 */
 	if (!io_file_can_poll(req))
 		return -EBADFD;
-	if (issue_flags & IO_URING_F_IOWQ)
-		return -EAGAIN;
 
 	ret = __io_read(req, issue_flags);
 

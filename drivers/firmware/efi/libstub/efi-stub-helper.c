@@ -237,10 +237,8 @@ union efistub_event {
 
 struct efistub_measured_event {
 	union efistub_event	event_data;
-	u32			tagged_event_id;
-	u32			tagged_event_data_size;
-	u8			tagged_event_data[];
-} __packed;
+	TCG_PCClientTaggedEvent tagged_event __packed;
+};
 
 static efi_status_t efi_measure_tagged_event(unsigned long load_addr,
 					     unsigned long load_size,
@@ -253,7 +251,7 @@ static efi_status_t efi_measure_tagged_event(unsigned long load_addr,
 		struct { u32 hash_log_extend_event; } mixed_mode;
 	} method;
 	struct efistub_measured_event *evt;
-	int size = struct_size(evt, tagged_event_data,
+	int size = struct_size(evt, tagged_event.tagged_event_data,
 			       events[event].event_data_len);
 	efi_guid_t tcg2_guid = EFI_TCG2_PROTOCOL_GUID;
 	efi_tcg2_protocol_t *tcg2 = NULL;
@@ -303,11 +301,13 @@ static efi_status_t efi_measure_tagged_event(unsigned long load_addr,
 	if (status != EFI_SUCCESS)
 		goto fail;
 
-	evt->event_data			= ev;
-	evt->tagged_event_id		= events[event].event_id;
-	evt->tagged_event_data_size	= events[event].event_data_len;
+	*evt = (struct efistub_measured_event) {
+		.event_data			     = ev,
+		.tagged_event.tagged_event_id	     = events[event].event_id,
+		.tagged_event.tagged_event_data_size = events[event].event_data_len,
+	};
 
-	memcpy(evt->tagged_event_data, events[event].event_data,
+	memcpy(evt->tagged_event.tagged_event_data, events[event].event_data,
 	       events[event].event_data_len);
 
 	status = efi_fn_call(&method, hash_log_extend_event, protocol, 0,
