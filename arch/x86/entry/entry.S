@@ -26,8 +26,6 @@ EXPORT_SYMBOL_GPL(entry_ibpb);
 
 .popsection
 
-THUNK warn_thunk_thunk, __warn_thunk
-
 /*
  * Define the VERW operand that is disguised as entry code so that
  * it can be referenced with KPTI enabled. This ensure VERW can be
@@ -47,3 +45,4 @@ EXPORT_SYMBOL_GPL(mds_verw_sel);
 
 .popsection
 
+THUNK warn_thunk_thunk, __warn_thunk

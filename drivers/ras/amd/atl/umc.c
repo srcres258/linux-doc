@@ -315,7 +315,7 @@ static u8 get_die_id(struct atl_err *err)
 	 * For CPUs, this is the AMD Node ID modulo the number
 	 * of AMD Nodes per socket.
 	 */
-	return topology_die_id(err->cpu) % topology_amd_nodes_per_pkg();
+	return topology_amd_node_id(err->cpu) % topology_amd_nodes_per_pkg();
 }
 
 #define UMC_CHANNEL_NUM	GENMASK(31, 20)

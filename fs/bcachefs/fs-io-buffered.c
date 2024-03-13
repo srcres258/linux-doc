@@ -1044,6 +1044,10 @@ static ssize_t bch2_buffered_write(struct kiocb *iocb, struct iov_iter *iter)
 
 	bch2_pagecache_add_get(inode);
 
+	if (!inode_locked &&
+	    (iocb->ki_pos + iov_iter_count(iter) > i_size_read(&inode->v)))
+		goto get_inode_lock;
+
 	do {
 		unsigned offset = pos & (PAGE_SIZE - 1);
 		unsigned bytes = iov_iter_count(iter);
