@@ -29,6 +29,8 @@ static int live_mocs_init(struct live_mocs *arg, struct xe_gt *gt)
 
 	flags = get_mocs_settings(gt_to_xe(gt), &arg->table);
 
+	kunit_info(test, "gt %d", gt->info.id);
+	kunit_info(test, "gt type %d", gt->info.type);
 	kunit_info(test, "table size %d", arg->table.size);
 	kunit_info(test, "table uc_index %d", arg->table.uc_index);
 	kunit_info(test, "table n_entries %d", arg->table.n_entries);
@@ -40,7 +42,6 @@ static void read_l3cc_table(struct xe_gt *gt,
 			    const struct xe_mocs_info *info)
 {
 	struct kunit *test = xe_cur_kunit();
-	struct xe_device *xe = gt_to_xe(gt);
 	u32 l3cc, l3cc_expected;
 	unsigned int i;
 	u32 reg_val;
@@ -51,12 +52,12 @@ static void read_l3cc_table(struct xe_gt *gt,
 
 	for (i = 0; i < info->n_entries; i++) {
 		if (!(i & 1)) {
-			if (GRAPHICS_VERx100(xe) >= 1250)
+			if (regs_are_mcr(gt))
 				reg_val = xe_gt_mcr_unicast_read_any(gt, XEHP_LNCFCMOCS(i >> 1));
 			else
 				reg_val = xe_mmio_read32(gt, XELP_LNCFCMOCS(i >> 1));
 
-			mocs_dbg(&xe->drm, "reg_val=0x%x\n", reg_val);
+			mocs_dbg(gt, "reg_val=0x%x\n", reg_val);
 		} else {
 			/* Just re-use value read on previous iteration */
 			reg_val >>= 16;
@@ -65,7 +66,7 @@ static void read_l3cc_table(struct xe_gt *gt,
 		l3cc_expected = get_entry_l3cc(info, i);
 		l3cc = reg_val & 0xffff;
 
-		mocs_dbg(&xe->drm, "[%u] expected=0x%x actual=0x%x\n",
+		mocs_dbg(gt, "[%u] expected=0x%x actual=0x%x\n",
 			 i, l3cc_expected, l3cc);
 
 		KUNIT_EXPECT_EQ_MSG(test, l3cc_expected, l3cc,
@@ -78,7 +79,6 @@ static void read_mocs_table(struct xe_gt *gt,
 			    const struct xe_mocs_info *info)
 {
 	struct kunit *test = xe_cur_kunit();
-	struct xe_device *xe = gt_to_xe(gt);
 	u32 mocs, mocs_expected;
 	unsigned int i;
 	u32 reg_val;
@@ -91,7 +91,7 @@ static void read_mocs_table(struct xe_gt *gt,
 	KUNIT_ASSERT_EQ_MSG(test, ret, 0, "Forcewake Failed.\n");
 
 	for (i = 0; i < info->n_entries; i++) {
-		if (GRAPHICS_VERx100(xe) >= 1250)
+		if (regs_are_mcr(gt))
 			reg_val = xe_gt_mcr_unicast_read_any(gt, XEHP_GLOBAL_MOCS(i));
 		else
 			reg_val = xe_mmio_read32(gt, XELP_GLOBAL_MOCS(i));
@@ -99,7 +99,7 @@ static void read_mocs_table(struct xe_gt *gt,
 		mocs_expected = get_entry_control(info, i);
 		mocs = reg_val;
 
-		mocs_dbg(&xe->drm, "[%u] expected=0x%x actual=0x%x\n",
+		mocs_dbg(gt, "[%u] expected=0x%x actual=0x%x\n",
 			 i, mocs_expected, mocs);
 
 		KUNIT_EXPECT_EQ_MSG(test, mocs_expected, mocs,

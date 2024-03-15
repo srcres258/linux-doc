@@ -166,9 +166,9 @@ static int bch2_fsck_offline_thread_fn(struct thread_with_stdio *stdio)
 	bch2_fs_stop(c);
 
 	if (ret & 1)
-		stdio_redirect_printf(&stdio->stdio, false, "%s: errors fixed\n", c->name);
+		bch2_stdio_redirect_printf(&stdio->stdio, false, "%s: errors fixed\n", c->name);
 	if (ret & 4)
-		stdio_redirect_printf(&stdio->stdio, false, "%s: still has errors\n", c->name);
+		bch2_stdio_redirect_printf(&stdio->stdio, false, "%s: still has errors\n", c->name);
 
 	return ret;
 }
@@ -230,7 +230,7 @@ static long bch2_ioctl_fsck_offline(struct bch_ioctl_fsck_offline __user *user_a
 
 	opt_set(thr->opts, stdio, (u64)(unsigned long)&thr->thr.stdio);
 
-	ret = run_thread_with_stdio(&thr->thr, &bch2_offline_fsck_ops);
+	ret = bch2_run_thread_with_stdio(&thr->thr, &bch2_offline_fsck_ops);
 err:
 	if (ret < 0) {
 		if (thr)
@@ -851,7 +851,7 @@ static long bch2_ioctl_fsck_online(struct bch_fs *c,
 			goto err;
 	}
 
-	ret = run_thread_with_stdio(&thr->thr, &bch2_online_fsck_ops);
+	ret = bch2_run_thread_with_stdio(&thr->thr, &bch2_online_fsck_ops);
 err:
 	if (ret < 0) {
 		bch_err_fn(c, ret);
