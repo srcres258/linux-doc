@@ -439,9 +439,11 @@ static inline pte_t pte_mkhuge(pte_t pte)
 	return pte;
 }
 
+#ifdef CONFIG_RISCV_ISA_SVNAPOT
 #define pte_leaf_size(pte)	(pte_napot(pte) ?				\
 					napot_cont_size(napot_cont_order(pte)) :\
 					PAGE_SIZE)
+#endif
 
 #ifdef CONFIG_NUMA_BALANCING
 /*
@@ -660,6 +662,12 @@ static inline pmd_t pmd_modify(pmd_t pmd, pgprot_t newprot)
 static inline int pmd_write(pmd_t pmd)
 {
 	return pte_write(pmd_pte(pmd));
+}
+
+#define pud_write pud_write
+static inline int pud_write(pud_t pud)
+{
+	return pte_write(pud_pte(pud));
 }
 
 #define pmd_dirty pmd_dirty
