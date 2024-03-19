@@ -1146,7 +1146,7 @@ void smb_lazy_parent_lease_break_close(struct ksmbd_file *fp)
 	opinfo = rcu_dereference(fp->f_opinfo);
 	rcu_read_unlock();
 
-	if (!opinfo->is_lease || opinfo->o_lease->version != 2)
+	if (!opinfo || !opinfo->is_lease || opinfo->o_lease->version != 2)
 		return;
 
 	p_ci = ksmbd_inode_lookup_lock(fp->filp->f_path.dentry->d_parent);
@@ -1846,7 +1846,7 @@ int smb2_check_durable_oplock(struct ksmbd_conn *conn,
 
 	if (memcmp(conn->ClientGUID, fp->client_guid,
 				SMB2_CLIENT_GUID_SIZE)) {
-		ksmbd_debug(SMB, "Client guid of fp is not equal to the one of connction\n");
+		ksmbd_debug(SMB, "Client guid of fp is not equal to the one of connection\n");
 		ret = -EBADF;
 		goto out;
 	}
