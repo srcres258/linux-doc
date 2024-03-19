@@ -9,6 +9,7 @@
 #include <linux/kthread.h>
 #include <linux/pagemap.h>
 #include <linux/poll.h>
+#include <linux/sched/sysctl.h>
 
 void bch2_thread_with_file_exit(struct thread_with_file *thr)
 {
@@ -97,6 +98,14 @@ static void stdio_buf_init(struct stdio_buf *buf)
 
 /* thread_with_stdio */
 
+static void thread_with_stdio_done(struct thread_with_stdio *thr)
+{
+	thr->thr.done = true;
+	thr->stdio.done = true;
+	wake_up(&thr->stdio.input.wait);
+	wake_up(&thr->stdio.output.wait);
+}
+
 static ssize_t thread_with_stdio_read(struct file *file, char __user *ubuf,
 				      size_t len, loff_t *ppos)
 {
@@ -142,10 +151,11 @@ static int thread_with_stdio_release(struct inode *inode, struct file *file)
 	struct thread_with_stdio *thr =
 		container_of(file->private_data, struct thread_with_stdio, thr);
 
+	thread_with_stdio_done(thr);
 	bch2_thread_with_file_exit(&thr->thr);
 	darray_exit(&thr->stdio.input.buf);
 	darray_exit(&thr->stdio.output.buf);
-	thr->exit(thr);
+	thr->ops->exit(thr);
 	return 0;
 }
 
@@ -221,42 +231,102 @@ static __poll_t thread_with_stdio_poll(struct file *file, struct poll_table_stru
 	return mask;
 }
 
+static __poll_t thread_with_stdout_poll(struct file *file, struct poll_table_struct *wait)
+{
+	struct thread_with_stdio *thr =
+		container_of(file->private_data, struct thread_with_stdio, thr);
+
+	poll_wait(file, &thr->stdio.output.wait, wait);
+
+	__poll_t mask = 0;
+
+	if (stdio_redirect_has_output(&thr->stdio))
+		mask |= EPOLLIN;
+	if (thr->thr.done)
+		mask |= EPOLLHUP|EPOLLERR;
+	return mask;
+}
+
+static int thread_with_stdio_flush(struct file *file, fl_owner_t id)
+{
+	struct thread_with_stdio *thr =
+		container_of(file->private_data, struct thread_with_stdio, thr);
+
+	return thr->thr.ret;
+}
+
+static long thread_with_stdio_ioctl(struct file *file, unsigned int cmd, unsigned long p)
+{
+	struct thread_with_stdio *thr =
+		container_of(file->private_data, struct thread_with_stdio, thr);
+
+	if (thr->ops->unlocked_ioctl)
+		return thr->ops->unlocked_ioctl(thr, cmd, p);
+	return -ENOTTY;
+}
+
 static const struct file_operations thread_with_stdio_fops = {
 	.llseek		= no_llseek,
 	.read		= thread_with_stdio_read,
 	.write		= thread_with_stdio_write,
 	.poll		= thread_with_stdio_poll,
+	.flush		= thread_with_stdio_flush,
 	.release	= thread_with_stdio_release,
+	.unlocked_ioctl	= thread_with_stdio_ioctl,
+};
+
+static const struct file_operations thread_with_stdout_fops = {
+	.llseek		= no_llseek,
+	.read		= thread_with_stdio_read,
+	.poll		= thread_with_stdout_poll,
+	.flush		= thread_with_stdio_flush,
+	.release	= thread_with_stdio_release,
+	.unlocked_ioctl	= thread_with_stdio_ioctl,
 };
 
 static int thread_with_stdio_fn(void *arg)
 {
 	struct thread_with_stdio *thr = arg;
 
-	thr->fn(thr);
+	thr->thr.ret = thr->ops->fn(thr);
 
-	thr->thr.done = true;
-	thr->stdio.done = true;
-	wake_up(&thr->stdio.input.wait);
-	wake_up(&thr->stdio.output.wait);
+	thread_with_stdio_done(thr);
 	return 0;
 }
 
 int bch2_run_thread_with_stdio(struct thread_with_stdio *thr,
-			       void (*exit)(struct thread_with_stdio *),
-			       void (*fn)(struct thread_with_stdio *))
+			       const struct thread_with_stdio_ops *ops)
 {
 	stdio_buf_init(&thr->stdio.input);
 	stdio_buf_init(&thr->stdio.output);
-	thr->exit	= exit;
-	thr->fn		= fn;
+	thr->ops = ops;
 
 	return bch2_run_thread_with_file(&thr->thr, &thread_with_stdio_fops, thread_with_stdio_fn);
 }
 
+int bch2_run_thread_with_stdout(struct thread_with_stdio *thr,
+				const struct thread_with_stdio_ops *ops)
+{
+	stdio_buf_init(&thr->stdio.input);
+	stdio_buf_init(&thr->stdio.output);
+	thr->ops = ops;
+
+	return bch2_run_thread_with_file(&thr->thr, &thread_with_stdout_fops, thread_with_stdio_fn);
+}
+EXPORT_SYMBOL_GPL(bch2_run_thread_with_stdout);
+
 int bch2_stdio_redirect_read(struct stdio_redirect *stdio, char *ubuf, size_t len)
 {
 	struct stdio_buf *buf = &stdio->input;
+
+	/*
+	 * we're waiting on user input (or for the file descriptor to be
+	 * closed), don't want a hung task warning:
+	 */
+	do {
+		wait_event_timeout(buf->wait, stdio_redirect_has_input(stdio),
+				   sysctl_hung_task_timeout_secs * HZ / 2);
+	} while (!stdio_redirect_has_input(stdio));
 
 	wait_event(buf->wait, stdio_redirect_has_input(stdio));
 	if (stdio->done)
@@ -281,7 +351,11 @@ int bch2_stdio_redirect_readline(struct stdio_redirect *stdio, char *ubuf, size_
 	size_t copied = 0;
 	ssize_t ret = 0;
 again:
-	wait_event(buf->wait, stdio_redirect_has_input(stdio));
+	do {
+		wait_event_timeout(buf->wait, stdio_redirect_has_input(stdio),
+				   sysctl_hung_task_timeout_secs * HZ / 2);
+	} while (!stdio_redirect_has_input(stdio));
+
 	if (stdio->done) {
 		ret = -1;
 		goto out;
@@ -311,48 +385,67 @@ out:
 }
 
 __printf(3, 0)
-static void bch2_darray_vprintf(darray_char *out, gfp_t gfp, const char *fmt, va_list args)
+static ssize_t bch2_darray_vprintf(darray_char *out, gfp_t gfp, const char *fmt, va_list args)
 {
-	size_t len;
+	ssize_t ret;
 
 	do {
 		va_list args2;
+		size_t len;
+
 		va_copy(args2, args);
-
 		len = vsnprintf(out->data + out->nr, darray_room(*out), fmt, args2);
-	} while (len + 1 > darray_room(*out) && !darray_make_room_gfp(out, len + 1, gfp));
+		va_end(args2);
 
-	out->nr += min(len, darray_room(*out));
+		if (len + 1 <= darray_room(*out)) {
+			out->nr += len;
+			return len;
+		}
+
+		ret = darray_make_room_gfp(out, len + 1, gfp);
+	} while (ret == 0);
+
+	return ret;
 }
 
-void bch2_stdio_redirect_vprintf(struct stdio_redirect *stdio, bool nonblocking,
-				 const char *fmt, va_list args)
+ssize_t bch2_stdio_redirect_vprintf(struct stdio_redirect *stdio, bool nonblocking,
+				    const char *fmt, va_list args)
 {
 	struct stdio_buf *buf = &stdio->output;
 	unsigned long flags;
+	ssize_t ret;
 
-	if (!nonblocking)
-		wait_event(buf->wait, stdio_redirect_has_output_space(stdio));
-	else if (!stdio_redirect_has_output_space(stdio))
-		return;
-	if (stdio->done)
-		return;
-
+again:
 	spin_lock_irqsave(&buf->lock, flags);
-	bch2_darray_vprintf(&buf->buf, nonblocking ? GFP_NOWAIT : GFP_KERNEL, fmt, args);
+	ret = bch2_darray_vprintf(&buf->buf, GFP_NOWAIT, fmt, args);
 	spin_unlock_irqrestore(&buf->lock, flags);
 
+	if (ret < 0) {
+		if (nonblocking)
+			return -EAGAIN;
+
+		ret = wait_event_interruptible(buf->wait,
+				stdio_redirect_has_output_space(stdio));
+		if (ret)
+			return ret;
+		goto again;
+	}
+
 	wake_up(&buf->wait);
+	return ret;
 }
 
-void bch2_stdio_redirect_printf(struct stdio_redirect *stdio, bool nonblocking,
+ssize_t bch2_stdio_redirect_printf(struct stdio_redirect *stdio, bool nonblocking,
 				const char *fmt, ...)
 {
-
 	va_list args;
+	ssize_t ret;
+
 	va_start(args, fmt);
-	bch2_stdio_redirect_vprintf(stdio, nonblocking, fmt, args);
+	ret = bch2_stdio_redirect_vprintf(stdio, nonblocking, fmt, args);
 	va_end(args);
+
+	return ret;
 }
 
 #endif /* NO_BCACHEFS_FS */

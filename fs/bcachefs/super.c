@@ -100,7 +100,7 @@ void bch2_print_opts(struct bch_opts *opts, const char *fmt, ...)
 		if (fmt[0] == KERN_SOH[0])
 			fmt += 2;
 
-		stdio_redirect_vprintf(stdio, true, fmt, args);
+		bch2_stdio_redirect_vprintf(stdio, true, fmt, args);
 	}
 	va_end(args);
 }
@@ -117,7 +117,7 @@ void __bch2_print(struct bch_fs *c, const char *fmt, ...)
 		if (fmt[0] == KERN_SOH[0])
 			fmt += 2;
 
-		stdio_redirect_vprintf(stdio, true, fmt, args);
+		bch2_stdio_redirect_vprintf(stdio, true, fmt, args);
 	}
 	va_end(args);
 }
@@ -1190,8 +1190,8 @@ static void bch2_dev_free(struct bch_dev *ca)
 	bch2_dev_buckets_free(ca);
 	free_page((unsigned long) ca->sb_read_scratch);
 
-	time_stats_quantiles_exit(&ca->io_latency[WRITE]);
-	time_stats_quantiles_exit(&ca->io_latency[READ]);
+	bch2_time_stats_quantiles_exit(&ca->io_latency[WRITE]);
+	bch2_time_stats_quantiles_exit(&ca->io_latency[READ]);
 
 	percpu_ref_exit(&ca->io_ref);
 	percpu_ref_exit(&ca->ref);
@@ -1282,8 +1282,8 @@ static struct bch_dev *__bch2_dev_alloc(struct bch_fs *c,
 
 	INIT_WORK(&ca->io_error_work, bch2_io_error_work);
 
-	time_stats_quantiles_init(&ca->io_latency[READ]);
-	time_stats_quantiles_init(&ca->io_latency[WRITE]);
+	bch2_time_stats_quantiles_init(&ca->io_latency[READ]);
+	bch2_time_stats_quantiles_init(&ca->io_latency[WRITE]);
 
 	ca->mi = bch2_mi_to_cpu(member);
 

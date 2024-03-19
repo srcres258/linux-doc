@@ -214,6 +214,7 @@
 #include "recovery_types.h"
 #include "sb-errors_types.h"
 #include "seqmutex.h"
+#include "time_stats.h"
 #include "util.h"
 
 #ifdef CONFIG_BCACHEFS_DEBUG
@@ -598,7 +599,7 @@ struct bch_dev {
 
 	/* The rest of this all shows up in sysfs */
 	atomic64_t		cur_latency[2];
-	struct time_stats_quantiles	io_latency[2];
+	struct bch2_time_stats_quantiles io_latency[2];
 
 #define CONGESTED_MAX		1024
 	atomic_t		congested;
