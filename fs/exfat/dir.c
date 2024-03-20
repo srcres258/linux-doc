@@ -799,8 +799,10 @@ static int __exfat_get_dentry_set(struct exfat_entry_set_cache *es,
 		struct exfat_dentry *ep;
 
 		ep = exfat_get_dentry_cached(es, ES_IDX_FILE);
-		if (ep->type != EXFAT_FILE)
-			goto put_es;
+		if (ep->type != EXFAT_FILE) {
+			brelse(bh);
+			return -EIO;
+		}
 
 		num_entries = ep->dentry.file.num_ext + 1;
 	}

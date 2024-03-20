@@ -178,7 +178,7 @@ static int smb2_get_data_area_len(unsigned int *off, unsigned int *len,
 		break;
 	}
 	case SMB2_IOCTL:
-		*off = max_t(unsigned short int,
+		*off = max_t(unsigned int,
 			     le32_to_cpu(((struct smb2_ioctl_req *)hdr)->InputOffset),
 			     offsetof(struct smb2_ioctl_req, Buffer));
 		*len = le32_to_cpu(((struct smb2_ioctl_req *)hdr)->InputCount);
