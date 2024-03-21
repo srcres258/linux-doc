@@ -51,7 +51,7 @@ struct aux_payload;
 struct set_config_cmd_payload;
 struct dmub_notification;
 
-#define DC_VER "3.2.275"
+#define DC_VER "3.2.276"
 
 #define MAX_SURFACES 3
 #define MAX_PLANES 6
@@ -991,6 +991,7 @@ struct dc_debug_options {
 	bool disable_dmub_reallow_idle;
 	bool disable_timeout;
 	bool disable_extblankadj;
+	bool enable_idle_reg_checks;
 	unsigned int static_screen_wait_frames;
 	bool force_chroma_subsampling_1tap;
 };

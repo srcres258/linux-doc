@@ -200,6 +200,8 @@ int xe_ggtt_init_early(struct xe_ggtt *ggtt)
 	return drmm_add_action_or_reset(&xe->drm, ggtt_fini_early, ggtt);
 }
 
+static void xe_ggtt_invalidate(struct xe_ggtt *ggtt);
+
 static void xe_ggtt_initial_clear(struct xe_ggtt *ggtt)
 {
 	struct drm_mm_node *hole;
@@ -261,7 +263,7 @@ static void ggtt_invalidate_gt_tlb(struct xe_gt *gt)
 		drm_warn(&gt_to_xe(gt)->drm, "xe_gt_tlb_invalidation_ggtt error=%d", err);
 }
 
-void xe_ggtt_invalidate(struct xe_ggtt *ggtt)
+static void xe_ggtt_invalidate(struct xe_ggtt *ggtt)
 {
 	/* Each GT in a tile has its own TLB to cache GGTT lookups */
 	ggtt_invalidate_gt_tlb(ggtt->tile->primary_gt);
@@ -387,8 +389,6 @@ void xe_ggtt_map_bo(struct xe_ggtt *ggtt, struct xe_bo *bo)
 		pte = ggtt->pt_ops->pte_encode_bo(bo, offset, pat_index);
 		xe_ggtt_set_pte(ggtt, start + offset, pte);
 	}
-
-	xe_ggtt_invalidate(ggtt);
 }
 
 static int __xe_ggtt_insert_bo_at(struct xe_ggtt *ggtt, struct xe_bo *bo,
@@ -417,6 +417,9 @@ static int __xe_ggtt_insert_bo_at(struct xe_ggtt *ggtt, struct xe_bo *bo,
 	if (!err)
 		xe_ggtt_map_bo(ggtt, bo);
 	mutex_unlock(&ggtt->lock);
+
+	if (!err && bo->flags & XE_BO_GGTT_INVALIDATE)
+		xe_ggtt_invalidate(ggtt);
 	xe_device_mem_access_put(tile_to_xe(ggtt->tile));
 
 	return err;
@@ -433,18 +436,20 @@ int xe_ggtt_insert_bo(struct xe_ggtt *ggtt, struct xe_bo *bo)
 	return __xe_ggtt_insert_bo_at(ggtt, bo, 0, U64_MAX);
 }
 
-void xe_ggtt_remove_node(struct xe_ggtt *ggtt, struct drm_mm_node *node)
+void xe_ggtt_remove_node(struct xe_ggtt *ggtt, struct drm_mm_node *node,
+			 bool invalidate)
 {
 	xe_device_mem_access_get(tile_to_xe(ggtt->tile));
-	mutex_lock(&ggtt->lock);
 
+	mutex_lock(&ggtt->lock);
 	xe_ggtt_clear(ggtt, node->start, node->size);
 	drm_mm_remove_node(node);
 	node->size = 0;
-
-	xe_ggtt_invalidate(ggtt);
-
 	mutex_unlock(&ggtt->lock);
+
+	if (invalidate)
+		xe_ggtt_invalidate(ggtt);
+
 	xe_device_mem_access_put(tile_to_xe(ggtt->tile));
 }
 
@@ -456,7 +461,8 @@ void xe_ggtt_remove_bo(struct xe_ggtt *ggtt, struct xe_bo *bo)
 	/* This BO is not currently in the GGTT */
 	xe_tile_assert(ggtt->tile, bo->ggtt_node.size == bo->size);
 
-	xe_ggtt_remove_node(ggtt, &bo->ggtt_node);
+	xe_ggtt_remove_node(ggtt, &bo->ggtt_node,
+			    bo->flags & XE_BO_GGTT_INVALIDATE);
 }
 
 int xe_ggtt_dump(struct xe_ggtt *ggtt, struct drm_printer *p)

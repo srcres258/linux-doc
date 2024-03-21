@@ -927,7 +927,7 @@ static void xe_guc_pc_fini(struct drm_device *drm, void *arg)
 		return;
 	}
 
-	xe_force_wake_get(gt_to_fw(pc_to_gt(pc)), XE_FORCEWAKE_ALL);
+	XE_WARN_ON(xe_force_wake_get(gt_to_fw(pc_to_gt(pc)), XE_FORCEWAKE_ALL));
 	XE_WARN_ON(xe_guc_pc_gucrc_disable(pc));
 	XE_WARN_ON(xe_guc_pc_stop(pc));
 	xe_force_wake_put(gt_to_fw(pc_to_gt(pc)), XE_FORCEWAKE_ALL);
@@ -955,7 +955,8 @@ int xe_guc_pc_init(struct xe_guc_pc *pc)
 
 	bo = xe_managed_bo_create_pin_map(xe, tile, size,
 					  XE_BO_CREATE_VRAM_IF_DGFX(tile) |
-					  XE_BO_CREATE_GGTT_BIT);
+					  XE_BO_CREATE_GGTT_BIT |
+					  XE_BO_GGTT_INVALIDATE);
 	if (IS_ERR(bo))
 		return PTR_ERR(bo);
 
