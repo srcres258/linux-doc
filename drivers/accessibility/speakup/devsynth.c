@@ -108,6 +108,7 @@ static ssize_t speakup_file_writeu(struct file *fp, const char __user *buffer,
 				break;
 			}
 drop:
+			/* empty statement */;
 		}
 
 		count -= bytes;
