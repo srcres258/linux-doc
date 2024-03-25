@@ -74,6 +74,7 @@
 #include "amdgpu_fru_eeprom.h"
 #include "amdgpu_reset.h"
 #include "amdgpu_virt.h"
+#include "amdgpu_dev_coredump.h"
 
 #include <linux/suspend.h>
 #include <drm/task_barrier.h>
@@ -4540,6 +4541,8 @@ int amdgpu_device_prepare(struct drm_device *dev)
 	r = amdgpu_device_evict_resources(adev);
 	if (r)
 		goto unprepare;
+
+	flush_delayed_work(&adev->gfx.gfx_off_delay_work);
 
 	for (i = 0; i < adev->num_ip_blocks; i++) {
 		if (!adev->ip_blocks[i].status.valid)

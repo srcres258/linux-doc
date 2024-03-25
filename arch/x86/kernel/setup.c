@@ -1107,8 +1107,6 @@ void __init setup_arch(char **cmdline_p)
 	 */
 	arch_reserve_crashkernel();
 
-	memblock_find_dma_reserve();
-
 	if (!early_xdbc_setup_hardware())
 		early_xdbc_register_console();
 
@@ -1206,16 +1204,6 @@ void __init i386_reserve_resources(void)
 }
 
 #endif /* CONFIG_X86_32 */
-
-#ifndef CONFIG_SMP
-void __init smp_prepare_boot_cpu(void)
-{
-	struct cpuinfo_x86 *c = &cpu_data(0);
-
-	*c = boot_cpu_data;
-	c->initialized = true;
-}
-#endif
 
 static struct notifier_block kernel_offset_notifier = {
 	.notifier_call = dump_kernel_offset

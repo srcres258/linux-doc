@@ -51,7 +51,7 @@ struct aux_payload;
 struct set_config_cmd_payload;
 struct dmub_notification;
 
-#define DC_VER "3.2.276"
+#define DC_VER "3.2.277"
 
 #define MAX_SURFACES 3
 #define MAX_PLANES 6
@@ -436,6 +436,7 @@ struct dc_config {
 	unsigned int disable_ips_in_vpb;
 	bool usb4_bw_alloc_support;
 	bool allow_0_dtb_clk;
+	bool use_assr_psp_message;
 };
 
 enum visual_confirm {
@@ -988,6 +989,7 @@ struct dc_debug_options {
 	bool psp_disabled_wa;
 	unsigned int ips2_eval_delay_us;
 	unsigned int ips2_entry_delay_us;
+	bool optimize_ips_handshake;
 	bool disable_dmub_reallow_idle;
 	bool disable_timeout;
 	bool disable_extblankadj;

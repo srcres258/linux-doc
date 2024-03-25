@@ -57,9 +57,20 @@ EXPORT_SYMBOL(cpumask_next_wrap);
  * CONFIG_CPUMASK_OFFSTACK=n, so does code elimination in that case
  * too.
  */
+
+static struct kmem_cache *cpumask_cache __ro_after_init;
+
+int __init cpumask_cache_init(void)
+{
+	cpumask_cache = kmem_cache_create("cpumask", cpumask_size(), sizeof(long),
+					  SLAB_HWCACHE_ALIGN, NULL);
+
+	return cpumask_cache ? 0 : -ENOMEM;
+}
+
 bool alloc_cpumask_var_node(cpumask_var_t *mask, gfp_t flags, int node)
 {
-	*mask = kmalloc_node(cpumask_size(), flags, node);
+	*mask = kmem_cache_alloc_node(cpumask_cache, flags, node);
 
 #ifdef CONFIG_DEBUG_PER_CPU_MAPS
 	if (!*mask) {
@@ -97,7 +108,7 @@ void __init alloc_bootmem_cpumask_var(cpumask_var_t *mask)
  */
 void free_cpumask_var(cpumask_var_t mask)
 {
-	kfree(mask);
+	kmem_cache_free(cpumask_cache, mask);
 }
 EXPORT_SYMBOL(free_cpumask_var);
 

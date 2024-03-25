@@ -1318,13 +1318,16 @@ static void dc_dmub_srv_exit_low_power_state(const struct dc *dc)
 		 */
 		dc_dmub_srv->needs_idle_wake = false;
 
-		if (prev_driver_signals.bits.allow_ips2) {
+		if (prev_driver_signals.bits.allow_ips2 &&
+		    (!dc->debug.optimize_ips_handshake ||
+		     ips_fw->signals.bits.ips2_commit || !ips_fw->signals.bits.in_idle)) {
 			DC_LOG_IPS(
 				"wait IPS2 eval (ips1_commit=%d ips2_commit=%d)",
 				ips_fw->signals.bits.ips1_commit,
 				ips_fw->signals.bits.ips2_commit);
 
-			udelay(dc->debug.ips2_eval_delay_us);
+			if (!dc->debug.optimize_ips_handshake || !ips_fw->signals.bits.ips2_commit)
+				udelay(dc->debug.ips2_eval_delay_us);
 
 			if (ips_fw->signals.bits.ips2_commit) {
 				DC_LOG_IPS(
@@ -1437,6 +1440,8 @@ void dc_dmub_srv_apply_idle_power_optimizations(const struct dc *dc, bool allow_
 	 */
 
 	if (!allow_idle) {
+		dc_dmub_srv->idle_exit_counter += 1;
+
 		dc_dmub_srv_exit_low_power_state(dc);
 		/*
 		 * Idle is considered fully exited only after the sequence above
@@ -1448,6 +1453,12 @@ void dc_dmub_srv_apply_idle_power_optimizations(const struct dc *dc, bool allow_
 		 * dm_execute_dmub_cmd submission instead of the "wake" helpers.
 		 */
 		dc_dmub_srv->idle_allowed = false;
+
+		dc_dmub_srv->idle_exit_counter -= 1;
+		if (dc_dmub_srv->idle_exit_counter < 0) {
+			ASSERT(0);
+			dc_dmub_srv->idle_exit_counter = 0;
+		}
 	} else {
 		/* Consider idle as notified prior to the actual submission to
 		 * prevent multiple entries. */
@@ -1489,7 +1500,8 @@ bool dc_wake_and_execute_dmub_cmd_list(const struct dc_context *ctx, unsigned in
 	else
 		result = dm_execute_dmub_cmd(ctx, cmd, wait_type);
 
-	if (result && reallow_idle && !ctx->dc->debug.disable_dmub_reallow_idle)
+	if (result && reallow_idle && dc_dmub_srv->idle_exit_counter == 0 &&
+	    !ctx->dc->debug.disable_dmub_reallow_idle)
 		dc_dmub_srv_apply_idle_power_optimizations(ctx->dc, true);
 
 	return result;
@@ -1538,7 +1550,8 @@ bool dc_wake_and_execute_gpint(const struct dc_context *ctx, enum dmub_gpint_com
 
 	result = dc_dmub_execute_gpint(ctx, command_code, param, response, wait_type);
 
-	if (result && reallow_idle && !ctx->dc->debug.disable_dmub_reallow_idle)
+	if (result && reallow_idle && dc_dmub_srv->idle_exit_counter == 0 &&
+	    !ctx->dc->debug.disable_dmub_reallow_idle)
 		dc_dmub_srv_apply_idle_power_optimizations(ctx->dc, true);
 
 	return result;

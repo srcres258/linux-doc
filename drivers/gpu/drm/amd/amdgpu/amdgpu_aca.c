@@ -116,20 +116,22 @@ static struct aca_regs_dump {
 	{"CONTROL_MASK",	ACA_REG_IDX_CTL_MASK},
 };
 
-static void aca_smu_bank_dump(struct amdgpu_device *adev, int idx, int total, struct aca_bank *bank)
+static void aca_smu_bank_dump(struct amdgpu_device *adev, int idx, int total, struct aca_bank *bank,
+			      struct ras_query_context *qctx)
 {
+	u64 event_id = qctx ? qctx->event_id : 0ULL;
 	int i;
 
-	dev_info(adev->dev, HW_ERR "Accelerator Check Architecture events logged\n");
+	RAS_EVENT_LOG(adev, event_id, HW_ERR "Accelerator Check Architecture events logged\n");
 	/* plus 1 for output format, e.g: ACA[08/08]: xxxx */
 	for (i = 0; i < ARRAY_SIZE(aca_regs); i++)
-		dev_info(adev->dev, HW_ERR "ACA[%02d/%02d].%s=0x%016llx\n",
-			 idx + 1, total, aca_regs[i].name, bank->regs[aca_regs[i].reg_idx]);
+		RAS_EVENT_LOG(adev, event_id, HW_ERR "ACA[%02d/%02d].%s=0x%016llx\n",
+			      idx + 1, total, aca_regs[i].name, bank->regs[aca_regs[i].reg_idx]);
 }
 
 static int aca_smu_get_valid_aca_banks(struct amdgpu_device *adev, enum aca_smu_type type,
 				       int start, int count,
-				       struct aca_banks *banks)
+				       struct aca_banks *banks, struct ras_query_context *qctx)
 {
 	struct amdgpu_aca *aca = &adev->aca;
 	const struct aca_smu_funcs *smu_funcs = aca->smu_funcs;
@@ -165,7 +167,7 @@ static int aca_smu_get_valid_aca_banks(struct amdgpu_device *adev, enum aca_smu_
 
 		bank.type = type;
 
-		aca_smu_bank_dump(adev, i, count, &bank);
+		aca_smu_bank_dump(adev, i, count, &bank, qctx);
 
 		ret = aca_banks_add_bank(banks, &bank);
 		if (ret)
@@ -369,8 +371,28 @@ static int aca_dispatch_banks(struct aca_handle_manager *mgr, struct aca_banks *
 	return 0;
 }
 
+static bool aca_bank_should_update(struct amdgpu_device *adev, enum aca_smu_type type)
+{
+	struct amdgpu_aca *aca = &adev->aca;
+	bool ret = true;
+
+	/*
+	 * Because the UE Valid MCA count will only be cleared after reset,
+	 * in order to avoid repeated counting of the error count,
+	 * the aca bank is only updated once during the gpu recovery stage.
+	 */
+	if (type == ACA_SMU_TYPE_UE) {
+		if (amdgpu_ras_intr_triggered())
+			ret = atomic_cmpxchg(&aca->ue_update_flag, 0, 1) == 0;
+		else
+			atomic_set(&aca->ue_update_flag, 0);
+	}
+
+	return ret;
+}
+
 static int aca_banks_update(struct amdgpu_device *adev, enum aca_smu_type type,
-			    bank_handler_t handler, void *data)
+			    bank_handler_t handler, struct ras_query_context *qctx, void *data)
 {
 	struct amdgpu_aca *aca = &adev->aca;
 	struct aca_banks banks;
@@ -378,6 +400,9 @@ static int aca_banks_update(struct amdgpu_device *adev, enum aca_smu_type type,
 	int ret;
 
 	if (list_empty(&aca->mgr.list))
+		return 0;
+
+	if (!aca_bank_should_update(adev, type))
 		return 0;
 
 	ret = aca_smu_get_valid_aca_count(adev, type, &count);
@@ -389,7 +414,7 @@ static int aca_banks_update(struct amdgpu_device *adev, enum aca_smu_type type,
 
 	aca_banks_init(&banks);
 
-	ret = aca_smu_get_valid_aca_banks(adev, type, 0, count, &banks);
+	ret = aca_smu_get_valid_aca_banks(adev, type, 0, count, &banks, qctx);
 	if (ret)
 		goto err_release_banks;
 
@@ -466,7 +491,7 @@ out_unlock:
 }
 
 static int __aca_get_error_data(struct amdgpu_device *adev, struct aca_handle *handle, enum aca_error_type type,
-				struct ras_err_data *err_data)
+				struct ras_err_data *err_data, struct ras_query_context *qctx)
 {
 	enum aca_smu_type smu_type;
 	int ret;
@@ -484,7 +509,7 @@ static int __aca_get_error_data(struct amdgpu_device *adev, struct aca_handle *h
 	}
 
 	/* udpate aca bank to aca source error_cache first */
-	ret = aca_banks_update(adev, smu_type, handler_aca_log_bank_error, NULL);
+	ret = aca_banks_update(adev, smu_type, handler_aca_log_bank_error, qctx, NULL);
 	if (ret)
 		return ret;
 
@@ -500,7 +525,7 @@ static bool aca_handle_is_valid(struct aca_handle *handle)
 }
 
 int amdgpu_aca_get_error_data(struct amdgpu_device *adev, struct aca_handle *handle,
-			      enum aca_error_type type, void *data)
+			      enum aca_error_type type, void *data, void *qctx)
 {
 	struct ras_err_data *err_data = (struct ras_err_data *)data;
 
@@ -513,7 +538,8 @@ int amdgpu_aca_get_error_data(struct amdgpu_device *adev, struct aca_handle *han
 	if (!(BIT(type) & handle->mask))
 		return  0;
 
-	return __aca_get_error_data(adev, handle, type, err_data);
+	return __aca_get_error_data(adev, handle, type, err_data,
+				    (struct ras_query_context *)qctx);
 }
 
 static void aca_error_init(struct aca_error *aerr, enum aca_error_type type)
@@ -670,6 +696,8 @@ int amdgpu_aca_init(struct amdgpu_device *adev)
 	struct amdgpu_aca *aca = &adev->aca;
 	int ret;
 
+	atomic_set(&aca->ue_update_flag, 0);
+
 	ret = aca_manager_init(&aca->mgr);
 	if (ret)
 		return ret;
@@ -682,6 +710,8 @@ void amdgpu_aca_fini(struct amdgpu_device *adev)
 	struct amdgpu_aca *aca = &adev->aca;
 
 	aca_manager_fini(&aca->mgr);
+
+	atomic_set(&aca->ue_update_flag, 0);
 }
 
 int amdgpu_aca_reset(struct amdgpu_device *adev)
@@ -826,7 +856,7 @@ static int aca_dump_show(struct seq_file *m, enum aca_smu_type type)
 		.idx = 0,
 	};
 
-	return aca_banks_update(adev, type, handler_aca_bank_dump, (void *)&context);
+	return aca_banks_update(adev, type, handler_aca_bank_dump, NULL, (void *)&context);
 }
 
 static int aca_dump_ce_show(struct seq_file *m, void *unused)
