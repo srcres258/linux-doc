@@ -263,7 +263,6 @@ unsigned long thp_vma_allowable_orders(struct vm_area_struct *vma,
 unsigned long thp_get_unmapped_area(struct file *filp, unsigned long addr,
 		unsigned long len, unsigned long pgoff, unsigned long flags);
 
-void folio_prep_large_rmappable(struct folio *folio);
 bool can_split_folio(struct folio *folio, int *pextra_pins);
 int split_huge_page_to_list_to_order(struct page *page, struct list_head *list,
 		unsigned int new_order);
@@ -411,8 +410,6 @@ static inline unsigned long thp_vma_allowable_orders(struct vm_area_struct *vma,
 	return 0;
 }
 
-static inline void folio_prep_large_rmappable(struct folio *folio) {}
-
 #define transparent_hugepage_flags 0UL
 
 #define thp_get_unmapped_area	NULL
@@ -534,17 +531,5 @@ static inline int split_folio_to_order(struct folio *folio, int new_order)
 
 #define split_folio_to_list(f, l) split_folio_to_list_to_order(f, l, 0)
 #define split_folio(f) split_folio_to_order(f, 0)
-
-/*
- * archs that select ARCH_WANTS_THP_SWAP but don't support THP_SWP due to
- * limitations in the implementation like arm64 MTE can override this to
- * false
- */
-#ifndef arch_thp_swp_supported
-static inline bool arch_thp_swp_supported(void)
-{
-	return true;
-}
-#endif
 
 #endif /* _LINUX_HUGE_MM_H */
