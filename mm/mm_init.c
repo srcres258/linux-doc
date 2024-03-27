@@ -1546,15 +1546,6 @@ void __ref free_area_init_core_hotplug(struct pglist_data *pgdat)
 }
 #endif
 
-/*
- * Set up the zone data structures:
- *   - mark all pages reserved
- *   - mark all memory queues empty
- *   - clear the memory bitmaps
- *
- * NOTE: pgdat should get zeroed by caller.
- * NOTE: this function is only called during early init.
- */
 static void __init free_area_init_core(struct pglist_data *pgdat)
 {
 	enum zone_type j;
@@ -1568,11 +1559,10 @@ static void __init free_area_init_core(struct pglist_data *pgdat)
 		unsigned long size = zone->spanned_pages;
 
 		/*
-		 * Set the zone->managed_pages as zone->present_pages roughly, it
-		 * be zeroed out and reset when memblock allocator frees pages into
-		 * buddy system.
+		 * Initialize zone->managed_pages as 0 , it will be reset
+		 * when memblock allocator frees pages into buddy system.
 		 */
-		zone_init_internals(zone, j, nid, zone->present_pages);
+		zone_init_internals(zone, j, nid, 0);
 
 		if (!size)
 			continue;

@@ -2890,9 +2890,8 @@ init_vbt_panel_defaults(struct intel_panel *panel)
 static void
 init_vbt_missing_defaults(struct drm_i915_private *i915)
 {
+	unsigned int ports = DISPLAY_RUNTIME_INFO(i915)->port_mask;
 	enum port port;
-	int ports = BIT(PORT_A) | BIT(PORT_B) | BIT(PORT_C) |
-		    BIT(PORT_D) | BIT(PORT_E) | BIT(PORT_F);
 
 	if (!HAS_DDI(i915) && !IS_CHERRYVIEW(i915))
 		return;
@@ -3457,6 +3456,9 @@ bool intel_bios_is_port_present(struct drm_i915_private *i915, enum port port)
 bool intel_bios_encoder_supports_dp_dual_mode(const struct intel_bios_encoder_data *devdata)
 {
 	const struct child_device_config *child = &devdata->child;
+
+	if (!devdata)
+		return false;
 
 	if (!intel_bios_encoder_supports_dp(devdata) ||
 	    !intel_bios_encoder_supports_hdmi(devdata))

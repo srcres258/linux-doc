@@ -829,6 +829,17 @@ static void zswap_entry_free(struct zswap_entry *entry)
 	atomic_dec(&zswap_stored_pages);
 }
 
+/*
+ * The caller hold the tree lock and search the entry from the tree,
+ * so it must be on the tree, remove it from the tree and free it.
+ */
+static void zswap_invalidate_entry(struct zswap_tree *tree,
+				   struct zswap_entry *entry)
+{
+	zswap_rb_erase(&tree->rbroot, entry);
+	zswap_entry_free(entry);
+}
+
 /*********************************
 * compressed storage functions
 **********************************/
@@ -1582,7 +1593,8 @@ bool zswap_load(struct folio *folio)
 	swp_entry_t swp = folio->swap;
 	pgoff_t offset = swp_offset(swp);
 	struct page *page = &folio->page;
-	struct xarray *tree = swap_zswap_tree(swp);
+	bool swapcache = folio_test_swapcache(folio);
+	struct zswap_tree *tree = swap_zswap_tree(swp);
 	struct zswap_entry *entry;
 	u8 *dst;
 
@@ -1591,6 +1603,22 @@ bool zswap_load(struct folio *folio)
 	entry = xa_erase(tree, offset);
 	if (!entry)
 		return false;
+	}
+	/*
+	 * When reading into the swapcache, invalidate our entry. The
+	 * swapcache can be the authoritative owner of the page and
+	 * its mappings, and the pressure that results from having two
+	 * in-memory copies outweighs any benefits of caching the
+	 * compression work.
+	 *
+	 * (Most swapins go through the swapcache. The notable
+	 * exception is the singleton fault on SWP_SYNCHRONOUS_IO
+	 * files, which reads into a private page and may free it if
+	 * the fault fails. We remain the primary owner of the entry.)
+	 */
+	if (swapcache)
+		zswap_rb_erase(&tree->rbroot, entry);
+	spin_unlock(&tree->lock);
 
 	if (entry->length)
 		zswap_decompress(entry, page);
@@ -1604,9 +1632,10 @@ bool zswap_load(struct folio *folio)
 	if (entry->objcg)
 		count_objcg_event(entry->objcg, ZSWPIN);
 
-	zswap_entry_free(entry);
-
-	folio_mark_dirty(folio);
+	if (swapcache) {
+		zswap_entry_free(entry);
+		folio_mark_dirty(folio);
+	}
 
 	return true;
 }

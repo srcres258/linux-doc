@@ -5307,8 +5307,7 @@ static int put_file_data(struct send_ctx *sctx, u64 offset, u32 len)
 		WARN_ON(folio_order(folio));
 
 		if (folio_test_readahead(folio))
-			page_cache_async_readahead(mapping,
-						   &sctx->ra, NULL, folio,
+			page_cache_async_readahead(mapping, &sctx->ra, NULL, folio,
 						   index, last_index + 1 - index);
 
 		if (!folio_test_uptodate(folio)) {
@@ -5327,7 +5326,7 @@ static int put_file_data(struct send_ctx *sctx, u64 offset, u32 len)
 		}
 
 		memcpy_from_folio(sctx->send_buf + sctx->send_size, folio,
-				 pg_offset, cur_len);
+				  pg_offset, cur_len);
 		folio_unlock(folio);
 		folio_put(folio);
 		index++;

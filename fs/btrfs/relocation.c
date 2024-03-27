@@ -2985,8 +2985,8 @@ static u64 get_cluster_boundary_end(const struct file_extent_cluster *cluster,
 }
 
 static int relocate_one_folio(struct inode *inode, struct file_ra_state *ra,
-			     const struct file_extent_cluster *cluster,
-			     int *cluster_nr, unsigned long index)
+			      const struct file_extent_cluster *cluster,
+			      int *cluster_nr, unsigned long index)
 {
 	struct btrfs_fs_info *fs_info = inode_to_fs_info(inode);
 	u64 offset = BTRFS_I(inode)->index_cnt;
@@ -3002,7 +3002,7 @@ static int relocate_one_folio(struct inode *inode, struct file_ra_state *ra,
 	folio = filemap_lock_folio(inode->i_mapping, index);
 	if (IS_ERR(folio)) {
 		page_cache_sync_readahead(inode->i_mapping, ra, NULL,
-				index, last_index + 1 - index);
+					  index, last_index + 1 - index);
 		folio = __filemap_get_folio(inode->i_mapping, index,
 					    FGP_LOCK | FGP_ACCESSED | FGP_CREAT, mask);
 		if (IS_ERR(folio))
@@ -3013,8 +3013,8 @@ static int relocate_one_folio(struct inode *inode, struct file_ra_state *ra,
 
 	if (folio_test_readahead(folio))
 		page_cache_async_readahead(inode->i_mapping, ra, NULL,
-				folio, index,
-				last_index + 1 - index);
+					   folio, index,
+					   last_index + 1 - index);
 
 	if (!folio_test_uptodate(folio)) {
 		btrfs_read_folio(NULL, folio);
@@ -3929,7 +3929,7 @@ static noinline_for_stack struct inode *create_reloc_inode(
 	struct btrfs_trans_handle *trans;
 	struct btrfs_root *root;
 	u64 objectid;
-	int err = 0;
+	int ret = 0;
 
 	root = btrfs_grab_root(fs_info->data_reloc_root);
 	trans = btrfs_start_transaction(root, 6);
@@ -3938,31 +3938,31 @@ static noinline_for_stack struct inode *create_reloc_inode(
 		return ERR_CAST(trans);
 	}
 
-	err = btrfs_get_free_objectid(root, &objectid);
-	if (err)
+	ret = btrfs_get_free_objectid(root, &objectid);
+	if (ret)
 		goto out;
 
-	err = __insert_orphan_inode(trans, root, objectid);
-	if (err)
+	ret = __insert_orphan_inode(trans, root, objectid);
+	if (ret)
 		goto out;
 
 	inode = btrfs_iget(fs_info->sb, objectid, root);
 	if (IS_ERR(inode)) {
 		delete_orphan_inode(trans, root, objectid);
-		err = PTR_ERR(inode);
+		ret = PTR_ERR(inode);
 		inode = NULL;
 		goto out;
 	}
 	BTRFS_I(inode)->index_cnt = group->start;
 
-	err = btrfs_orphan_add(trans, BTRFS_I(inode));
+	ret = btrfs_orphan_add(trans, BTRFS_I(inode));
 out:
 	btrfs_put_root(root);
 	btrfs_end_transaction(trans);
 	btrfs_btree_balance_dirty(fs_info);
-	if (err) {
+	if (ret) {
 		iput(inode);
-		inode = ERR_PTR(err);
+		inode = ERR_PTR(ret);
 	}
 	return inode;
 }
