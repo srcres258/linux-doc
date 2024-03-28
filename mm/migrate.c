@@ -113,7 +113,7 @@ bool isolate_movable_page(struct page *page, isolate_mode_t mode)
 	if (!mops->isolate_page(&folio->page, mode))
 		goto out_no_isolated;
 
-	/* Driver shouldn't use PG_isolated bit of page->flags */
+	/* Driver shouldn't use the isolated flag */
 	WARN_ON_ONCE(folio_test_isolated(folio));
 	folio_set_isolated(folio);
 	folio_unlock(folio);
@@ -1668,7 +1668,7 @@ static int migrate_pages_batch(struct list_head *from,
 			 */
 			if (nr_pages > 2 &&
 			   !list_empty(&folio->_deferred_list)) {
-				if (try_split_folio(folio, from) == 0) {
+				if (try_split_folio(folio, split_folios) == 0) {
 					stats->nr_thp_split += is_thp;
 					stats->nr_split++;
 					continue;

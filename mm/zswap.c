@@ -829,17 +829,6 @@ static void zswap_entry_free(struct zswap_entry *entry)
 	atomic_dec(&zswap_stored_pages);
 }
 
-/*
- * The caller hold the tree lock and search the entry from the tree,
- * so it must be on the tree, remove it from the tree and free it.
- */
-static void zswap_invalidate_entry(struct zswap_tree *tree,
-				   struct zswap_entry *entry)
-{
-	zswap_rb_erase(&tree->rbroot, entry);
-	zswap_entry_free(entry);
-}
-
 /*********************************
 * compressed storage functions
 **********************************/
@@ -1594,18 +1583,14 @@ bool zswap_load(struct folio *folio)
 	pgoff_t offset = swp_offset(swp);
 	struct page *page = &folio->page;
 	bool swapcache = folio_test_swapcache(folio);
-	struct zswap_tree *tree = swap_zswap_tree(swp);
+	struct xarray *tree = swap_zswap_tree(swp);
 	struct zswap_entry *entry;
 	u8 *dst;
 
 	VM_WARN_ON_ONCE(!folio_test_locked(folio));
 
-	entry = xa_erase(tree, offset);
-	if (!entry)
-		return false;
-	}
 	/*
-	 * When reading into the swapcache, invalidate our entry. The
+	 * When reading into the swapcache, erase our entry. The
 	 * swapcache can be the authoritative owner of the page and
 	 * its mappings, and the pressure that results from having two
 	 * in-memory copies outweighs any benefits of caching the
@@ -1617,8 +1602,12 @@ bool zswap_load(struct folio *folio)
 	 * the fault fails. We remain the primary owner of the entry.)
 	 */
 	if (swapcache)
-		zswap_rb_erase(&tree->rbroot, entry);
-	spin_unlock(&tree->lock);
+		entry = xa_erase(tree, offset);
+	else
+		entry = xa_load(tree, offset);
+
+	if (!entry)
+		return false;
 
 	if (entry->length)
 		zswap_decompress(entry, page);

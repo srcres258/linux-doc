@@ -77,7 +77,7 @@ to be explicit about the denied-by-default access rights.
             LANDLOCK_ACCESS_FS_MAKE_SYM |
             LANDLOCK_ACCESS_FS_REFER |
             LANDLOCK_ACCESS_FS_TRUNCATE |
-            LANDLOCK_ACCESS_FS_IOCTL,
+            LANDLOCK_ACCESS_FS_IOCTL_DEV,
         .handled_access_net =
             LANDLOCK_ACCESS_NET_BIND_TCP |
             LANDLOCK_ACCESS_NET_CONNECT_TCP,
@@ -117,8 +117,8 @@ version, and only use the available subset of access rights:
               LANDLOCK_ACCESS_NET_CONNECT_TCP);
         __attribute__((fallthrough));
     case 4:
-        /* Removes LANDLOCK_ACCESS_FS_IOCTL for ABI < 5 */
-        ruleset_attr.handled_access_fs &= ~LANDLOCK_ACCESS_FS_IOCTL;
+        /* Removes LANDLOCK_ACCESS_FS_IOCTL_DEV for ABI < 5 */
+        ruleset_attr.handled_access_fs &= ~LANDLOCK_ACCESS_FS_IOCTL_DEV;
     }
 
 This enables to create an inclusive ruleset that will contain our rules.
@@ -330,10 +330,10 @@ Rights associated with file descriptors
 ---------------------------------------
 
 When opening a file, the availability of the ``LANDLOCK_ACCESS_FS_TRUNCATE`` and
-``LANDLOCK_ACCESS_FS_IOCTL`` rights is associated with the newly created file
-descriptor and will be used for subsequent truncation and ioctl attempts using
-:manpage:`ftruncate(2)` and :manpage:`ioctl(2)`.  The behavior is similar to
-opening a file for reading or writing, where permissions are checked during
+``LANDLOCK_ACCESS_FS_IOCTL_DEV`` rights is associated with the newly created
+file descriptor and will be used for subsequent truncation and ioctl attempts
+using :manpage:`ftruncate(2)` and :manpage:`ioctl(2)`.  The behavior is similar
+to opening a file for reading or writing, where permissions are checked during
 :manpage:`open(2)`, but not during the subsequent :manpage:`read(2)` and
 :manpage:`write(2)` calls.
 
@@ -344,52 +344,6 @@ ruleset gets enforced and the process keeps file descriptors which were opened
 both before and after the enforcement.  It is also possible to pass such file
 descriptors between processes, keeping their Landlock properties, even when some
 of the involved processes do not have an enforced Landlock ruleset.
-
-Restricting IOCTL commands
---------------------------
-
-When the ``LANDLOCK_ACCESS_FS_IOCTL`` right is handled, Landlock will restrict
-the invocation of IOCTL commands.  However, to *allow* these IOCTL commands
-again, some of these IOCTL commands are then granted through other, preexisting
-access rights.
-
-For example, consider a program which handles ``LANDLOCK_ACCESS_FS_IOCTL`` and
-``LANDLOCK_ACCESS_FS_READ_FILE``.  The program *allows*
-``LANDLOCK_ACCESS_FS_READ_FILE`` on a file ``foo.log``.
-
-By virtue of granting this access on the ``foo.log`` file, it is now possible to
-use common and harmless IOCTL commands which are useful when reading files, such
-as ``FIONREAD``.
-
-When both ``LANDLOCK_ACCESS_FS_IOCTL`` and other access rights are
-handled in the ruleset, these other access rights may start governing
-the use of individual IOCTL commands instead of
-``LANDLOCK_ACCESS_FS_IOCTL``.  For instance, if both
-``LANDLOCK_ACCESS_FS_IOCTL`` and ``LANDLOCK_ACCESS_FS_READ_FILE`` are
-handled, allowing ``LANDLOCK_ACCESS_FS_READ_FILE`` will make it
-possible to use ``FIONREAD`` and other IOCTL commands.
-
-The following table illustrates how IOCTL attempts for ``FIONREAD`` are
-filtered, depending on how a Landlock ruleset handles and allows the
-``LANDLOCK_ACCESS_FS_IOCTL`` and ``LANDLOCK_ACCESS_FS_READ_FILE`` rights:
-
-+-------------------------+--------------+--------------+--------------+
-|                         | ``FS_IOCTL`` | ``FS_IOCTL`` | ``FS_IOCTL`` |
-|                         | not handled  | handled and  | handled and  |
-|                         |              | allowed      | not allowed  |
-+-------------------------+--------------+--------------+--------------+
-| ``FS_READ_FILE``        | allow        | allow        | deny         |
-| not handled             |              |              |              |
-+-------------------------+              +--------------+--------------+
-| ``FS_READ_FILE``        |              | allow                       |
-| handled and allowed     |              |                             |
-+-------------------------+              +-----------------------------+
-| ``FS_READ_FILE``        |              | deny                        |
-| handled and not allowed |              |                             |
-+-------------------------+--------------+-----------------------------+
-
-The full list of IOCTL commands and the access rights which affect them is
-documented below.
 
 Compatibility
 =============
@@ -521,23 +475,24 @@ by the Documentation/admin-guide/cgroup-v1/memory.rst.
 IOCTL support
 -------------
 
-The ``LANDLOCK_ACCESS_FS_IOCTL`` right restricts the use of :manpage:`ioctl(2)`,
-but it only applies to newly opened files.  This means specifically that
-pre-existing file descriptors like stdin, stdout and stderr are unaffected.
+The ``LANDLOCK_ACCESS_FS_IOCTL_DEV`` right restricts the use of
+:manpage:`ioctl(2)`, but it only applies to *newly opened* device files.  This
+means specifically that pre-existing file descriptors like stdin, stdout and
+stderr are unaffected.
 
 Users should be aware that TTY devices have traditionally permitted to control
 other processes on the same TTY through the ``TIOCSTI`` and ``TIOCLINUX`` IOCTL
-commands.  It is therefore recommended to close inherited TTY file descriptors,
-or to reopen them from ``/proc/self/fd/*`` without the
-``LANDLOCK_ACCESS_FS_IOCTL`` right, if possible.  The :manpage:`isatty(3)`
-function checks whether a given file descriptor is a TTY.
+commands.  Both of these require ``CAP_SYS_ADMIN`` on modern Linux systems, but
+the behavior is configurable for ``TIOCSTI``.
+
+On older systems, it is therefore recommended to close inherited TTY file
+descriptors, or to reopen them from ``/proc/self/fd/*`` without the
+``LANDLOCK_ACCESS_FS_IOCTL_DEV`` right, if possible.
 
 Landlock's IOCTL support is coarse-grained at the moment, but may become more
 fine-grained in the future.  Until then, users are advised to establish the
 guarantees that they need through the file hierarchy, by only allowing the
-``LANDLOCK_ACCESS_FS_IOCTL`` right on files where it is really harmless.  In
-cases where you can control the mounts, the ``nodev`` mount option can help to
-rule out that device files can be accessed.
+``LANDLOCK_ACCESS_FS_IOCTL_DEV`` right on files where it is really required.
 
 Previous limitations
 ====================
@@ -584,7 +539,7 @@ IOCTL operations could not be denied before the fifth Landlock ABI, so
 earlier ABI.
 
 Starting with the Landlock ABI version 5, it is possible to restrict the use of
-:manpage:`ioctl(2)` using the new ``LANDLOCK_ACCESS_FS_IOCTL`` access right.
+:manpage:`ioctl(2)` using the new ``LANDLOCK_ACCESS_FS_IOCTL_DEV`` access right.
 
 .. _kernel_support:
 

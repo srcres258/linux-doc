@@ -8,7 +8,7 @@
  */
 
 #define _GNU_SOURCE
-#include <arpa/inet.h>
+#include <asm/termbits.h>
 #include <fcntl.h>
 #include <linux/fs.h>
 #include <linux/landlock.h>
@@ -18,6 +18,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <sys/capability.h>
+#include <sys/ioctl.h>
 #include <sys/mount.h>
 #include <sys/prctl.h>
 #include <sys/sendfile.h>
@@ -541,9 +542,9 @@ TEST_F_FORK(layout1, inval)
 	LANDLOCK_ACCESS_FS_WRITE_FILE | \
 	LANDLOCK_ACCESS_FS_READ_FILE | \
 	LANDLOCK_ACCESS_FS_TRUNCATE | \
-	LANDLOCK_ACCESS_FS_IOCTL)
+	LANDLOCK_ACCESS_FS_IOCTL_DEV)
 
-#define ACCESS_LAST LANDLOCK_ACCESS_FS_IOCTL
+#define ACCESS_LAST LANDLOCK_ACCESS_FS_IOCTL_DEV
 
 #define ACCESS_ALL ( \
 	ACCESS_FILE | \
@@ -3889,6 +3890,15 @@ TEST(memfd_ftruncate_and_ioctl)
 	}
 }
 
+static int test_fionread_ioctl(int fd)
+{
+	size_t sz = 0;
+
+	if (ioctl(fd, FIONREAD, &sz) < 0 && errno == EACCES)
+		return errno;
+	return 0;
+}
+
 TEST_F_FORK(layout1, o_path_ftruncate_and_ioctl)
 {
 	const struct landlock_ruleset_attr attr = {
@@ -3929,21 +3939,9 @@ TEST_F_FORK(layout1, o_path_ftruncate_and_ioctl)
 	ASSERT_EQ(0, close(fd));
 }
 
-static int test_fionread_ioctl(int fd)
-{
-	size_t sz = 0;
-
-	if (ioctl(fd, FIONREAD, &sz) < 0 && errno == EACCES)
-		return errno;
-	return 0;
-}
-
 /*
- * For named pipes, the same rules should apply as for anonymous pipes.
- *
- * That means, if the pipe is opened, we should permit the IOCTLs which are
- * implemented by pipefifo_fops (fs/pipe.c), even if they were otherwise
- * forbidden by Landlock policy.
+ * Named pipes are not governed by the LANDLOCK_ACCESS_FS_IOCTL_DEV right,
+ * because they are not character or block devices.
  */
 TEST_F_FORK(layout1, named_pipe_ioctl)
 {
@@ -3951,7 +3949,7 @@ TEST_F_FORK(layout1, named_pipe_ioctl)
 	int fd, ruleset_fd;
 	const char *const path = file1_s1d1;
 	const struct landlock_ruleset_attr attr = {
-		.handled_access_fs = LANDLOCK_ACCESS_FS_IOCTL,
+		.handled_access_fs = LANDLOCK_ACCESS_FS_IOCTL_DEV,
 	};
 
 	ASSERT_EQ(0, unlink(path));
@@ -3981,12 +3979,6 @@ TEST_F_FORK(layout1, named_pipe_ioctl)
 	ASSERT_EQ(0, close(fd));
 	ASSERT_EQ(0, unlink(path));
 
-	/* Under the same conditions, FIONREAD on a regular file fails. */
-	fd = open(file2_s1d1, O_RDONLY);
-	ASSERT_LE(0, fd);
-	EXPECT_EQ(EACCES, test_fionread_ioctl(fd));
-	ASSERT_EQ(0, close(fd));
-
 	ASSERT_EQ(child_pid, waitpid(child_pid, NULL, 0));
 }
 
@@ -3998,7 +3990,7 @@ TEST_F_FORK(layout1, named_unix_domain_socket_ioctl)
 	socklen_t size;
 	struct sockaddr_un srv_un, cli_un;
 	const struct landlock_ruleset_attr attr = {
-		.handled_access_fs = LANDLOCK_ACCESS_FS_IOCTL,
+		.handled_access_fs = LANDLOCK_ACCESS_FS_IOCTL_DEV,
 	};
 
 	/* Sets up a server */
@@ -4020,8 +4012,6 @@ TEST_F_FORK(layout1, named_unix_domain_socket_ioctl)
 
 	/* Sets up a client connection to it */
 	cli_un.sun_family = AF_UNIX;
-	snprintf(cli_un.sun_path, sizeof(cli_un.sun_path), "%s%ld", path,
-		 (long)getpid());
 
 	ASSERT_LE(0, (cli_fd = socket(AF_UNIX, SOCK_STREAM, 0)));
 
@@ -4043,19 +4033,11 @@ TEST_F_FORK(layout1, named_unix_domain_socket_ioctl)
 
 /* clang-format off */
 FIXTURE(ioctl) {};
+
+FIXTURE_SETUP(ioctl) {};
+
+FIXTURE_TEARDOWN(ioctl) {};
 /* clang-format on */
-
-FIXTURE_SETUP(ioctl)
-{
-	prepare_layout(_metadata);
-	create_file(_metadata, file1_s1d1);
-}
-
-FIXTURE_TEARDOWN(ioctl)
-{
-	EXPECT_EQ(0, remove_path(file1_s1d1));
-	cleanup_layout(_metadata);
-}
 
 FIXTURE_VARIANT(ioctl)
 {
@@ -4063,40 +4045,34 @@ FIXTURE_VARIANT(ioctl)
 	const __u64 allowed;
 	const mode_t open_mode;
 	/*
-	 * These are the expected IOCTL results for a representative IOCTL from
-	 * each of the IOCTL groups.  We only distinguish the 0 and EACCES
-	 * results here, and treat other errors as 0.
+	 * TCGETS is used as a characteristic device-specific IOCTL command.
+	 * The logic is the same for other IOCTL commands as well.
 	 */
-	const int expected_fioqsize_result; /* RW */
-	const int expected_fibmap_result; /* RW_FILE */
-	const int expected_fionread_result; /* special */
+	const int expected_tcgets_result; /* terminal device IOCTL */
+	/*
+	 * FIONREAD is implemented in fs/ioctl.c for regular files,
+	 * but we do not blanket-permit it for devices.
+	 */
+	const int expected_fionread_result;
 };
 
 /* clang-format off */
 FIXTURE_VARIANT_ADD(ioctl, handled_i_allowed_none) {
 	/* clang-format on */
-	.handled = LANDLOCK_ACCESS_FS_IOCTL,
+	.handled = LANDLOCK_ACCESS_FS_IOCTL_DEV,
 	.allowed = 0,
 	.open_mode = O_RDWR,
-	/*
-	 * If LANDLOCK_ACCESS_FS_IOCTL is handled, but nothing else is
-	 * explicitly handled, almost all IOCTL commands will be governed by the
-	 * LANDLOCK_ACCESS_FS_IOCTL right.  Files can be opened, but IOCTLs are
-	 * disallowed.
-	 */
-	.expected_fioqsize_result = EACCES,
-	.expected_fibmap_result = EACCES,
+	.expected_tcgets_result = EACCES,
 	.expected_fionread_result = EACCES,
 };
 
 /* clang-format off */
 FIXTURE_VARIANT_ADD(ioctl, handled_i_allowed_i) {
 	/* clang-format on */
-	.handled = LANDLOCK_ACCESS_FS_IOCTL,
-	.allowed = LANDLOCK_ACCESS_FS_IOCTL,
+	.handled = LANDLOCK_ACCESS_FS_IOCTL_DEV,
+	.allowed = LANDLOCK_ACCESS_FS_IOCTL_DEV,
 	.open_mode = O_RDWR,
-	.expected_fioqsize_result = 0,
-	.expected_fibmap_result = 0,
+	.expected_tcgets_result = 0,
 	.expected_fionread_result = 0,
 };
 
@@ -4106,149 +4082,15 @@ FIXTURE_VARIANT_ADD(ioctl, unhandled) {
 	.handled = LANDLOCK_ACCESS_FS_EXECUTE,
 	.allowed = LANDLOCK_ACCESS_FS_EXECUTE,
 	.open_mode = O_RDWR,
-	.expected_fioqsize_result = 0,
-	.expected_fibmap_result = 0,
+	.expected_tcgets_result = 0,
 	.expected_fionread_result = 0,
 };
 
-/* clang-format off */
-FIXTURE_VARIANT_ADD(ioctl, handled_rwd_allowed_r) {
-	/* clang-format on */
-	.handled = LANDLOCK_ACCESS_FS_READ_FILE |
-		   LANDLOCK_ACCESS_FS_WRITE_FILE | LANDLOCK_ACCESS_FS_READ_DIR,
-	.allowed = LANDLOCK_ACCESS_FS_READ_FILE,
-	.open_mode = O_RDONLY,
-	/* If LANDLOCK_ACCESS_FS_IOCTL is not handled, all IOCTLs work. */
-	.expected_fioqsize_result = 0,
-	.expected_fibmap_result = 0,
-	.expected_fionread_result = 0,
-};
-
-/* clang-format off */
-FIXTURE_VARIANT_ADD(ioctl, handled_rwd_allowed_w) {
-	/* clang-format on */
-	.handled = LANDLOCK_ACCESS_FS_READ_FILE |
-		   LANDLOCK_ACCESS_FS_WRITE_FILE | LANDLOCK_ACCESS_FS_READ_DIR,
-	.allowed = LANDLOCK_ACCESS_FS_WRITE_FILE,
-	.open_mode = O_WRONLY,
-	/* If LANDLOCK_ACCESS_FS_IOCTL is not handled, all IOCTLs work. */
-	.expected_fioqsize_result = 0,
-	.expected_fibmap_result = 0,
-	.expected_fionread_result = 0,
-};
-
-/* clang-format off */
-FIXTURE_VARIANT_ADD(ioctl, handled_ri_allowed_r) {
-	/* clang-format on */
-	.handled = LANDLOCK_ACCESS_FS_READ_FILE | LANDLOCK_ACCESS_FS_IOCTL,
-	.allowed = LANDLOCK_ACCESS_FS_READ_FILE,
-	.open_mode = O_RDONLY,
-	.expected_fioqsize_result = 0,
-	.expected_fibmap_result = 0,
-	.expected_fionread_result = 0,
-};
-
-/* clang-format off */
-FIXTURE_VARIANT_ADD(ioctl, handled_wi_allowed_w) {
-	/* clang-format on */
-	.handled = LANDLOCK_ACCESS_FS_WRITE_FILE | LANDLOCK_ACCESS_FS_IOCTL,
-	.allowed = LANDLOCK_ACCESS_FS_WRITE_FILE,
-	.open_mode = O_WRONLY,
-	.expected_fioqsize_result = 0,
-	.expected_fibmap_result = 0,
-	.expected_fionread_result = 0,
-};
-
-/* clang-format off */
-FIXTURE_VARIANT_ADD(ioctl, handled_di_allowed_d) {
-	/* clang-format on */
-	.handled = LANDLOCK_ACCESS_FS_READ_DIR | LANDLOCK_ACCESS_FS_IOCTL,
-	.allowed = LANDLOCK_ACCESS_FS_READ_DIR,
-	.open_mode = O_RDWR,
-	.expected_fioqsize_result = 0,
-	.expected_fibmap_result = EACCES,
-	.expected_fionread_result = 0,
-};
-
-/* clang-format off */
-FIXTURE_VARIANT_ADD(ioctl, handled_rwi_allowed_rw) {
-	/* clang-format on */
-	.handled = LANDLOCK_ACCESS_FS_READ_FILE |
-		   LANDLOCK_ACCESS_FS_WRITE_FILE | LANDLOCK_ACCESS_FS_IOCTL,
-	.allowed = LANDLOCK_ACCESS_FS_READ_FILE | LANDLOCK_ACCESS_FS_WRITE_FILE,
-	.open_mode = O_RDWR,
-	.expected_fioqsize_result = 0,
-	.expected_fibmap_result = 0,
-	.expected_fionread_result = 0,
-};
-
-/* clang-format off */
-FIXTURE_VARIANT_ADD(ioctl, handled_rwi_allowed_r) {
-	/* clang-format on */
-	.handled = LANDLOCK_ACCESS_FS_READ_FILE |
-		   LANDLOCK_ACCESS_FS_WRITE_FILE | LANDLOCK_ACCESS_FS_IOCTL,
-	.allowed = LANDLOCK_ACCESS_FS_READ_FILE,
-	.open_mode = O_RDONLY,
-	.expected_fioqsize_result = 0,
-	.expected_fibmap_result = 0,
-	.expected_fionread_result = 0,
-};
-
-/* clang-format off */
-FIXTURE_VARIANT_ADD(ioctl, handled_rwi_allowed_ri) {
-	/* clang-format on */
-	.handled = LANDLOCK_ACCESS_FS_READ_FILE |
-		   LANDLOCK_ACCESS_FS_WRITE_FILE | LANDLOCK_ACCESS_FS_IOCTL,
-	.allowed = LANDLOCK_ACCESS_FS_READ_FILE | LANDLOCK_ACCESS_FS_IOCTL,
-	.open_mode = O_RDONLY,
-	.expected_fioqsize_result = 0,
-	.expected_fibmap_result = 0,
-	.expected_fionread_result = 0,
-};
-
-/* clang-format off */
-FIXTURE_VARIANT_ADD(ioctl, handled_rwi_allowed_w) {
-	/* clang-format on */
-	.handled = LANDLOCK_ACCESS_FS_READ_FILE |
-		   LANDLOCK_ACCESS_FS_WRITE_FILE | LANDLOCK_ACCESS_FS_IOCTL,
-	.allowed = LANDLOCK_ACCESS_FS_WRITE_FILE,
-	.open_mode = O_WRONLY,
-	.expected_fioqsize_result = 0,
-	.expected_fibmap_result = 0,
-	.expected_fionread_result = 0,
-};
-
-/* clang-format off */
-FIXTURE_VARIANT_ADD(ioctl, handled_rwi_allowed_wi) {
-	/* clang-format on */
-	.handled = LANDLOCK_ACCESS_FS_READ_FILE |
-		   LANDLOCK_ACCESS_FS_WRITE_FILE | LANDLOCK_ACCESS_FS_IOCTL,
-	.allowed = LANDLOCK_ACCESS_FS_WRITE_FILE | LANDLOCK_ACCESS_FS_IOCTL,
-	.open_mode = O_WRONLY,
-	.expected_fioqsize_result = 0,
-	.expected_fibmap_result = 0,
-	.expected_fionread_result = 0,
-};
-
-static int test_fioqsize_ioctl(int fd)
+static int test_tcgets_ioctl(int fd)
 {
-	size_t sz;
+	struct termios info;
 
-	if (ioctl(fd, FIOQSIZE, &sz) < 0)
-		return errno;
-	return 0;
-}
-
-static int test_fibmap_ioctl(int fd)
-{
-	int blk = 0;
-
-	/*
-	 * We only want to distinguish here whether Landlock already caught it,
-	 * so we treat anything but EACCESS as success.  (It commonly returns
-	 * EPERM when missing CAP_SYS_RAWIO.)
-	 */
-	if (ioctl(fd, FIBMAP, &blk) < 0 && errno == EACCES)
+	if (ioctl(fd, TCGETS, &info) < 0)
 		return errno;
 	return 0;
 }
@@ -4258,7 +4100,7 @@ TEST_F_FORK(ioctl, handle_dir_access_file)
 	const int flag = 0;
 	const struct rule rules[] = {
 		{
-			.path = dir_s1d1,
+			.path = "/dev",
 			.access = variant->allowed,
 		},
 		{},
@@ -4271,16 +4113,11 @@ TEST_F_FORK(ioctl, handle_dir_access_file)
 	enforce_ruleset(_metadata, ruleset_fd);
 	ASSERT_EQ(0, close(ruleset_fd));
 
-	file_fd = open(file1_s1d1, variant->open_mode);
+	file_fd = open("/dev/tty", variant->open_mode);
 	ASSERT_LE(0, file_fd);
 
-	/*
-	 * Checks that IOCTL commands in each IOCTL group return the expected
-	 * errors.
-	 */
-	EXPECT_EQ(variant->expected_fioqsize_result,
-		  test_fioqsize_ioctl(file_fd));
-	EXPECT_EQ(variant->expected_fibmap_result, test_fibmap_ioctl(file_fd));
+	/* Checks that IOCTL commands return the expected errors. */
+	EXPECT_EQ(variant->expected_tcgets_result, test_tcgets_ioctl(file_fd));
 	EXPECT_EQ(variant->expected_fionread_result,
 		  test_fionread_ioctl(file_fd));
 
@@ -4289,17 +4126,17 @@ TEST_F_FORK(ioctl, handle_dir_access_file)
 	EXPECT_EQ(0, ioctl(file_fd, FIONCLEX));
 	EXPECT_EQ(0, ioctl(file_fd, FIONBIO, &flag));
 	EXPECT_EQ(0, ioctl(file_fd, FIOASYNC, &flag));
+	EXPECT_EQ(0, ioctl(file_fd, FIGETBSZ, &flag));
 
 	ASSERT_EQ(0, close(file_fd));
 }
 
 TEST_F_FORK(ioctl, handle_dir_access_dir)
 {
-	const char *const path = dir_s1d1;
 	const int flag = 0;
 	const struct rule rules[] = {
 		{
-			.path = path,
+			.path = "/dev",
 			.access = variant->allowed,
 		},
 		{},
@@ -4317,36 +4154,36 @@ TEST_F_FORK(ioctl, handle_dir_access_dir)
 	 * directory.  If the directory can not be opened, the variant is
 	 * infeasible to test with an opened directory.
 	 */
-	dir_fd = open(path, O_RDONLY);
+	dir_fd = open("/dev", O_RDONLY);
 	if (dir_fd < 0)
 		return;
 
 	/*
-	 * Checks that IOCTL commands in each IOCTL group return the expected
-	 * errors.
+	 * Checks that IOCTL commands return the expected errors.
+	 * We do not use the expected values from the fixture here.
+	 *
+	 * When using IOCTL on a directory, no Landlock restrictions apply.
+	 * TCGETS will fail anyway because it is not invoked on a TTY device.
 	 */
-	EXPECT_EQ(variant->expected_fioqsize_result,
-		  test_fioqsize_ioctl(dir_fd));
-	EXPECT_EQ(variant->expected_fibmap_result, test_fibmap_ioctl(dir_fd));
-	EXPECT_EQ(variant->expected_fionread_result,
-		  test_fionread_ioctl(dir_fd));
+	EXPECT_EQ(ENOTTY, test_tcgets_ioctl(dir_fd));
+	EXPECT_EQ(0, test_fionread_ioctl(dir_fd));
 
 	/* Checks that unrestrictable commands are unrestricted. */
 	EXPECT_EQ(0, ioctl(dir_fd, FIOCLEX));
 	EXPECT_EQ(0, ioctl(dir_fd, FIONCLEX));
 	EXPECT_EQ(0, ioctl(dir_fd, FIONBIO, &flag));
 	EXPECT_EQ(0, ioctl(dir_fd, FIOASYNC, &flag));
+	EXPECT_EQ(0, ioctl(dir_fd, FIGETBSZ, &flag));
 
 	ASSERT_EQ(0, close(dir_fd));
 }
 
 TEST_F_FORK(ioctl, handle_file_access_file)
 {
-	const char *const path = file1_s1d1;
 	const int flag = 0;
 	const struct rule rules[] = {
 		{
-			.path = path,
+			.path = "/dev/tty0",
 			.access = variant->allowed,
 		},
 		{},
@@ -4364,16 +4201,14 @@ TEST_F_FORK(ioctl, handle_file_access_file)
 	enforce_ruleset(_metadata, ruleset_fd);
 	ASSERT_EQ(0, close(ruleset_fd));
 
-	file_fd = open(path, variant->open_mode);
-	ASSERT_LE(0, file_fd);
+	file_fd = open("/dev/tty0", variant->open_mode);
+	ASSERT_LE(0, file_fd)
+	{
+		TH_LOG("Failed to open /dev/tty0: %s", strerror(errno));
+	}
 
-	/*
-	 * Checks that IOCTL commands in each IOCTL group return the expected
-	 * errors.
-	 */
-	EXPECT_EQ(variant->expected_fioqsize_result,
-		  test_fioqsize_ioctl(file_fd));
-	EXPECT_EQ(variant->expected_fibmap_result, test_fibmap_ioctl(file_fd));
+	/* Checks that IOCTL commands return the expected errors. */
+	EXPECT_EQ(variant->expected_tcgets_result, test_tcgets_ioctl(file_fd));
 	EXPECT_EQ(variant->expected_fionread_result,
 		  test_fionread_ioctl(file_fd));
 
@@ -4382,6 +4217,7 @@ TEST_F_FORK(ioctl, handle_file_access_file)
 	EXPECT_EQ(0, ioctl(file_fd, FIONCLEX));
 	EXPECT_EQ(0, ioctl(file_fd, FIONBIO, &flag));
 	EXPECT_EQ(0, ioctl(file_fd, FIOASYNC, &flag));
+	EXPECT_EQ(0, ioctl(file_fd, FIGETBSZ, &flag));
 
 	ASSERT_EQ(0, close(file_fd));
 }

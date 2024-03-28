@@ -348,12 +348,12 @@ struct page *follow_devmap_pud(struct vm_area_struct *vma, unsigned long addr,
 
 vm_fault_t do_huge_pmd_numa_page(struct vm_fault *vmf);
 
-extern struct page *huge_zero_page;
+extern struct folio *huge_zero_folio;
 extern unsigned long huge_zero_pfn;
 
-static inline bool is_huge_zero_page(struct page *page)
+static inline bool is_huge_zero_folio(const struct folio *folio)
 {
-	return READ_ONCE(huge_zero_page) == page;
+	return READ_ONCE(huge_zero_folio) == folio;
 }
 
 static inline bool is_huge_zero_pmd(pmd_t pmd)
@@ -366,8 +366,8 @@ static inline bool is_huge_zero_pud(pud_t pud)
 	return false;
 }
 
-struct page *mm_get_huge_zero_page(struct mm_struct *mm);
-void mm_put_huge_zero_page(struct mm_struct *mm);
+struct folio *mm_get_huge_zero_folio(struct mm_struct *mm);
+void mm_put_huge_zero_folio(struct mm_struct *mm);
 
 #define mk_huge_pmd(page, prot) pmd_mkhuge(mk_pmd(page, prot))
 
@@ -480,7 +480,7 @@ static inline vm_fault_t do_huge_pmd_numa_page(struct vm_fault *vmf)
 	return 0;
 }
 
-static inline bool is_huge_zero_page(struct page *page)
+static inline bool is_huge_zero_folio(const struct folio *folio)
 {
 	return false;
 }
@@ -495,7 +495,7 @@ static inline bool is_huge_zero_pud(pud_t pud)
 	return false;
 }
 
-static inline void mm_put_huge_zero_page(struct mm_struct *mm)
+static inline void mm_put_huge_zero_folio(struct mm_struct *mm)
 {
 	return;
 }

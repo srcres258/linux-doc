@@ -89,27 +89,19 @@ static const struct landlock_object_underops landlock_fs_underops = {
 
 /* IOCTL helpers */
 
-/*
- * These are synthetic access rights, which are only used within the kernel, but
- * not exposed to callers in userspace.  The mapping between these access rights
- * and IOCTL commands is defined in the get_required_ioctl_access() helper function.
- */
-#define LANDLOCK_ACCESS_FS_IOCTL_RW (LANDLOCK_LAST_PUBLIC_ACCESS_FS << 1)
-#define LANDLOCK_ACCESS_FS_IOCTL_RW_FILE (LANDLOCK_LAST_PUBLIC_ACCESS_FS << 2)
-
-/* ioctl_groups - all synthetic access rights for IOCTL command groups */
-/* clang-format off */
-#define IOCTL_GROUPS (				\
-	LANDLOCK_ACCESS_FS_IOCTL_RW |		\
-	LANDLOCK_ACCESS_FS_IOCTL_RW_FILE)
-/* clang-format on */
-
-static_assert((IOCTL_GROUPS & LANDLOCK_MASK_ACCESS_FS) == IOCTL_GROUPS);
-
 /**
- * get_required_ioctl_access(): Determine required IOCTL access rights.
+ * get_required_ioctl_dev_access(): Determine required access rights for IOCTLs
+ * on device files.
  *
  * @cmd: The IOCTL command that is supposed to be run.
+ *
+ * By default, any IOCTL on a device file requires the
+ * LANDLOCK_ACCESS_FS_IOCTL_DEV right.  We make exceptions for commands, if:
+ *
+ * 1. The command is implemented in fs/ioctl.c's do_vfs_ioctl(),
+ *    not in f_ops->unlocked_ioctl() or f_ops->compat_ioctl().
+ *
+ * 2. The command can be reasonably used on a device file at all.
  *
  * Any new IOCTL commands that are implemented in fs/ioctl.c's do_vfs_ioctl()
  * should be considered for inclusion here.
@@ -118,7 +110,7 @@ static_assert((IOCTL_GROUPS & LANDLOCK_MASK_ACCESS_FS) == IOCTL_GROUPS);
  * use the given @cmd.
  */
 static __attribute_const__ access_mask_t
-get_required_ioctl_access(const unsigned int cmd)
+get_required_ioctl_dev_access(const unsigned int cmd)
 {
 	switch (cmd) {
 	case FIOCLEX:
@@ -132,139 +124,102 @@ get_required_ioctl_access(const unsigned int cmd)
 		 * unconditionally permitted in Landlock.
 		 */
 		return 0;
-	case FIONREAD:
 	case FIOQSIZE:
+		/*
+		 * FIOQSIZE queries the size of a regular file or directory.
+		 *
+		 * This IOCTL command only applies to regular files and
+		 * directories.
+		 */
+		return LANDLOCK_ACCESS_FS_IOCTL_DEV;
+	case FIFREEZE:
+	case FITHAW:
+		/*
+		 * FIFREEZE and FITHAW freeze and thaw the file system which the
+		 * given file belongs to.  Requires CAP_SYS_ADMIN.
+		 *
+		 * These commands operate on the file system's superblock rather
+		 * than on the file itself.  The same operations can also be
+		 * done through any other file or directory on the same file
+		 * system, so it is safe to permit these.
+		 */
+		return 0;
+	case FS_IOC_FIEMAP:
+		/*
+		 * FS_IOC_FIEMAP queries information about the allocation of
+		 * blocks within a file.
+		 *
+		 * This IOCTL command only applies to regular files.
+		 */
+		return LANDLOCK_ACCESS_FS_IOCTL_DEV;
 	case FIGETBSZ:
 		/*
-		 * FIONREAD returns the number of bytes available for reading.
-		 * FIONREAD returns the number of immediately readable bytes for
-		 * a file.
-		 *
-		 * FIOQSIZE queries the size of a file or directory.
-		 *
 		 * FIGETBSZ queries the file system's block size for a file or
 		 * directory.
 		 *
-		 * These IOCTL commands are permitted for files which are opened
-		 * with LANDLOCK_ACCESS_FS_READ_DIR,
-		 * LANDLOCK_ACCESS_FS_READ_FILE, or
-		 * LANDLOCK_ACCESS_FS_WRITE_FILE.
+		 * This command operates on the file system's superblock rather
+		 * than on the file itself.  The same operation can also be done
+		 * through any other file or directory on the same file system,
+		 * so it is safe to permit it.
 		 */
-		return LANDLOCK_ACCESS_FS_IOCTL_RW;
-	case FS_IOC_FIEMAP:
-	case FIBMAP:
-		/*
-		 * FS_IOC_FIEMAP and FIBMAP query information about the
-		 * allocation of blocks within a file.  They are permitted for
-		 * files which are opened with LANDLOCK_ACCESS_FS_READ_FILE or
-		 * LANDLOCK_ACCESS_FS_WRITE_FILE.
-		 */
-		fallthrough;
-	case FIDEDUPERANGE:
+		return 0;
 	case FICLONE:
 	case FICLONERANGE:
+	case FIDEDUPERANGE:
 		/*
-		 * FIDEDUPERANGE, FICLONE and FICLONERANGE make files share
+		 * FICLONE, FICLONERANGE and FIDEDUPERANGE make files share
 		 * their underlying storage ("reflink") between source and
 		 * destination FDs, on file systems which support that.
 		 *
-		 * The underlying implementations are already checking whether
-		 * the involved files are opened with the appropriate read/write
-		 * modes.  We rely on this being implemented correctly.
-		 *
-		 * These IOCTLs are permitted for files which are opened with
-		 * LANDLOCK_ACCESS_FS_READ_FILE or
-		 * LANDLOCK_ACCESS_FS_WRITE_FILE.
+		 * These IOCTL commands only apply to regular files.
 		 */
-		fallthrough;
+		return LANDLOCK_ACCESS_FS_IOCTL_DEV;
+	case FIONREAD:
+		/*
+		 * FIONREAD returns the number of bytes available for reading.
+		 *
+		 * We require LANDLOCK_ACCESS_FS_IOCTL_DEV for FIONREAD, because
+		 * devices implement it in f_ops->unlocked_ioctl().  The
+		 * implementations of this operation have varying quality and
+		 * complexity, so it is hard to reason about what they do.
+		 */
+		return LANDLOCK_ACCESS_FS_IOCTL_DEV;
+	case FS_IOC_GETFLAGS:
+	case FS_IOC_SETFLAGS:
+	case FS_IOC_FSGETXATTR:
+	case FS_IOC_FSSETXATTR:
+		/*
+		 * FS_IOC_GETFLAGS, FS_IOC_SETFLAGS, FS_IOC_FSGETXATTR and
+		 * FS_IOC_FSSETXATTR do not apply for devices.
+		 */
+		return LANDLOCK_ACCESS_FS_IOCTL_DEV;
+	case FS_IOC_GETFSUUID:
+	case FS_IOC_GETFSSYSFSPATH:
+		/*
+		 * FS_IOC_GETFSUUID and FS_IOC_GETFSSYSFSPATH both operate on
+		 * the file system superblock, not on the specific file, so
+		 * these operations are available through any other file on the
+		 * same file system as well.
+		 */
+		return 0;
+	case FIBMAP:
 	case FS_IOC_RESVSP:
 	case FS_IOC_RESVSP64:
 	case FS_IOC_UNRESVSP:
 	case FS_IOC_UNRESVSP64:
 	case FS_IOC_ZERO_RANGE:
 		/*
-		 * These IOCTLs reserve space, or create holes like
-		 * fallocate(2).  We rely on the implementations checking the
-		 * files' read/write modes.
-		 *
-		 * These IOCTLs are permitted for files which are opened with
-		 * LANDLOCK_ACCESS_FS_READ_FILE or
-		 * LANDLOCK_ACCESS_FS_WRITE_FILE.
+		 * FIBMAP, FS_IOC_RESVSP, FS_IOC_RESVSP64, FS_IOC_UNRESVSP,
+		 * FS_IOC_UNRESVSP64 and FS_IOC_ZERO_RANGE only apply to regular
+		 * files (as implemented in file_ioctl()).
 		 */
-		return LANDLOCK_ACCESS_FS_IOCTL_RW_FILE;
+		return LANDLOCK_ACCESS_FS_IOCTL_DEV;
 	default:
 		/*
 		 * Other commands are guarded by the catch-all access right.
 		 */
-		return LANDLOCK_ACCESS_FS_IOCTL;
+		return LANDLOCK_ACCESS_FS_IOCTL_DEV;
 	}
-}
-
-/**
- * expand_ioctl() - Return the dst flags from either the src flag or the
- * %LANDLOCK_ACCESS_FS_IOCTL flag, depending on whether the
- * %LANDLOCK_ACCESS_FS_IOCTL and src access rights are handled or not.
- *
- * @handled: Handled access rights.
- * @access: The access mask to copy values from.
- * @src: A single access right to copy from in @access.
- * @dst: One or more access rights to copy to.
- *
- * Returns: @dst, or 0.
- */
-static __attribute_const__ access_mask_t
-expand_ioctl(const access_mask_t handled, const access_mask_t access,
-	     const access_mask_t src, const access_mask_t dst)
-{
-	access_mask_t copy_from;
-
-	if (!(handled & LANDLOCK_ACCESS_FS_IOCTL))
-		return 0;
-
-	copy_from = (handled & src) ? src : LANDLOCK_ACCESS_FS_IOCTL;
-	if (access & copy_from)
-		return dst;
-
-	return 0;
-}
-
-/**
- * landlock_expand_access_fs() - Returns @access with the synthetic IOCTL group
- * flags enabled if necessary.
- *
- * @handled: Handled FS access rights.
- * @access: FS access rights to expand.
- *
- * Returns: @access expanded by the necessary flags for the synthetic IOCTL
- * access rights.
- */
-static __attribute_const__ access_mask_t landlock_expand_access_fs(
-	const access_mask_t handled, const access_mask_t access)
-{
-	return access |
-	       expand_ioctl(handled, access, LANDLOCK_ACCESS_FS_WRITE_FILE,
-			    LANDLOCK_ACCESS_FS_IOCTL_RW |
-				    LANDLOCK_ACCESS_FS_IOCTL_RW_FILE) |
-	       expand_ioctl(handled, access, LANDLOCK_ACCESS_FS_READ_FILE,
-			    LANDLOCK_ACCESS_FS_IOCTL_RW |
-				    LANDLOCK_ACCESS_FS_IOCTL_RW_FILE) |
-	       expand_ioctl(handled, access, LANDLOCK_ACCESS_FS_READ_DIR,
-			    LANDLOCK_ACCESS_FS_IOCTL_RW);
-}
-
-/**
- * landlock_expand_handled_access_fs() - add synthetic IOCTL access rights to an
- * access mask of handled accesses.
- *
- * @handled: The handled accesses of a ruleset that is being created.
- *
- * Returns: @handled, with the bits for the synthetic IOCTL access rights set,
- * if %LANDLOCK_ACCESS_FS_IOCTL is handled.
- */
-__attribute_const__ access_mask_t
-landlock_expand_handled_access_fs(const access_mask_t handled)
-{
-	return landlock_expand_access_fs(handled, handled);
 }
 
 /* Ruleset management */
@@ -332,7 +287,7 @@ retry:
 	LANDLOCK_ACCESS_FS_WRITE_FILE | \
 	LANDLOCK_ACCESS_FS_READ_FILE | \
 	LANDLOCK_ACCESS_FS_TRUNCATE | \
-	LANDLOCK_ACCESS_FS_IOCTL)
+	LANDLOCK_ACCESS_FS_IOCTL_DEV)
 /* clang-format on */
 
 /*
@@ -1526,8 +1481,10 @@ static const access_mask_t ioctl_groups =
 static int hook_file_open(struct file *const file)
 {
 	layer_mask_t layer_masks[LANDLOCK_NUM_ACCESS_FS] = {};
-	access_mask_t open_access_request, full_access_request, allowed_access;
-	const access_mask_t optional_access = LANDLOCK_ACCESS_FS_TRUNCATE;
+	access_mask_t open_access_request, full_access_request, allowed_access,
+		optional_access;
+	const struct inode *inode = file_inode(file);
+	const bool is_device = S_ISBLK(inode->i_mode) || S_ISCHR(inode->i_mode);
 	const struct landlock_ruleset *const dom =
 		get_fs_domain(landlock_cred(file->f_cred)->domain);
 
@@ -1545,6 +1502,10 @@ static int hook_file_open(struct file *const file)
 	 * We look up more access than what we immediately need for open(), so
 	 * that we can later authorize operations on opened files.
 	 */
+	optional_access = LANDLOCK_ACCESS_FS_TRUNCATE;
+	if (is_device)
+		optional_access |= LANDLOCK_ACCESS_FS_IOCTL_DEV;
+
 	full_access_request = open_access_request | optional_access;
 
 	if (is_access_to_paths_allowed(
@@ -1614,9 +1575,12 @@ static int hook_file_truncate(struct file *const file)
 static int hook_file_ioctl(struct file *file, unsigned int cmd,
 			   unsigned long arg)
 {
-	const access_mask_t required_access = get_required_ioctl_access(cmd);
-	const access_mask_t allowed_access =
-		landlock_file(file)->allowed_access;
+	const struct inode *inode = file_inode(file);
+	const bool is_device = S_ISBLK(inode->i_mode) || S_ISCHR(inode->i_mode);
+	access_mask_t required_access, allowed_access;
+
+	if (!is_device)
+		return 0;
 
 	/*
 	 * It is the access rights at the time of opening the file which
@@ -1624,10 +1588,18 @@ static int hook_file_ioctl(struct file *file, unsigned int cmd,
 	 *
 	 * The access right is attached to the opened file in hook_file_open().
 	 */
+	required_access = get_required_ioctl_dev_access(cmd);
+	allowed_access = landlock_file(file)->allowed_access;
 	if ((allowed_access & required_access) == required_access)
 		return 0;
 
 	return -EACCES;
+}
+
+static int hook_file_ioctl_compat(struct file *file, unsigned int cmd,
+				  unsigned long arg)
+{
+	return hook_file_ioctl(file, cmd, arg);
 }
 
 static struct security_hook_list landlock_hooks[] __ro_after_init = {
@@ -1653,6 +1625,7 @@ static struct security_hook_list landlock_hooks[] __ro_after_init = {
 	LSM_HOOK_INIT(file_open, hook_file_open),
 	LSM_HOOK_INIT(file_truncate, hook_file_truncate),
 	LSM_HOOK_INIT(file_ioctl, hook_file_ioctl),
+	LSM_HOOK_INIT(file_ioctl_compat, hook_file_ioctl_compat),
 };
 
 __init void landlock_add_fs_hooks(void)

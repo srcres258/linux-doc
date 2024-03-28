@@ -84,7 +84,7 @@ static void test_mlock_limit(int fd)
 	pass("mlock limit is respected\n");
 }
 
-static void test_vmsplice(int fd)
+static void test_vmsplice(int fd, const char *desc)
 {
 	ssize_t transferred;
 	struct iovec iov;
@@ -112,8 +112,10 @@ static void test_vmsplice(int fd)
 	iov.iov_len = page_size;
 	transferred = vmsplice(pipefd[1], &iov, 1, 0);
 
-	ksft_test_result(transferred < 0 && errno == EFAULT,
-			 "vmsplice is blocked as expected\n");
+	if (transferred < 0 && errno == EFAULT)
+		pass("vmsplice is blocked as expected with %s\n", desc);
+	else
+		fail("vmsplice: unexpected memory access with %s\n", desc);
 
 	munmap(mem, page_size);
 close_pipe:
@@ -295,7 +297,7 @@ static void prepare(void)
 				   strerror(errno));
 }
 
-#define NUM_TESTS 5
+#define NUM_TESTS 6
 
 int main(int argc, char *argv[])
 {
@@ -319,7 +321,12 @@ int main(int argc, char *argv[])
 
 	test_mlock_limit(fd);
 	test_file_apis(fd);
-	test_vmsplice(fd);
+	/*
+	 * We have to run the first vmsplice test before any secretmem page was
+	 * allocated for this fd.
+	 */
+	test_vmsplice(fd, "fresh page");
+	test_vmsplice(fd, "existing page");
 	test_process_vm_read(fd);
 	test_ptrace(fd);
 

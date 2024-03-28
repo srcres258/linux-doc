@@ -201,37 +201,15 @@ struct landlock_net_port_attr {
  *
  * The following access right applies both to files and directories:
  *
- * - %LANDLOCK_ACCESS_FS_IOCTL: Invoke :manpage:`ioctl(2)` commands on an opened
- *   file or directory.
+ * - %LANDLOCK_ACCESS_FS_IOCTL_DEV: Invoke :manpage:`ioctl(2)` commands on an opened
+ *   character or block device.
  *
- *   This access right applies to all :manpage:`ioctl(2)` commands, except of
- *   ``FIOCLEX``, ``FIONCLEX``, ``FIONBIO`` and ``FIOASYNC``.  These commands
- *   continue to be invokable independent of the %LANDLOCK_ACCESS_FS_IOCTL
- *   access right.
+ *   This access right applies to all `ioctl(2)` commands implemented by device
+ *   drivers.  However, the following common IOCTL commands continue to be
+ *   invokable independent of the %LANDLOCK_ACCESS_FS_IOCTL_DEV right:
  *
- *   When certain other access rights are handled in the ruleset, in addition to
- *   %LANDLOCK_ACCESS_FS_IOCTL, granting these access rights will unlock access
- *   to additional groups of IOCTL commands, on the affected files:
- *
- *   * %LANDLOCK_ACCESS_FS_READ_FILE and %LANDLOCK_ACCESS_FS_WRITE_FILE unlock
- *     access to ``FIOQSIZE``, ``FIONREAD``, ``FIGETBSZ``, ``FS_IOC_FIEMAP``,
- *     ``FIBMAP``, ``FIDEDUPERANGE``, ``FICLONE``, ``FICLONERANGE``,
- *     ``FS_IOC_RESVSP``, ``FS_IOC_RESVSP64``, ``FS_IOC_UNRESVSP``,
- *     ``FS_IOC_UNRESVSP64``, ``FS_IOC_ZERO_RANGE``.
- *
- *   * %LANDLOCK_ACCESS_FS_READ_DIR unlocks access to ``FIOQSIZE``,
- *     ``FIONREAD``, ``FIGETBSZ``.
- *
- *   When these access rights are handled in the ruleset, the availability of
- *   the affected IOCTL commands is not governed by %LANDLOCK_ACCESS_FS_IOCTL
- *   any more, but by the respective access right.
- *
- *   All other IOCTL commands are not handled specially, and are governed by
- *   %LANDLOCK_ACCESS_FS_IOCTL.  This includes %FS_IOC_GETFLAGS and
- *   %FS_IOC_SETFLAGS for manipulating inode flags (:manpage:`ioctl_iflags(2)`),
- *   %FS_IOC_FSFETXATTR and %FS_IOC_FSSETXATTR for manipulating extended
- *   attributes, as well as %FIFREEZE and %FITHAW for freezing and thawing file
- *   systems.
+ *   ``FIOCLEX``, ``FIONCLEX``, ``FIONBIO``, ``FIOASYNC``, ``FIFREEZE``,
+ *   ``FITHAW``, ``FIGETBSZ``, ``FS_IOC_GETFSUUID``, ``FS_IOC_GETFSSYSFSPATH``
  *
  *   This access right is available since the fifth version of the Landlock
  *   ABI.
@@ -261,7 +239,7 @@ struct landlock_net_port_attr {
 #define LANDLOCK_ACCESS_FS_MAKE_SYM			(1ULL << 12)
 #define LANDLOCK_ACCESS_FS_REFER			(1ULL << 13)
 #define LANDLOCK_ACCESS_FS_TRUNCATE			(1ULL << 14)
-#define LANDLOCK_ACCESS_FS_IOCTL			(1ULL << 15)
+#define LANDLOCK_ACCESS_FS_IOCTL_DEV			(1ULL << 15)
 /* clang-format on */
 
 /**
