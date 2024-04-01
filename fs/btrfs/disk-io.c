@@ -2822,6 +2822,8 @@ void btrfs_init_fs_info(struct btrfs_fs_info *fs_info)
 	fs_info->sectorsize = 4096;
 	fs_info->sectorsize_bits = ilog2(4096);
 	fs_info->stripesize = 4096;
+	fs_info->folio_size = PAGE_SIZE;
+	fs_info->folio_shift = PAGE_SHIFT;
 
 	/* Default compress algorithm when user does -o compress */
 	fs_info->compress_type = BTRFS_COMPRESS_ZLIB;
@@ -3314,6 +3316,15 @@ int __cold open_ctree(struct super_block *sb, struct btrfs_fs_devices *fs_device
 	fs_info->sectorsize_bits = ilog2(sectorsize);
 	fs_info->csums_per_leaf = BTRFS_MAX_ITEM_SIZE(fs_info) / fs_info->csum_size;
 	fs_info->stripesize = stripesize;
+
+	if (sectorsize > PAGE_SIZE) {
+		/* For future multi-page sectorsize support */
+		fs_info->folio_size = sectorsize;
+		fs_info->sectorsize_bits = fs_info->sectorsize_bits;
+	} else {
+		fs_info->folio_size = PAGE_SIZE;
+		fs_info->folio_shift = PAGE_SHIFT;
+	}
 
 	/*
 	 * Handle the space caching options appropriately now that we have the
@@ -4844,13 +4855,9 @@ void btrfs_cleanup_one_transaction(struct btrfs_transaction *cur_trans,
 	cur_trans->state = TRANS_STATE_UNBLOCKED;
 	wake_up(&fs_info->transaction_wait);
 
-	btrfs_destroy_delayed_inodes(fs_info);
-
 	btrfs_destroy_marked_extents(fs_info, &cur_trans->dirty_pages,
 				     EXTENT_DIRTY);
 	btrfs_destroy_pinned_extent(fs_info, &cur_trans->pinned_extents);
-
-	btrfs_free_all_qgroup_pertrans(fs_info);
 
 	cur_trans->state =TRANS_STATE_COMPLETED;
 	wake_up(&cur_trans->commit_wait);
@@ -4904,6 +4911,7 @@ static int btrfs_cleanup_transaction(struct btrfs_fs_info *fs_info)
 	btrfs_assert_delayed_root_empty(fs_info);
 	btrfs_destroy_all_delalloc_inodes(fs_info);
 	btrfs_drop_all_logs(fs_info);
+	btrfs_free_all_qgroup_pertrans(fs_info);
 	mutex_unlock(&fs_info->transaction_kthread_mutex);
 
 	return 0;
