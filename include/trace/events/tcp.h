@@ -12,35 +12,6 @@
 #include <net/tcp.h>
 #include <linux/sock_diag.h>
 
-#define TP_STORE_V4MAPPED(__entry, saddr, daddr)		\
-	do {							\
-		struct in6_addr *pin6;				\
-								\
-		pin6 = (struct in6_addr *)__entry->saddr_v6;	\
-		ipv6_addr_set_v4mapped(saddr, pin6);		\
-		pin6 = (struct in6_addr *)__entry->daddr_v6;	\
-		ipv6_addr_set_v4mapped(daddr, pin6);		\
-	} while (0)
-
-#if IS_ENABLED(CONFIG_IPV6)
-#define TP_STORE_ADDRS(__entry, saddr, daddr, saddr6, daddr6)		\
-	do {								\
-		if (sk->sk_family == AF_INET6) {			\
-			struct in6_addr *pin6;				\
-									\
-			pin6 = (struct in6_addr *)__entry->saddr_v6;	\
-			*pin6 = saddr6;					\
-			pin6 = (struct in6_addr *)__entry->daddr_v6;	\
-			*pin6 = daddr6;					\
-		} else {						\
-			TP_STORE_V4MAPPED(__entry, saddr, daddr);	\
-		}							\
-	} while (0)
-#else
-#define TP_STORE_ADDRS(__entry, saddr, daddr, saddr6, daddr6)	\
-	TP_STORE_V4MAPPED(__entry, saddr, daddr)
-#endif
-
 /*
  * tcp event with arguments sk and skb
  *
@@ -302,48 +273,6 @@ TRACE_EVENT(tcp_probe,
 		  __entry->skbaddr, __entry->skaddr)
 );
 
-#define TP_STORE_ADDR_PORTS_SKB_V4(__entry, skb)			\
-	do {								\
-		const struct tcphdr *th = (const struct tcphdr *)skb->data; \
-		struct sockaddr_in *v4 = (void *)__entry->saddr;	\
-									\
-		v4->sin_family = AF_INET;				\
-		v4->sin_port = th->source;				\
-		v4->sin_addr.s_addr = ip_hdr(skb)->saddr;		\
-		v4 = (void *)__entry->daddr;				\
-		v4->sin_family = AF_INET;				\
-		v4->sin_port = th->dest;				\
-		v4->sin_addr.s_addr = ip_hdr(skb)->daddr;		\
-	} while (0)
-
-#if IS_ENABLED(CONFIG_IPV6)
-
-#define TP_STORE_ADDR_PORTS_SKB(__entry, skb)				\
-	do {								\
-		const struct iphdr *iph = ip_hdr(skb);			\
-									\
-		if (iph->version == 6) {				\
-			const struct tcphdr *th = (const struct tcphdr *)skb->data; \
-			struct sockaddr_in6 *v6 = (void *)__entry->saddr; \
-									\
-			v6->sin6_family = AF_INET6;			\
-			v6->sin6_port = th->source;			\
-			v6->sin6_addr = ipv6_hdr(skb)->saddr;		\
-			v6 = (void *)__entry->daddr;			\
-			v6->sin6_family = AF_INET6;			\
-			v6->sin6_port = th->dest;			\
-			v6->sin6_addr = ipv6_hdr(skb)->daddr;		\
-		} else							\
-			TP_STORE_ADDR_PORTS_SKB_V4(__entry, skb);	\
-	} while (0)
-
-#else
-
-#define TP_STORE_ADDR_PORTS_SKB(__entry, skb)		\
-	TP_STORE_ADDR_PORTS_SKB_V4(__entry, skb)
-
-#endif
-
 /*
  * tcp event with only skb
  */
@@ -360,12 +289,13 @@ DECLARE_EVENT_CLASS(tcp_event_skb,
 	),
 
 	TP_fast_assign(
+		const struct tcphdr *th = (const struct tcphdr *)skb->data;
 		__entry->skbaddr = skb;
 
 		memset(__entry->saddr, 0, sizeof(struct sockaddr_in6));
 		memset(__entry->daddr, 0, sizeof(struct sockaddr_in6));
 
-		TP_STORE_ADDR_PORTS_SKB(__entry, skb);
+		TP_STORE_ADDR_PORTS_SKB(__entry, skb, th);
 	),
 
 	TP_printk("skbaddr=%p src=%pISpc dest=%pISpc",
