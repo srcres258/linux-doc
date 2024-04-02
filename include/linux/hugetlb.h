@@ -168,6 +168,9 @@ u32 hugetlb_fault_mutex_hash(struct address_space *mapping, pgoff_t idx);
 
 pte_t *huge_pmd_share(struct mm_struct *mm, struct vm_area_struct *vma,
 		      unsigned long addr, pud_t *pud);
+bool hugetlbfs_pagecache_present(struct hstate *h,
+				 struct vm_area_struct *vma,
+				 unsigned long address);
 
 struct address_space *hugetlb_page_mapping_lock_write(struct page *hpage);
 
@@ -317,13 +320,6 @@ static inline void hugetlb_zap_end(
 				struct vm_area_struct *vma,
 				struct zap_details *details)
 {
-}
-
-static inline struct page *hugetlb_follow_page_mask(
-    struct vm_area_struct *vma, unsigned long address, unsigned int flags,
-    unsigned int *page_mask)
-{
-	BUILD_BUG(); /* should never be compiled in if !CONFIG_HUGETLB_PAGE*/
 }
 
 static inline int copy_hugetlb_page_range(struct mm_struct *dst,
@@ -1221,6 +1217,12 @@ static inline void hugetlb_register_node(struct node *node)
 
 static inline void hugetlb_unregister_node(struct node *node)
 {
+}
+
+static inline bool hugetlbfs_pagecache_present(
+    struct hstate *h, struct vm_area_struct *vma, unsigned long address)
+{
+	return false;
 }
 #endif	/* CONFIG_HUGETLB_PAGE */
 

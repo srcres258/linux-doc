@@ -65,6 +65,7 @@ bcachefs-y		:=	\
 	quota.o			\
 	rebalance.o		\
 	recovery.o		\
+	recovery_passes.o	\
 	reflink.o		\
 	replicas.o		\
 	sb-clean.o		\

@@ -141,7 +141,6 @@ static struct ctl_table memory_failure_table[] = {
 		.extra1		= SYSCTL_ZERO,
 		.extra2		= SYSCTL_ONE,
 	},
-	{ }
 };
 
 /*
@@ -443,7 +442,7 @@ static void __add_to_kill(struct task_struct *tsk, struct page *p,
 	tk->addr = ksm_addr ? ksm_addr : page_address_in_vma(p, vma);
 	if (is_zone_device_page(p)) {
 		if (fsdax_pgoff != FSDAX_INVALID_PGOFF)
-			tk->addr = vma_pgoff_address(fsdax_pgoff, 1, vma);
+			tk->addr = vma_address(vma, fsdax_pgoff, 1);
 		tk->size_shift = dev_pagemap_mapping_shift(vma, tk->addr);
 	} else
 		tk->size_shift = page_shift(compound_head(p));

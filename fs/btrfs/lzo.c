@@ -210,8 +210,8 @@ out:
 }
 
 int lzo_compress_folios(struct list_head *ws, struct address_space *mapping,
-		u64 start, struct folio **folios, unsigned long *out_folios,
-		unsigned long *total_in, unsigned long *total_out)
+			u64 start, struct folio **folios, unsigned long *out_folios,
+			unsigned long *total_in, unsigned long *total_out)
 {
 	struct workspace *workspace = list_entry(ws, struct workspace, list);
 	const u32 sectorsize = inode_to_fs_info(mapping->host)->sectorsize;
@@ -322,7 +322,7 @@ static void copy_compressed_segment(struct compressed_bio *cb,
 		cur_folio = cb->compressed_folios[*cur_in / PAGE_SIZE];
 
 		memcpy_from_folio(dest + *cur_in - orig_in, cur_folio,
-				offset_in_folio(cur_folio, *cur_in), copy_len);
+				  offset_in_folio(cur_folio, *cur_in), copy_len);
 
 		*cur_in += copy_len;
 	}

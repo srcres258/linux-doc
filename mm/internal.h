@@ -11,6 +11,8 @@
 #include <linux/mm.h>
 #include <linux/pagemap.h>
 #include <linux/rmap.h>
+#include <linux/swap.h>
+#include <linux/swapops.h>
 #include <linux/tracepoint-defs.h>
 
 struct folio_batch;
@@ -128,6 +130,8 @@ static inline pte_t __pte_batch_clear_ignored(pte_t pte, fpb_t flags)
  * @flags: Flags to modify the PTE batch semantics.
  * @any_writable: Optional pointer to indicate whether any entry except the
  *		  first one is writable.
+ * @any_young: Optional pointer to indicate whether any entry except the
+ *		  first one is young.
  *
  * Detect a PTE batch: consecutive (present) PTEs that map consecutive
  * pages of the same large folio.
@@ -143,16 +147,18 @@ static inline pte_t __pte_batch_clear_ignored(pte_t pte, fpb_t flags)
  */
 static inline int folio_pte_batch(struct folio *folio, unsigned long addr,
 		pte_t *start_ptep, pte_t pte, int max_nr, fpb_t flags,
-		bool *any_writable)
+		bool *any_writable, bool *any_young)
 {
 	unsigned long folio_end_pfn = folio_pfn(folio) + folio_nr_pages(folio);
 	const pte_t *end_ptep = start_ptep + max_nr;
 	pte_t expected_pte, *ptep;
-	bool writable;
+	bool writable, young;
 	int nr;
 
 	if (any_writable)
 		*any_writable = false;
+	if (any_young)
+		*any_young = false;
 
 	VM_WARN_ON_FOLIO(!pte_present(pte), folio);
 	VM_WARN_ON_FOLIO(!folio_test_large(folio) || max_nr < 1, folio);
@@ -166,6 +172,8 @@ static inline int folio_pte_batch(struct folio *folio, unsigned long addr,
 		pte = ptep_get(ptep);
 		if (any_writable)
 			writable = !!pte_write(pte);
+		if (any_young)
+			young = !!pte_young(pte);
 		pte = __pte_batch_clear_ignored(pte, flags);
 
 		if (!pte_same(pte, expected_pte))
@@ -181,6 +189,8 @@ static inline int folio_pte_batch(struct folio *folio, unsigned long addr,
 
 		if (any_writable)
 			*any_writable |= writable;
+		if (any_young)
+			*any_young |= young;
 
 		nr = pte_batch_hint(ptep, pte);
 		expected_pte = pte_advance_pfn(expected_pte, nr);
@@ -188,6 +198,52 @@ static inline int folio_pte_batch(struct folio *folio, unsigned long addr,
 	}
 
 	return min(ptep - start_ptep, max_nr);
+}
+
+/**
+ * swap_pte_batch - detect a PTE batch for a set of contiguous swap entries
+ * @start_ptep: Page table pointer for the first entry.
+ * @max_nr: The maximum number of table entries to consider.
+ * @entry: Swap entry recovered from the first table entry.
+ *
+ * Detect a batch of contiguous swap entries: consecutive (non-present) PTEs
+ * containing swap entries all with consecutive offsets and targeting the same
+ * swap type.
+ *
+ * max_nr must be at least one and must be limited by the caller so scanning
+ * cannot exceed a single page table.
+ *
+ * Return: the number of table entries in the batch.
+ */
+static inline int swap_pte_batch(pte_t *start_ptep, int max_nr,
+				 swp_entry_t entry)
+{
+	const pte_t *end_ptep = start_ptep + max_nr;
+	unsigned long expected_offset = swp_offset(entry) + 1;
+	unsigned int expected_type = swp_type(entry);
+	pte_t *ptep = start_ptep + 1;
+
+	VM_WARN_ON(max_nr < 1);
+	VM_WARN_ON(non_swap_entry(entry));
+
+	while (ptep < end_ptep) {
+		pte_t pte = ptep_get(ptep);
+
+		if (pte_none(pte) || pte_present(pte))
+			break;
+
+		entry = pte_to_swp_entry(pte);
+
+		if (non_swap_entry(entry) ||
+		    swp_type(entry) != expected_type ||
+		    swp_offset(entry) != expected_offset)
+			break;
+
+		expected_offset++;
+		ptep++;
+	}
+
+	return ptep - start_ptep;
 }
 #endif /* CONFIG_MMU */
 
@@ -506,6 +562,7 @@ extern void __putback_isolated_page(struct page *page, unsigned int order,
 extern void memblock_free_pages(struct page *page, unsigned long pfn,
 					unsigned int order);
 extern void __free_pages_core(struct page *page, unsigned int order);
+extern void kernel_init_pages(struct page *page, int numpages);
 
 /*
  * This will have no effect, other than possibly generating a warning, if the
@@ -809,13 +866,17 @@ void mlock_drain_remote(int cpu);
 
 extern pmd_t maybe_pmd_mkwrite(pmd_t pmd, struct vm_area_struct *vma);
 
-/*
- * Return the start of user virtual address at the specific offset within
- * a vma.
+/**
+ * vma_address - Find the virtual address a page range is mapped at
+ * @vma: The vma which maps this object.
+ * @pgoff: The page offset within its object.
+ * @nr_pages: The number of pages to consider.
+ *
+ * If any page in this range is mapped by this VMA, return the first address
+ * where any of these pages appear.  Otherwise, return -EFAULT.
  */
-static inline unsigned long
-vma_pgoff_address(pgoff_t pgoff, unsigned long nr_pages,
-		  struct vm_area_struct *vma)
+static inline unsigned long vma_address(struct vm_area_struct *vma,
+		pgoff_t pgoff, unsigned long nr_pages)
 {
 	unsigned long address;
 
@@ -832,18 +893,6 @@ vma_pgoff_address(pgoff_t pgoff, unsigned long nr_pages,
 		address = -EFAULT;
 	}
 	return address;
-}
-
-/*
- * Return the start of user virtual address of a page within a vma.
- * Returns -EFAULT if all of the page is outside the range of vma.
- * If page is a compound head, the entire compound page is considered.
- */
-static inline unsigned long
-vma_address(struct page *page, struct vm_area_struct *vma)
-{
-	VM_BUG_ON_PAGE(PageKsm(page), page);	/* KSM page->index unusable */
-	return vma_pgoff_address(page_to_pgoff(page), compound_nr(page), vma);
 }
 
 /*
@@ -1118,9 +1167,10 @@ int __must_check try_grab_page(struct page *page, unsigned int flags);
 /*
  * mm/huge_memory.c
  */
-struct page *follow_trans_huge_pmd(struct vm_area_struct *vma,
-				   unsigned long addr, pmd_t *pmd,
-				   unsigned int flags);
+void touch_pud(struct vm_area_struct *vma, unsigned long addr,
+	       pud_t *pud, bool write);
+void touch_pmd(struct vm_area_struct *vma, unsigned long addr,
+	       pmd_t *pmd, bool write);
 
 /*
  * mm/mmap.c

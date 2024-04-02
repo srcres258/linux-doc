@@ -6,7 +6,8 @@
  */
 
 #include "bcachefs.h"
-#include "recovery.h"
+#include "darray.h"
+#include "recovery_passes.h"
 #include "sb-downgrade.h"
 #include "sb-errors.h"
 #include "super-io.h"

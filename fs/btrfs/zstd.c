@@ -375,15 +375,15 @@ fail:
 }
 
 int zstd_compress_folios(struct list_head *ws, struct address_space *mapping,
-		u64 start, struct folio **folios, unsigned long *out_folios,
-		unsigned long *total_in, unsigned long *total_out)
+			 u64 start, struct folio **folios, unsigned long *out_folios,
+			 unsigned long *total_in, unsigned long *total_out)
 {
 	struct workspace *workspace = list_entry(ws, struct workspace, list);
 	zstd_cstream *stream;
 	int ret = 0;
 	int nr_folios = 0;
-	struct folio *in_folio = NULL;  /* The current page to read */
-	struct folio *out_folio = NULL; /* The current page to write to */
+	struct folio *in_folio = NULL;  /* The current folio to read. */
+	struct folio *out_folio = NULL; /* The current folio to write to. */
 	unsigned long tot_in = 0;
 	unsigned long tot_out = 0;
 	unsigned long len = *total_out;
@@ -485,8 +485,7 @@ int zstd_compress_folios(struct list_head *ws, struct address_space *mapping,
 			folio_put(in_folio);
 			start += PAGE_SIZE;
 			len -= PAGE_SIZE;
-			ret = btrfs_compress_filemap_get_folio(mapping, start,
-							       &in_folio);
+			ret = btrfs_compress_filemap_get_folio(mapping, start, &in_folio);
 			if (ret < 0)
 				goto out;
 			workspace->in_buf.src = kmap_local_folio(in_folio, 0);

@@ -527,14 +527,14 @@ static int insert_inline_extent(struct btrfs_trans_handle *trans,
 	u64 i_size;
 
 	/*
-	 * The decompressed size must still be no larger than a sector.
-	 * Under heavy race, we can have size == 0 passed in, but that
-	 * shouldn't be a big deal and we can continue the insertion.
+	 * The decompressed size must still be no larger than a sector.  Under
+	 * heavy race, we can have size == 0 passed in, but that shouldn't be a
+	 * big deal and we can continue the insertion.
 	 */
 	ASSERT(size <= sectorsize);
 
 	/*
-	 * The compressed size also need to be no larger than a sector.
+	 * The compressed size also needs to be no larger than a sector.
 	 * That's also why we only need one page as the parameter.
 	 */
 	if (compressed_folio)
@@ -949,8 +949,8 @@ again:
 
 	/* Compression level is applied here. */
 	ret = btrfs_compress_folios(compress_type | (fs_info->compress_level << 4),
-				   mapping, start, folios, &nr_folios, &total_in,
-				   &total_compressed);
+				    mapping, start, folios, &nr_folios, &total_in,
+				    &total_compressed);
 	if (ret)
 		goto mark_incompressible;
 
@@ -2536,7 +2536,7 @@ void btrfs_clear_delalloc_extent(struct btrfs_inode *inode,
 		 */
 		if (bits & EXTENT_CLEAR_META_RESV &&
 		    root != fs_info->tree_root)
-			btrfs_delalloc_release_metadata(inode, len, false);
+			btrfs_delalloc_release_metadata(inode, len, true);
 
 		/* For sanity tests. */
 		if (btrfs_is_testing(fs_info))
@@ -4506,6 +4506,7 @@ int btrfs_delete_subvolume(struct btrfs_inode *dir, struct dentry *dentry)
 	struct btrfs_trans_handle *trans;
 	struct btrfs_block_rsv block_rsv;
 	u64 root_flags;
+	u64 qgroup_reserved = 0;
 	int ret;
 
 	down_write(&fs_info->subvol_sem);
@@ -4550,12 +4551,20 @@ int btrfs_delete_subvolume(struct btrfs_inode *dir, struct dentry *dentry)
 	ret = btrfs_subvolume_reserve_metadata(root, &block_rsv, 5, true);
 	if (ret)
 		goto out_undead;
+	qgroup_reserved = block_rsv.qgroup_rsv_reserved;
 
 	trans = btrfs_start_transaction(root, 0);
 	if (IS_ERR(trans)) {
 		ret = PTR_ERR(trans);
 		goto out_release;
 	}
+	ret = btrfs_record_root_in_trans(trans, root);
+	if (ret) {
+		btrfs_abort_transaction(trans, ret);
+		goto out_end_trans;
+	}
+	btrfs_qgroup_convert_reserved_meta(root, qgroup_reserved);
+	qgroup_reserved = 0;
 	trans->block_rsv = &block_rsv;
 	trans->bytes_reserved = block_rsv.size;
 
@@ -4614,7 +4623,9 @@ out_end_trans:
 	ret = btrfs_end_transaction(trans);
 	inode->i_flags |= S_DEAD;
 out_release:
-	btrfs_subvolume_release_metadata(root, &block_rsv);
+	btrfs_block_rsv_release(fs_info, &block_rsv, (u64)-1, NULL);
+	if (qgroup_reserved)
+		btrfs_qgroup_free_meta_prealloc(root, qgroup_reserved);
 out_undead:
 	if (ret) {
 		spin_lock(&dest->root_item_lock);

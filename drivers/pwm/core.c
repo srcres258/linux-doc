@@ -512,7 +512,7 @@ of_pwm_single_xlate(struct pwm_chip *chip, const struct of_phandle_args *args)
 	if (IS_ERR(pwm))
 		return pwm;
 
-	if (args->args_count > 1)
+	if (args->args_count > 0)
 		pwm->args.period = args->args[0];
 
 	pwm->args.polarity = PWM_POLARITY_NORMAL;
@@ -1866,10 +1866,12 @@ EXPORT_SYMBOL_GPL(pwm_get);
  */
 void pwm_put(struct pwm_device *pwm)
 {
-	struct pwm_chip *chip = pwm->chip;
+	struct pwm_chip *chip;
 
 	if (!pwm)
 		return;
+
+	chip = pwm->chip;
 
 	mutex_lock(&pwm_lock);
 

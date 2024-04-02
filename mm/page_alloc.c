@@ -646,8 +646,8 @@ compaction_capture(struct capture_control *capc, struct page *page,
 }
 #endif /* CONFIG_COMPACTION */
 
-static inline void account_freepages(struct page *page, struct zone *zone,
-				     int nr_pages, int migratetype)
+static inline void account_freepages(struct zone *zone, int nr_pages,
+				     int migratetype)
 {
 	if (is_migrate_isolate(migratetype))
 		return;
@@ -681,7 +681,7 @@ static inline void add_to_free_list(struct page *page, struct zone *zone,
 				    bool tail)
 {
 	__add_to_free_list(page, zone, order, migratetype, tail);
-	account_freepages(page, zone, 1 << order, migratetype);
+	account_freepages(zone, 1 << order, migratetype);
 }
 
 /*
@@ -701,8 +701,8 @@ static inline void move_to_free_list(struct page *page, struct zone *zone,
 
 	list_move_tail(&page->buddy_list, &area->free_list[new_mt]);
 
-	account_freepages(page, zone, -(1 << order), old_mt);
-	account_freepages(page, zone, 1 << order, new_mt);
+	account_freepages(zone, -(1 << order), old_mt);
+	account_freepages(zone, 1 << order, new_mt);
 }
 
 static inline void __del_page_from_free_list(struct page *page, struct zone *zone,
@@ -726,7 +726,7 @@ static inline void del_page_from_free_list(struct page *page, struct zone *zone,
 					   unsigned int order, int migratetype)
 {
 	__del_page_from_free_list(page, zone, order, migratetype);
-	account_freepages(page, zone, -(1 << order), migratetype);
+	account_freepages(zone, -(1 << order), migratetype);
 }
 
 static inline struct page *get_page_from_free_area(struct free_area *area,
@@ -803,7 +803,7 @@ static inline void __free_one_page(struct page *page,
 	VM_BUG_ON_PAGE(pfn & ((1 << order) - 1), page);
 	VM_BUG_ON_PAGE(bad_range(zone, page), page);
 
-	account_freepages(page, zone, 1 << order, migratetype);
+	account_freepages(zone, 1 << order, migratetype);
 
 	while (order < MAX_PAGE_ORDER) {
 		int buddy_mt = migratetype;
@@ -1048,7 +1048,7 @@ static inline bool should_skip_kasan_poison(struct page *page)
 	return page_kasan_tag(page) == KASAN_TAG_KERNEL;
 }
 
-static void kernel_init_pages(struct page *page, int numpages)
+void kernel_init_pages(struct page *page, int numpages)
 {
 	int i;
 
@@ -1357,6 +1357,7 @@ static inline void expand(struct zone *zone, struct page *page,
 	int low, int high, int migratetype)
 {
 	unsigned long size = 1 << high;
+	unsigned long nr_added = 0;
 
 	while (high > low) {
 		high--;
@@ -1372,9 +1373,11 @@ static inline void expand(struct zone *zone, struct page *page,
 		if (set_page_guard(zone, &page[size], high))
 			continue;
 
-		add_to_free_list(&page[size], zone, high, migratetype, false);
+		__add_to_free_list(&page[size], zone, high, migratetype, false);
 		set_buddy_order(&page[size], high);
+		nr_added += size;
 	}
+	account_freepages(zone, nr_added, migratetype);
 }
 
 static void check_new_page_bad(struct page *page)
@@ -1582,18 +1585,18 @@ static inline struct page *__rmqueue_cma_fallback(struct zone *zone,
  * Change the type of a block and move all its free pages to that
  * type's freelist.
  */
-static int move_freepages(struct zone *zone, unsigned long start_pfn,
-			  unsigned long end_pfn, int old_mt, int new_mt)
+static int __move_freepages_block(struct zone *zone, unsigned long start_pfn,
+				  int old_mt, int new_mt)
 {
 	struct page *page;
-	unsigned long pfn;
+	unsigned long pfn, end_pfn;
 	unsigned int order;
 	int pages_moved = 0;
 
 	VM_WARN_ON(start_pfn & (pageblock_nr_pages - 1));
-	VM_WARN_ON(start_pfn + pageblock_nr_pages - 1 != end_pfn);
+	end_pfn = pageblock_end_pfn(start_pfn);
 
-	for (pfn = start_pfn; pfn <= end_pfn;) {
+	for (pfn = start_pfn; pfn < end_pfn;) {
 		page = pfn_to_page(pfn);
 		if (!PageBuddy(page)) {
 			pfn++;
@@ -1619,14 +1622,13 @@ static int move_freepages(struct zone *zone, unsigned long start_pfn,
 
 static bool prep_move_freepages_block(struct zone *zone, struct page *page,
 				      unsigned long *start_pfn,
-				      unsigned long *end_pfn,
 				      int *num_free, int *num_movable)
 {
 	unsigned long pfn, start, end;
 
 	pfn = page_to_pfn(page);
 	start = pageblock_start_pfn(pfn);
-	end = pageblock_end_pfn(pfn) - 1;
+	end = pageblock_end_pfn(pfn);
 
 	/*
 	 * The caller only has the lock for @zone, don't touch ranges
@@ -1637,16 +1639,15 @@ static bool prep_move_freepages_block(struct zone *zone, struct page *page,
 	 */
 	if (!zone_spans_pfn(zone, start))
 		return false;
-	if (!zone_spans_pfn(zone, end))
+	if (!zone_spans_pfn(zone, end - 1))
 		return false;
 
 	*start_pfn = start;
-	*end_pfn = end;
 
 	if (num_free) {
 		*num_free = 0;
 		*num_movable = 0;
-		for (pfn = start; pfn <= end;) {
+		for (pfn = start; pfn < end;) {
 			page = pfn_to_page(pfn);
 			if (PageBuddy(page)) {
 				int nr = 1 << buddy_order(page);
@@ -1668,17 +1669,17 @@ static bool prep_move_freepages_block(struct zone *zone, struct page *page,
 
 	return true;
 }
+#endif /* CONFIG_MEMORY_ISOLATION */
 
 static int move_freepages_block(struct zone *zone, struct page *page,
 				int old_mt, int new_mt)
 {
-	unsigned long start_pfn, end_pfn;
+	unsigned long start_pfn;
 
-	if (!prep_move_freepages_block(zone, page, &start_pfn, &end_pfn,
-				       NULL, NULL))
+	if (!prep_move_freepages_block(zone, page, &start_pfn, NULL, NULL))
 		return -1;
 
-	return move_freepages(zone, start_pfn, end_pfn, old_mt, new_mt);
+	return __move_freepages_block(zone, start_pfn, old_mt, new_mt);
 }
 
 #ifdef CONFIG_MEMORY_ISOLATION
@@ -1749,10 +1750,9 @@ static void split_large_buddy(struct zone *zone, struct page *page,
 bool move_freepages_block_isolate(struct zone *zone, struct page *page,
 				  int migratetype)
 {
-	unsigned long start_pfn, end_pfn, pfn;
+	unsigned long start_pfn, pfn;
 
-	if (!prep_move_freepages_block(zone, page, &start_pfn, &end_pfn,
-				       NULL, NULL))
+	if (!prep_move_freepages_block(zone, page, &start_pfn, NULL, NULL))
 		return false;
 
 	/* No splits needed if buddies can't span multiple blocks */
@@ -1783,8 +1783,9 @@ bool move_freepages_block_isolate(struct zone *zone, struct page *page,
 		return true;
 	}
 move:
-	move_freepages(zone, start_pfn, end_pfn,
-		       get_pfnblock_migratetype(page, start_pfn), migratetype);
+	__move_freepages_block(zone, start_pfn,
+			       get_pfnblock_migratetype(page, start_pfn),
+			       migratetype);
 	return true;
 }
 #endif /* CONFIG_MEMORY_ISOLATION */
@@ -1884,7 +1885,7 @@ steal_suitable_fallback(struct zone *zone, struct page *page,
 			unsigned int alloc_flags, bool whole_block)
 {
 	int free_pages, movable_pages, alike_pages;
-	unsigned long start_pfn, end_pfn;
+	unsigned long start_pfn;
 	int block_type;
 
 	block_type = get_pageblock_migratetype(page);
@@ -1917,8 +1918,8 @@ steal_suitable_fallback(struct zone *zone, struct page *page,
 		goto single_page;
 
 	/* moving whole block can fail due to zone boundary conditions */
-	if (!prep_move_freepages_block(zone, page, &start_pfn, &end_pfn,
-				       &free_pages, &movable_pages))
+	if (!prep_move_freepages_block(zone, page, &start_pfn, &free_pages,
+				       &movable_pages))
 		goto single_page;
 
 	/*
@@ -1948,7 +1949,7 @@ steal_suitable_fallback(struct zone *zone, struct page *page,
 	 */
 	if (free_pages + alike_pages >= (1 << (pageblock_order-1)) ||
 			page_group_by_mobility_disabled) {
-		move_freepages(zone, start_pfn, end_pfn, block_type, start_type);
+		__move_freepages_block(zone, start_pfn, block_type, start_type);
 		return __rmqueue_smallest(zone, order, start_type);
 	}
 
@@ -6347,7 +6348,6 @@ static struct ctl_table page_alloc_sysctl_table[] = {
 		.extra2		= SYSCTL_ONE_HUNDRED,
 	},
 #endif
-	{}
 };
 
 void __init page_alloc_sysctl_init(void)
@@ -6962,7 +6962,7 @@ static bool try_to_accept_memory_one(struct zone *zone)
 	list_del(&page->lru);
 	last = list_empty(&zone->unaccepted_pages);
 
-	account_freepages(page, zone, -MAX_ORDER_NR_PAGES, MIGRATE_MOVABLE);
+	account_freepages(zone, -MAX_ORDER_NR_PAGES, MIGRATE_MOVABLE);
 	__mod_zone_page_state(zone, NR_UNACCEPTED, -MAX_ORDER_NR_PAGES);
 	spin_unlock_irqrestore(&zone->lock, flags);
 
@@ -7014,7 +7014,7 @@ static bool __free_unaccepted(struct page *page)
 	spin_lock_irqsave(&zone->lock, flags);
 	first = list_empty(&zone->unaccepted_pages);
 	list_add_tail(&page->lru, &zone->unaccepted_pages);
-	account_freepages(page, zone, MAX_ORDER_NR_PAGES, MIGRATE_MOVABLE);
+	account_freepages(zone, MAX_ORDER_NR_PAGES, MIGRATE_MOVABLE);
 	__mod_zone_page_state(zone, NR_UNACCEPTED, MAX_ORDER_NR_PAGES);
 	spin_unlock_irqrestore(&zone->lock, flags);
 

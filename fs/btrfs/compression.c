@@ -90,20 +90,20 @@ bool btrfs_compress_is_valid_type(const char *str, size_t len)
 }
 
 static int compression_compress_pages(int type, struct list_head *ws,
-		struct address_space *mapping, u64 start, struct folio **folios,
-		unsigned long *out_folios, unsigned long *total_in,
-		unsigned long *total_out)
+				      struct address_space *mapping, u64 start,
+				      struct folio **folios, unsigned long *out_folios,
+				      unsigned long *total_in, unsigned long *total_out)
 {
 	switch (type) {
 	case BTRFS_COMPRESS_ZLIB:
 		return zlib_compress_folios(ws, mapping, start, folios,
-				out_folios, total_in, total_out);
+					    out_folios, total_in, total_out);
 	case BTRFS_COMPRESS_LZO:
 		return lzo_compress_folios(ws, mapping, start, folios,
-				out_folios, total_in, total_out);
+					   out_folios, total_in, total_out);
 	case BTRFS_COMPRESS_ZSTD:
 		return zstd_compress_folios(ws, mapping, start, folios,
-				out_folios, total_in, total_out);
+					    out_folios, total_in, total_out);
 	case BTRFS_COMPRESS_NONE:
 	default:
 		/*
@@ -352,7 +352,8 @@ static void btrfs_add_compressed_bio_folios(struct compressed_bio *cb)
 		u32 len = min_t(u32, cb->compressed_len - offset, PAGE_SIZE);
 
 		/* Maximum compressed extent is smaller than bio size limit. */
-		ret = bio_add_folio(bio, cb->compressed_folios[offset >> PAGE_SHIFT], len, 0);
+		ret = bio_add_folio(bio, cb->compressed_folios[offset >> PAGE_SHIFT],
+				    len, 0);
 		ASSERT(ret);
 		offset += len;
 	}
@@ -975,26 +976,23 @@ static unsigned int btrfs_compress_set_level(int type, unsigned level)
 	return level;
 }
 
-/* A wrapper around filemap_get_folio(), with extra error message. */
+/* Wrapper around find_get_page(), with extra error message. */
 int btrfs_compress_filemap_get_folio(struct address_space *mapping, u64 start,
 				     struct folio **in_folio_ret)
 {
 	struct folio *in_folio;
 
 	/*
-	 * The compressed write path should have the folio locked already,
-	 * thus we only need to grab one reference.
+	 * The compressed write path should have the folio locked already, thus
+	 * we only need to grab one reference.
 	 */
 	in_folio = filemap_get_folio(mapping, start >> PAGE_SHIFT);
 	if (IS_ERR(in_folio)) {
-		struct btrfs_inode *binode = BTRFS_I(mapping->host);
-		struct btrfs_fs_info *fs_info = binode->root->fs_info;
+		struct btrfs_inode *inode = BTRFS_I(mapping->host);
 
-		btrfs_crit(fs_info,
+		btrfs_crit(inode->root->fs_info,
 		"failed to get page cache, root %lld ino %llu file offset %llu",
-			   binode->root->root_key.objectid, btrfs_ino(binode),
-			   start);
-		ASSERT(0);
+			   inode->root->root_key.objectid, btrfs_ino(inode), start);
 		return -ENOENT;
 	}
 	*in_folio_ret = in_folio;
@@ -1022,10 +1020,8 @@ int btrfs_compress_filemap_get_folio(struct address_space *mapping, u64 start,
  * be also used to return the total number of compressed bytes
  */
 int btrfs_compress_folios(unsigned int type_level, struct address_space *mapping,
-			 u64 start, struct folio **folios,
-			 unsigned long *out_folios,
-			 unsigned long *total_in,
-			 unsigned long *total_out)
+			 u64 start, struct folio **folios, unsigned long *out_folios,
+			 unsigned long *total_in, unsigned long *total_out)
 {
 	int type = btrfs_compress_type(type_level);
 	int level = btrfs_compress_level(type_level);

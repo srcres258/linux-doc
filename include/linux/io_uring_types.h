@@ -296,7 +296,6 @@ struct io_ring_ctx {
 
 		struct io_submit_state	submit_state;
 
-		struct io_buffer_list	*io_bl;
 		struct xarray		io_bl_xa;
 
 		struct io_hash_table	cancel_table_locked;
@@ -373,19 +372,6 @@ struct io_ring_ctx {
 	unsigned int		file_alloc_end;
 
 	struct list_head	io_buffers_cache;
-
-	/* deferred free list, protected by ->uring_lock */
-	struct hlist_head	io_buf_list;
-
-#ifdef CONFIG_NET_RX_BUSY_POLL
-	struct list_head	napi_list;	/* track busy poll napi_id */
-	spinlock_t		napi_lock;	/* napi_list lock */
-
-	DECLARE_HASHTABLE(napi_ht, 4);
-	/* napi busy poll default timeout */
-	unsigned int		napi_busy_poll_to;
-	bool			napi_prefer_busy_poll;
-#endif
 
 	/* Keep this last, we don't need it for the fast path */
 	struct wait_queue_head		poll_wq;

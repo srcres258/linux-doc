@@ -1241,11 +1241,12 @@ retry:
 					if (!can_split_folio(folio, NULL))
 						goto activate_locked;
 					/*
-					 * Split folios without a PMD map right
-					 * away. Chances are some or all of the
-					 * tail pages can be freed without IO.
+					 * Split partially mapped folios right
+					 * away. We can free the unmapped pages
+					 * without IO.
 					 */
-					if (!folio_entire_mapcount(folio) &&
+					if (data_race(!list_empty(
+						&folio->_deferred_list)) &&
 					    split_folio_to_list(folio,
 								folio_list))
 						goto activate_locked;

@@ -92,8 +92,8 @@ fail:
 }
 
 int zlib_compress_folios(struct list_head *ws, struct address_space *mapping,
-		u64 start, struct folio **folios, unsigned long *out_folios,
-		unsigned long *total_in, unsigned long *total_out)
+			 u64 start, struct folio **folios, unsigned long *out_folios,
+			 unsigned long *total_in, unsigned long *total_out)
 {
 	struct workspace *workspace = list_entry(ws, struct workspace, list);
 	int ret;
@@ -237,7 +237,7 @@ int zlib_compress_folios(struct list_head *ws, struct address_space *mapping,
 			ret = -EIO;
 			goto out;
 		} else if (workspace->strm.avail_out == 0) {
-			/* get another folio for the stream end */
+			/* Get another folio for the stream end. */
 			if (nr_folios == nr_dest_folios) {
 				ret = -E2BIG;
 				goto out;

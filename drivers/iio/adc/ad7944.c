@@ -384,16 +384,14 @@ static int ad7944_probe(struct spi_device *spi)
 	ret = device_property_match_property_string(dev, "adi,spi-mode",
 						    ad7944_spi_modes,
 						    ARRAY_SIZE(ad7944_spi_modes));
-	if (ret < 0) {
-		if (ret != -EINVAL)
-			return dev_err_probe(dev, ret,
-					     "getting adi,spi-mode property failed\n");
-
-		/* absence of adi,spi-mode property means default mode */
+	/* absence of adi,spi-mode property means default mode */
+	if (ret == -EINVAL)
 		adc->spi_mode = AD7944_SPI_MODE_DEFAULT;
-	} else {
+	else if (ret < 0)
+		return dev_err_probe(dev, ret,
+				     "getting adi,spi-mode property failed\n");
+	else
 		adc->spi_mode = ret;
-	}
 
 	if (adc->spi_mode == AD7944_SPI_MODE_CHAIN)
 		return dev_err_probe(dev, -EINVAL,

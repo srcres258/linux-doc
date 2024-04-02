@@ -723,7 +723,8 @@ static bool io_rw_should_retry(struct io_kiocb *req)
 	 * just use poll if we can, and don't attempt if the fs doesn't
 	 * support callback based unlocks
 	 */
-	if (io_file_can_poll(req) || !(req->file->f_mode & FMODE_BUF_RASYNC))
+	if (io_file_can_poll(req) ||
+	    !(req->file->f_op->fop_flags & FOP_BUFFER_RASYNC))
 		return false;
 
 	wait->wait.func = io_async_buf_func;
@@ -928,6 +929,13 @@ int io_read_mshot(struct io_kiocb *req, unsigned int issue_flags)
 	ret = __io_read(req, issue_flags);
 
 	/*
+	 * If the file doesn't support proper NOWAIT, then disable multishot
+	 * and stay in single shot mode.
+	 */
+	if (!io_file_supports_nowait(req))
+		req->flags &= ~REQ_F_APOLL_MULTISHOT;
+
+	/*
 	 * If we get -EAGAIN, recycle our buffer and just let normal poll
 	 * handling arm it.
 	 */
@@ -946,7 +954,7 @@ int io_read_mshot(struct io_kiocb *req, unsigned int issue_flags)
 	/*
 	 * Any successful return value will keep the multishot read armed.
 	 */
-	if (ret > 0) {
+	if (ret > 0 && req->flags & REQ_F_APOLL_MULTISHOT) {
 		/*
 		 * Put our buffer and post a CQE. If we fail to post a CQE, then
 		 * jump to the termination path. This request is then done.
@@ -998,10 +1006,10 @@ int io_write(struct io_kiocb *req, unsigned int issue_flags)
 		if (unlikely(!io_file_supports_nowait(req)))
 			goto ret_eagain;
 
-		/* File path supports NOWAIT for non-direct_IO only for block devices. */
+		/* Check if we can support NOWAIT. */
 		if (!(kiocb->ki_flags & IOCB_DIRECT) &&
-			!(kiocb->ki_filp->f_mode & FMODE_BUF_WASYNC) &&
-			(req->flags & REQ_F_ISREG))
+		    !(req->file->f_op->fop_flags & FOP_BUFFER_WASYNC) &&
+		    (req->flags & REQ_F_ISREG))
 			goto ret_eagain;
 
 		kiocb->ki_flags |= IOCB_NOWAIT;

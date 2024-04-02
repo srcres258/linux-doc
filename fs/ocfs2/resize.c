@@ -91,7 +91,8 @@ static int ocfs2_update_last_group_and_inode(handle_t *handle,
 	u16 cl_bpc = le16_to_cpu(cl->cl_bpc);
 	u16 cl_cpg = le16_to_cpu(cl->cl_cpg);
 	u16 old_bg_clusters;
-	u16 contig_bits, old_bg_contig_free_bits;
+	u16 contig_bits;
+	__le16 old_bg_contig_free_bits;
 
 	trace_ocfs2_update_last_group_and_inode(new_clusters,
 						first_new_cluster);
@@ -124,7 +125,7 @@ static int ocfs2_update_last_group_and_inode(handle_t *handle,
 	}
 
 	contig_bits = ocfs2_find_max_contig_free_bits(group->bg_bitmap,
-					group->bg_bits, 0);
+					le16_to_cpu(group->bg_bits), 0);
 	old_bg_contig_free_bits = group->bg_contig_free_bits;
 	group->bg_contig_free_bits = cpu_to_le16(contig_bits);
 
