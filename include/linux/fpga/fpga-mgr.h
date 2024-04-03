@@ -201,7 +201,6 @@ struct fpga_manager_ops {
  * @state: state of fpga manager
  * @compat_id: FPGA manager id for compatibility check.
  * @mops: pointer to struct of fpga manager ops
- * @mops_mutex: protects mops from low-level module removal
  * @mops_owner: module containing the mops
  * @priv: low level driver private date
  */
@@ -212,7 +211,6 @@ struct fpga_manager {
 	enum fpga_mgr_states state;
 	struct fpga_compat_id *compat_id;
 	const struct fpga_manager_ops *mops;
-	struct mutex mops_mutex;
 	struct module *mops_owner;
 	void *priv;
 };
@@ -253,7 +251,6 @@ void fpga_mgr_unregister(struct fpga_manager *mgr);
 struct fpga_manager *
 __devm_fpga_mgr_register_full(struct device *parent, const struct fpga_manager_info *info,
 			      struct module *owner);
-
 #define devm_fpga_mgr_register(parent, name, mops, priv) \
 	__devm_fpga_mgr_register(parent, name, mops, priv, THIS_MODULE)
 struct fpga_manager *

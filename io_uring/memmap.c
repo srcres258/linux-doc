@@ -21,13 +21,13 @@ static void *io_mem_alloc_compound(struct page **pages, int nr_pages,
 
 	order = get_order(size);
 	if (order > MAX_PAGE_ORDER)
-		return NULL;
+		return ERR_PTR(-ENOMEM);
 	else if (order)
 		gfp |= __GFP_COMP;
 
 	page = alloc_pages(gfp, order);
 	if (!page)
-		return NULL;
+		return ERR_PTR(-ENOMEM);
 
 	for (i = 0; i < nr_pages; i++)
 		pages[i] = page + i;
@@ -70,11 +70,11 @@ void *io_pages_map(struct page ***out_pages, unsigned short *npages,
 		return ERR_PTR(-ENOMEM);
 
 	ret = io_mem_alloc_compound(pages, nr_pages, size, gfp);
-	if (ret)
+	if (!IS_ERR(ret))
 		goto done;
 
 	ret = io_mem_alloc_single(pages, nr_pages, size, gfp);
-	if (ret) {
+	if (!IS_ERR(ret)) {
 done:
 		*out_pages = pages;
 		*npages = nr_pages;
@@ -84,13 +84,16 @@ done:
 	kvfree(pages);
 	*out_pages = NULL;
 	*npages = 0;
-	return ERR_PTR(-ENOMEM);
+	return ret;
 }
 
 void io_pages_unmap(void *ptr, struct page ***pages, unsigned short *npages,
 		    bool put_pages)
 {
 	bool do_vunmap = false;
+
+	if (!ptr)
+		return;
 
 	if (put_pages && *npages) {
 		struct page **to_free = *pages;

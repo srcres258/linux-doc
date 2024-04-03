@@ -1870,6 +1870,9 @@ static int match_session(struct cifs_ses *ses, struct smb3_fs_context *ctx)
 	    ctx->sectype != ses->sectype)
 		return 0;
 
+	if (ctx->dfs_root_ses != ses->dfs_root_ses)
+		return 0;
+
 	/*
 	 * If an existing session is limited to less channels than
 	 * requested, it should not be reused
@@ -2362,9 +2365,9 @@ cifs_get_smb_ses(struct TCP_Server_Info *server, struct smb3_fs_context *ctx)
 	 * need to lock before changing something in the session.
 	 */
 	spin_lock(&cifs_tcp_ses_lock);
+	if (ctx->dfs_root_ses)
+		cifs_smb_ses_inc_refcount(ctx->dfs_root_ses);
 	ses->dfs_root_ses = ctx->dfs_root_ses;
-	if (ses->dfs_root_ses)
-		ses->dfs_root_ses->ses_count++;
 	list_add(&ses->smb_ses_list, &server->smb_ses_list);
 	spin_unlock(&cifs_tcp_ses_lock);
 
@@ -3315,6 +3318,9 @@ void cifs_mount_put_conns(struct cifs_mount_ctx *mnt_ctx)
 		cifs_put_smb_ses(mnt_ctx->ses);
 	else if (mnt_ctx->server)
 		cifs_put_tcp_session(mnt_ctx->server, 0);
+	mnt_ctx->ses = NULL;
+	mnt_ctx->tcon = NULL;
+	mnt_ctx->server = NULL;
 	mnt_ctx->cifs_sb->mnt_cifs_flags &= ~CIFS_MOUNT_POSIX_PATHS;
 	free_xid(mnt_ctx->xid);
 }
@@ -3594,8 +3600,6 @@ int cifs_mount(struct cifs_sb_info *cifs_sb, struct smb3_fs_context *ctx)
 	bool isdfs;
 	int rc;
 
-	INIT_LIST_HEAD(&mnt_ctx.dfs_ses_list);
-
 	rc = dfs_mount_share(&mnt_ctx, &isdfs);
 	if (rc)
 		goto error;
@@ -3626,7 +3630,6 @@ out:
 	return rc;
 
 error:
-	dfs_put_root_smb_sessions(&mnt_ctx.dfs_ses_list);
 	cifs_mount_put_conns(&mnt_ctx);
 	return rc;
 }
@@ -3641,6 +3644,18 @@ int cifs_mount(struct cifs_sb_info *cifs_sb, struct smb3_fs_context *ctx)
 		goto error;
 
 	rc = cifs_mount_get_tcon(&mnt_ctx);
+	if (!rc) {
+		/*
+		 * Prevent superblock from being created with any missing
+		 * connections.
+		 */
+		if (WARN_ON(!mnt_ctx.server))
+			rc = -EHOSTDOWN;
+		else if (WARN_ON(!mnt_ctx.ses))
+			rc = -EACCES;
+		else if (WARN_ON(!mnt_ctx.tcon))
+			rc = -ENOENT;
+	}
 	if (rc)
 		goto error;
 
@@ -3978,13 +3993,14 @@ cifs_set_vol_auth(struct smb3_fs_context *ctx, struct cifs_ses *ses)
 }
 
 static struct cifs_tcon *
-cifs_construct_tcon(struct cifs_sb_info *cifs_sb, kuid_t fsuid)
+__cifs_construct_tcon(struct cifs_sb_info *cifs_sb, kuid_t fsuid)
 {
 	int rc;
 	struct cifs_tcon *master_tcon = cifs_sb_master_tcon(cifs_sb);
 	struct cifs_ses *ses;
 	struct cifs_tcon *tcon = NULL;
 	struct smb3_fs_context *ctx;
+	char *origin_fullpath = NULL;
 
 	ctx = kzalloc(sizeof(*ctx), GFP_KERNEL);
 	if (ctx == NULL)
@@ -4008,6 +4024,7 @@ cifs_construct_tcon(struct cifs_sb_info *cifs_sb, kuid_t fsuid)
 	ctx->sign = master_tcon->ses->sign;
 	ctx->seal = master_tcon->seal;
 	ctx->witness = master_tcon->use_witness;
+	ctx->dfs_root_ses = master_tcon->ses->dfs_root_ses;
 
 	rc = cifs_set_vol_auth(ctx, master_tcon->ses);
 	if (rc) {
@@ -4027,12 +4044,39 @@ cifs_construct_tcon(struct cifs_sb_info *cifs_sb, kuid_t fsuid)
 		goto out;
 	}
 
+#ifdef CONFIG_CIFS_DFS_UPCALL
+	spin_lock(&master_tcon->tc_lock);
+	if (master_tcon->origin_fullpath) {
+		spin_unlock(&master_tcon->tc_lock);
+		origin_fullpath = dfs_get_path(cifs_sb, cifs_sb->ctx->source);
+		if (IS_ERR(origin_fullpath)) {
+			tcon = ERR_CAST(origin_fullpath);
+			origin_fullpath = NULL;
+			cifs_put_smb_ses(ses);
+			goto out;
+		}
+	} else {
+		spin_unlock(&master_tcon->tc_lock);
+	}
+#endif
+
 	tcon = cifs_get_tcon(ses, ctx);
 	if (IS_ERR(tcon)) {
 		cifs_put_smb_ses(ses);
 		goto out;
 	}
 	tcon->cifs_sb = cifs_sb;
+
+#ifdef CONFIG_CIFS_DFS_UPCALL
+	if (origin_fullpath) {
+		spin_lock(&tcon->tc_lock);
+		tcon->origin_fullpath = origin_fullpath;
+		spin_unlock(&tcon->tc_lock);
+		origin_fullpath = NULL;
+		queue_delayed_work(dfscache_wq, &tcon->dfs_cache_work,
+				   dfs_cache_get_ttl() * HZ);
+	}
+#endif
 
 #ifdef CONFIG_CIFS_ALLOW_INSECURE_LEGACY
 	if (cap_unix(ses))
@@ -4042,9 +4086,21 @@ cifs_construct_tcon(struct cifs_sb_info *cifs_sb, kuid_t fsuid)
 out:
 	kfree(ctx->username);
 	kfree_sensitive(ctx->password);
+	kfree(origin_fullpath);
 	kfree(ctx);
 
 	return tcon;
+}
+
+static struct cifs_tcon *
+cifs_construct_tcon(struct cifs_sb_info *cifs_sb, kuid_t fsuid)
+{
+	struct cifs_tcon *ret;
+
+	cifs_mount_lock();
+	ret = __cifs_construct_tcon(cifs_sb, fsuid);
+	cifs_mount_unlock();
+	return ret;
 }
 
 struct cifs_tcon *

@@ -670,12 +670,8 @@ static struct fpga_manager *__fpga_mgr_get(struct device *mgr_dev)
 
 	mgr = to_fpga_manager(mgr_dev);
 
-	mutex_lock(&mgr->mops_mutex);
-
-	if (!mgr->mops || !try_module_get(mgr->mops_owner))
+	if (!try_module_get(mgr->mops_owner))
 		mgr = ERR_PTR(-ENODEV);
-
-	mutex_unlock(&mgr->mops_mutex);
 
 	return mgr;
 }
@@ -817,6 +813,8 @@ __fpga_mgr_register_full(struct device *parent, const struct fpga_manager_info *
 
 	mutex_init(&mgr->ref_mutex);
 	mutex_init(&mgr->mops_mutex);
+
+	mgr->mops_owner = owner;
 
 	mgr->mops_owner = owner;
 

@@ -191,14 +191,12 @@ static int __io_remove_buffers(struct io_ring_ctx *ctx,
 		if (bl->buf_nr_pages) {
 			int j;
 
-			for (j = 0; j < bl->buf_nr_pages; j++) {
-				if (bl->is_mmap)
-					put_page(bl->buf_pages[j]);
-				else
+			if (!bl->is_mmap) {
+				for (j = 0; j < bl->buf_nr_pages; j++)
 					unpin_user_page(bl->buf_pages[j]);
 			}
 			io_pages_unmap(bl->buf_ring, &bl->buf_pages,
-					&bl->buf_nr_pages, false);
+					&bl->buf_nr_pages, bl->is_mmap);
 			bl->is_mmap = 0;
 		}
 		/* make sure it's seen as empty */
