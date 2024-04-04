@@ -1272,8 +1272,10 @@ static long pwm_cdev_ioctl(struct file *file, unsigned int cmd, unsigned long ar
 			struct pwm_device *pwm;
 
 			ret = copy_from_user(&cstate, (struct pwmchip_state __user *)arg, sizeof(cstate));
-			if (ret)
+			if (ret) {
+				ret = -EFAULT;
 				goto out_unlock;
+			}
 
 			ret = pwm_cdev_request(cdata, cstate.hwpwm);
 			if (ret)
@@ -1300,6 +1302,8 @@ static long pwm_cdev_ioctl(struct file *file, unsigned int cmd, unsigned long ar
 				cstate.duty_offset = 0;
 			}
 			ret = copy_to_user((struct pwmchip_state __user *)arg, &cstate, sizeof(cstate));
+			if (ret)
+				ret = -EFAULT;
 		}
 		break;
 
@@ -1310,8 +1314,10 @@ static long pwm_cdev_ioctl(struct file *file, unsigned int cmd, unsigned long ar
 			struct pwm_device *pwm;
 
 			ret = copy_from_user(&cstate, (struct pwmchip_state __user *)arg, sizeof(cstate));
-			if (ret)
+			if (ret) {
+				ret = -EFAULT;
 				goto out_unlock;
+			}
 
 			if (cstate.period > 0 &&
 			    (cstate.duty_cycle > cstate.period ||

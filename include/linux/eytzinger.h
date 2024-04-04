@@ -252,19 +252,22 @@ static inline ssize_t eytzinger0_find_le(void *base, size_t nr, size_t size,
 
 	do {
 		i = n;
-		n = eytzinger0_child(i, cmp(search, base + i * size) >= 0);
+		n = eytzinger0_child(i, cmp(base + i * size, search) <= 0);
 	} while (n < nr);
 
 	if (n & 1) {
 		/* @i was greater than @search, return previous node: */
-
-		if (i == eytzinger0_first(nr))
-			return -1;
-
 		return eytzinger0_prev(i, nr);
 	} else {
 		return i;
 	}
+}
+
+static inline ssize_t eytzinger0_find_gt(void *base, size_t nr, size_t size,
+					 cmp_func_t cmp, const void *search)
+{
+	ssize_t idx = eytzinger0_find_le(base, nr, size, cmp, search);
+	return eytzinger0_next(idx, size);
 }
 
 #define eytzinger0_find(base, nr, size, _cmp, search)			\

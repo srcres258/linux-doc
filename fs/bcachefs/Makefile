@@ -17,6 +17,7 @@ bcachefs-y		:=	\
 	btree_journal_iter.o	\
 	btree_key_cache.o	\
 	btree_locking.o		\
+	btree_node_scan.o	\
 	btree_trans_commit.o	\
 	btree_update.o		\
 	btree_update_interior.o	\
@@ -36,6 +37,7 @@ bcachefs-y		:=	\
 	error.o			\
 	extents.o		\
 	extent_update.o		\
+	eytzinger.o		\
 	fs.o			\
 	fs-common.o		\
 	fs-ioctl.o		\

@@ -633,6 +633,30 @@ static inline void memset_u64s_tail(void *s, int c, unsigned bytes)
 	memset(s + bytes, c, rem);
 }
 
+/* just the memmove, doesn't update @_nr */
+#define __array_insert_item(_array, _nr, _pos)				\
+	memmove(&(_array)[(_pos) + 1],					\
+		&(_array)[(_pos)],					\
+		sizeof((_array)[0]) * ((_nr) - (_pos)))
+
+#define array_insert_item(_array, _nr, _pos, _new_item)			\
+do {									\
+	__array_insert_item(_array, _nr, _pos);				\
+	(_nr)++;							\
+	(_array)[(_pos)] = (_new_item);					\
+} while (0)
+
+#define array_remove_items(_array, _nr, _pos, _nr_to_remove)		\
+do {									\
+	(_nr) -= (_nr_to_remove);					\
+	memmove(&(_array)[(_pos)],					\
+		&(_array)[(_pos) + (_nr_to_remove)],			\
+		sizeof((_array)[0]) * ((_nr) - (_pos)));		\
+} while (0)
+
+#define array_remove_item(_array, _nr, _pos)				\
+	array_remove_items(_array, _nr, _pos, 1)
+
 static inline void __move_gap(void *array, size_t element_size,
 			      size_t nr, size_t size,
 			      size_t old_gap, size_t new_gap)
@@ -769,6 +793,16 @@ static inline int copy_from_user_errcode(void *to, const void __user *from, unsi
 static inline void __set_bit_le64(size_t bit, __le64 *addr)
 {
 	addr[bit / 64] |= cpu_to_le64(BIT_ULL(bit % 64));
+}
+
+static inline void __clear_bit_le64(size_t bit, __le64 *addr)
+{
+	addr[bit / 64] &= !cpu_to_le64(BIT_ULL(bit % 64));
+}
+
+static inline bool test_bit_le64(size_t bit, __le64 *addr)
+{
+	return (addr[bit / 64] & cpu_to_le64(BIT_ULL(bit % 64))) != 0;
 }
 
 #endif /* _BCACHEFS_UTIL_H */

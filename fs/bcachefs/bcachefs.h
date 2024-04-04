@@ -458,6 +458,7 @@ enum bch_time_stats {
 
 #include "alloc_types.h"
 #include "btree_types.h"
+#include "btree_node_scan_types.h"
 #include "btree_write_buffer_types.h"
 #include "buckets_types.h"
 #include "buckets_waiting_for_journal_types.h"
@@ -615,6 +616,7 @@ struct bch_dev {
  */
 
 #define BCH_FS_FLAGS()			\
+	x(new_fs)			\
 	x(started)			\
 	x(may_go_rw)			\
 	x(rw)				\
@@ -797,6 +799,7 @@ struct bch_fs {
 		u64		features;
 		u64		compat;
 		unsigned long	errors_silent[BITS_TO_LONGS(BCH_SB_ERR_MAX)];
+		u64		btrees_lost_data;
 	}			sb;
 
 
@@ -1103,6 +1106,8 @@ struct bch_fs {
 	u64			journal_entries_base_seq;
 	struct journal_keys	journal_keys;
 	struct list_head	journal_iters;
+
+	struct find_btree_nodes	found_btree_nodes;
 
 	u64			last_bucket_seq_cleanup;
 

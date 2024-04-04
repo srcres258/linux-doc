@@ -365,7 +365,10 @@ int gpiod_get_direction(struct gpio_desc *desc)
 	if (ret < 0)
 		return ret;
 
-	/* GPIOF_DIR_IN or other positive, otherwise GPIOF_DIR_OUT */
+	/*
+	 * GPIO_LINE_DIRECTION_IN or other positive,
+	 * otherwise GPIO_LINE_DIRECTION_OUT.
+	 */
 	if (ret > 0)
 		ret = 1;
 
@@ -1175,6 +1178,9 @@ struct gpio_device *gpio_device_find(const void *data,
 
 	list_for_each_entry_srcu(gdev, &gpio_devices, list,
 				 srcu_read_lock_held(&gpio_devices_srcu)) {
+		if (!device_is_registered(&gdev->dev))
+			continue;
+
 		guard(srcu)(&gdev->srcu);
 
 		gc = srcu_dereference(gdev->chip, &gdev->srcu);
