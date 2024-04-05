@@ -507,14 +507,13 @@ restart:
 				err = split_folio(folio);
 				folio_unlock(folio);
 				folio_put(folio);
-				if (err)
-					continue;
 				start_pte = pte =
 					pte_offset_map_lock(mm, pmd, addr, &ptl);
 				if (!start_pte)
 					break;
 				arch_enter_lazy_mmu_mode();
-				nr = 0;
+				if (!err)
+					nr = 0;
 				continue;
 			}
 		}

@@ -1608,7 +1608,9 @@ void free_swap_and_cache_nr(swp_entry_t entry, int nr)
 	unsigned long end = swp_offset(entry) + nr;
 	unsigned int type = swp_type(entry);
 	struct swap_info_struct *si;
+	bool any_only_cache = false;
 	unsigned long offset;
+	unsigned char count;
 
 	if (non_swap_entry(entry))
 		return;
@@ -1624,9 +1626,19 @@ void free_swap_and_cache_nr(swp_entry_t entry, int nr)
 	 * First free all entries in the range.
 	 */
 	for (offset = swp_offset(entry); offset < end; offset++) {
-		if (!WARN_ON(data_race(!si->swap_map[offset])))
-			__swap_entry_free(si, swp_entry(type, offset));
+		if (!WARN_ON(data_race(!si->swap_map[offset]))) {
+			count = __swap_entry_free(si, swp_entry(type, offset));
+			if (count == SWAP_HAS_CACHE)
+				any_only_cache = true;
+		}
 	}
+
+	/*
+	 * Short-circuit the below loop if none of the entries had their
+	 * reference drop to zero.
+	 */
+	if (!any_only_cache)
+		goto out;
 
 	/*
 	 * Now go back over the range trying to reclaim the swap cache. This is

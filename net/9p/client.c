@@ -1670,10 +1670,10 @@ p9_client_write_subreq(struct netfs_io_subrequest *subreq)
 	struct p9_client *clnt = fid->clnt;
 	struct p9_req_t *req;
 	unsigned long long start = subreq->start + subreq->transferred;
-	size_t len = subreq->len - subreq->transferred;
-	int written, err;
+	int written, len = subreq->len - subreq->transferred;
+	int err;
 
-	p9_debug(P9_DEBUG_9P, ">>> TWRITE fid %d offset %llu len %zd\n",
+	p9_debug(P9_DEBUG_9P, ">>> TWRITE fid %d offset %llu len %d\n",
 		 fid->fid, start, len);
 
 	/* Don't bother zerocopy for small IO (< 1024) */
@@ -1699,11 +1699,11 @@ p9_client_write_subreq(struct netfs_io_subrequest *subreq)
 	}
 
 	if (written > len) {
-		pr_err("bogus RWRITE count (%d > %zu)\n", written, len);
+		pr_err("bogus RWRITE count (%d > %u)\n", written, len);
 		written = len;
 	}
 
-	p9_debug(P9_DEBUG_9P, "<<< RWRITE count %zd\n", len);
+	p9_debug(P9_DEBUG_9P, "<<< RWRITE count %d\n", len);
 
 	p9_req_put(clnt, req);
 	netfs_write_subrequest_terminated(subreq, written, false);

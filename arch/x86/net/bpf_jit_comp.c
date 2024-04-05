@@ -816,9 +816,10 @@ done:
 static void emit_mov_imm64(u8 **pprog, u32 dst_reg,
 			   const u32 imm32_hi, const u32 imm32_lo)
 {
+	u64 imm64 = ((u64)imm32_hi << 32) | (u32)imm32_lo;
 	u8 *prog = *pprog;
 
-	if (is_uimm32(((u64)imm32_hi << 32) | (u32)imm32_lo)) {
+	if (is_uimm32(imm64)) {
 		/*
 		 * For emitting plain u32, where sign bit must not be
 		 * propagated LLVM tends to load imm64 over mov32
@@ -826,6 +827,8 @@ static void emit_mov_imm64(u8 **pprog, u32 dst_reg,
 		 * 'mov %eax, imm32' instead.
 		 */
 		emit_mov_imm32(&prog, false, dst_reg, imm32_lo);
+	} else if (is_simm32(imm64)) {
+		emit_mov_imm32(&prog, true, dst_reg, imm32_lo);
 	} else {
 		/* movabsq rax, imm64 */
 		EMIT2(add_1mod(0x48, dst_reg), add_1reg(0xB8, dst_reg));
@@ -1383,15 +1386,14 @@ static int do_jit(struct bpf_prog *bpf_prog, int *addrs, u8 *image, u8 *rw_image
 				EMIT3(0x0F, 0x44, add_2reg(0xC0, AUX_REG, dst_reg));
 				break;
 			} else if (insn_is_mov_percpu_addr(insn)) {
-				u32 off = (u32)(unsigned long)&this_cpu_off;
-
 				/* mov <dst>, <src> (if necessary) */
 				EMIT_mov(dst_reg, src_reg);
-
+#ifdef CONFIG_SMP
 				/* add <dst>, gs:[<off>] */
 				EMIT2(0x65, add_1mod(0x48, dst_reg));
 				EMIT3(0x03, add_1reg(0x04, dst_reg), 0x25);
-				EMIT(off, 4);
+				EMIT((u32)(unsigned long)&this_cpu_off, 4);
+#endif
 				break;
 			}
 			fallthrough;

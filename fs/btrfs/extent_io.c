@@ -698,6 +698,37 @@ error:
 }
 
 /*
+ * Populate every free slot in a provided array with folios.
+ *
+ * @nr_folios:   number of folios to allocate
+ * @folio_array: the array to fill with folios; any existing non-NULL entries in
+ *		 the array will be skipped
+ * @extra_gfp:	 the extra GFP flags for the allocation
+ *
+ * Return: 0        if all folios were able to be allocated;
+ *         -ENOMEM  otherwise, the partially allocated folios would be freed and
+ *                  the array slots zeroed
+ */
+int btrfs_alloc_folio_array(unsigned int nr_folios, struct folio **folio_array,
+			    gfp_t extra_gfp)
+{
+	for (int i = 0; i < nr_folios; i++) {
+		if (folio_array[i])
+			continue;
+		folio_array[i] = folio_alloc(GFP_NOFS | extra_gfp, 0);
+		if (!folio_array[i])
+			goto error;
+	}
+	return 0;
+error:
+	for (int i = 0; i < nr_folios; i++) {
+		if (folio_array[i])
+			folio_put(folio_array[i]);
+	}
+	return -ENOMEM;
+}
+
+/*
  * Populate every free slot in a provided array with pages.
  *
  * @nr_pages:   number of pages to allocate
@@ -712,28 +743,27 @@ error:
 int btrfs_alloc_page_array(unsigned int nr_pages, struct page **page_array,
 		   gfp_t extra_gfp)
 {
-unsigned int allocated;
+	const gfp_t gfp = GFP_NOFS | extra_gfp;
+	unsigned int allocated;
 
 for (allocated = 0; allocated < nr_pages;) {
 	unsigned int last = allocated;
 
-	allocated = alloc_pages_bulk_array(GFP_NOFS | extra_gfp,
-					   nr_pages, page_array);
+		allocated = alloc_pages_bulk_array(gfp, nr_pages, page_array);
+		if (unlikely(allocated == last)) {
+			/* Can not fail, wait and retry. */
+			if (extra_gfp & __GFP_NOFAIL) {
+				memalloc_retry_wait(GFP_NOFS);
+				continue;
+			}
 
-	if (allocated == nr_pages)
-		return 0;
-
-	/*
-	 * During this iteration, no page could be allocated, even
-	 * though alloc_pages_bulk_array() falls back to alloc_page()
-	 * if  it could not bulk-allocate. So we must be out of memory.
-	 */
-	if (allocated == last) {
-		for (int i = 0; i < allocated; i++) {
-			__free_page(page_array[i]);
-			page_array[i] = NULL;
+			/* Allowed to fail, error out. */
+			for (int i = 0; i < allocated; i++) {
+				__free_page(page_array[i]);
+				page_array[i] = NULL;
+			}
+			return -ENOMEM;
 		}
-		return -ENOMEM;
 	}
 
 	memalloc_retry_wait(GFP_NOFS);
@@ -4632,19 +4662,19 @@ btrfs_assert_tree_write_locked(eb);
 if (trans && btrfs_header_generation(eb) != trans->transid)
 	return;
 
-/*
- * Instead of clearing the dirty flag off of the buffer, mark it as
- * EXTENT_BUFFER_ZONED_ZEROOUT. This allows us to preserve
- * write-ordering in zoned mode, without the need to later re-dirty
- * the extent_buffer.
- *
- * The actual zeroout of the buffer will happen later in
- * btree_csum_one_bio.
- */
-if (btrfs_is_zoned(fs_info)) {
-	set_bit(EXTENT_BUFFER_ZONED_ZEROOUT, &eb->bflags);
-	return;
-}
+	/*
+	 * Instead of clearing the dirty flag off of the buffer, mark it as
+	 * EXTENT_BUFFER_ZONED_ZEROOUT. This allows us to preserve
+	 * write-ordering in zoned mode, without the need to later re-dirty
+	 * the extent_buffer.
+	 *
+	 * The actual zeroout of the buffer will happen later in
+	 * btree_csum_one_bio.
+	 */
+	if (btrfs_is_zoned(fs_info) && test_bit(EXTENT_BUFFER_DIRTY, &eb->bflags)) {
+		set_bit(EXTENT_BUFFER_ZONED_ZEROOUT, &eb->bflags);
+		return;
+	}
 
 if (!test_and_clear_bit(EXTENT_BUFFER_DIRTY, &eb->bflags))
 	return;
@@ -4677,9 +4707,10 @@ check_buffer_tree_ref(eb);
 
 was_dirty = test_and_set_bit(EXTENT_BUFFER_DIRTY, &eb->bflags);
 
-num_folios = num_extent_folios(eb);
-WARN_ON(atomic_read(&eb->refs) == 0);
-WARN_ON(!test_bit(EXTENT_BUFFER_TREE_REF, &eb->bflags));
+	num_folios = num_extent_folios(eb);
+	WARN_ON(atomic_read(&eb->refs) == 0);
+	WARN_ON(!test_bit(EXTENT_BUFFER_TREE_REF, &eb->bflags));
+	WARN_ON(test_bit(EXTENT_BUFFER_ZONED_ZEROOUT, &eb->bflags));
 
 if (!was_dirty) {
 	bool subpage = eb->fs_info->nodesize < PAGE_SIZE;

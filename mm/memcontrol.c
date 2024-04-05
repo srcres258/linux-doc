@@ -351,7 +351,7 @@ static void memcg_reparent_objcgs(struct mem_cgroup *memcg,
 
 /*
  * A lot of the calls to the cache allocation functions are expected to be
- * inlined by the compiler. Since the calls to memcg_slab_pre_alloc_hook() are
+ * inlined by the compiler. Since the calls to memcg_slab_post_alloc_hook() are
  * conditional to this static branch, we'll have to allow modules that does
  * kmem_cache_alloc and the such to see this symbol as well
  */
@@ -861,10 +861,16 @@ void __mod_memcg_lruvec_state(struct lruvec *lruvec, enum node_stat_item idx,
 		case NR_ANON_THPS_PTEMAPPED:
 		case NR_SHMEM_PMDMAPPED:
 		case NR_FILE_PMDMAPPED:
-			WARN_ON_ONCE(!in_task());
+			if (WARN_ON_ONCE(!in_task()))
+				pr_warn("stat item index: %d\n", idx);
 			break;
 		default:
-			VM_WARN_ON_IRQS_ENABLED();
+#ifdef CONFIG_DEBUG_VM_IRQSOFF
+			if (VM_WARN_ON_IRQS_ENABLED())
+				pr_warn("stat item index: %d\n", idx);
+#else
+			;
+#endif
 		}
 	}
 
