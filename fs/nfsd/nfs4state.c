@@ -2245,6 +2245,10 @@ static struct nfs4_client *alloc_client(struct xdr_netobj name,
 						 GFP_KERNEL);
 	if (!clp->cl_ownerstr_hashtbl)
 		goto err_no_hashtbl;
+	clp->cl_callback_wq = alloc_ordered_workqueue("nfsd4_callbacks", 0);
+	if (!clp->cl_callback_wq)
+		goto err_no_callback_wq;
+
 	for (i = 0; i < OWNER_HASH_SIZE; i++)
 		INIT_LIST_HEAD(&clp->cl_ownerstr_hashtbl[i]);
 	INIT_LIST_HEAD(&clp->cl_sessions);
@@ -2267,6 +2271,8 @@ static struct nfs4_client *alloc_client(struct xdr_netobj name,
 	spin_lock_init(&clp->cl_lock);
 	rpc_init_wait_queue(&clp->cl_cb_waitq, "Backchannel slot table");
 	return clp;
+err_no_callback_wq:
+	kfree(clp->cl_ownerstr_hashtbl);
 err_no_hashtbl:
 	kfree(clp->cl_name.data);
 err_no_name:
@@ -2280,6 +2286,7 @@ static void __free_client(struct kref *k)
 	struct nfs4_client *clp = container_of(c, struct nfs4_client, cl_nfsdfs);
 
 	free_svc_cred(&clp->cl_cred);
+	destroy_workqueue(clp->cl_callback_wq);
 	kfree(clp->cl_ownerstr_hashtbl);
 	kfree(clp->cl_name.data);
 	kfree(clp->cl_nii_domain.data);
@@ -2352,7 +2359,11 @@ unhash_client(struct nfs4_client *clp)
 
 static __be32 mark_client_expired_locked(struct nfs4_client *clp)
 {
-	if (atomic_read(&clp->cl_rpc_users))
+	int users = atomic_read(&clp->cl_rpc_users);
+
+	trace_nfsd_mark_client_expired(clp, users);
+
+	if (users)
 		return nfserr_jukebox;
 	unhash_client_locked(clp);
 	return nfs_ok;
@@ -3641,12 +3652,8 @@ out_nolock:
 	return status;
 }
 
-static __be32
-check_slot_seqid(u32 seqid, u32 slot_seqid, int slot_inuse)
+static __be32 check_slot_seqid(u32 seqid, u32 slot_seqid, bool slot_inuse)
 {
-	dprintk("%s enter. seqid %d slot_seqid %d\n", __func__, seqid,
-		slot_seqid);
-
 	/* The slot is in use, and no response has been sent. */
 	if (slot_inuse) {
 		if (seqid == slot_seqid)
@@ -3823,10 +3830,13 @@ nfsd4_create_session(struct svc_rqst *rqstp,
 	}
 
 	/* RFC 8881 Section 18.36.4 Phase 2: Sequence ID processing. */
-	if (conf)
+	if (conf) {
 		cs_slot = &conf->cl_cs_slot;
-	else
+		trace_nfsd_slot_seqid_conf(conf, cr_ses);
+	} else {
 		cs_slot = &unconf->cl_cs_slot;
+		trace_nfsd_slot_seqid_unconf(unconf, cr_ses);
+	}
 	status = check_slot_seqid(cr_ses->seqid, cs_slot->sl_seqid, 0);
 	switch (status) {
 	case nfs_ok:
@@ -4221,6 +4231,7 @@ nfsd4_sequence(struct svc_rqst *rqstp, struct nfsd4_compound_state *cstate,
 	 * sr_highest_slotid and the sr_target_slot id to maxslots */
 	seq->maxslots = session->se_fchannel.maxreqs;
 
+	trace_nfsd_slot_seqid_sequence(clp, seq, slot);
 	status = check_slot_seqid(seq->seqid, slot->sl_seqid,
 					slot->sl_flags & NFSD4_SLOT_INUSE);
 	if (status == nfserr_replay_cache) {
@@ -8625,12 +8636,6 @@ nfs4_state_start(void)
 	if (ret)
 		return ret;
 
-	ret = nfsd4_create_callback_queue();
-	if (ret) {
-		rhltable_destroy(&nfs4_file_rhltable);
-		return ret;
-	}
-
 	set_max_delegations();
 	return 0;
 }
@@ -8671,7 +8676,6 @@ nfs4_state_shutdown_net(struct net *net)
 void
 nfs4_state_shutdown(void)
 {
-	nfsd4_destroy_callback_queue();
 	rhltable_destroy(&nfs4_file_rhltable);
 }
 
