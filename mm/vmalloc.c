@@ -1064,10 +1064,9 @@ repeat:
 	}
 
 	/*
-	 * Check if found VA exists, it might it is gone away.
-	 * In this case we repeat the search because a VA has
-	 * been removed concurrently thus we need to proceed
-	 * with next one what is a rare case.
+	 * Check if found VA exists, it might have gone away.  In this case we
+	 * repeat the search because a VA has been removed concurrently and we
+	 * need to proceed to the next one, which is a rare case.
 	 */
 	if (va_start_lowest) {
 		vn = addr_to_node(va_start_lowest);

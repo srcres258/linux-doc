@@ -59,12 +59,6 @@
 #define __force_percpu_prefix	"%%"__stringify(__percpu_seg)":"
 #define __my_cpu_offset		this_cpu_read(this_cpu_off)
 
-#ifdef CONFIG_X86_64
-#define __raw_my_cpu_offset	raw_cpu_read_8(this_cpu_off);
-#else
-#define __raw_my_cpu_offset	raw_cpu_read_4(this_cpu_off);
-#endif
-
 /*
  * Compared to the generic __my_cpu_offset version, the following
  * saves one instruction and avoids clobbering a temp register.
@@ -76,7 +70,7 @@
 #ifndef BUILD_VDSO32_64
 #define arch_raw_cpu_ptr(_ptr)					\
 ({								\
-	unsigned long tcp_ptr__ = __raw_my_cpu_offset;		\
+	unsigned long tcp_ptr__ = raw_cpu_read_long(this_cpu_off); \
 	tcp_ptr__ += (__force unsigned long)(_ptr);		\
 	(typeof(*(_ptr)) __kernel __force *)tcp_ptr__;		\
 })
@@ -96,7 +90,7 @@
 #endif /* CONFIG_SMP */
 
 #define __my_cpu_type(var)	typeof(var) __percpu_seg_override
-#define __my_cpu_ptr(ptr)	(__my_cpu_type(*ptr)*)(__force uintptr_t)(ptr)
+#define __my_cpu_ptr(ptr)	(__my_cpu_type(*(ptr))*)(__force uintptr_t)(ptr)
 #define __my_cpu_var(var)	(*__my_cpu_ptr(&(var)))
 #define __percpu_arg(x)		__percpu_prefix "%" #x
 #define __force_percpu_arg(x)	__force_percpu_prefix "%" #x
@@ -563,41 +557,38 @@ do {									\
 #define this_cpu_xchg_8(pcp, nval)		this_percpu_xchg_op(pcp, nval)
 #define this_cpu_cmpxchg_8(pcp, oval, nval)	percpu_cmpxchg_op(8, volatile, pcp, oval, nval)
 #define this_cpu_try_cmpxchg_8(pcp, ovalp, nval)	percpu_try_cmpxchg_op(8, volatile, pcp, ovalp, nval)
+
+#define raw_cpu_read_long(pcp)		raw_cpu_read_8(pcp)
 #else
 /* There is no generic 64 bit read stable operation for 32 bit targets. */
-#define this_cpu_read_stable_8(pcp)    ({ BUILD_BUG(); (typeof(pcp))0; })
+#define this_cpu_read_stable_8(pcp)	({ BUILD_BUG(); (typeof(pcp))0; })
+
+#define raw_cpu_read_long(pcp)		raw_cpu_read_4(pcp)
 #endif
 
-static __always_inline bool x86_this_cpu_constant_test_bit(unsigned int nr,
-                        const unsigned long __percpu *addr)
-{
-	unsigned long __percpu *a =
-		(unsigned long __percpu *)addr + nr / BITS_PER_LONG;
+#define x86_this_cpu_constant_test_bit(_nr, _var)			\
+({									\
+	unsigned long __percpu *addr__ =				\
+		(unsigned long __percpu *)&(_var) + ((_nr) / BITS_PER_LONG); \
+	!!((1UL << ((_nr) % BITS_PER_LONG)) & raw_cpu_read(*addr__));	\
+})
 
-#ifdef CONFIG_X86_64
-	return ((1UL << (nr % BITS_PER_LONG)) & raw_cpu_read_8(*a)) != 0;
-#else
-	return ((1UL << (nr % BITS_PER_LONG)) & raw_cpu_read_4(*a)) != 0;
-#endif
-}
+#define x86_this_cpu_variable_test_bit(_nr, _var)		\
+({								\
+	bool oldbit;						\
+								\
+	asm volatile("btl %[nr], " __percpu_arg([var])		\
+		     CC_SET(c)					\
+		     : CC_OUT(c) (oldbit)			\
+		     : [var] "m" (__my_cpu_var(_var)),		\
+		       [nr] "rI" (_nr));			\
+	oldbit;							\
+})
 
-static inline bool x86_this_cpu_variable_test_bit(int nr,
-                        const unsigned long __percpu *addr)
-{
-	bool oldbit;
-
-	asm volatile("btl "__percpu_arg(2)",%1"
-			CC_SET(c)
-			: CC_OUT(c) (oldbit)
-			: "m" (*__my_cpu_ptr((unsigned long __percpu *)(addr))), "Ir" (nr));
-
-	return oldbit;
-}
-
-#define x86_this_cpu_test_bit(nr, addr)			\
-	(__builtin_constant_p((nr))			\
-	 ? x86_this_cpu_constant_test_bit((nr), (addr))	\
-	 : x86_this_cpu_variable_test_bit((nr), (addr)))
+#define x86_this_cpu_test_bit(_nr, _var)			\
+	(__builtin_constant_p(_nr)				\
+	 ? x86_this_cpu_constant_test_bit(_nr, _var)		\
+	 : x86_this_cpu_variable_test_bit(_nr, _var))
 
 
 #include <asm-generic/percpu.h>

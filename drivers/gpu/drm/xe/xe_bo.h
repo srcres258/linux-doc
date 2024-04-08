@@ -13,14 +13,6 @@
 #include "xe_vm_types.h"
 #include "xe_vm.h"
 
-/**
- * xe_vm_assert_held(vm) - Assert that the vm's reservation object is held.
- * @vm: The vm
- */
-#define xe_vm_assert_held(vm) dma_resv_assert_held(xe_vm_resv(vm))
-
-
-
 #define XE_DEFAULT_GTT_SIZE_MB          3072ULL /* 3GB by default */
 
 #define XE_BO_FLAG_USER		BIT(0)
@@ -50,13 +42,6 @@
 #define XE_BO_FLAG_INTERNAL_TEST	BIT(30)
 #define XE_BO_FLAG_INTERNAL_64K		BIT(31)
 
-#define XELPG_PPGTT_PTE_PAT3		BIT_ULL(62)
-#define XE2_PPGTT_PTE_PAT4		BIT_ULL(61)
-#define XE_PPGTT_PDE_PDPE_PAT2		BIT_ULL(12)
-#define XE_PPGTT_PTE_PAT2		BIT_ULL(7)
-#define XE_PPGTT_PTE_PAT1		BIT_ULL(4)
-#define XE_PPGTT_PTE_PAT0		BIT_ULL(3)
-
 #define XE_PTE_SHIFT			12
 #define XE_PAGE_SIZE			(1 << XE_PTE_SHIFT)
 #define XE_PTE_MASK			(XE_PAGE_SIZE - 1)
@@ -68,20 +53,6 @@
 #define XE_64K_PAGE_SIZE		(1 << XE_64K_PTE_SHIFT)
 #define XE_64K_PTE_MASK			(XE_64K_PAGE_SIZE - 1)
 #define XE_64K_PDE_MASK			(XE_PDE_MASK >> 4)
-
-#define XE_PDE_PS_2M			BIT_ULL(7)
-#define XE_PDPE_PS_1G			BIT_ULL(7)
-#define XE_PDE_IPS_64K			BIT_ULL(11)
-
-#define XE_GGTT_PTE_DM			BIT_ULL(1)
-#define XE_USM_PPGTT_PTE_AE		BIT_ULL(10)
-#define XE_PPGTT_PTE_DM			BIT_ULL(11)
-#define XE_PDE_64K			BIT_ULL(6)
-#define XE_PTE_PS64			BIT_ULL(8)
-#define XE_PTE_NULL			BIT_ULL(9)
-
-#define XE_PAGE_PRESENT			BIT_ULL(0)
-#define XE_PAGE_RW			BIT_ULL(1)
 
 #define XE_PL_SYSTEM		TTM_PL_SYSTEM
 #define XE_PL_TT		TTM_PL_TT

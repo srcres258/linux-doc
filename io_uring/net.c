@@ -353,12 +353,9 @@ static int io_send_setup(struct io_kiocb *req)
 		kmsg->msg.msg_name = &kmsg->addr;
 		kmsg->msg.msg_namelen = sr->addr_len;
 	}
-	if (!io_do_buffer_select(req)) {
-		ret = import_ubuf(ITER_SOURCE, sr->buf, sr->len,
-				  &kmsg->msg.msg_iter);
-		if (unlikely(ret < 0))
-			return ret;
-	}
+	ret = import_ubuf(ITER_SOURCE, sr->buf, sr->len, &kmsg->msg.msg_iter);
+	if (unlikely(ret < 0))
+		return ret;
 
 	return 0;
 }

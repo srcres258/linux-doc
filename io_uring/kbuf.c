@@ -646,7 +646,7 @@ struct io_buffer_list *io_pbuf_get_bl(struct io_ring_ctx *ctx,
 	bl = xa_load(&ctx->io_bl_xa, bgid);
 	/* must be a mmap'able buffer ring and have pages */
 	ret = false;
-	if (bl && bl->is_mmap && bl->buf_nr_pages)
+	if (bl && bl->is_mmap)
 		ret = atomic_inc_not_zero(&bl->refs);
 	rcu_read_unlock();
 
@@ -664,7 +664,6 @@ int io_pbuf_mmap(struct file *file, struct vm_area_struct *vma)
 	int bgid, ret;
 
 	bgid = (pgoff & ~IORING_OFF_MMAP_MASK) >> IORING_OFF_PBUF_SHIFT;
-
 	bl = io_pbuf_get_bl(ctx, bgid);
 	if (IS_ERR(bl))
 		return PTR_ERR(bl);

@@ -213,15 +213,15 @@ static void *io_uring_validate_mmap_request(struct file *file, loff_t pgoff,
 	case IORING_OFF_PBUF_RING: {
 		struct io_buffer_list *bl;
 		unsigned int bgid;
-		void *ret;
+		void *ptr;
 
 		bgid = (offset & ~IORING_OFF_MMAP_MASK) >> IORING_OFF_PBUF_SHIFT;
 		bl = io_pbuf_get_bl(ctx, bgid);
 		if (IS_ERR(bl))
 			return bl;
-		ret = bl->buf_ring;
+		ptr = bl->buf_ring;
 		io_put_bl(ctx, bl);
-		return ret;
+		return ptr;
 		}
 	}
 

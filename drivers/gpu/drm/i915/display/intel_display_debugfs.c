@@ -191,7 +191,7 @@ static void intel_hdcp_info(struct seq_file *m,
 			    struct intel_connector *intel_connector,
 			    bool remote_req)
 {
-	bool hdcp_cap, hdcp2_cap;
+	bool hdcp_cap = false, hdcp2_cap = false;
 
 	if (!intel_connector->hdcp.shim) {
 		seq_puts(m, "No Connector Support");
@@ -252,9 +252,6 @@ static void intel_connector_info(struct seq_file *m,
 				 struct drm_connector *connector)
 {
 	struct intel_connector *intel_connector = to_intel_connector(connector);
-	const struct drm_connector_state *conn_state = connector->state;
-	struct intel_encoder *encoder =
-		to_intel_encoder(conn_state->best_encoder);
 	const struct drm_display_mode *mode;
 
 	seq_printf(m, "[CONNECTOR:%d:%s]: status: %s\n",
@@ -271,28 +268,23 @@ static void intel_connector_info(struct seq_file *m,
 		   drm_get_subpixel_order_name(connector->display_info.subpixel_order));
 	seq_printf(m, "\tCEA rev: %d\n", connector->display_info.cea_rev);
 
-	if (!encoder)
-		return;
-
 	switch (connector->connector_type) {
 	case DRM_MODE_CONNECTOR_DisplayPort:
 	case DRM_MODE_CONNECTOR_eDP:
-		if (encoder->type == INTEL_OUTPUT_DP_MST)
+		if (intel_connector->mst_port)
 			intel_dp_mst_info(m, intel_connector);
 		else
 			intel_dp_info(m, intel_connector);
 		break;
 	case DRM_MODE_CONNECTOR_HDMIA:
-		if (encoder->type == INTEL_OUTPUT_HDMI ||
-		    encoder->type == INTEL_OUTPUT_DDI)
-			intel_hdmi_info(m, intel_connector);
+		intel_hdmi_info(m, intel_connector);
 		break;
 	default:
 		break;
 	}
 
 	seq_puts(m, "\tHDCP version: ");
-	if (intel_encoder_is_mst(encoder)) {
+	if (intel_connector->mst_port) {
 		intel_hdcp_info(m, intel_connector, true);
 		seq_puts(m, "\tMST Hub HDCP version: ");
 	}
