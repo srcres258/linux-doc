@@ -3464,6 +3464,14 @@ void btrfs_free_tree_block(struct btrfs_trans_handle *trans,
 	if (root_id != BTRFS_TREE_LOG_OBJECTID) {
 		struct btrfs_ref generic_ref = { 0 };
 
+		/*
+		 * Assert that the extent buffer is not cleared due to
+		 * EXTENT_BUFFER_ZONED_ZEROOUT. Please refer
+		 * btrfs_clear_buffer_dirty() and btree_csum_one_bio() for
+		 * detail.
+		 */
+		ASSERT(btrfs_header_bytenr(buf) != 0);
+
 		btrfs_init_generic_ref(&generic_ref, BTRFS_DROP_DELAYED_REF,
 				       buf->start, buf->len, parent,
 				       btrfs_header_owner(buf));
@@ -5093,7 +5101,7 @@ btrfs_init_new_buffer(struct btrfs_trans_handle *trans, struct btrfs_root *root,
 	 */
 	btrfs_set_buffer_lockdep_class(lockdep_owner, buf, level);
 
-	__btrfs_tree_lock(buf, nest);
+	btrfs_tree_lock_nested(buf, nest);
 	btrfs_clear_buffer_dirty(trans, buf);
 	clear_bit(EXTENT_BUFFER_STALE, &buf->bflags);
 	clear_bit(EXTENT_BUFFER_ZONED_ZEROOUT, &buf->bflags);
@@ -5188,8 +5196,16 @@ struct extent_buffer *btrfs_alloc_tree_block(struct btrfs_trans_handle *trans,
 			parent = ins.objectid;
 		flags |= BTRFS_BLOCK_FLAG_FULL_BACKREF;
 		owning_root = reloc_src_root;
-	} else
-		BUG_ON(parent > 0);
+	} else {
+		if (unlikely(parent > 0)) {
+			/*
+			 * Other roots than reloc tree don't expect start
+			 * offset of a parent block.
+			 */
+			ret = -EUCLEAN;
+			goto out_free_reserved;
+		}
+	}
 
 	if (root_objectid != BTRFS_TREE_LOG_OBJECTID) {
 		extent_op = btrfs_alloc_delayed_extent_op();
