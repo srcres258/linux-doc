@@ -238,7 +238,6 @@ static void guc_submit_fini(struct drm_device *drm, void *arg)
 
 	xa_destroy(&guc->submission_state.exec_queue_lookup);
 	free_submit_wq(guc);
-	mutex_destroy(&guc->submission_state.lock);
 }
 
 static const struct xe_exec_queue_ops guc_exec_queue_ops;
@@ -263,21 +262,7 @@ int xe_guc_submit_init(struct xe_guc *guc)
 	struct xe_gt *gt = guc_to_gt(guc);
 	int err;
 
-	err = alloc_submit_wq(guc);
-	if (err)
-		return err;
-
-	gt->exec_queue_ops = &guc_exec_queue_ops;
-
-	mutex_init(&guc->submission_state.lock);
-	xa_init(&guc->submission_state.exec_queue_lookup);
-
-	spin_lock_init(&guc->submission_state.suspend.lock);
-	guc->submission_state.suspend.context = dma_fence_context_alloc(1);
-
-	primelockdep(guc);
-
-	err = drmm_add_action_or_reset(&xe->drm, guc_submit_fini, guc);
+	err = drmm_mutex_init(&xe->drm, &guc->submission_state.lock);
 	if (err)
 		return err;
 
@@ -285,7 +270,20 @@ int xe_guc_submit_init(struct xe_guc *guc)
 	if (err)
 		return err;
 
-	return 0;
+	err = alloc_submit_wq(guc);
+	if (err)
+		return err;
+
+	gt->exec_queue_ops = &guc_exec_queue_ops;
+
+	xa_init(&guc->submission_state.exec_queue_lookup);
+
+	spin_lock_init(&guc->submission_state.suspend.lock);
+	guc->submission_state.suspend.context = dma_fence_context_alloc(1);
+
+	primelockdep(guc);
+
+	return drmm_add_action_or_reset(&xe->drm, guc_submit_fini, guc);
 }
 
 static void __release_guc_id(struct xe_guc *guc, struct xe_exec_queue *q, u32 xa_count)
@@ -1777,7 +1775,7 @@ guc_exec_queue_wq_snapshot_print(struct xe_guc_submit_exec_queue_snapshot *snaps
 
 /**
  * xe_guc_exec_queue_snapshot_capture - Take a quick snapshot of the GuC Engine.
- * @job: faulty Xe scheduled job.
+ * @q: faulty exec queue
  *
  * This can be printed out in a later stage like during dev_coredump
  * analysis.
@@ -1786,9 +1784,8 @@ guc_exec_queue_wq_snapshot_print(struct xe_guc_submit_exec_queue_snapshot *snaps
  * caller, using `xe_guc_exec_queue_snapshot_free`.
  */
 struct xe_guc_submit_exec_queue_snapshot *
-xe_guc_exec_queue_snapshot_capture(struct xe_sched_job *job)
+xe_guc_exec_queue_snapshot_capture(struct xe_exec_queue *q)
 {
-	struct xe_exec_queue *q = job->q;
 	struct xe_gpu_scheduler *sched = &q->guc->sched;
 	struct xe_guc_submit_exec_queue_snapshot *snapshot;
 	int i;
@@ -1944,28 +1941,10 @@ void xe_guc_exec_queue_snapshot_free(struct xe_guc_submit_exec_queue_snapshot *s
 static void guc_exec_queue_print(struct xe_exec_queue *q, struct drm_printer *p)
 {
 	struct xe_guc_submit_exec_queue_snapshot *snapshot;
-	struct xe_gpu_scheduler *sched = &q->guc->sched;
-	struct xe_sched_job *job;
-	bool found = false;
 
-	spin_lock(&sched->base.job_list_lock);
-	list_for_each_entry(job, &sched->base.pending_list, drm.list) {
-		if (job->q == q) {
-			xe_sched_job_get(job);
-			found = true;
-			break;
-		}
-	}
-	spin_unlock(&sched->base.job_list_lock);
-
-	if (!found)
-		return;
-
-	snapshot = xe_guc_exec_queue_snapshot_capture(job);
+	snapshot = xe_guc_exec_queue_snapshot_capture(q);
 	xe_guc_exec_queue_snapshot_print(snapshot, p);
 	xe_guc_exec_queue_snapshot_free(snapshot);
-
-	xe_sched_job_put(job);
 }
 
 /**

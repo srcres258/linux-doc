@@ -1638,7 +1638,7 @@ static unsigned long zap_pte_range(struct mmu_gather *tlb,
 			folio_put(folio);
 		} else if (!non_swap_entry(entry)) {
 			max_nr = (end - addr) / PAGE_SIZE;
-			nr = swap_pte_batch(pte, max_nr, entry);
+			nr = swap_pte_batch(pte, max_nr, ptent);
 			/* Genuine swap entries, hence a private anon pages */
 			if (!should_zap_cows(details))
 				continue;
@@ -4382,8 +4382,10 @@ static struct folio *alloc_anon_folio(struct vm_fault *vmf)
 			}
 			folio_throttle_swaprate(folio, gfp);
 			clear_huge_page(&folio->page, vmf->address, 1 << order);
+			count_mthp_stat(order, MTHP_STAT_ANON_ALLOC);
 			return folio;
 		}
+		count_mthp_stat(order, MTHP_STAT_ANON_ALLOC_FALLBACK);
 next:
 		order = next_order(&orders, order);
 	}

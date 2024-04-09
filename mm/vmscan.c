@@ -1241,30 +1241,28 @@ retry:
 					if (!can_split_folio(folio, NULL))
 						goto activate_locked;
 					/*
-					 * Split partially mapped folios right
-					 * away. We can free the unmapped pages
-					 * without IO.
+					 * Split partially mapped folios right away.
+					 * We can free the unmapped pages without IO.
 					 */
-					if (data_race(!list_empty(
-						&folio->_deferred_list)) &&
-					    split_folio_to_list(folio,
-								folio_list))
+					if (data_race(!list_empty(&folio->_deferred_list)) &&
+					    split_folio_to_list(folio, folio_list))
 						goto activate_locked;
 				}
 				if (!add_to_swap(folio)) {
 					if (!folio_test_large(folio))
 						goto activate_locked_split;
 					/* Fallback to swap normal pages */
-					if (split_folio_to_list(folio,
-								folio_list))
+					if (split_folio_to_list(folio, folio_list))
 						goto activate_locked;
 #ifdef CONFIG_TRANSPARENT_HUGEPAGE
 					if (nr_pages >= HPAGE_PMD_NR) {
 						count_memcg_folio_events(folio,
 							THP_SWPOUT_FALLBACK, 1);
-						count_vm_event(
-							THP_SWPOUT_FALLBACK);
+						count_vm_event(THP_SWPOUT_FALLBACK);
 					}
+					if (nr_pages > 0)
+						count_mthp_stat(get_order(nr_pages * PAGE_SIZE),
+							MTHP_STAT_ANON_SWPOUT_FALLBACK);
 #endif
 					if (!add_to_swap(folio))
 						goto activate_locked_split;

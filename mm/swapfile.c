@@ -1238,16 +1238,15 @@ static unsigned char __swap_entry_free_locked(struct swap_info_struct *p,
 
 /*
  * When we get a swap entry, if there aren't some other ways to
- * prevent swapoff, such as the folio in swap cache is locked, page
- * table lock is held, etc., the swap entry may become invalid because
- * of swapoff.  Then, we need to enclose all swap related functions
- * with get_swap_device() and put_swap_device(), unless the swap
- * functions call get/put_swap_device() by themselves.
+ * prevent swapoff, such as the folio in swap cache is locked, RCU
+ * reader side is locked, etc., the swap entry may become invalid
+ * because of swapoff.  Then, we need to enclose all swap related
+ * functions with get_swap_device() and put_swap_device(), unless the
+ * swap functions call get/put_swap_device() by themselves.
  *
- * Note that when only holding the PTL, swapoff might succeed immediately
- * after freeing a swap entry. Therefore, immediately after
- * __swap_entry_free(), the swap info might become stale and should not
- * be touched without a prior get_swap_device().
+ * RCU reader side lock (including any spinlock) is sufficient to
+ * prevent swapoff, because synchronize_rcu() is called in swapoff()
+ * before freeing data structures.
  *
  * Check whether swap entry is valid in the swap device.  If so,
  * return pointer to swap_info_struct, and keep the swap entry valid
@@ -1519,11 +1518,11 @@ out:
 }
 
 static bool swap_page_trans_huge_swapped(struct swap_info_struct *si,
-					 swp_entry_t entry,
-					 unsigned int nr_pages)
+					 swp_entry_t entry, int order)
 {
 	struct swap_cluster_info *ci;
 	unsigned char *map = si->swap_map;
+	unsigned int nr_pages = 1 << order;
 	unsigned long roffset = swp_offset(entry);
 	unsigned long offset = round_down(roffset, nr_pages);
 	int i;
@@ -1557,7 +1556,7 @@ static bool folio_swapped(struct folio *folio)
 	if (!IS_ENABLED(CONFIG_THP_SWAP) || likely(!folio_test_large(folio)))
 		return swap_swapcount(si, entry) != 0;
 
-	return swap_page_trans_huge_swapped(si, entry, folio_nr_pages(folio));
+	return swap_page_trans_huge_swapped(si, entry, folio_order(folio));
 }
 
 /**
@@ -1603,9 +1602,20 @@ bool folio_free_swap(struct folio *folio)
 	return true;
 }
 
+/**
+ * free_swap_and_cache_nr() - Release reference on range of swap entries and
+ *                            reclaim their cache if no more references remain.
+ * @entry: First entry of range.
+ * @nr: Number of entries in range.
+ *
+ * For each swap entry in the contiguous range, release a reference. If any swap
+ * entries become free, try to reclaim their underlying folios, if present. The
+ * offset range is defined by [entry.offset, entry.offset + nr).
+ */
 void free_swap_and_cache_nr(swp_entry_t entry, int nr)
 {
-	unsigned long end = swp_offset(entry) + nr;
+	const unsigned long start_offset = swp_offset(entry);
+	const unsigned long end_offset = start_offset + nr;
 	unsigned int type = swp_type(entry);
 	struct swap_info_struct *si;
 	bool any_only_cache = false;
@@ -1619,17 +1629,19 @@ void free_swap_and_cache_nr(swp_entry_t entry, int nr)
 	if (!si)
 		return;
 
-	if (WARN_ON(end > si->max))
+	if (WARN_ON(end_offset > si->max))
 		goto out;
 
 	/*
 	 * First free all entries in the range.
 	 */
-	for (offset = swp_offset(entry); offset < end; offset++) {
-		if (!WARN_ON(data_race(!si->swap_map[offset]))) {
+	for (offset = start_offset; offset < end_offset; offset++) {
+		if (data_race(si->swap_map[offset])) {
 			count = __swap_entry_free(si, swp_entry(type, offset));
 			if (count == SWAP_HAS_CACHE)
 				any_only_cache = true;
+		} else {
+			WARN_ON_ONCE(1);
 		}
 	}
 
@@ -1649,7 +1661,7 @@ void free_swap_and_cache_nr(swp_entry_t entry, int nr)
 	 * page but will only succeed once the swap slot for every subpage is
 	 * zero.
 	 */
-	for (offset = swp_offset(entry); offset < end; offset += nr) {
+	for (offset = start_offset; offset < end_offset; offset += nr) {
 		nr = 1;
 		if (READ_ONCE(si->swap_map[offset]) == SWAP_HAS_CACHE) {
 			/*
@@ -2538,10 +2550,11 @@ SYSCALL_DEFINE1(swapoff, const char __user *, specialfile)
 
 	/*
 	 * Wait for swap operations protected by get/put_swap_device()
-	 * to complete.
-	 *
-	 * We need synchronize_rcu() here to protect the accessing to
-	 * the swap cache data structure.
+	 * to complete.  Because of synchronize_rcu() here, all swap
+	 * operations protected by RCU reader side lock (including any
+	 * spinlock) will be waited too.  This makes it easy to
+	 * prevent folio_test_swapcache() and the following swap cache
+	 * operations from racing with swapoff.
 	 */
 	percpu_ref_kill(&p->users);
 	synchronize_rcu();

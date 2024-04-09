@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 /*
- * quickstart.c - ACPI Direct App Launch driver
+ * ACPI Direct App Launch driver
  *
  * Copyright (C) 2024 Armin Wolf <W_Armin@gmx.de>
  * Copyright (C) 2022 Arvid Norlander <lkml@vorapal.se>
@@ -10,15 +10,19 @@
  * <https://archive.org/details/microsoft-acpi-dirapplaunch>
  */
 
-#define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
-
 #include <linux/acpi.h>
+#include <linux/device.h>
+#include <linux/errno.h>
 #include <linux/init.h>
 #include <linux/input.h>
 #include <linux/input/sparse-keymap.h>
-#include <linux/kernel.h>
+#include <linux/mod_devicetable.h>
 #include <linux/module.h>
+#include <linux/mutex.h>
 #include <linux/platform_device.h>
+#include <linux/pm_wakeup.h>
+#include <linux/printk.h>
+#include <linux/slab.h>
 #include <linux/sysfs.h>
 #include <linux/types.h>
 
@@ -35,6 +39,7 @@
 
 struct quickstart_data {
 	struct device *dev;
+	struct mutex input_lock;	/* Protects input sequence during notify */
 	struct input_dev *input_device;
 	char input_name[32];
 	char phys[32];
@@ -73,7 +78,10 @@ static void quickstart_notify(acpi_handle handle, u32 event, void *context)
 
 	switch (event) {
 	case QUICKSTART_EVENT_RUNTIME:
+		mutex_lock(&data->input_lock);
 		sparse_keymap_report_event(data->input_device, 0x1, 1, true);
+		mutex_unlock(&data->input_lock);
+
 		acpi_bus_generate_netlink_event(DRIVER_NAME, dev_name(data->dev), event, 0);
 		break;
 	default:
@@ -147,6 +155,13 @@ static void quickstart_notify_remove(void *context)
 	acpi_remove_notify_handler(handle, ACPI_DEVICE_NOTIFY, quickstart_notify);
 }
 
+static void quickstart_mutex_destroy(void *data)
+{
+	struct mutex *lock = data;
+
+	mutex_destroy(lock);
+}
+
 static int quickstart_probe(struct platform_device *pdev)
 {
 	struct quickstart_data *data;
@@ -165,7 +180,13 @@ static int quickstart_probe(struct platform_device *pdev)
 	data->dev = &pdev->dev;
 	dev_set_drvdata(&pdev->dev, data);
 
-	/* We have to initialize the device wakeup before evaluating GHID because
+	mutex_init(&data->input_lock);
+	ret = devm_add_action_or_reset(&pdev->dev, quickstart_mutex_destroy, &data->input_lock);
+	if (ret < 0)
+		return ret;
+
+	/*
+	 * We have to initialize the device wakeup before evaluating GHID because
 	 * doing so will notify the device if the button was used to wake the machine
 	 * from S5.
 	 */
@@ -202,7 +223,7 @@ static int quickstart_probe(struct platform_device *pdev)
 }
 
 static const struct acpi_device_id quickstart_device_ids[] = {
-	{ "PNP0C32", 0 },
+	{ "PNP0C32" },
 	{ }
 };
 MODULE_DEVICE_TABLE(acpi, quickstart_device_ids);

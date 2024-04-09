@@ -264,6 +264,26 @@ unsigned long thp_vma_allowable_orders(struct vm_area_struct *vma,
 					  enforce_sysfs, orders);
 }
 
+enum mthp_stat_item {
+	MTHP_STAT_ANON_ALLOC,
+	MTHP_STAT_ANON_ALLOC_FALLBACK,
+	MTHP_STAT_ANON_SWPOUT,
+	MTHP_STAT_ANON_SWPOUT_FALLBACK,
+	__MTHP_STAT_COUNT
+};
+
+struct mthp_stat {
+	unsigned long stats[0][__MTHP_STAT_COUNT];
+};
+
+extern struct mthp_stat __percpu *mthp_stats;
+
+static inline void count_mthp_stat(int order, enum mthp_stat_item item)
+{
+	if (likely(order <= PMD_ORDER))
+		raw_cpu_ptr(mthp_stats)->stats[order][item]++;
+}
+
 #define transparent_hugepage_use_zero_page()				\
 	(transparent_hugepage_flags &					\
 	 (1<<TRANSPARENT_HUGEPAGE_USE_ZERO_PAGE_FLAG))

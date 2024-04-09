@@ -30,7 +30,7 @@ static struct shrinker *erofs_shrinker_info;
 
 static unsigned int z_erofs_gbuf_id(void)
 {
-	return smp_processor_id() % z_erofs_gbuf_count;
+	return raw_smp_processor_id() % z_erofs_gbuf_count;
 }
 
 void *z_erofs_get_gbuf(unsigned int requiredpages)

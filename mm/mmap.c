@@ -1520,32 +1520,32 @@ bool vma_needs_dirty_tracking(struct vm_area_struct *vma)
  * to the private version (using protection_map[] without the
  * VM_SHARED bit).
  */
-int vma_wants_writenotify(struct vm_area_struct *vma, pgprot_t vm_page_prot)
+bool vma_wants_writenotify(struct vm_area_struct *vma, pgprot_t vm_page_prot)
 {
 	/* If it was private or non-writable, the write bit is already clear */
 	if (!vma_is_shared_writable(vma))
-		return 0;
+		return false;
 
 	/* The backer wishes to know when pages are first written to? */
 	if (vm_ops_needs_writenotify(vma->vm_ops))
-		return 1;
+		return true;
 
 	/* The open routine did something to the protections that pgprot_modify
 	 * won't preserve? */
 	if (pgprot_val(vm_page_prot) !=
 	    pgprot_val(vm_pgprot_modify(vm_page_prot, vma->vm_flags)))
-		return 0;
+		return false;
 
 	/*
 	 * Do we need to track softdirty? hugetlb does not support softdirty
 	 * tracking yet.
 	 */
 	if (vma_soft_dirty_enabled(vma) && !is_vm_hugetlb_page(vma))
-		return 1;
+		return true;
 
 	/* Do we need write faults for uffd-wp tracking? */
 	if (userfaultfd_wp(vma))
-		return 1;
+		return true;
 
 	/* Can the mapping track the dirty pages? */
 	return vma_fs_can_writeback(vma);
@@ -1555,14 +1555,14 @@ int vma_wants_writenotify(struct vm_area_struct *vma, pgprot_t vm_page_prot)
  * We account for memory if it's a private writeable mapping,
  * not hugepages and VM_NORESERVE wasn't set.
  */
-static inline int accountable_mapping(struct file *file, vm_flags_t vm_flags)
+static inline bool accountable_mapping(struct file *file, vm_flags_t vm_flags)
 {
 	/*
 	 * hugetlb has its own accounting separate from the core VM
 	 * VM_HUGETLB may not be set yet so we cannot check for that flag.
 	 */
 	if (file && is_file_hugepages(file))
-		return 0;
+		return false;
 
 	return (vm_flags & (VM_NORESERVE | VM_SHARED | VM_WRITE)) == VM_WRITE;
 }

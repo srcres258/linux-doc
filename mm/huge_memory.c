@@ -592,6 +592,50 @@ static const struct kobj_type thpsize_ktype = {
 	.sysfs_ops = &kobj_sysfs_ops,
 };
 
+struct mthp_stat __percpu *mthp_stats;
+
+static unsigned long sum_mthp_stat(int order, enum mthp_stat_item item)
+{
+	unsigned long sum = 0;
+	int cpu;
+
+	for_each_online_cpu(cpu) {
+		struct mthp_stat *this = per_cpu_ptr(mthp_stats, cpu);
+
+		sum += this->stats[order][item];
+	}
+
+	return sum;
+}
+
+#define DEFINE_MTHP_STAT_ATTR(_name, _index)					\
+static ssize_t _name##_show(struct kobject *kobj,			\
+			struct kobj_attribute *attr, char *buf)		\
+{									\
+	int order = to_thpsize(kobj)->order;				\
+									\
+	return sysfs_emit(buf, "%lu\n", sum_mthp_stat(order, _index));	\
+}									\
+static struct kobj_attribute _name##_attr = __ATTR_RO(_name)
+
+DEFINE_MTHP_STAT_ATTR(anon_alloc, MTHP_STAT_ANON_ALLOC);
+DEFINE_MTHP_STAT_ATTR(anon_alloc_fallback, MTHP_STAT_ANON_ALLOC_FALLBACK);
+DEFINE_MTHP_STAT_ATTR(anon_swpout, MTHP_STAT_ANON_SWPOUT);
+DEFINE_MTHP_STAT_ATTR(anon_swpout_fallback, MTHP_STAT_ANON_SWPOUT_FALLBACK);
+
+static struct attribute *stats_attrs[] = {
+	&anon_alloc_attr.attr,
+	&anon_alloc_fallback_attr.attr,
+	&anon_swpout_attr.attr,
+	&anon_swpout_fallback_attr.attr,
+	NULL,
+};
+
+static struct attribute_group stats_attr_group = {
+	.name = "stats",
+	.attrs = stats_attrs,
+};
+
 static struct thpsize *thpsize_create(int order, struct kobject *parent)
 {
 	unsigned long size = (PAGE_SIZE << order) / SZ_1K;
@@ -610,6 +654,12 @@ static struct thpsize *thpsize_create(int order, struct kobject *parent)
 	}
 
 	ret = sysfs_create_group(&thpsize->kobj, &thpsize_attr_group);
+	if (ret) {
+		kobject_put(&thpsize->kobj);
+		return ERR_PTR(ret);
+	}
+
+	ret = sysfs_create_group(&thpsize->kobj, &stats_attr_group);
 	if (ret) {
 		kobject_put(&thpsize->kobj);
 		return ERR_PTR(ret);
@@ -656,6 +706,13 @@ static int __init hugepage_init_sysfs(struct kobject **hugepage_kobj)
 		goto remove_hp_group;
 	}
 
+	mthp_stats = __alloc_percpu((PMD_ORDER + 1) * sizeof(mthp_stats->stats[0]),
+			sizeof(unsigned long));
+	if (!mthp_stats) {
+		err = -ENOMEM;
+		goto remove_hp_group;
+	}
+
 	orders = THP_ORDERS_ALL_ANON;
 	order = highest_order(orders);
 	while (orders) {
@@ -693,6 +750,7 @@ static void __init hugepage_exit_sysfs(struct kobject *hugepage_kobj)
 	sysfs_remove_group(hugepage_kobj, &khugepaged_attr_group);
 	sysfs_remove_group(hugepage_kobj, &hugepage_attr_group);
 	kobject_put(hugepage_kobj);
+	free_percpu(mthp_stats);
 }
 #else
 static inline int hugepage_init_sysfs(struct kobject **hugepage_kobj)
@@ -1116,8 +1174,10 @@ vm_fault_t do_huge_pmd_anonymous_page(struct vm_fault *vmf)
 	folio = vma_alloc_folio(gfp, HPAGE_PMD_ORDER, vma, haddr, true);
 	if (unlikely(!folio)) {
 		count_vm_event(THP_FAULT_FALLBACK);
+		count_mthp_stat(HPAGE_PMD_ORDER, MTHP_STAT_ANON_ALLOC_FALLBACK);
 		return VM_FAULT_FALLBACK;
 	}
+	count_mthp_stat(HPAGE_PMD_ORDER, MTHP_STAT_ANON_ALLOC);
 	return __do_huge_pmd_anonymous_page(vmf, &folio->page, gfp);
 }
 

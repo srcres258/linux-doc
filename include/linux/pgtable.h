@@ -753,7 +753,8 @@ static inline void pte_clear_not_present_full(struct mm_struct *mm,
 
 #ifndef clear_not_present_full_ptes
 /**
- * clear_not_present_full_ptes - Clear consecutive not present PTEs.
+ * clear_not_present_full_ptes - Clear multiple not present PTEs which are
+ *				 consecutive in the pgtable.
  * @mm: Address space the ptes represent.
  * @addr: Address of the first pte.
  * @ptep: Page table pointer for the first entry.
