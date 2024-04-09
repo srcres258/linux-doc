@@ -1197,16 +1197,14 @@ static int _create_lkb(struct dlm_ls *ls, struct dlm_lkb **lkb_ret,
 	if (!lkb)
 		return -ENOMEM;
 
-	lkb->lkb_last_bast_mode = -1;
+	lkb->lkb_last_bast_cb_mode = DLM_LOCK_IV;
+	lkb->lkb_last_cast_cb_mode = DLM_LOCK_IV;
+	lkb->lkb_last_cb_mode = DLM_LOCK_IV;
 	lkb->lkb_nodeid = -1;
 	lkb->lkb_grmode = DLM_LOCK_IV;
 	kref_init(&lkb->lkb_ref);
 	INIT_LIST_HEAD(&lkb->lkb_ownqueue);
 	INIT_LIST_HEAD(&lkb->lkb_rsb_lookup);
-	INIT_LIST_HEAD(&lkb->lkb_cb_list);
-	INIT_LIST_HEAD(&lkb->lkb_callbacks);
-	spin_lock_init(&lkb->lkb_cb_lock);
-	INIT_WORK(&lkb->lkb_cb_work, dlm_callback_work);
 
 	idr_preload(GFP_NOFS);
 	spin_lock(&ls->ls_lkbidr_spin);
@@ -6003,6 +6001,7 @@ static struct dlm_lkb *del_proc_lock(struct dlm_ls *ls,
 
 void dlm_clear_proc_locks(struct dlm_ls *ls, struct dlm_user_proc *proc)
 {
+	struct dlm_callback *cb, *cb_safe;
 	struct dlm_lkb *lkb, *safe;
 
 	dlm_lock_recovery(ls);
@@ -6032,10 +6031,9 @@ void dlm_clear_proc_locks(struct dlm_ls *ls, struct dlm_user_proc *proc)
 		dlm_put_lkb(lkb);
 	}
 
-	list_for_each_entry_safe(lkb, safe, &proc->asts, lkb_cb_list) {
-		dlm_purge_lkb_callbacks(lkb);
-		list_del_init(&lkb->lkb_cb_list);
-		dlm_put_lkb(lkb);
+	list_for_each_entry_safe(cb, cb_safe, &proc->asts, list) {
+		list_del(&cb->list);
+		dlm_free_cb(cb);
 	}
 
 	spin_unlock(&ls->ls_clear_proc_locks);
@@ -6044,6 +6042,7 @@ void dlm_clear_proc_locks(struct dlm_ls *ls, struct dlm_user_proc *proc)
 
 static void purge_proc_locks(struct dlm_ls *ls, struct dlm_user_proc *proc)
 {
+	struct dlm_callback *cb, *cb_safe;
 	struct dlm_lkb *lkb, *safe;
 
 	while (1) {
@@ -6073,10 +6072,9 @@ static void purge_proc_locks(struct dlm_ls *ls, struct dlm_user_proc *proc)
 	spin_unlock(&proc->locks_spin);
 
 	spin_lock(&proc->asts_spin);
-	list_for_each_entry_safe(lkb, safe, &proc->asts, lkb_cb_list) {
-		dlm_purge_lkb_callbacks(lkb);
-		list_del_init(&lkb->lkb_cb_list);
-		dlm_put_lkb(lkb);
+	list_for_each_entry_safe(cb, cb_safe, &proc->asts, list) {
+		list_del(&cb->list);
+		dlm_free_cb(cb);
 	}
 	spin_unlock(&proc->asts_spin);
 }
