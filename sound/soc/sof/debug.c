@@ -19,24 +19,6 @@
 #include "sof-priv.h"
 #include "ops.h"
 
-static ssize_t sof_dfsentry_write(struct file *file, const char __user *buffer,
-				  size_t count, loff_t *ppos)
-{
-	size_t size;
-	char *string;
-	int ret;
-
-	string = kzalloc(count+1, GFP_KERNEL);
-	if (!string)
-		return -ENOMEM;
-
-	size = simple_write_to_buffer(string, count, ppos, buffer, count);
-	ret = size;
-
-	kfree(string);
-	return ret;
-}
-
 static ssize_t sof_dfsentry_read(struct file *file, char __user *buffer,
 				 size_t count, loff_t *ppos)
 {
@@ -126,7 +108,6 @@ static const struct file_operations sof_dfs_fops = {
 	.open = simple_open,
 	.read = sof_dfsentry_read,
 	.llseek = default_llseek,
-	.write = sof_dfsentry_write,
 };
 
 /* create FS entry for debug files that can expose DSP memories, registers */
@@ -330,13 +311,31 @@ EXPORT_SYMBOL_GPL(snd_sof_dbg_memory_info_init);
 
 int snd_sof_dbg_init(struct snd_sof_dev *sdev)
 {
+	struct snd_sof_pdata *plat_data = sdev->pdata;
 	struct snd_sof_dsp_ops *ops = sof_ops(sdev);
 	const struct snd_sof_debugfs_map *map;
+	struct dentry *fw_profile;
 	int i;
 	int err;
 
 	/* use "sof" as top level debugFS dir */
 	sdev->debugfs_root = debugfs_create_dir("sof", NULL);
+
+	/* expose firmware/topology prefix/names for test purposes */
+	fw_profile = debugfs_create_dir("fw_profile", sdev->debugfs_root);
+
+	debugfs_create_str("fw_path", 0444, fw_profile,
+			   (char **)&plat_data->fw_filename_prefix);
+	debugfs_create_str("fw_lib_path", 0444, fw_profile,
+			   (char **)&plat_data->fw_lib_prefix);
+	debugfs_create_str("tplg_path", 0444, fw_profile,
+			   (char **)&plat_data->tplg_filename_prefix);
+	debugfs_create_str("fw_name", 0444, fw_profile,
+			   (char **)&plat_data->fw_filename);
+	debugfs_create_str("tplg_name", 0444, fw_profile,
+			   (char **)&plat_data->tplg_filename);
+	debugfs_create_u32("ipc_type", 0444, fw_profile,
+			   (u32 *)&plat_data->ipc_type);
 
 	/* init dfsentry list */
 	INIT_LIST_HEAD(&sdev->dfsentry_list);
