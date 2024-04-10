@@ -1397,11 +1397,16 @@ static void
 recalculate_deny_mode(struct nfs4_file *fp)
 {
 	struct nfs4_ol_stateid *stp;
+	u32 old_deny;
 
 	spin_lock(&fp->fi_lock);
+	old_deny = fp->fi_share_deny;
 	fp->fi_share_deny = 0;
-	list_for_each_entry(stp, &fp->fi_stateids, st_perfile)
+	list_for_each_entry(stp, &fp->fi_stateids, st_perfile) {
 		fp->fi_share_deny |= bmap_to_share_mode(stp->st_deny_bmap);
+		if (fp->fi_share_deny == old_deny)
+			break;
+	}
 	spin_unlock(&fp->fi_lock);
 }
 
@@ -4679,11 +4684,6 @@ static int nfsd4_cstate_assign_replay(struct nfsd4_compound_state *cstate,
 				      struct nfs4_stateowner *so)
 {
 	if (!nfsd4_has_session(cstate)) {
-		/*
-		 * rp_locked is an open-coded mutex which is unlocked in
-		 * nfsd4_cstate_clear_replay() or aborted in
-		 * move_to_close_lru().
-		 */
 		wait_var_event(&so->so_replay.rp_locked,
 			       atomic_cmpxchg(&so->so_replay.rp_locked,
 					      RP_UNLOCKED, RP_LOCKED) != RP_LOCKED);
@@ -4888,40 +4888,40 @@ find_or_alloc_open_stateowner(unsigned int strhashval, struct nfsd4_open *open,
 	struct nfs4_client *clp = cstate->clp;
 	struct nfs4_openowner *oo, *new = NULL;
 
-	while (1) {
-		spin_lock(&clp->cl_lock);
-		oo = find_openstateowner_str(strhashval, open, clp);
-		if (oo && !(oo->oo_flags & NFS4_OO_CONFIRMED)) {
-			/* Replace unconfirmed owners without checking for replay. */
-			release_openowner(oo);
-			oo = NULL;
-		}
-		if (oo) {
-			spin_unlock(&clp->cl_lock);
-			if (new)
-				nfs4_free_stateowner(&new->oo_owner);
-			return oo;
-		}
-		if (new) {
-			hash_openowner(new, clp, strhashval);
-			spin_unlock(&clp->cl_lock);
-			return new;
-		}
+retry:
+	spin_lock(&clp->cl_lock);
+	oo = find_openstateowner_str(strhashval, open, clp);
+	if (!oo && new) {
+		hash_openowner(new, clp, strhashval);
 		spin_unlock(&clp->cl_lock);
-
-		new = alloc_stateowner(openowner_slab, &open->op_owner, clp);
-		if (!new)
-			return NULL;
-		new->oo_owner.so_ops = &openowner_ops;
-		new->oo_owner.so_is_open_owner = 1;
-		new->oo_owner.so_seqid = open->op_seqid;
-		new->oo_flags = 0;
-		if (nfsd4_has_session(cstate))
-			new->oo_flags |= NFS4_OO_CONFIRMED;
-		new->oo_time = 0;
-		new->oo_last_closed_stid = NULL;
-		INIT_LIST_HEAD(&new->oo_close_lru);
+		return new;
 	}
+	spin_unlock(&clp->cl_lock);
+
+	if (oo && !(oo->oo_flags & NFS4_OO_CONFIRMED)) {
+		/* Replace unconfirmed owners without checking for replay. */
+		release_openowner(oo);
+		oo = NULL;
+	}
+	if (oo) {
+		if (new)
+			nfs4_free_stateowner(&new->oo_owner);
+		return oo;
+	}
+
+	new = alloc_stateowner(openowner_slab, &open->op_owner, clp);
+	if (!new)
+		return NULL;
+	new->oo_owner.so_ops = &openowner_ops;
+	new->oo_owner.so_is_open_owner = 1;
+	new->oo_owner.so_seqid = open->op_seqid;
+	new->oo_flags = 0;
+	if (nfsd4_has_session(cstate))
+		new->oo_flags |= NFS4_OO_CONFIRMED;
+	new->oo_time = 0;
+	new->oo_last_closed_stid = NULL;
+	INIT_LIST_HEAD(&new->oo_close_lru);
+	goto retry;
 }
 
 static struct nfs4_ol_stateid *

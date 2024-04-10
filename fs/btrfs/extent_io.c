@@ -729,6 +729,37 @@ error:
 }
 
 /*
+ * Populate every free slot in a provided array with folios.
+ *
+ * @nr_folios:   number of folios to allocate
+ * @folio_array: the array to fill with folios; any existing non-NULL entries in
+ *		 the array will be skipped
+ * @extra_gfp:	 the extra GFP flags for the allocation
+ *
+ * Return: 0        if all folios were able to be allocated;
+ *         -ENOMEM  otherwise, the partially allocated folios would be freed and
+ *                  the array slots zeroed
+ */
+int btrfs_alloc_folio_array(unsigned int nr_folios, struct folio **folio_array,
+			    gfp_t extra_gfp)
+{
+	for (int i = 0; i < nr_folios; i++) {
+		if (folio_array[i])
+			continue;
+		folio_array[i] = folio_alloc(GFP_NOFS | extra_gfp, 0);
+		if (!folio_array[i])
+			goto error;
+	}
+	return 0;
+error:
+	for (int i = 0; i < nr_folios; i++) {
+		if (folio_array[i])
+			folio_put(folio_array[i]);
+	}
+	return -ENOMEM;
+}
+
+/*
  * Populate every free slot in a provided array with pages.
  *
  * @nr_pages:   number of pages to allocate
@@ -751,13 +782,7 @@ for (allocated = 0; allocated < nr_pages;) {
 
 		allocated = alloc_pages_bulk_array(gfp, nr_pages, page_array);
 		if (unlikely(allocated == last)) {
-			/* Can not fail, wait and retry. */
-			if (extra_gfp & __GFP_NOFAIL) {
-				memalloc_retry_wait(GFP_NOFS);
-				continue;
-			}
-
-			/* Allowed to fail, error out. */
+			/* No progress, fail and do cleanup. */
 			for (int i = 0; i < allocated; i++) {
 				__free_page(page_array[i]);
 				page_array[i] = NULL;

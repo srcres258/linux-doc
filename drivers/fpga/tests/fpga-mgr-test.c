@@ -7,8 +7,8 @@
  * Author: Marco Pagani <marpagan@redhat.com>
  */
 
+#include <kunit/device.h>
 #include <kunit/test.h>
-#include <linux/device.h>
 #include <linux/fpga/fpga-mgr.h>
 #include <linux/module.h>
 #include <linux/scatterlist.h>
@@ -42,7 +42,7 @@ struct mgr_stats {
 struct mgr_ctx {
 	struct fpga_image_info *img_info;
 	struct fpga_manager *mgr;
-	struct platform_device *pdev;
+	struct device *dev;
 	struct mgr_stats stats;
 };
 
@@ -196,7 +196,7 @@ static void fpga_mgr_test_get(struct kunit *test)
 	struct mgr_ctx *ctx = test->priv;
 	struct fpga_manager *mgr;
 
-	mgr = fpga_mgr_get(&ctx->pdev->dev);
+	mgr = fpga_mgr_get(ctx->dev);
 	KUNIT_EXPECT_PTR_EQ(test, mgr, ctx->mgr);
 
 	fpga_mgr_put(ctx->mgr);
@@ -298,14 +298,14 @@ static int fpga_mgr_test_init(struct kunit *test)
 	ctx = kunit_kzalloc(test, sizeof(*ctx), GFP_KERNEL);
 	KUNIT_ASSERT_NOT_ERR_OR_NULL(test, ctx);
 
-	ctx->pdev = platform_device_register_simple(TEST_PDEV_NAME, PLATFORM_DEVID_AUTO, NULL, 0);
-	KUNIT_ASSERT_NOT_ERR_OR_NULL(test, ctx->pdev);
+	ctx->dev = kunit_device_register(test, "fpga-manager-test-dev");
+	KUNIT_ASSERT_NOT_ERR_OR_NULL(test, ctx->dev);
 
-	ctx->mgr = devm_fpga_mgr_register(&ctx->pdev->dev, "Fake FPGA Manager", &fake_mgr_ops,
+	ctx->mgr = devm_fpga_mgr_register(ctx->dev, "Fake FPGA Manager", &fake_mgr_ops,
 					  &ctx->stats);
 	KUNIT_ASSERT_FALSE(test, IS_ERR_OR_NULL(ctx->mgr));
 
-	ctx->img_info = fpga_image_info_alloc(&ctx->pdev->dev);
+	ctx->img_info = fpga_image_info_alloc(ctx->dev);
 	KUNIT_ASSERT_NOT_ERR_OR_NULL(test, ctx->img_info);
 
 	test->priv = ctx;
@@ -318,7 +318,7 @@ static void fpga_mgr_test_exit(struct kunit *test)
 	struct mgr_ctx *ctx = test->priv;
 
 	fpga_image_info_free(ctx->img_info);
-	platform_device_unregister(ctx->pdev);
+	kunit_device_unregister(test, ctx->dev);
 }
 
 static struct kunit_case fpga_mgr_test_cases[] = {

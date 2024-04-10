@@ -170,6 +170,7 @@ config X86
 	select GENERIC_TIME_VSYSCALL
 	select GENERIC_GETTIMEOFDAY
 	select GENERIC_VDSO_TIME_NS
+	select GENERIC_VDSO_OVERFLOW_PROTECT
 	select GUP_GET_PXX_LOW_HIGH		if X86_PAE
 	select HARDIRQS_SW_RESEND
 	select HARDLOCKUP_CHECK_TIMESTAMP	if X86_64
@@ -2636,6 +2637,32 @@ config MITIGATION_RFDS
 	  allows unprivileged speculative access to stale data previously
 	  stored in floating point, vector and integer registers.
 	  See also <file:Documentation/admin-guide/hw-vuln/reg-file-data-sampling.rst>
+
+choice
+	prompt "Clear branch history"
+	depends on CPU_SUP_INTEL
+	default SPECTRE_BHI_ON
+	help
+	  Enable BHI mitigations. BHI attacks are a form of Spectre V2 attacks
+	  where the branch history buffer is poisoned to speculatively steer
+	  indirect branches.
+	  See <file:Documentation/admin-guide/hw-vuln/spectre.rst>
+
+config SPECTRE_BHI_ON
+	bool "on"
+	help
+	  Equivalent to setting spectre_bhi=on command line parameter.
+config SPECTRE_BHI_OFF
+	bool "off"
+	help
+	  Equivalent to setting spectre_bhi=off command line parameter.
+config SPECTRE_BHI_AUTO
+	bool "auto"
+	depends on BROKEN
+	help
+	  Equivalent to setting spectre_bhi=auto command line parameter.
+
+endchoice
 
 endif
 

@@ -235,25 +235,17 @@ struct drm_i915_private {
 	/* protects the irq masks */
 	spinlock_t irq_lock;
 
-	bool display_irqs_enabled;
-
 	/* Sideband mailbox protection */
 	struct mutex sb_lock;
 	struct pm_qos_request sb_qos;
 
 	/** Cached value of IMR to avoid reads in updating the bitfield */
-	union {
-		u32 irq_mask;
-		u32 de_irq_mask[I915_MAX_PIPES];
-	};
-	u32 pipestat_irq_mask[I915_MAX_PIPES];
+	u32 irq_mask;
 
 	bool preserve_bios_swizzle;
 
 	unsigned int fsb_freq, mem_freq, is_ddr3;
-	unsigned int skl_preferred_vco_freq;
 
-	unsigned int max_dotclk_freq;
 	unsigned int hpll_freq;
 	unsigned int czclk_freq;
 
@@ -349,9 +341,6 @@ struct drm_i915_private {
 	} gem;
 
 	struct intel_pxp *pxp;
-
-	/* For i915gm/i945gm vblank irq workaround */
-	u8 vblank_enabled;
 
 	bool irq_enabled;
 

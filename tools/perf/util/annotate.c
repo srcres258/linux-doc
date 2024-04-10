@@ -369,14 +369,33 @@ int addr_map_symbol__account_cycles(struct addr_map_symbol *ams,
 	return err;
 }
 
+struct annotation_line *annotated_source__get_line(struct annotated_source *src,
+						   s64 offset)
+{
+	struct annotation_line *al;
+
+	list_for_each_entry(al, &src->source, node) {
+		if (al->offset == offset)
+			return al;
+	}
+	return NULL;
+}
+
 static unsigned annotation__count_insn(struct annotation *notes, u64 start, u64 end)
 {
+	struct annotation_line *al;
 	unsigned n_insn = 0;
-	u64 offset;
 
-	for (offset = start; offset <= end; offset++) {
-		if (notes->src->offsets[offset])
-			n_insn++;
+	al = annotated_source__get_line(notes->src, start);
+	if (al == NULL)
+		return 0;
+
+	list_for_each_entry_from(al, &notes->src->source, node) {
+		if (al->offset == -1)
+			continue;
+		if ((u64)al->offset > end)
+			break;
+		n_insn++;
 	}
 	return n_insn;
 }
@@ -393,10 +412,10 @@ static void annotation__count_and_fill(struct annotation *notes, u64 start, u64 
 {
 	unsigned n_insn;
 	unsigned int cover_insn = 0;
-	u64 offset;
 
 	n_insn = annotation__count_insn(notes, start, end);
 	if (n_insn && ch->num && ch->cycles) {
+		struct annotation_line *al;
 		struct annotated_branch *branch;
 		float ipc = n_insn / ((double)ch->cycles / (double)ch->num);
 
@@ -404,10 +423,16 @@ static void annotation__count_and_fill(struct annotation *notes, u64 start, u64 
 		if (ch->reset >= 0x7fff)
 			return;
 
-		for (offset = start; offset <= end; offset++) {
-			struct annotation_line *al = notes->src->offsets[offset];
+		al = annotated_source__get_line(notes->src, start);
+		if (al == NULL)
+			return;
 
-			if (al && al->cycles && al->cycles->ipc == 0.0) {
+		list_for_each_entry_from(al, &notes->src->source, node) {
+			if (al->offset == -1)
+				continue;
+			if ((u64)al->offset > end)
+				break;
+			if (al->cycles && al->cycles->ipc == 0.0) {
 				al->cycles->ipc = ipc;
 				cover_insn++;
 			}
@@ -443,7 +468,7 @@ static int annotation__compute_ipc(struct annotation *notes, size_t size)
 		if (ch && ch->cycles) {
 			struct annotation_line *al;
 
-			al = notes->src->offsets[offset];
+			al = annotated_source__get_line(notes->src, offset);
 			if (al && al->cycles == NULL) {
 				al->cycles = zalloc(sizeof(*al->cycles));
 				if (al->cycles == NULL) {
@@ -466,7 +491,9 @@ static int annotation__compute_ipc(struct annotation *notes, size_t size)
 			struct cyc_hist *ch = &notes->branch->cycles_hist[offset];
 
 			if (ch && ch->cycles) {
-				struct annotation_line *al = notes->src->offsets[offset];
+				struct annotation_line *al;
+
+				al = annotated_source__get_line(notes->src, offset);
 				if (al)
 					zfree(&al->cycles);
 			}
@@ -885,9 +912,9 @@ int symbol__annotate(struct map_symbol *ms, struct evsel *evsel,
 	args.arch = arch;
 	args.ms = *ms;
 	if (annotate_opts.full_addr)
-		notes->start = map__objdump_2mem(ms->map, ms->sym->start);
+		notes->src->start = map__objdump_2mem(ms->map, ms->sym->start);
 	else
-		notes->start = map__rip_2objdump(ms->map, ms->sym->start);
+		notes->src->start = map__rip_2objdump(ms->map, ms->sym->start);
 
 	return symbol__disassemble(sym, &args);
 }
@@ -1256,13 +1283,16 @@ void symbol__annotate_decay_histogram(struct symbol *sym, int evidx)
 {
 	struct annotation *notes = symbol__annotation(sym);
 	struct sym_hist *h = annotation__histogram(notes, evidx);
-	int len = symbol__size(sym), offset;
+	struct annotation_line *al;
 
 	h->nr_samples = 0;
-	for (offset = 0; offset < len; ++offset) {
+	list_for_each_entry(al, &notes->src->source, node) {
 		struct sym_hist_entry *entry;
 
-		entry = annotated_source__hist_entry(notes->src, evidx, offset);
+		if (al->offset == -1)
+			continue;
+
+		entry = annotated_source__hist_entry(notes->src, evidx, al->offset);
 		if (entry == NULL)
 			continue;
 
@@ -1319,64 +1349,56 @@ bool disasm_line__is_valid_local_jump(struct disasm_line *dl, struct symbol *sym
 	return true;
 }
 
-void annotation__mark_jump_targets(struct annotation *notes, struct symbol *sym)
+static void
+annotation__mark_jump_targets(struct annotation *notes, struct symbol *sym)
 {
-	u64 offset, size = symbol__size(sym);
+	struct annotation_line *al;
 
 	/* PLT symbols contain external offsets */
 	if (strstr(sym->name, "@plt"))
 		return;
 
-	for (offset = 0; offset < size; ++offset) {
-		struct annotation_line *al = notes->src->offsets[offset];
+	list_for_each_entry(al, &notes->src->source, node) {
 		struct disasm_line *dl;
+		struct annotation_line *target;
 
 		dl = disasm_line(al);
 
 		if (!disasm_line__is_valid_local_jump(dl, sym))
 			continue;
 
-		al = notes->src->offsets[dl->ops.target.offset];
-
+		target = annotated_source__get_line(notes->src,
+						    dl->ops.target.offset);
 		/*
 		 * FIXME: Oops, no jump target? Buggy disassembler? Or do we
 		 * have to adjust to the previous offset?
 		 */
-		if (al == NULL)
+		if (target == NULL)
 			continue;
 
-		if (++al->jump_sources > notes->max_jump_sources)
-			notes->max_jump_sources = al->jump_sources;
+		if (++target->jump_sources > notes->src->max_jump_sources)
+			notes->src->max_jump_sources = target->jump_sources;
 	}
 }
 
-void annotation__set_offsets(struct annotation *notes, s64 size)
+static void annotation__set_index(struct annotation *notes)
 {
 	struct annotation_line *al;
 	struct annotated_source *src = notes->src;
 
-	src->max_line_len = 0;
+	src->widths.max_line_len = 0;
 	src->nr_entries = 0;
 	src->nr_asm_entries = 0;
 
 	list_for_each_entry(al, &src->source, node) {
 		size_t line_len = strlen(al->line);
 
-		if (src->max_line_len < line_len)
-			src->max_line_len = line_len;
+		if (src->widths.max_line_len < line_len)
+			src->widths.max_line_len = line_len;
 		al->idx = src->nr_entries++;
-		if (al->offset != -1) {
+		if (al->offset != -1)
 			al->idx_asm = src->nr_asm_entries++;
-			/*
-			 * FIXME: short term bandaid to cope with assembly
-			 * routines that comes with labels in the same column
-			 * as the address in objdump, sigh.
-			 *
-			 * E.g. copy_user_generic_unrolled
- 			 */
-			if (al->offset < size)
-				notes->src->offsets[al->offset] = al;
-		} else
+		else
 			al->idx_asm = -1;
 	}
 }
@@ -1407,28 +1429,29 @@ static int annotation__max_ins_name(struct annotation *notes)
 	return max_name;
 }
 
-void annotation__init_column_widths(struct annotation *notes, struct symbol *sym)
+static void
+annotation__init_column_widths(struct annotation *notes, struct symbol *sym)
 {
-	notes->widths.addr = notes->widths.target =
-		notes->widths.min_addr = hex_width(symbol__size(sym));
-	notes->widths.max_addr = hex_width(sym->end);
-	notes->widths.jumps = width_jumps(notes->max_jump_sources);
-	notes->widths.max_ins_name = annotation__max_ins_name(notes);
+	notes->src->widths.addr = notes->src->widths.target =
+		notes->src->widths.min_addr = hex_width(symbol__size(sym));
+	notes->src->widths.max_addr = hex_width(sym->end);
+	notes->src->widths.jumps = width_jumps(notes->src->max_jump_sources);
+	notes->src->widths.max_ins_name = annotation__max_ins_name(notes);
 }
 
 void annotation__update_column_widths(struct annotation *notes)
 {
 	if (annotate_opts.use_offset)
-		notes->widths.target = notes->widths.min_addr;
+		notes->src->widths.target = notes->src->widths.min_addr;
 	else if (annotate_opts.full_addr)
-		notes->widths.target = BITS_PER_LONG / 4;
+		notes->src->widths.target = BITS_PER_LONG / 4;
 	else
-		notes->widths.target = notes->widths.max_addr;
+		notes->src->widths.target = notes->src->widths.max_addr;
 
-	notes->widths.addr = notes->widths.target;
+	notes->src->widths.addr = notes->src->widths.target;
 
 	if (annotate_opts.show_nr_jumps)
-		notes->widths.addr += notes->widths.jumps + 1;
+		notes->src->widths.addr += notes->src->widths.jumps + 1;
 }
 
 void annotation__toggle_full_addr(struct annotation *notes, struct map_symbol *ms)
@@ -1436,14 +1459,14 @@ void annotation__toggle_full_addr(struct annotation *notes, struct map_symbol *m
 	annotate_opts.full_addr = !annotate_opts.full_addr;
 
 	if (annotate_opts.full_addr)
-		notes->start = map__objdump_2mem(ms->map, ms->sym->start);
+		notes->src->start = map__objdump_2mem(ms->map, ms->sym->start);
 	else
-		notes->start = map__rip_2objdump(ms->map, ms->sym->start);
+		notes->src->start = map__rip_2objdump(ms->map, ms->sym->start);
 
 	annotation__update_column_widths(notes);
 }
 
-static void annotation__calc_lines(struct annotation *notes, struct map *map,
+static void annotation__calc_lines(struct annotation *notes, struct map_symbol *ms,
 				   struct rb_root *root)
 {
 	struct annotation_line *al;
@@ -1451,6 +1474,7 @@ static void annotation__calc_lines(struct annotation *notes, struct map *map,
 
 	list_for_each_entry(al, &notes->src->source, node) {
 		double percent_max = 0.0;
+		u64 addr;
 		int i;
 
 		for (i = 0; i < al->data_nr; i++) {
@@ -1466,8 +1490,9 @@ static void annotation__calc_lines(struct annotation *notes, struct map *map,
 		if (percent_max <= 0.5)
 			continue;
 
-		al->path = get_srcline(map__dso(map), notes->start + al->offset, NULL,
-				       false, true, notes->start + al->offset);
+		addr = map__rip_2objdump(ms->map, ms->sym->start);
+		al->path = get_srcline(map__dso(ms->map), addr + al->offset, NULL,
+				       false, true, ms->sym->start + al->offset);
 		insert_source_line(&tmp_root, al);
 	}
 
@@ -1478,7 +1503,7 @@ static void symbol__calc_lines(struct map_symbol *ms, struct rb_root *root)
 {
 	struct annotation *notes = symbol__annotation(ms->sym);
 
-	annotation__calc_lines(notes, ms->map, root);
+	annotation__calc_lines(notes, ms, root);
 }
 
 int symbol__tty_annotate2(struct map_symbol *ms, struct evsel *evsel)
@@ -1562,7 +1587,7 @@ static double annotation_line__max_percent(struct annotation_line *al,
 	double percent_max = 0.0;
 	int i;
 
-	for (i = 0; i < notes->nr_events; i++) {
+	for (i = 0; i < notes->src->nr_events; i++) {
 		double percent;
 
 		percent = annotation_data__percent(&al->data[i],
@@ -1603,7 +1628,8 @@ call_like:
 		obj__printf(obj, "  ");
 	}
 
-	disasm_line__scnprintf(dl, bf, size, !annotate_opts.use_offset, notes->widths.max_ins_name);
+	disasm_line__scnprintf(dl, bf, size, !annotate_opts.use_offset,
+			       notes->src->widths.max_ins_name);
 }
 
 static void ipc_coverage_string(char *bf, int size, struct annotation *notes)
@@ -1651,7 +1677,7 @@ static void __annotation_line__write(struct annotation_line *al, struct annotati
 	if (al->offset != -1 && percent_max != 0.0) {
 		int i;
 
-		for (i = 0; i < notes->nr_events; i++) {
+		for (i = 0; i < notes->src->nr_events; i++) {
 			double percent;
 
 			percent = annotation_data__percent(&al->data[i], percent_type);
@@ -1731,9 +1757,11 @@ static void __annotation_line__write(struct annotation_line *al, struct annotati
 		obj__printf(obj, "%-*s", width - pcnt_width - cycles_width, " ");
 	else if (al->offset == -1) {
 		if (al->line_nr && annotate_opts.show_linenr)
-			printed = scnprintf(bf, sizeof(bf), "%-*d ", notes->widths.addr + 1, al->line_nr);
+			printed = scnprintf(bf, sizeof(bf), "%-*d ",
+					    notes->src->widths.addr + 1, al->line_nr);
 		else
-			printed = scnprintf(bf, sizeof(bf), "%-*s  ", notes->widths.addr, " ");
+			printed = scnprintf(bf, sizeof(bf), "%-*s  ",
+					    notes->src->widths.addr, " ");
 		obj__printf(obj, bf);
 		obj__printf(obj, "%-*s", width - printed - pcnt_width - cycles_width + 1, al->line);
 	} else {
@@ -1741,7 +1769,7 @@ static void __annotation_line__write(struct annotation_line *al, struct annotati
 		int color = -1;
 
 		if (!annotate_opts.use_offset)
-			addr += notes->start;
+			addr += notes->src->start;
 
 		if (!annotate_opts.use_offset) {
 			printed = scnprintf(bf, sizeof(bf), "%" PRIx64 ": ", addr);
@@ -1751,7 +1779,7 @@ static void __annotation_line__write(struct annotation_line *al, struct annotati
 				if (annotate_opts.show_nr_jumps) {
 					int prev;
 					printed = scnprintf(bf, sizeof(bf), "%*d ",
-							    notes->widths.jumps,
+							    notes->src->widths.jumps,
 							    al->jump_sources);
 					prev = obj__set_jumps_percent_color(obj, al->jump_sources,
 									    current_entry);
@@ -1760,7 +1788,7 @@ static void __annotation_line__write(struct annotation_line *al, struct annotati
 				}
 print_addr:
 				printed = scnprintf(bf, sizeof(bf), "%*" PRIx64 ": ",
-						    notes->widths.target, addr);
+						    notes->src->widths.target, addr);
 			} else if (ins__is_call(&disasm_line(al)->ins) &&
 				   annotate_opts.offset_level >= ANNOTATION__OFFSET_CALL) {
 				goto print_addr;
@@ -1768,7 +1796,7 @@ print_addr:
 				goto print_addr;
 			} else {
 				printed = scnprintf(bf, sizeof(bf), "%-*s  ",
-						    notes->widths.addr, " ");
+						    notes->src->widths.addr, " ");
 			}
 		}
 
@@ -1804,37 +1832,29 @@ int symbol__annotate2(struct map_symbol *ms, struct evsel *evsel,
 	size_t size = symbol__size(sym);
 	int nr_pcnt = 1, err;
 
-	notes->src->offsets = zalloc(size * sizeof(struct annotation_line *));
-	if (notes->src->offsets == NULL)
-		return ENOMEM;
-
 	if (evsel__is_group_event(evsel))
 		nr_pcnt = evsel->core.nr_members;
 
 	err = symbol__annotate(ms, evsel, parch);
 	if (err)
-		goto out_free_offsets;
+		return err;
 
 	symbol__calc_percent(sym, evsel);
 
-	annotation__set_offsets(notes, size);
+	annotation__set_index(notes);
 	annotation__mark_jump_targets(notes, sym);
 
 	err = annotation__compute_ipc(notes, size);
 	if (err)
-		goto out_free_offsets;
+		return err;
 
 	annotation__init_column_widths(notes, sym);
-	notes->nr_events = nr_pcnt;
+	notes->src->nr_events = nr_pcnt;
 
 	annotation__update_column_widths(notes);
 	sym->annotate2 = 1;
 
 	return 0;
-
-out_free_offsets:
-	zfree(&notes->src->offsets);
-	return err;
 }
 
 static int annotation__config(const char *var, const char *value, void *data)
@@ -2140,27 +2160,6 @@ int annotate_get_insn_location(struct arch *arch, struct disasm_line *dl,
 	return 0;
 }
 
-static void symbol__ensure_annotate(struct map_symbol *ms, struct evsel *evsel)
-{
-	struct disasm_line *dl, *tmp_dl;
-	struct annotation *notes;
-
-	notes = symbol__annotation(ms->sym);
-	if (!list_empty(&notes->src->source))
-		return;
-
-	if (symbol__annotate(ms, evsel, NULL) < 0)
-		return;
-
-	/* remove non-insn disasm lines for simplicity */
-	list_for_each_entry_safe(dl, tmp_dl, &notes->src->source, al.node) {
-		if (dl->al.offset == -1) {
-			list_del(&dl->al.node);
-			free(dl);
-		}
-	}
-}
-
 static struct disasm_line *find_disasm_line(struct symbol *sym, u64 ip,
 					    bool allow_update)
 {
@@ -2170,6 +2169,9 @@ static struct disasm_line *find_disasm_line(struct symbol *sym, u64 ip,
 	notes = symbol__annotation(sym);
 
 	list_for_each_entry(dl, &notes->src->source, al.node) {
+		if (dl->al.offset == -1)
+			continue;
+
 		if (sym->start + dl->al.offset == ip) {
 			/*
 			 * llvm-objdump places "lock" in a separate line and
@@ -2234,6 +2236,46 @@ static bool is_stack_canary(struct arch *arch, struct annotated_op_loc *loc)
 	return false;
 }
 
+static struct disasm_line *
+annotation__prev_asm_line(struct annotation *notes, struct disasm_line *curr)
+{
+	struct list_head *sources = &notes->src->source;
+	struct disasm_line *prev;
+
+	if (curr == list_first_entry(sources, struct disasm_line, al.node))
+		return NULL;
+
+	prev = list_prev_entry(curr, al.node);
+	while (prev->al.offset == -1 &&
+	       prev != list_first_entry(sources, struct disasm_line, al.node))
+		prev = list_prev_entry(prev, al.node);
+
+	if (prev->al.offset == -1)
+		return NULL;
+
+	return prev;
+}
+
+static struct disasm_line *
+annotation__next_asm_line(struct annotation *notes, struct disasm_line *curr)
+{
+	struct list_head *sources = &notes->src->source;
+	struct disasm_line *next;
+
+	if (curr == list_last_entry(sources, struct disasm_line, al.node))
+		return NULL;
+
+	next = list_next_entry(curr, al.node);
+	while (next->al.offset == -1 &&
+	       next != list_last_entry(sources, struct disasm_line, al.node))
+		next = list_next_entry(next, al.node);
+
+	if (next->al.offset == -1)
+		return NULL;
+
+	return next;
+}
+
 u64 annotate_calc_pcrel(struct map_symbol *ms, u64 ip, int offset,
 			struct disasm_line *dl)
 {
@@ -2249,12 +2291,12 @@ u64 annotate_calc_pcrel(struct map_symbol *ms, u64 ip, int offset,
 	 * disasm_line.  If it's the last one, we can use symbol's end
 	 * address directly.
 	 */
-	if (&dl->al.node == notes->src->source.prev)
+	next = annotation__next_asm_line(notes, dl);
+	if (next == NULL)
 		addr = ms->sym->end + offset;
-	else {
-		next = list_next_entry(dl, al.node);
+	else
 		addr = ip + (next->al.offset - dl->al.offset) + offset;
-	}
+
 	return map__rip_2objdump(ms->map, addr);
 }
 
@@ -2292,13 +2334,11 @@ struct annotated_data_type *hist_entry__get_data_type(struct hist_entry *he)
 		return NULL;
 	}
 
-	if (evsel__get_arch(evsel, &arch) < 0) {
+	/* Make sure it has the disasm of the function */
+	if (symbol__annotate(ms, evsel, &arch) < 0) {
 		ann_data_stat.no_insn++;
 		return NULL;
 	}
-
-	/* Make sure it runs objdump to get disasm of the function */
-	symbol__ensure_annotate(ms, evsel);
 
 	/*
 	 * Get a disasm to extract the location from the insn.
@@ -2386,10 +2426,13 @@ retry:
 	 * from the previous instruction.
 	 */
 	if (dl->al.offset > 0) {
+		struct annotation *notes;
 		struct disasm_line *prev_dl;
 
-		prev_dl = list_prev_entry(dl, al.node);
-		if (ins__is_fused(arch, prev_dl->ins.name, dl->ins.name)) {
+		notes = symbol__annotation(ms->sym);
+		prev_dl = annotation__prev_asm_line(notes, dl);
+
+		if (prev_dl && ins__is_fused(arch, prev_dl->ins.name, dl->ins.name)) {
 			dl = prev_dl;
 			goto retry;
 		}
@@ -2494,8 +2537,16 @@ static bool process_basic_block(struct basic_block_data *bb_data,
 
 	last_dl = list_last_entry(&notes->src->source,
 				  struct disasm_line, al.node);
+	if (last_dl->al.offset == -1)
+		last_dl = annotation__prev_asm_line(notes, last_dl);
+
+	if (last_dl == NULL)
+		return false;
 
 	list_for_each_entry_from(dl, &notes->src->source, al.node) {
+		/* Skip comment or debug info line */
+		if (dl->al.offset == -1)
+			continue;
 		/* Found the target instruction */
 		if (sym->start + dl->al.offset == target) {
 			found = true;
@@ -2516,7 +2567,8 @@ static bool process_basic_block(struct basic_block_data *bb_data,
 		/* jump instruction creates new basic block(s) */
 		next_dl = find_disasm_line(sym, sym->start + dl->ops.target.offset,
 					   /*allow_update=*/false);
-		add_basic_block(bb_data, link, next_dl);
+		if (next_dl)
+			add_basic_block(bb_data, link, next_dl);
 
 		/*
 		 * FIXME: determine conditional jumps properly.
@@ -2524,8 +2576,9 @@ static bool process_basic_block(struct basic_block_data *bb_data,
 		 * next disasm line.
 		 */
 		if (!strstr(dl->ins.name, "jmp")) {
-			next_dl = list_next_entry(dl, al.node);
-			add_basic_block(bb_data, link, next_dl);
+			next_dl = annotation__next_asm_line(notes, dl);
+			if (next_dl)
+				add_basic_block(bb_data, link, next_dl);
 		}
 		break;
 

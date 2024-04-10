@@ -246,12 +246,14 @@ struct cyc_hist {
  * 		  we have more than a group in a evlist, where we will want
  * 		  to see each group separately, that is why symbol__annotate2()
  * 		  sets src->nr_histograms to evsel->nr_members.
- * @offsets: Array of annotation_line to be accessed by offset.
  * @samples: Hash map of sym_hist_entry.  Keyed by event index and offset in symbol.
+ * @nr_events: Number of events in the current output.
  * @nr_entries: Number of annotated_line in the source list.
  * @nr_asm_entries: Number of annotated_line with actual asm instruction in the
  * 		    source list.
- * @max_line_len: Maximum length of objdump output in an annotated_line.
+ * @max_jump_sources: Maximum number of jump instructions targeting to the same
+ * 		      instruction.
+ * @widths: Precalculated width of each column in the TUI output.
  *
  * disasm_lines are allocated, percentages calculated and all sorted by percentage
  * when the annotation is about to be presented, so the percentages are for
@@ -262,13 +264,26 @@ struct cyc_hist {
 struct annotated_source {
 	struct list_head	source;
 	struct sym_hist		*histograms;
-	struct annotation_line	**offsets;
 	struct hashmap	   	*samples;
 	int    			nr_histograms;
+	int    			nr_events;
 	int			nr_entries;
 	int			nr_asm_entries;
-	u16			max_line_len;
+	int			max_jump_sources;
+	u64			start;
+	struct {
+		u8		addr;
+		u8		jumps;
+		u8		target;
+		u8		min_addr;
+		u8		max_addr;
+		u8		max_ins_name;
+		u16		max_line_len;
+	} widths;
 };
+
+struct annotation_line *annotated_source__get_line(struct annotated_source *src,
+						   s64 offset);
 
 /**
  * struct annotated_branch - basic block and IPC information for a symbol.
@@ -298,17 +313,6 @@ struct annotated_branch {
 };
 
 struct LOCKABLE annotation {
-	u64			start;
-	int			nr_events;
-	int			max_jump_sources;
-	struct {
-		u8		addr;
-		u8		jumps;
-		u8		target;
-		u8		min_addr;
-		u8		max_addr;
-		u8		max_ins_name;
-	} widths;
 	struct annotated_source *src;
 	struct annotated_branch *branch;
 };
@@ -332,7 +336,7 @@ static inline int annotation__cycles_width(struct annotation *notes)
 
 static inline int annotation__pcnt_width(struct annotation *notes)
 {
-	return (symbol_conf.show_total_period ? 12 : 7) * notes->nr_events;
+	return (symbol_conf.show_total_period ? 12 : 7) * notes->src->nr_events;
 }
 
 static inline bool annotation_line__filter(struct annotation_line *al)
@@ -340,10 +344,7 @@ static inline bool annotation_line__filter(struct annotation_line *al)
 	return annotate_opts.hide_src_code && al->offset == -1;
 }
 
-void annotation__set_offsets(struct annotation *notes, s64 size);
-void annotation__mark_jump_targets(struct annotation *notes, struct symbol *sym);
 void annotation__update_column_widths(struct annotation *notes);
-void annotation__init_column_widths(struct annotation *notes, struct symbol *sym);
 void annotation__toggle_full_addr(struct annotation *notes, struct map_symbol *ms);
 
 static inline struct sym_hist *annotated_source__histogram(struct annotated_source *src, int idx)
