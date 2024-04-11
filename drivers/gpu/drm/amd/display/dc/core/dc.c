@@ -36,6 +36,7 @@
 #include "resource.h"
 #include "dc_state.h"
 #include "dc_state_priv.h"
+#include "dc_plane_priv.h"
 
 #include "gpio_service_interface.h"
 #include "clk_mgr.h"
@@ -212,7 +213,8 @@ static bool create_links(
 		connectors_num,
 		num_virtual_links);
 
-	for (i = 0; i < connectors_num; i++) {
+	// condition loop on link_count to allow skipping invalid indices
+	for (i = 0; dc->link_count < connectors_num && i < MAX_LINKS; i++) {
 		struct link_init_data link_init_params = {0};
 		struct dc_link *link;
 
@@ -1088,8 +1090,7 @@ static bool dc_construct(struct dc *dc,
 	 * is initialized in dc_create_resource_pool because
 	 * on creation it copies the contents of dc->dml
 	 */
-
-	dc->current_state = dc_state_create(dc);
+	dc->current_state = dc_state_create(dc, NULL);
 
 	if (!dc->current_state) {
 		dm_error("%s: failed to create validate ctx\n", __func__);
@@ -2125,8 +2126,7 @@ static bool commit_minimal_transition_state(struct dc *dc,
  * dc_commit_streams - Commit current stream state
  *
  * @dc: DC object with the commit state to be configured in the hardware
- * @streams: Array with a list of stream state
- * @stream_count: Total of streams
+ * @params: Parameters for the commit, including the streams to be committed
  *
  * Function responsible for commit streams change to the hardware.
  *
@@ -2134,9 +2134,7 @@ static bool commit_minimal_transition_state(struct dc *dc,
  * Return DC_OK if everything work as expected, otherwise, return a dc_status
  * code.
  */
-enum dc_status dc_commit_streams(struct dc *dc,
-				 struct dc_stream_state *streams[],
-				 uint8_t stream_count)
+enum dc_status dc_commit_streams(struct dc *dc, struct dc_commit_streams_params *params)
 {
 	int i, j;
 	struct dc_state *context;
@@ -2145,18 +2143,22 @@ enum dc_status dc_commit_streams(struct dc *dc,
 	struct pipe_ctx *pipe;
 	bool handle_exit_odm2to1 = false;
 
+	if (!params)
+		return DC_ERROR_UNEXPECTED;
+
 	if (dc->ctx->dce_environment == DCE_ENV_VIRTUAL_HW)
 		return res;
 
-	if (!streams_changed(dc, streams, stream_count))
+	if (!streams_changed(dc, params->streams, params->stream_count) &&
+			dc->current_state->power_source == params->power_source)
 		return res;
 
 	dc_exit_ips_for_hw_access(dc);
 
-	DC_LOG_DC("%s: %d streams\n", __func__, stream_count);
+	DC_LOG_DC("%s: %d streams\n", __func__, params->stream_count);
 
-	for (i = 0; i < stream_count; i++) {
-		struct dc_stream_state *stream = streams[i];
+	for (i = 0; i < params->stream_count; i++) {
+		struct dc_stream_state *stream = params->streams[i];
 		struct dc_stream_status *status = dc_stream_get_status(stream);
 
 		dc_stream_log(dc, stream);
@@ -2174,7 +2176,7 @@ enum dc_status dc_commit_streams(struct dc *dc,
 	 * scenario, it uses extra pipes than needed to reduce power consumption
 	 * We need to switch off this feature to make room for new streams.
 	 */
-	if (stream_count > dc->current_state->stream_count &&
+	if (params->stream_count > dc->current_state->stream_count &&
 			dc->current_state->stream_count == 1) {
 		for (i = 0; i < dc->res_pool->pipe_count; i++) {
 			pipe = &dc->current_state->res_ctx.pipe_ctx[i];
@@ -2190,7 +2192,9 @@ enum dc_status dc_commit_streams(struct dc *dc,
 	if (!context)
 		goto context_alloc_fail;
 
-	res = dc_validate_with_context(dc, set, stream_count, context, false);
+	context->power_source = params->power_source;
+
+	res = dc_validate_with_context(dc, set, params->stream_count, context, false);
 	if (res != DC_OK) {
 		BREAK_TO_DEBUGGER();
 		goto fail;
@@ -2198,16 +2202,16 @@ enum dc_status dc_commit_streams(struct dc *dc,
 
 	res = dc_commit_state_no_check(dc, context);
 
-	for (i = 0; i < stream_count; i++) {
+	for (i = 0; i < params->stream_count; i++) {
 		for (j = 0; j < context->stream_count; j++) {
-			if (streams[i]->stream_id == context->streams[j]->stream_id)
-				streams[i]->out.otg_offset = context->stream_status[j].primary_otg_inst;
+			if (params->streams[i]->stream_id == context->streams[j]->stream_id)
+				params->streams[i]->out.otg_offset = context->stream_status[j].primary_otg_inst;
 
-			if (dc_is_embedded_signal(streams[i]->signal)) {
-				struct dc_stream_status *status = dc_state_get_stream_status(context, streams[i]);
+			if (dc_is_embedded_signal(params->streams[i]->signal)) {
+				struct dc_stream_status *status = dc_state_get_stream_status(context, params->streams[i]);
 
 				if (dc->hwss.is_abm_supported)
-					status->is_abm_supported = dc->hwss.is_abm_supported(dc, context, streams[i]);
+					status->is_abm_supported = dc->hwss.is_abm_supported(dc, context, params->streams[i]);
 				else
 					status->is_abm_supported = true;
 			}
@@ -3231,18 +3235,6 @@ static bool update_planes_and_stream_state(struct dc *dc,
 			BREAK_TO_DEBUGGER();
 			goto fail;
 		}
-
-		for (i = 0; i < context->stream_count; i++) {
-			struct pipe_ctx *otg_master = resource_get_otg_master_for_stream(&context->res_ctx,
-					context->streams[i]);
-
-			if (otg_master && otg_master->stream->test_pattern.type != DP_TEST_PATTERN_VIDEO_MODE)
-				resource_build_test_pattern_params(&context->res_ctx, otg_master);
-
-			if (otg_master && (otg_master->stream->timing.pixel_encoding == PIXEL_ENCODING_YCBCR422 ||
-					otg_master->stream->timing.pixel_encoding == PIXEL_ENCODING_YCBCR420))
-				resource_build_subsampling_params(&context->res_ctx, otg_master);
-		}
 	}
 	update_seamless_boot_flags(dc, context, surface_count, stream);
 
@@ -3338,12 +3330,26 @@ static void commit_planes_do_stream_update(struct dc *dc,
  			}
 
 			if (stream_update->pending_test_pattern) {
-				dc_link_dp_set_test_pattern(stream->link,
+				/*
+				 * test pattern params depends on ODM topology
+				 * changes that we could be applying to front
+				 * end. Since at the current stage front end
+				 * changes are not yet applied. We can only
+				 * apply test pattern in hw based on current
+				 * state and populate the final test pattern
+				 * params in new state. If current and new test
+				 * pattern params are different as result of
+				 * different ODM topology being used, it will be
+				 * detected and handle during front end
+				 * programming update.
+				 */
+				dc->link_srv->dp_set_test_pattern(stream->link,
 					stream->test_pattern.type,
 					stream->test_pattern.color_space,
 					stream->test_pattern.p_link_settings,
 					stream->test_pattern.p_custom_pattern,
 					stream->test_pattern.cust_pattern_size);
+				resource_build_test_pattern_params(&context->res_ctx, pipe_ctx);
 			}
 
 			if (stream_update->dpms_off) {
@@ -3556,6 +3562,7 @@ static void commit_planes_for_stream_fast(struct dc *dc,
 	int i, j;
 	struct pipe_ctx *top_pipe_to_program = NULL;
 	struct dc_stream_status *stream_status = NULL;
+
 	dc_exit_ips_for_hw_access(dc);
 
 	dc_z10_restore(dc);
@@ -3613,7 +3620,8 @@ static void commit_planes_for_stream_fast(struct dc *dc,
 			context->block_sequence,
 			&(context->block_sequence_steps),
 			top_pipe_to_program,
-			stream_status);
+			stream_status,
+			context);
 	hwss_execute_sequence(dc,
 			context->block_sequence,
 			context->block_sequence_steps);

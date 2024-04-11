@@ -1468,6 +1468,9 @@ void resource_build_test_pattern_params(struct resource_context *res_ctx,
 	controller_color_space = convert_dp_to_controller_color_space(
 			otg_master->stream->test_pattern.color_space);
 
+	if (controller_test_pattern == CONTROLLER_DP_TEST_PATTERN_VIDEOMODE)
+		return;
+
 	odm_cnt = resource_get_opp_heads_for_otg_master(otg_master, res_ctx, opp_heads);
 
 	odm_slice_width = h_active / odm_cnt;
@@ -2230,50 +2233,84 @@ static void resource_log_pipe(struct dc *dc, struct pipe_ctx *pipe,
 	}
 }
 
-void resource_log_pipe_topology_update(struct dc *dc, struct dc_state *state)
+static void resource_log_pipe_for_stream(struct dc *dc, struct dc_state *state,
+		struct pipe_ctx *otg_master, int stream_idx)
 {
-	struct pipe_ctx *otg_master;
 	struct pipe_ctx *opp_heads[MAX_PIPES];
 	struct pipe_ctx *dpp_pipes[MAX_PIPES];
 
-	int stream_idx, slice_idx, dpp_idx, plane_idx, slice_count, dpp_count;
+	int slice_idx, dpp_idx, plane_idx, slice_count, dpp_count;
 	bool is_primary;
+	DC_LOGGER_INIT(dc->ctx->logger);
+
+	slice_count = resource_get_opp_heads_for_otg_master(otg_master,
+			&state->res_ctx, opp_heads);
+	for (slice_idx = 0; slice_idx < slice_count; slice_idx++) {
+		plane_idx = -1;
+		if (opp_heads[slice_idx]->plane_state) {
+			dpp_count = resource_get_dpp_pipes_for_opp_head(
+					opp_heads[slice_idx],
+					&state->res_ctx,
+					dpp_pipes);
+			for (dpp_idx = 0; dpp_idx < dpp_count; dpp_idx++) {
+				is_primary = !dpp_pipes[dpp_idx]->top_pipe ||
+						dpp_pipes[dpp_idx]->top_pipe->plane_state != dpp_pipes[dpp_idx]->plane_state;
+				if (is_primary)
+					plane_idx++;
+				resource_log_pipe(dc, dpp_pipes[dpp_idx],
+						stream_idx, slice_idx,
+						plane_idx, slice_count,
+						is_primary);
+			}
+		} else {
+			resource_log_pipe(dc, opp_heads[slice_idx],
+					stream_idx, slice_idx, plane_idx,
+					slice_count, true);
+		}
+
+	}
+}
+
+static int resource_stream_to_stream_idx(struct dc_state *state,
+		struct dc_stream_state *stream)
+{
+	int i, stream_idx = -1;
+
+	for (i = 0; i < state->stream_count; i++)
+		if (state->streams[i] == stream) {
+			stream_idx = i;
+			break;
+		}
+	return stream_idx;
+}
+
+void resource_log_pipe_topology_update(struct dc *dc, struct dc_state *state)
+{
+	struct pipe_ctx *otg_master;
+	int stream_idx, phantom_stream_idx;
 	DC_LOGGER_INIT(dc->ctx->logger);
 
 	DC_LOG_DC("    pipe topology update");
 	DC_LOG_DC("  ________________________");
 	for (stream_idx = 0; stream_idx < state->stream_count; stream_idx++) {
+		if (state->streams[stream_idx]->is_phantom)
+			continue;
+
 		otg_master = resource_get_otg_master_for_stream(
 				&state->res_ctx, state->streams[stream_idx]);
-		if (!otg_master	|| otg_master->stream_res.tg == NULL) {
-			DC_LOG_DC("topology update: otg_master NULL stream_idx %d!\n", stream_idx);
-			return;
-		}
-		slice_count = resource_get_opp_heads_for_otg_master(otg_master,
-				&state->res_ctx, opp_heads);
-		for (slice_idx = 0; slice_idx < slice_count; slice_idx++) {
-			plane_idx = -1;
-			if (opp_heads[slice_idx]->plane_state) {
-				dpp_count = resource_get_dpp_pipes_for_opp_head(
-						opp_heads[slice_idx],
-						&state->res_ctx,
-						dpp_pipes);
-				for (dpp_idx = 0; dpp_idx < dpp_count; dpp_idx++) {
-					is_primary = !dpp_pipes[dpp_idx]->top_pipe ||
-							dpp_pipes[dpp_idx]->top_pipe->plane_state != dpp_pipes[dpp_idx]->plane_state;
-					if (is_primary)
-						plane_idx++;
-					resource_log_pipe(dc, dpp_pipes[dpp_idx],
-							stream_idx, slice_idx,
-							plane_idx, slice_count,
-							is_primary);
-				}
-			} else {
-				resource_log_pipe(dc, opp_heads[slice_idx],
-						stream_idx, slice_idx, plane_idx,
-						slice_count, true);
-			}
+		resource_log_pipe_for_stream(dc, state, otg_master, stream_idx);
+	}
+	if (state->phantom_stream_count > 0) {
+		DC_LOG_DC(" |    (phantom pipes)     |");
+		for (stream_idx = 0; stream_idx < state->stream_count; stream_idx++) {
+			if (state->stream_status[stream_idx].mall_stream_config.type != SUBVP_MAIN)
+				continue;
 
+			phantom_stream_idx = resource_stream_to_stream_idx(state,
+					state->stream_status[stream_idx].mall_stream_config.paired_stream);
+			otg_master = resource_get_otg_master_for_stream(
+					&state->res_ctx, state->streams[phantom_stream_idx]);
+			resource_log_pipe_for_stream(dc, state, otg_master, stream_idx);
 		}
 	}
 	DC_LOG_DC(" |________________________|\n");
@@ -2328,6 +2365,9 @@ static bool update_pipe_params_after_odm_slice_count_change(
 
 	if (pool->funcs->build_pipe_pix_clk_params)
 		pool->funcs->build_pipe_pix_clk_params(otg_master);
+
+	resource_build_test_pattern_params(&context->res_ctx, otg_master);
+
 	return result;
 }
 
@@ -5085,11 +5125,14 @@ void resource_init_common_dml2_callbacks(struct dc *dc, struct dml2_configuratio
 {
 	dml2_options->callbacks.dc = dc;
 	dml2_options->callbacks.build_scaling_params = &resource_build_scaling_params;
+	dml2_options->callbacks.build_test_pattern_params = &resource_build_test_pattern_params;
 	dml2_options->callbacks.acquire_secondary_pipe_for_mpc_odm = &dc_resource_acquire_secondary_pipe_for_mpc_odm_legacy;
 	dml2_options->callbacks.update_pipes_for_stream_with_slice_count = &resource_update_pipes_for_stream_with_slice_count;
 	dml2_options->callbacks.update_pipes_for_plane_with_slice_count = &resource_update_pipes_for_plane_with_slice_count;
 	dml2_options->callbacks.get_mpc_slice_index = &resource_get_mpc_slice_index;
+	dml2_options->callbacks.get_mpc_slice_count = &resource_get_mpc_slice_count;
 	dml2_options->callbacks.get_odm_slice_index = &resource_get_odm_slice_index;
+	dml2_options->callbacks.get_odm_slice_count = &resource_get_odm_slice_count;
 	dml2_options->callbacks.get_opp_head = &resource_get_opp_head;
 	dml2_options->callbacks.get_otg_master_for_stream = &resource_get_otg_master_for_stream;
 	dml2_options->callbacks.get_opp_heads_for_otg_master = &resource_get_opp_heads_for_otg_master;

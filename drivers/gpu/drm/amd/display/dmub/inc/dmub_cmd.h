@@ -97,6 +97,9 @@
 /* Maximum number of planes on any ASIC. */
 #define DMUB_MAX_PLANES 6
 
+/* Maximum number of phantom planes on any ASIC */
+#define DMUB_MAX_PHANTOM_PLANES ((DMUB_MAX_PLANES) / 2)
+
 /* Trace buffer offset for entry */
 #define TRACE_BUFFER_ENTRY_OFFSET  16
 
@@ -466,7 +469,7 @@ struct dmub_feature_caps {
 	 * Max PSR version supported by FW.
 	 */
 	uint8_t psr;
-	uint8_t fw_assisted_mclk_switch;
+	uint8_t fw_assisted_mclk_switch_ver;
 	uint8_t reserved[4];
 	uint8_t subvp_psr_support;
 	uint8_t gecc_enable;
@@ -659,6 +662,7 @@ union dmub_fw_boot_options {
 		uint32_t disable_timeout_recovery : 1; /* 1 if timeout recovery should be disabled */
 		uint32_t ips_pg_disable: 1; /* 1 to disable ONO domains power gating*/
 		uint32_t ips_disable: 3; /* options to disable ips support*/
+		uint32_t ips_sequential_ono: 1; /**< 1 to enable sequential ONO IPS sequence */
 		uint32_t reserved : 9; /**< reserved */
 	} bits; /**< boot bits */
 	uint32_t all; /**< 32-bit access to bits */
@@ -4667,6 +4671,7 @@ union dmub_rb_cmd {
 	 * Definition of a DMUB_CMD__PSP_ASSR_ENABLE command.
 	 */
 	struct dmub_rb_cmd_assr_enable assr_enable;
+
 };
 
 /**

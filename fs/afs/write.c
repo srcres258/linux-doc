@@ -98,8 +98,9 @@ void afs_prepare_write(struct netfs_io_subrequest *subreq)
 /*
  * Issue a subrequest to write to the server.
  */
-void afs_issue_write(struct netfs_io_subrequest *subreq)
+static void afs_issue_write_worker(struct work_struct *work)
 {
+	struct netfs_io_subrequest *subreq = container_of(work, struct netfs_io_subrequest, work);
 	struct netfs_io_request *wreq = subreq->rreq;
 	struct afs_operation *op;
 	struct afs_vnode *vnode = AFS_FS_I(wreq->inode);
@@ -161,6 +162,13 @@ void afs_issue_write(struct netfs_io_subrequest *subreq)
 	}
 
 	netfs_write_subrequest_terminated(subreq, ret < 0 ? ret : subreq->len, false);
+}
+
+void afs_issue_write(struct netfs_io_subrequest *subreq)
+{
+	subreq->work.func = afs_issue_write_worker;
+	if (!queue_work(system_unbound_wq, &subreq->work))
+		WARN_ON_ONCE(1);
 }
 
 /*

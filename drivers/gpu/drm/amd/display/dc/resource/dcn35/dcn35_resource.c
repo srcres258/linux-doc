@@ -721,7 +721,7 @@ static const struct dc_debug_options debug_defaults_drv = {
 	.disable_dpp_power_gate = true,
 	.disable_hubp_power_gate = true,
 	.disable_optc_power_gate = true, /*should the same as above two*/
-	.disable_hpo_power_gate = true, /*dmubfw force domain25 on*/
+	.disable_hpo_power_gate = false, /*dmubfw force domain25 on*/
 	.disable_clock_gate = false,
 	.disable_dsc_power_gate = true,
 	.vsr_support = true,
@@ -764,7 +764,7 @@ static const struct dc_debug_options debug_defaults_drv = {
 	},
 	.seamless_boot_odm_combine = DML_FAIL_SOURCE_PIXEL_FORMAT,
 	.enable_z9_disable_interface = true, /* Allow support for the PMFW interface for disable Z9*/
-	.minimum_z8_residency_time = 2100,
+	.minimum_z8_residency_time = 1, /* Always allow when other conditions are met */
 	.using_dml2 = true,
 	.support_eDP1_5 = true,
 	.enable_hpo_pg_support = false,
@@ -1734,7 +1734,9 @@ static bool dcn35_validate_bandwidth(struct dc *dc,
 {
 	bool out = false;
 
-	out = dml2_validate(dc, context, fast_validate);
+	out = dml2_validate(dc, context,
+			context->power_source == DC_POWER_SOURCE_DC ? context->bw_ctx.dml2_dc_power_source : context->bw_ctx.dml2,
+			fast_validate);
 
 	if (fast_validate)
 		return out;

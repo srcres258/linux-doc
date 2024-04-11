@@ -480,9 +480,10 @@ void hwss_build_fast_sequence(struct dc *dc,
 		struct dc_dmub_cmd *dc_dmub_cmd,
 		unsigned int dmub_cmd_count,
 		struct block_sequence block_sequence[],
-		int *num_steps,
+		unsigned int *num_steps,
 		struct pipe_ctx *pipe_ctx,
-		struct dc_stream_status *stream_status);
+		struct dc_stream_status *stream_status,
+		struct dc_state *context);
 
 void hwss_send_dmcub_cmd(union block_sequence_params *params);
 

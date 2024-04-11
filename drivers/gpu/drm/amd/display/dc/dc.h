@@ -44,6 +44,8 @@
 
 #include "dml2/dml2_wrapper.h"
 
+#include "dmub/inc/dmub_cmd.h"
+
 struct abm_save_restore;
 
 /* forward declaration */
@@ -51,7 +53,7 @@ struct aux_payload;
 struct set_config_cmd_payload;
 struct dmub_notification;
 
-#define DC_VER "3.2.278"
+#define DC_VER "3.2.279"
 
 #define MAX_SURFACES 3
 #define MAX_PLANES 6
@@ -219,6 +221,7 @@ struct dc_dmub_caps {
 	bool mclk_sw;
 	bool subvp_psr;
 	bool gecc_enable;
+	uint8_t fams_ver;
 };
 
 struct dc_caps {
@@ -437,6 +440,7 @@ struct dc_config {
 	bool usb4_bw_alloc_support;
 	bool allow_0_dtb_clk;
 	bool use_assr_psp_message;
+	bool support_edp0_on_dp1;
 };
 
 enum visual_confirm {
@@ -695,6 +699,8 @@ enum pg_hw_pipe_resources {
 	PG_MPCC,
 	PG_OPP,
 	PG_OPTC,
+	PG_DPSTREAM,
+	PG_HDMISTREAM,
 	PG_HW_PIPE_RESOURCES_NUM_ELEMENT
 };
 
@@ -1326,7 +1332,7 @@ struct dc {
 	struct dc_phy_addr_space_config vm_pa_config;
 
 	uint8_t link_count;
-	struct dc_link *links[MAX_PIPES * 2];
+	struct dc_link *links[MAX_LINKS];
 	struct link_service *link_srv;
 
 	struct dc_state *current_state;
@@ -1502,10 +1508,15 @@ bool dc_acquire_release_mpc_3dlut(
 bool dc_resource_is_dsc_encoding_supported(const struct dc *dc);
 void get_audio_check(struct audio_info *aud_modes,
 	struct audio_check *aud_chk);
-
-enum dc_status dc_commit_streams(struct dc *dc,
-				 struct dc_stream_state *streams[],
-				 uint8_t stream_count);
+/*
+ * Set up streams and links associated to drive sinks
+ * The streams parameter is an absolute set of all active streams.
+ *
+ * After this call:
+ *   Phy, Encoder, Timing Generator are programmed and enabled.
+ *   New streams are enabled with blank stream; no memory read.
+ */
+enum dc_status dc_commit_streams(struct dc *dc, struct dc_commit_streams_params *params);
 
 
 struct dc_plane_state *dc_get_surface_for_mpcc(struct dc *dc,

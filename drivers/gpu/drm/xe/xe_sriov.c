@@ -11,6 +11,7 @@
 #include "xe_device.h"
 #include "xe_mmio.h"
 #include "xe_sriov.h"
+#include "xe_sriov_pf.h"
 
 /**
  * xe_sriov_mode_to_string - Convert enum value to string.
@@ -58,6 +59,8 @@ void xe_sriov_probe_early(struct xe_device *xe)
 	if (has_sriov) {
 		if (test_is_vf(xe))
 			mode = XE_SRIOV_MODE_VF;
+		else if (xe_sriov_pf_readiness(xe))
+			mode = XE_SRIOV_MODE_PF;
 	}
 
 	xe_assert(xe, !xe->sriov.__mode);
@@ -97,4 +100,18 @@ int xe_sriov_init(struct xe_device *xe)
 		return -ENOMEM;
 
 	return drmm_add_action_or_reset(&xe->drm, fini_sriov, xe);
+}
+
+/**
+ * xe_sriov_print_info - Print basic SR-IOV information.
+ * @xe: the &xe_device to print info from
+ * @p: the &drm_printer
+ *
+ * Print SR-IOV related information into provided DRM printer.
+ */
+void xe_sriov_print_info(struct xe_device *xe, struct drm_printer *p)
+{
+	drm_printf(p, "supported: %s\n", str_yes_no(xe_device_has_sriov(xe)));
+	drm_printf(p, "enabled: %s\n", str_yes_no(IS_SRIOV(xe)));
+	drm_printf(p, "mode: %s\n", xe_sriov_mode_to_string(xe_device_sriov_mode(xe)));
 }

@@ -55,6 +55,8 @@
 #include "dccg.h"
 #include "clk_mgr.h"
 #include "atomfirmware.h"
+#include "vpg.h"
+
 #define DC_LOGGER \
 	dc_logger
 #define DC_LOGGER_INIT(logger) \
@@ -67,7 +69,6 @@
 #define RETIMER_REDRIVER_INFO(...) \
 	DC_LOG_RETIMER_REDRIVER(  \
 		__VA_ARGS__)
-#include "dc/dcn30/dcn30_vpg.h"
 
 #define MAX_MTP_SLOT_COUNT 64
 #define LINK_TRAINING_ATTEMPTS 4
@@ -127,7 +128,7 @@ void link_blank_dp_stream(struct dc_link *link, bool hw_init)
 		if (link->ep_type == DISPLAY_ENDPOINT_PHY &&
 			link->link_enc->funcs->get_dig_frontend &&
 			link->link_enc->funcs->is_dig_enabled(link->link_enc)) {
-			unsigned int fe = link->link_enc->funcs->get_dig_frontend(link->link_enc);
+			int fe = link->link_enc->funcs->get_dig_frontend(link->link_enc);
 
 			if (fe != ENGINE_ID_UNKNOWN)
 				for (j = 0; j < dc->res_pool->stream_enc_count; j++) {

@@ -435,6 +435,10 @@ void xe_pat_init_early(struct xe_device *xe)
 	/* VFs can't program nor dump PAT settings */
 	if (IS_SRIOV_VF(xe))
 		xe->pat.ops = NULL;
+
+	xe_assert(xe, !xe->pat.ops || xe->pat.ops->dump);
+	xe_assert(xe, !xe->pat.ops || xe->pat.ops->program_graphics);
+	xe_assert(xe, !xe->pat.ops || MEDIA_VER(xe) < 13 || xe->pat.ops->program_media);
 }
 
 void xe_pat_init(struct xe_gt *gt)
@@ -454,7 +458,7 @@ void xe_pat_dump(struct xe_gt *gt, struct drm_printer *p)
 {
 	struct xe_device *xe = gt_to_xe(gt);
 
-	if (!xe->pat.ops->dump)
+	if (!xe->pat.ops)
 		return;
 
 	xe->pat.ops->dump(gt, p);

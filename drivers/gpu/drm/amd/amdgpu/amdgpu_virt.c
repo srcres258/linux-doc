@@ -576,6 +576,11 @@ static int amdgpu_virt_write_vf2pf_data(struct amdgpu_device *adev)
 	vf2pf_info->decode_usage = 0;
 
 	vf2pf_info->dummy_page_addr = (uint64_t)adev->dummy_page_addr;
+	vf2pf_info->mes_info_addr = (uint64_t)adev->mes.resource_1_gpu_addr;
+
+	if (adev->mes.resource_1) {
+		vf2pf_info->mes_info_size = adev->mes.resource_1->tbo.base.size;
+	}
 	vf2pf_info->checksum =
 		amd_sriov_msg_checksum(
 		vf2pf_info, vf2pf_info->header.size, 0, 0);
@@ -593,6 +598,7 @@ static void amdgpu_virt_update_vf2pf_work_item(struct work_struct *work)
 		adev->virt.vf2pf_update_retry_cnt++;
 		if ((adev->virt.vf2pf_update_retry_cnt >= AMDGPU_VF2PF_UPDATE_MAX_RETRY_LIMIT) &&
 		    amdgpu_sriov_runtime(adev) && !amdgpu_in_reset(adev)) {
+			amdgpu_ras_set_fed(adev, true);
 			if (amdgpu_reset_domain_schedule(adev->reset_domain,
 							  &adev->virt.flr_work))
 				return;
@@ -723,12 +729,6 @@ void amdgpu_detect_virtualization(struct amdgpu_device *adev)
 		if (is_virtual_machine() && !xen_initial_domain())
 			adev->virt.caps |= AMDGPU_PASSTHROUGH_MODE;
 	}
-
-	if (amdgpu_sriov_vf(adev) && adev->asic_type == CHIP_SIENNA_CICHLID)
-		/* VF MMIO access (except mailbox range) from CPU
-		 * will be blocked during sriov runtime
-		 */
-		adev->virt.caps |= AMDGPU_VF_MMIO_ACCESS_PROTECT;
 
 	/* we have the ability to check now */
 	if (amdgpu_sriov_vf(adev)) {

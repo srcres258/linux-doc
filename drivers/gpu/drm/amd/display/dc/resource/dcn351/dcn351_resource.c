@@ -1714,7 +1714,9 @@ static bool dcn351_validate_bandwidth(struct dc *dc,
 {
 	bool out = false;
 
-	out = dml2_validate(dc, context, fast_validate);
+	out = dml2_validate(dc, context,
+			context->power_source == DC_POWER_SOURCE_DC ? context->bw_ctx.dml2_dc_power_source : context->bw_ctx.dml2,
+			fast_validate);
 
 	if (fast_validate)
 		return out;
@@ -1891,6 +1893,8 @@ static bool dcn351_resource_construct(
 	if (dc->ctx->dce_environment == DCE_ENV_PRODUCTION_DRV)
 		dc->debug = debug_defaults_drv;
 
+	/*HW default is to have all the FGCG enabled, SW no need to program them*/
+	dc->debug.enable_fine_grain_clock_gating.u32All = 0xFFFF;
 	// Init the vm_helper
 	if (dc->vm_helper)
 		vm_helper_init(dc->vm_helper, 16);

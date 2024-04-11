@@ -188,8 +188,11 @@ static void init_state(struct dc *dc, struct dc_state *state)
 }
 
 /* Public dc_state functions */
-struct dc_state *dc_state_create(struct dc *dc)
+struct dc_state *dc_state_create(struct dc *dc, struct dc_state_create_params *params)
 {
+#ifdef CONFIG_DRM_AMD_DC_FP
+	struct dml2_configuration_options dml2_opt = dc->dml2_options;
+#endif
 	struct dc_state *state = kvzalloc(sizeof(struct dc_state),
 			GFP_KERNEL);
 
@@ -198,10 +201,16 @@ struct dc_state *dc_state_create(struct dc *dc)
 
 	init_state(dc, state);
 	dc_state_construct(dc, state);
+	state->power_source = params ? params->power_source : DC_POWER_SOURCE_AC;
 
 #ifdef CONFIG_DRM_AMD_DC_FP
-	if (dc->debug.using_dml2)
-		dml2_create(dc, &dc->dml2_options, &state->bw_ctx.dml2);
+	if (dc->debug.using_dml2) {
+		dml2_opt.use_clock_dc_limits = false;
+		dml2_create(dc, &dml2_opt, &state->bw_ctx.dml2);
+
+		dml2_opt.use_clock_dc_limits = true;
+		dml2_create(dc, &dml2_opt, &state->bw_ctx.dml2_dc_power_source);
+	}
 #endif
 
 	kref_init(&state->refcount);
@@ -214,6 +223,7 @@ void dc_state_copy(struct dc_state *dst_state, struct dc_state *src_state)
 	struct kref refcount = dst_state->refcount;
 #ifdef CONFIG_DRM_AMD_DC_FP
 	struct dml2_context *dst_dml2 = dst_state->bw_ctx.dml2;
+	struct dml2_context *dst_dml2_dc_power_source = dst_state->bw_ctx.dml2_dc_power_source;
 #endif
 
 	dc_state_copy_internal(dst_state, src_state);
@@ -222,6 +232,10 @@ void dc_state_copy(struct dc_state *dst_state, struct dc_state *src_state)
 	dst_state->bw_ctx.dml2 = dst_dml2;
 	if (src_state->bw_ctx.dml2)
 		dml2_copy(dst_state->bw_ctx.dml2, src_state->bw_ctx.dml2);
+
+	dst_state->bw_ctx.dml2_dc_power_source = dst_dml2_dc_power_source;
+	if (src_state->bw_ctx.dml2_dc_power_source)
+		dml2_copy(dst_state->bw_ctx.dml2_dc_power_source, src_state->bw_ctx.dml2_dc_power_source);
 #endif
 
 	/* context refcount should not be overridden */
@@ -242,6 +256,12 @@ struct dc_state *dc_state_create_copy(struct dc_state *src_state)
 #ifdef CONFIG_DRM_AMD_DC_FP
 	if (src_state->bw_ctx.dml2 &&
 			!dml2_create_copy(&new_state->bw_ctx.dml2, src_state->bw_ctx.dml2)) {
+		dc_state_release(new_state);
+		return NULL;
+	}
+
+	if (src_state->bw_ctx.dml2_dc_power_source &&
+			!dml2_create_copy(&new_state->bw_ctx.dml2_dc_power_source, src_state->bw_ctx.dml2_dc_power_source)) {
 		dc_state_release(new_state);
 		return NULL;
 	}
@@ -326,6 +346,9 @@ static void dc_state_free(struct kref *kref)
 #ifdef CONFIG_DRM_AMD_DC_FP
 	dml2_destroy(state->bw_ctx.dml2);
 	state->bw_ctx.dml2 = 0;
+
+	dml2_destroy(state->bw_ctx.dml2_dc_power_source);
+	state->bw_ctx.dml2_dc_power_source = 0;
 #endif
 
 	kvfree(state);
@@ -434,6 +457,15 @@ bool dc_state_add_plane(
 				plane_state, MAX_SURFACE_NUM);
 		goto out;
 	}
+
+	if (stream_status->plane_count == 0 && dc->config.enable_windowed_mpo_odm)
+		/* ODM combine could prevent us from supporting more planes
+		 * we will reset ODM slice count back to 1 when all planes have
+		 * been removed to maximize the amount of planes supported when
+		 * new planes are added.
+		 */
+		resource_update_pipes_for_stream_with_slice_count(
+				state, dc->current_state, dc->res_pool, stream, 1);
 
 	otg_master_pipe = resource_get_otg_master_for_stream(
 			&state->res_ctx, stream);
@@ -883,3 +915,4 @@ struct dc_stream_state *dc_state_get_stream_from_id(const struct dc_state *state
 
 	return stream;
 }
+

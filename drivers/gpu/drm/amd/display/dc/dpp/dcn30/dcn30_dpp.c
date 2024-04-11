@@ -293,9 +293,11 @@ void dpp3_cnv_setup (
 		break;
 	case SURFACE_PIXEL_FORMAT_GRPH_RGB111110_FIX:
 		pixel_format = 112;
+		alpha_en = 0;
 		break;
 	case SURFACE_PIXEL_FORMAT_GRPH_BGR101111_FIX:
 		pixel_format = 113;
+		alpha_en = 0;
 		break;
 	case SURFACE_PIXEL_FORMAT_VIDEO_ACrYCb2101010:
 		pixel_format = 114;
@@ -319,9 +321,11 @@ void dpp3_cnv_setup (
 		break;
 	case SURFACE_PIXEL_FORMAT_GRPH_RGB111110_FLOAT:
 		pixel_format = 118;
+		alpha_en = 0;
 		break;
 	case SURFACE_PIXEL_FORMAT_GRPH_BGR101111_FLOAT:
 		pixel_format = 119;
+		alpha_en = 0;
 		break;
 	default:
 		break;
@@ -391,9 +395,7 @@ void dpp3_set_cursor_attributes(
 
 	if (color_format == CURSOR_MODE_COLOR_PRE_MULTIPLIED_ALPHA ||
 		color_format == CURSOR_MODE_COLOR_UN_PRE_MULTIPLIED_ALPHA) {
-		if (cursor_attributes->attribute_flags.bits.ENABLE_CURSOR_DEGAMMA) {
-			cur_rom_en = 1;
-		}
+		cur_rom_en = 1;
 	}
 
 	REG_UPDATE_3(CURSOR0_CONTROL,

@@ -520,6 +520,7 @@ struct bw_context {
 	union bw_output bw;
 	struct display_mode_lib dml;
 	struct dml2_context *dml2;
+	struct dml2_context *dml2_dc_power_source;
 };
 
 struct dc_dmub_cmd {
@@ -608,6 +609,8 @@ struct dc_state {
 	struct {
 		unsigned int stutter_period_us;
 	} perf_params;
+
+	enum dc_power_source_type power_source;
 };
 
 struct replay_context {

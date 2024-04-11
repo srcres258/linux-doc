@@ -23,6 +23,7 @@
  *
  */
 
+#include "dm_services.h"
 #include "dc.h"
 #include "dc_dmub_srv.h"
 #include "../dmub/dmub_srv.h"
@@ -34,6 +35,7 @@
 #include "resource.h"
 #include "clk_mgr.h"
 #include "dc_state_priv.h"
+#include "dc_plane_priv.h"
 
 #define CTX dc_dmub_srv->ctx
 #define DC_LOGGER CTX->logger
@@ -198,6 +200,11 @@ bool dc_dmub_srv_wait_for_idle(struct dc_dmub_srv *dc_dmub_srv,
 
 		if (status != DMUB_STATUS_OK) {
 			DC_LOG_DEBUG("No reply for DMUB command: status=%d\n", status);
+			if (!dmub->debug.timeout_occured) {
+				dmub->debug.timeout_occured = true;
+				dmub->debug.timeout_cmd = *cmd_list;
+				dmub->debug.timestamp = dm_get_timestamp(dc_dmub_srv->ctx);
+			}
 			dc_dmub_srv_log_diagnostic_data(dc_dmub_srv);
 			return false;
 		}
@@ -904,6 +911,7 @@ bool dc_dmub_srv_get_diagnostic_data(struct dc_dmub_srv *dc_dmub_srv, struct dmu
 void dc_dmub_srv_log_diagnostic_data(struct dc_dmub_srv *dc_dmub_srv)
 {
 	struct dmub_diagnostic_data diag_data = {0};
+	uint32_t i;
 
 	if (!dc_dmub_srv || !dc_dmub_srv->dmub) {
 		DC_LOG_ERROR("%s: invalid parameters.", __func__);
@@ -935,7 +943,8 @@ void dc_dmub_srv_log_diagnostic_data(struct dc_dmub_srv *dc_dmub_srv)
 	DC_LOG_DEBUG("    scratch [13]       : %08x", diag_data.scratch[13]);
 	DC_LOG_DEBUG("    scratch [14]       : %08x", diag_data.scratch[14]);
 	DC_LOG_DEBUG("    scratch [15]       : %08x", diag_data.scratch[15]);
-	DC_LOG_DEBUG("    pc                 : %08x", diag_data.pc);
+	for (i = 0; i < DMUB_PC_SNAPSHOT_COUNT; i++)
+		DC_LOG_DEBUG("    pc[%d]             : %08x", i, diag_data.pc[i]);
 	DC_LOG_DEBUG("    unk_fault_addr     : %08x", diag_data.undefined_address_fault_addr);
 	DC_LOG_DEBUG("    inst_fault_addr    : %08x", diag_data.inst_fetch_fault_addr);
 	DC_LOG_DEBUG("    data_fault_addr    : %08x", diag_data.data_write_fault_addr);
@@ -1308,7 +1317,7 @@ static void dc_dmub_srv_notify_idle(const struct dc *dc, bool allow_idle)
 static void dc_dmub_srv_exit_low_power_state(const struct dc *dc)
 {
 	struct dc_dmub_srv *dc_dmub_srv;
-	uint32_t rcg_exit_count, ips1_exit_count, ips2_exit_count;
+	uint32_t rcg_exit_count = 0, ips1_exit_count = 0, ips2_exit_count = 0;
 
 	if (dc->debug.dmcub_emulation)
 		return;
@@ -1585,3 +1594,4 @@ bool dc_wake_and_execute_gpint(const struct dc_context *ctx, enum dmub_gpint_com
 
 	return result;
 }
+

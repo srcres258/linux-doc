@@ -52,10 +52,7 @@ int netfs_folio_written_back(struct folio *folio)
 	if ((group = netfs_folio_group(folio))) {
 		if (group == NETFS_FOLIO_COPY_TO_CACHE) {
 			why = netfs_folio_trace_clear_cc;
-			if (group == NETFS_FOLIO_COPY_TO_CACHE)
-				folio_detach_private(folio);
-			else
-				why = netfs_folio_trace_redirtied;
+			folio_detach_private(folio);
 			goto end_wb;
 		}
 
@@ -65,11 +62,9 @@ int netfs_folio_written_back(struct folio *folio)
 		 */
 		why = netfs_folio_trace_redirtied;
 		if (!folio_test_dirty(folio)) {
-			if (!folio_test_dirty(folio)) {
-				folio_detach_private(folio);
-				gcount++;
-				why = netfs_folio_trace_clear_g;
-			}
+			folio_detach_private(folio);
+			gcount++;
+			why = netfs_folio_trace_clear_g;
 		}
 	}
 

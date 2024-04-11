@@ -1799,7 +1799,9 @@ bool dcn32_validate_bandwidth(struct dc *dc,
 	bool out = false;
 
 	if (dc->debug.using_dml2)
-		out = dml2_validate(dc, context, fast_validate);
+		out = dml2_validate(dc, context,
+				context->power_source == DC_POWER_SOURCE_DC ? context->bw_ctx.dml2_dc_power_source : context->bw_ctx.dml2,
+				fast_validate);
 	else
 		out = dml1_validate(dc, context, fast_validate);
 	return out;
@@ -1815,8 +1817,47 @@ int dcn32_populate_dml_pipes_from_context(
 	struct pipe_ctx *pipe = NULL;
 	bool subvp_in_use = false;
 	struct dc_crtc_timing *timing;
+	int subvp_main_pipe_index = -1;
+	enum mall_stream_type mall_type;
+	bool single_display_subvp = false;
+	struct dc_stream_state *stream = NULL;
+	int num_subvp_main = 0;
+	int num_subvp_phantom = 0;
+	int num_subvp_none = 0;
+	int odm_slice_count;
 
 	dcn20_populate_dml_pipes_from_context(dc, context, pipes, fast_validate);
+
+	/* For single display subvp, look for subvp main so if we have phantom
+	 *  pipe, we can set odm policy to match main pipe
+	 */
+	for (i = 0; i < context->stream_count; i++) {
+		stream = context->streams[i];
+		mall_type = dc_state_get_stream_subvp_type(context, stream);
+		if (mall_type == SUBVP_MAIN)
+			num_subvp_main++;
+		else if (mall_type == SUBVP_PHANTOM)
+			num_subvp_phantom++;
+		else
+			num_subvp_none++;
+	}
+	if (num_subvp_main == 1 && num_subvp_phantom == 1 && num_subvp_none == 0)
+		single_display_subvp = true;
+
+	if (single_display_subvp) {
+		for (i = 0, pipe_cnt = 0; i < dc->res_pool->pipe_count; i++) {
+			pipe = &res_ctx->pipe_ctx[i];
+			if (!res_ctx->pipe_ctx[i].stream)
+				continue;
+
+			mall_type = dc_state_get_pipe_subvp_type(context, pipe);
+			if (mall_type == SUBVP_MAIN) {
+				if (resource_is_pipe_type(pipe, OTG_MASTER))
+					subvp_main_pipe_index = i;
+			}
+			pipe_cnt++;
+		}
+	}
 
 	for (i = 0, pipe_cnt = 0; i < dc->res_pool->pipe_count; i++) {
 
@@ -1832,7 +1873,21 @@ int dcn32_populate_dml_pipes_from_context(
 		pipes[pipe_cnt].pipe.dest.vfront_porch = timing->v_front_porch;
 		if (dc->config.enable_windowed_mpo_odm &&
 				dc->debug.enable_single_display_2to1_odm_policy) {
-			switch (resource_get_odm_slice_count(pipe)) {
+			/* For single display subvp, if pipe is phantom pipe,
+			 *  then copy odm policy from subvp main pipe
+			 */
+			mall_type = dc_state_get_pipe_subvp_type(context, pipe);
+			if (single_display_subvp && (mall_type == SUBVP_PHANTOM)) {
+				if (subvp_main_pipe_index < 0) {
+					odm_slice_count = -1;
+					ASSERT(0);
+				} else {
+					odm_slice_count = resource_get_odm_slice_count(&res_ctx->pipe_ctx[subvp_main_pipe_index]);
+				}
+			} else {
+				odm_slice_count = resource_get_odm_slice_count(pipe);
+			}
+			switch (odm_slice_count) {
 			case 2:
 				pipes[pipe_cnt].pipe.dest.odm_combine_policy = dm_odm_combine_policy_2to1;
 				break;
@@ -1845,6 +1900,7 @@ int dcn32_populate_dml_pipes_from_context(
 		} else {
 			pipes[pipe_cnt].pipe.dest.odm_combine_policy = dm_odm_combine_policy_dal;
 		}
+
 		pipes[pipe_cnt].pipe.src.gpuvm_min_page_size_kbytes = 256; // according to spreadsheet
 		pipes[pipe_cnt].pipe.src.unbounded_req_mode = false;
 		pipes[pipe_cnt].pipe.scale_ratio_depth.lb_depth = dm_lb_19;
@@ -1945,10 +2001,20 @@ void dcn32_calculate_wm_and_dlg(struct dc *dc, struct dc_state *context,
 
 static void dcn32_update_bw_bounding_box(struct dc *dc, struct clk_bw_params *bw_params)
 {
+	struct dml2_configuration_options dml2_opt = dc->dml2_options;
+
 	DC_FP_START();
+
 	dcn32_update_bw_bounding_box_fpu(dc, bw_params);
+
+	dml2_opt.use_clock_dc_limits = false;
 	if (dc->debug.using_dml2 && dc->current_state && dc->current_state->bw_ctx.dml2)
-		dml2_reinit(dc, &dc->dml2_options, &dc->current_state->bw_ctx.dml2);
+		dml2_reinit(dc, &dml2_opt, &dc->current_state->bw_ctx.dml2);
+
+	dml2_opt.use_clock_dc_limits = true;
+	if (dc->debug.using_dml2 && dc->current_state && dc->current_state->bw_ctx.dml2_dc_power_source)
+		dml2_reinit(dc, &dml2_opt, &dc->current_state->bw_ctx.dml2_dc_power_source);
+
 	DC_FP_END();
 }
 

@@ -436,11 +436,31 @@ void intel_enable_transcoder(const struct intel_crtc_state *new_crtc_state)
 		intel_de_rmw(dev_priv, PIPE_ARB_CTL(pipe),
 			     0, PIPE_ARB_USE_PROG_SLOTS);
 
+	if (DISPLAY_VER(dev_priv) >= 14) {
+		u32 clear = DP_DSC_INSERT_SF_AT_EOL_WA;
+		u32 set = 0;
+
+		if (DISPLAY_VER(dev_priv) == 14)
+			set |= DP_FEC_BS_JITTER_WA;
+
+		intel_de_rmw(dev_priv,
+			     hsw_chicken_trans_reg(dev_priv, cpu_transcoder),
+			     clear, set);
+	}
+
 	val = intel_de_read(dev_priv, TRANSCONF(cpu_transcoder));
 	if (val & TRANSCONF_ENABLE) {
 		/* we keep both pipes enabled on 830 */
 		drm_WARN_ON(&dev_priv->drm, !IS_I830(dev_priv));
 		return;
+	}
+
+	/* Wa_1409098942:adlp+ */
+	if (DISPLAY_VER(dev_priv) >= 13 &&
+	    new_crtc_state->dsc.compression_enable) {
+		val &= ~TRANSCONF_PIXEL_COUNT_SCALING_MASK;
+		val |= REG_FIELD_PREP(TRANSCONF_PIXEL_COUNT_SCALING_MASK,
+				      TRANSCONF_PIXEL_COUNT_SCALING_X4);
 	}
 
 	intel_de_write(dev_priv, TRANSCONF(cpu_transcoder),
@@ -488,6 +508,11 @@ void intel_disable_transcoder(const struct intel_crtc_state *old_crtc_state)
 	/* Don't disable pipe or pipe PLLs if needed */
 	if (!IS_I830(dev_priv))
 		val &= ~TRANSCONF_ENABLE;
+
+	/* Wa_1409098942:adlp+ */
+	if (DISPLAY_VER(dev_priv) >= 13 &&
+	    old_crtc_state->dsc.compression_enable)
+		val &= ~TRANSCONF_PIXEL_COUNT_SCALING_MASK;
 
 	intel_de_write(dev_priv, TRANSCONF(cpu_transcoder), val);
 
