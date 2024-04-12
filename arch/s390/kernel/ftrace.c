@@ -220,7 +220,7 @@ static int __init ftrace_plt_init(void)
 {
 	const char *start, *end;
 
-	ftrace_plt = execmem_text_alloc(EXECMEM_FTRACE, PAGE_SIZE);
+	ftrace_plt = execmem_alloc(EXECMEM_FTRACE, PAGE_SIZE);
 	if (!ftrace_plt)
 		panic("cannot allocate ftrace plt\n");
 

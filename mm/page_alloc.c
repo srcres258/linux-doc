@@ -786,7 +786,8 @@ static inline void __free_one_page(struct page *page,
 	while (order < MAX_PAGE_ORDER) {
 		int buddy_mt = migratetype;
 
-		if (compaction_capture(capc, page, order, migratetype))
+		if (compaction_capture(capc, page, order, migratetype)) {
+			account_freepages(zone, -(1 << order), migratetype);
 			return;
 
 		buddy = find_buddy_page_pfn(page, pfn, order, &buddy_pfn);
@@ -942,6 +943,10 @@ static int free_tail_page_prepare(struct page *head_page, struct page *page)
 	if (index == 1) {
 		if (unlikely(folio_entire_mapcount(folio))) {
 			bad_page(page, "nonzero entire_mapcount");
+			goto out;
+		}
+		if (unlikely(folio_large_mapcount(folio))) {
+			bad_page(page, "nonzero large_mapcount");
 			goto out;
 		}
 		if (unlikely(atomic_read(&folio->_nr_pages_mapped))) {
@@ -1645,6 +1650,125 @@ static bool prep_move_freepages_block(struct zone *zone, struct page *page,
 		}
 	}
 
+	return true;
+}
+#endif /* CONFIG_MEMORY_ISOLATION */
+
+static int move_freepages_block(struct zone *zone, struct page *page,
+				int old_mt, int new_mt)
+{
+	unsigned long start_pfn;
+
+	if (!prep_move_freepages_block(zone, page, &start_pfn, NULL, NULL))
+		return -1;
+
+	return __move_freepages_block(zone, start_pfn, old_mt, new_mt);
+}
+
+#ifdef CONFIG_MEMORY_ISOLATION
+/* Look for a buddy that straddles start_pfn */
+static unsigned long find_large_buddy(unsigned long start_pfn)
+{
+	int order = 0;
+	struct page *page;
+	unsigned long pfn = start_pfn;
+
+	while (!PageBuddy(page = pfn_to_page(pfn))) {
+		/* Nothing found */
+		if (++order > MAX_PAGE_ORDER)
+			return start_pfn;
+		pfn &= ~0UL << order;
+	}
+
+	/*
+	 * Found a preceding buddy, but does it straddle?
+	 */
+	if (pfn + (1 << buddy_order(page)) > start_pfn)
+		return pfn;
+
+	/* Nothing found */
+	return start_pfn;
+}
+
+/* Split a multi-block free page into its individual pageblocks */
+static void split_large_buddy(struct zone *zone, struct page *page,
+			      unsigned long pfn, int order)
+{
+	unsigned long end_pfn = pfn + (1 << order);
+
+	VM_WARN_ON_ONCE(order <= pageblock_order);
+	VM_WARN_ON_ONCE(pfn & (pageblock_nr_pages - 1));
+
+	/* Caller removed page from freelist, buddy info cleared! */
+	VM_WARN_ON_ONCE(PageBuddy(page));
+
+	while (pfn != end_pfn) {
+		int mt = get_pfnblock_migratetype(page, pfn);
+
+		__free_one_page(page, pfn, zone, pageblock_order, mt, FPI_NONE);
+		pfn += pageblock_nr_pages;
+		page = pfn_to_page(pfn);
+	}
+}
+
+/**
+ * move_freepages_block_isolate - move free pages in block for page isolation
+ * @zone: the zone
+ * @page: the pageblock page
+ * @migratetype: migratetype to set on the pageblock
+ *
+ * This is similar to move_freepages_block(), but handles the special
+ * case encountered in page isolation, where the block of interest
+ * might be part of a larger buddy spanning multiple pageblocks.
+ *
+ * Unlike the regular page allocator path, which moves pages while
+ * stealing buddies off the freelist, page isolation is interested in
+ * arbitrary pfn ranges that may have overlapping buddies on both ends.
+ *
+ * This function handles that. Straddling buddies are split into
+ * individual pageblocks. Only the block of interest is moved.
+ *
+ * Returns %true if pages could be moved, %false otherwise.
+ */
+bool move_freepages_block_isolate(struct zone *zone, struct page *page,
+				  int migratetype)
+{
+	unsigned long start_pfn, pfn;
+
+	if (!prep_move_freepages_block(zone, page, &start_pfn, NULL, NULL))
+		return false;
+
+	/* No splits needed if buddies can't span multiple blocks */
+	if (pageblock_order == MAX_PAGE_ORDER)
+		goto move;
+
+	/* We're a tail block in a larger buddy */
+	pfn = find_large_buddy(start_pfn);
+	if (pfn != start_pfn) {
+		struct page *buddy = pfn_to_page(pfn);
+		int order = buddy_order(buddy);
+
+		del_page_from_free_list(buddy, zone, order,
+					get_pfnblock_migratetype(buddy, pfn));
+		set_pageblock_migratetype(page, migratetype);
+		split_large_buddy(zone, buddy, pfn, order);
+		return true;
+	}
+
+	/* We're the starting block of a larger buddy */
+	if (PageBuddy(page) && buddy_order(page) > pageblock_order) {
+		int order = buddy_order(page);
+
+		del_page_from_free_list(page, zone, order,
+					get_pfnblock_migratetype(page, pfn));
+		set_pageblock_migratetype(page, migratetype);
+		split_large_buddy(zone, page, pfn, order);
+		return true;
+	}
+move:
+	__move_freepages_block(zone, start_pfn,
+			       get_pfnblock_migratetype(page, start_pfn),
+			       migratetype);
 	return true;
 }
 #endif /* CONFIG_MEMORY_ISOLATION */
@@ -6761,8 +6885,12 @@ int __alloc_contig_migrate_range(struct compact_control *cc,
 
 		if (trace_mm_alloc_contig_migrate_range_info_enabled()) {
 			total_reclaimed += nr_reclaimed;
-			list_for_each_entry(page, &cc->migratepages, lru)
-				total_mapped += page_mapcount(page);
+			list_for_each_entry(page, &cc->migratepages, lru) {
+				struct folio *folio = page_folio(page);
+
+				total_mapped += folio_mapped(folio) *
+						folio_nr_pages(folio);
+			}
 		}
 
 		ret = migrate_pages(&cc->migratepages, alloc_migration_target,

@@ -736,7 +736,7 @@ cond_branch:			f_offset = addrs[i + filter[i].jf];
 			break;
 		}
 		if (proglen == oldproglen) {
-			image = execmem_text_alloc(EXECMEM_BPF, proglen);
+			image = execmem_alloc(EXECMEM_BPF, proglen);
 			if (!image)
 				goto out;
 		}

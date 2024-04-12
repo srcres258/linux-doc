@@ -313,8 +313,11 @@ static ssize_t timerfd_read_iter(struct kiocb *iocb, struct iov_iter *to)
 		ctx->ticks = 0;
 	}
 	spin_unlock_irq(&ctx->wqh.lock);
-	if (ticks && !copy_to_iter_full(&ticks, sizeof(ticks), to))
-		res = -EFAULT;
+	if (ticks) {
+		res = copy_to_iter(&ticks, sizeof(ticks), to);
+		if (!res)
+			res = -EFAULT;
+	}
 	return res;
 }
 

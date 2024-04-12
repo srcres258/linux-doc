@@ -130,7 +130,7 @@ void *alloc_insn_page(void)
 {
 	void *page;
 
-	page = module_alloc(PAGE_SIZE);
+	page = execmem_alloc(EXECMEM_KPROBES, PAGE_SIZE);
 	if (!page)
 		return NULL;
 
@@ -142,7 +142,7 @@ void *alloc_insn_page(void)
 	}
 	return page;
 error:
-	module_memfree(page);
+	execmem_free(page);
 	return NULL;
 }
 
