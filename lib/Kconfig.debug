@@ -1064,6 +1064,7 @@ config SOFTLOCKUP_DETECTOR
 config SOFTLOCKUP_DETECTOR_INTR_STORM
 	bool "Detect Interrupt Storm in Soft Lockups"
 	depends on SOFTLOCKUP_DETECTOR && IRQ_TIME_ACCOUNTING
+	select GENERIC_IRQ_STAT_SNAPSHOT
 	default y if NR_CPUS <= 128
 	help
 	  Say Y here to enable the kernel to detect interrupt storm

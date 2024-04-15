@@ -265,24 +265,26 @@ unsigned long thp_vma_allowable_orders(struct vm_area_struct *vma,
 }
 
 enum mthp_stat_item {
-	MTHP_STAT_ANON_ALLOC,
-	MTHP_STAT_ANON_ALLOC_FALLBACK,
+	MTHP_STAT_ANON_FAULT_ALLOC,
+	MTHP_STAT_ANON_FAULT_FALLBACK,
+	MTHP_STAT_ANON_FAULT_FALLBACK_CHARGE,
 	MTHP_STAT_ANON_SWPOUT,
 	MTHP_STAT_ANON_SWPOUT_FALLBACK,
-	MTHP_STAT_ANON_SWPIN_REFAULT,
 	__MTHP_STAT_COUNT
 };
 
 struct mthp_stat {
-	unsigned long stats[0][__MTHP_STAT_COUNT];
+	unsigned long stats[ilog2(MAX_PTRS_PER_PTE) + 1][__MTHP_STAT_COUNT];
 };
 
-extern struct mthp_stat __percpu *mthp_stats;
+DECLARE_PER_CPU(struct mthp_stat, mthp_stats);
 
 static inline void count_mthp_stat(int order, enum mthp_stat_item item)
 {
-	if (likely(order <= PMD_ORDER))
-		raw_cpu_ptr(mthp_stats)->stats[order][item]++;
+	if (order <= 0 || order > PMD_ORDER)
+		return;
+
+	this_cpu_inc(mthp_stats.stats[order][item]);
 }
 
 #define transparent_hugepage_use_zero_page()				\

@@ -403,8 +403,9 @@ static void print_cpustat(void)
 	do_div(sample_period_second, NSEC_PER_SEC);
 
 	/*
-	 * We do not want the "watchdog: " prefix on every line,
-	 * hence we use "printk" instead of "pr_crit".
+	 * Outputting the "watchdog" prefix on every line is redundant and not
+	 * concise, and the original alarm information is sufficient for
+	 * positioning in logs, hence here printk() is used instead of pr_crit().
 	 */
 	printk(KERN_CRIT "CPU#%d Utilization every %llus during lockup:\n",
 	       smp_processor_id(), sample_period_second);
@@ -420,14 +421,14 @@ static void print_cpustat(void)
 	}
 }
 
-#define HARDIRQ_PERCENT_THRESH		50
-#define NUM_HARDIRQ_REPORT		5
-static DEFINE_PER_CPU(u32 *, hardirq_counts);
-static DEFINE_PER_CPU(int, actual_nr_irqs);
+#define HARDIRQ_PERCENT_THRESH          50
+#define NUM_HARDIRQ_REPORT              5
 struct irq_counts {
 	int irq;
 	u32 counts;
 };
+
+static DEFINE_PER_CPU(bool, snapshot_taken);
 
 /* Tabulate the most frequent interrupts. */
 static void tabulate_irq_count(struct irq_counts *irq_counts, int irq, u32 counts, int rank)
@@ -458,69 +459,34 @@ static bool need_counting_irqs(void)
 
 static void start_counting_irqs(void)
 {
-	int i;
-	int local_nr_irqs;
-	struct irq_desc *desc;
-	u32 *counts = __this_cpu_read(hardirq_counts);
-
-	if (!counts) {
-		/*
-		 * nr_irqs has the potential to grow at runtime. We should read
-		 * it and store locally to avoid array out-of-bounds access.
-		 */
-		local_nr_irqs = nr_irqs;
-		counts = kcalloc(local_nr_irqs, sizeof(u32), GFP_ATOMIC);
-		if (!counts)
-			return;
-
-		for (i = 0; i < local_nr_irqs; i++) {
-			desc = irq_to_desc(i);
-			if (!desc)
-				continue;
-			counts[i] = desc->kstat_irqs ?
-				*this_cpu_ptr(desc->kstat_irqs) : 0;
-		}
-
-		__this_cpu_write(actual_nr_irqs, local_nr_irqs);
-		__this_cpu_write(hardirq_counts, counts);
+	if (!__this_cpu_read(snapshot_taken)) {
+		kstat_snapshot_irqs();
+		__this_cpu_write(snapshot_taken, true);
 	}
 }
 
 static void stop_counting_irqs(void)
 {
-	kfree(__this_cpu_read(hardirq_counts));
-	__this_cpu_write(hardirq_counts, NULL);
+	__this_cpu_write(snapshot_taken, false);
 }
 
 static void print_irq_counts(void)
 {
-	int i;
-	struct irq_desc *desc;
-	u32 counts_diff;
-	int local_nr_irqs = __this_cpu_read(actual_nr_irqs);
-	u32 *counts = __this_cpu_read(hardirq_counts);
+	unsigned int i, count;
 	struct irq_counts irq_counts_sorted[NUM_HARDIRQ_REPORT] = {
-		{-1, 0}, {-1, 0}, {-1, 0}, {-1, 0},
+		{-1, 0}, {-1, 0}, {-1, 0}, {-1, 0}, {-1, 0}
 	};
 
-	if (counts) {
-		for_each_irq_desc(i, desc) {
-			/*
-			 * We need to bounds-check in case someone on a different CPU
-			 * expanded nr_irqs.
-			 */
-			if (desc->kstat_irqs) {
-				counts_diff = *this_cpu_ptr(desc->kstat_irqs);
-				if (i < local_nr_irqs)
-					counts_diff -= counts[i];
-				tabulate_irq_count(irq_counts_sorted, i, counts_diff,
-						   NUM_HARDIRQ_REPORT);
-			}
+	if (__this_cpu_read(snapshot_taken)) {
+		for_each_active_irq(i) {
+			count = kstat_get_irq_since_snapshot(i);
+			tabulate_irq_count(irq_counts_sorted, i, count, NUM_HARDIRQ_REPORT);
 		}
 
 		/*
-		 * We do not want the "watchdog: " prefix on every line,
-		 * hence we use "printk" instead of "pr_crit".
+		 * Outputting the "watchdog" prefix on every line is redundant and not
+		 * concise, and the original alarm information is sufficient for
+		 * positioning in logs, hence here printk() is used instead of pr_crit().
 		 */
 		printk(KERN_CRIT "CPU#%d Detect HardIRQ Time exceeds %d%%. Most frequent HardIRQs:\n",
 		       smp_processor_id(), HARDIRQ_PERCENT_THRESH);
@@ -529,15 +495,9 @@ static void print_irq_counts(void)
 			if (irq_counts_sorted[i].irq == -1)
 				break;
 
-			desc = irq_to_desc(irq_counts_sorted[i].irq);
-			if (desc && desc->action)
-				printk(KERN_CRIT "\t#%u: %-10u\tirq#%d(%s)\n",
-				       i + 1, irq_counts_sorted[i].counts,
-				       irq_counts_sorted[i].irq, desc->action->name);
-			else
-				printk(KERN_CRIT "\t#%u: %-10u\tirq#%d\n",
-				       i + 1, irq_counts_sorted[i].counts,
-				       irq_counts_sorted[i].irq);
+			printk(KERN_CRIT "\t#%u: %-10u\tirq#%d\n",
+			       i + 1, irq_counts_sorted[i].counts,
+			       irq_counts_sorted[i].irq);
 		}
 
 		/*
@@ -671,7 +631,7 @@ static int is_softlockup(unsigned long touch_ts,
 		 * might be interrupt storm, then we need to count the interrupts
 		 * to find which interrupt is storming.
 		 */
-		if (time_after_eq(now, period_ts + get_softlockup_thresh() / 5) &&
+		if (time_after_eq(now, period_ts + get_softlockup_thresh() / NUM_SAMPLE_PERIODS) &&
 		    need_counting_irqs())
 			start_counting_irqs();
 

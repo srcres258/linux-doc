@@ -680,7 +680,8 @@ static void __io_cqring_overflow_flush(struct io_ring_ctx *ctx, bool dying)
 
 	lockdep_assert_held(&ctx->uring_lock);
 
-	if (__io_cqring_events(ctx) == ctx->cq_entries)
+	/* don't abort if we're dying, entries must get freed */
+	if (!dying && __io_cqring_events(ctx) == ctx->cq_entries)
 		return;
 
 	if (ctx->flags & IORING_SETUP_CQE32)
@@ -926,16 +927,6 @@ static void io_req_complete_post(struct io_kiocb *req, unsigned issue_flags)
 	 */
 	if (WARN_ON_ONCE(!(issue_flags & IO_URING_F_IOWQ)))
 		return;
-
-	/*
-	 * Handle special CQ sync cases via task_work. DEFER_TASKRUN requires
-	 * the submitter task context, IOPOLL protects with uring_lock.
-	 */
-	if (ctx->task_complete || (ctx->flags & IORING_SETUP_IOPOLL)) {
-		req->io_task_work.func = io_req_task_complete;
-		io_req_task_work_add(req);
-		return;
-	}
 
 	/*
 	 * Handle special CQ sync cases via task_work. DEFER_TASKRUN requires
@@ -2462,19 +2453,6 @@ static int io_cqring_wait(struct io_ring_ctx *ctx, int min_events,
 	if (__io_cqring_events_user(ctx) >= min_events)
 		return 0;
 
-	if (sig) {
-#ifdef CONFIG_COMPAT
-		if (in_compat_syscall())
-			ret = set_compat_user_sigmask((const compat_sigset_t __user *)sig,
-						      sigsz);
-		else
-#endif
-			ret = set_user_sigmask(sig, sigsz);
-
-		if (ret)
-			return ret;
-	}
-
 	init_waitqueue_func_entry(&iowq.wq, io_wake_function);
 	iowq.wq.private = current;
 	INIT_LIST_HEAD(&iowq.wq.entry);
@@ -2491,6 +2469,19 @@ static int io_cqring_wait(struct io_ring_ctx *ctx, int min_events,
 
 		iowq.timeout = ktime_add_ns(timespec64_to_ktime(ts), ktime_get_ns());
 		io_napi_adjust_timeout(ctx, &iowq, &ts);
+	}
+
+	if (sig) {
+#ifdef CONFIG_COMPAT
+		if (in_compat_syscall())
+			ret = set_compat_user_sigmask((const compat_sigset_t __user *)sig,
+						      sigsz);
+		else
+#endif
+			ret = set_user_sigmask(sig, sigsz);
+
+		if (ret)
+			return ret;
 	}
 
 	io_napi_busy_loop(ctx, &iowq);

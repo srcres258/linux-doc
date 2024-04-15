@@ -99,6 +99,7 @@ xe-y += xe_bb.o \
 	xe_guc_debugfs.o \
 	xe_guc_hwconfig.o \
 	xe_guc_id_mgr.o \
+	xe_guc_klv_helpers.o \
 	xe_guc_log.o \
 	xe_guc_pc.o \
 	xe_guc_submit.o \
@@ -147,6 +148,8 @@ xe-y += xe_bb.o \
 	xe_wa.o \
 	xe_wopcm.o
 
+xe-$(CONFIG_HMM_MIRROR) += xe_hmm.o
+
 # graphics hardware monitoring (HWMON) support
 xe-$(CONFIG_HWMON) += xe_hwmon.o
 
@@ -158,6 +161,7 @@ xe-y += \
 
 xe-$(CONFIG_PCI_IOV) += \
 	xe_gt_sriov_pf_control.o \
+	xe_gt_sriov_pf_policy.o \
 	xe_lmtt.o \
 	xe_lmtt_2l.o \
 	xe_lmtt_ml.o \

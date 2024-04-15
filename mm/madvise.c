@@ -514,29 +514,41 @@ restart:
 		 * next pte in the range.
 		 */
 		if (folio_test_large(folio)) {
+			const fpb_t fpb_flags = FPB_IGNORE_DIRTY |
+						FPB_IGNORE_SOFT_DIRTY;
+			int max_nr = (end - addr) / PAGE_SIZE;
 			bool any_young;
-			nr = madvise_folio_pte_batch(addr, end, folio, pte,
-						     ptent, &any_young, NULL);
+
+			nr = folio_pte_batch(folio, addr, pte, ptent, max_nr,
+					     fpb_flags, NULL, &any_young);
+			if (any_young)
+				ptent = pte_mkyoung(ptent);
 
 			if (nr < folio_nr_pages(folio)) {
+				int err;
+
 				if (folio_likely_mapped_shared(folio))
 					continue;
 				if (pageout_anon_only_filter && !folio_test_anon(folio))
 					continue;
-
+				if (!folio_trylock(folio))
+					continue;
+				folio_get(folio);
 				arch_leave_lazy_mmu_mode();
-				if (madvise_pte_split_folio(mm, pmd, addr,
-							    folio, &start_pte, &ptl))
-					nr = 0;
+				pte_unmap_unlock(start_pte, ptl);
+				start_pte = NULL;
+				err = split_folio(folio);
+				folio_unlock(folio);
+				folio_put(folio);
+				start_pte = pte =
+					pte_offset_map_lock(mm, pmd, addr, &ptl);
 				if (!start_pte)
 					break;
-				pte = start_pte;
 				arch_enter_lazy_mmu_mode();
+				if (!err)
+					nr = 0;
 				continue;
 			}
-
-			if (any_young)
-				ptent = pte_mkyoung(ptent);
 		}
 
 		/*
@@ -717,7 +729,7 @@ static int madvise_free_pte_range(pmd_t *pmd, unsigned long addr,
 			entry = pte_to_swp_entry(ptent);
 			if (!non_swap_entry(entry)) {
 				max_nr = (end - addr) / PAGE_SIZE;
-				nr = swap_pte_batch(pte, max_nr, ptent, NULL);
+				nr = swap_pte_batch(pte, max_nr, ptent);
 				nr_swap -= nr;
 				free_swap_and_cache_nr(entry, nr);
 				clear_not_present_full_ptes(mm, addr, pte, nr, tlb->fullmm);
@@ -744,35 +756,15 @@ static int madvise_free_pte_range(pmd_t *pmd, unsigned long addr,
 			nr = madvise_folio_pte_batch(addr, end, folio, pte,
 						     ptent, &any_young, &any_dirty);
 
-			if (nr < folio_nr_pages(folio)) {
-				if (folio_likely_mapped_shared(folio))
-					continue;
-
-				arch_leave_lazy_mmu_mode();
-				if (madvise_pte_split_folio(mm, pmd, addr,
-							    folio, &start_pte, &ptl))
-					nr = 0;
-				if (!start_pte)
-					break;
-				pte = start_pte;
-				arch_enter_lazy_mmu_mode();
-				continue;
-			}
-
-			if (any_young)
-				ptent = pte_mkyoung(ptent);
-			if (any_dirty)
-				ptent = pte_mkdirty(ptent);
-		}
-
-		if (!folio_trylock(folio))
-			continue;
-		/*
-		 * If we have a large folio at this point, we know it is fully mapped
-		 * so if its mapcount is the same as its number of pages, it must be
-		 * exclusive.
-		 */
-		if (folio_mapcount(folio) != folio_nr_pages(folio)) {
+			if (folio_likely_mapped_shared(folio))
+				break;
+			if (!folio_trylock(folio))
+				break;
+			folio_get(folio);
+			arch_leave_lazy_mmu_mode();
+			pte_unmap_unlock(start_pte, ptl);
+			start_pte = NULL;
+			err = split_folio(folio);
 			folio_unlock(folio);
 			continue;
 		}

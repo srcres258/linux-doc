@@ -573,9 +573,10 @@ static int __kprobes do_page_fault(unsigned long far, unsigned long esr,
 
 	if (!(vma->vm_flags & vm_flags)) {
 		vma_end_read(vma);
-		fault = VM_FAULT_BADACCESS;
+		fault = 0;
+		si_code = SEGV_ACCERR;
 		count_vm_vma_lock_event(VMA_LOCK_SUCCESS);
-		goto done;
+		goto bad_area;
 	}
 	fault = handle_mm_fault(vma, addr, mm_flags | FAULT_FLAG_VMA_LOCK, regs);
 	if (!(fault & (VM_FAULT_RETRY | VM_FAULT_COMPLETED)))
@@ -605,10 +606,12 @@ retry:
 		goto bad_area;
 	}
 
-	if (!(vma->vm_flags & vm_flags))
-		fault = VM_FAULT_BADACCESS;
-	else
-		fault = handle_mm_fault(vma, addr, mm_flags, regs);
+	if (!(vma->vm_flags & vm_flags)) {
+		mmap_read_unlock(mm);
+		fault = 0;
+		si_code = SEGV_ACCERR;
+		goto bad_area;
+	}
 
 	fault = handle_mm_fault(vma, addr, mm_flags, regs);
 	/* Quick path to respond to signals */
@@ -633,6 +636,7 @@ done:
 	if (likely(!(fault & VM_FAULT_ERROR)))
 		return 0;
 
+	si_code = SEGV_MAPERR;
 bad_area:
 	/*
 	 * If we are in kernel mode at this point, we have no context to

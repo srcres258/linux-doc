@@ -49,9 +49,6 @@
 	case 1:								\
 		_prev_ = cmpxchg_emu_u8((volatile u8 *)_p_, _o_, _n_);	\
 		break;							\
-	case 2:								\
-		_prev_ = cmpxchg_emu_u16((volatile u16 *)_p_, _o_, _n_); \
-		break;							\
 	case 4:								\
 		_prev_ = __cmpxchg(_p_, _o_, _n_);			\
 		break;							\
@@ -76,9 +73,6 @@
 		__flags = cmpxchg_emu_u8((volatile u8 *)_p_, _o_, _n_);	\
 		_prev_ = (__typeof__(*(ptr)))__flags;			\
 		break;							\
-	case 2:								\
-		__flags = cmpxchg_emu_u16((volatile u16 *)_p_, _o_, _n_); \
-		_prev_ = (__typeof__(*(ptr)))__flags;			\
 		break;							\
 	case 4:								\
 		/*							\

@@ -1490,7 +1490,7 @@ static void ffa_notifications_setup(void)
 	if (!ret) {
 		ret = ffa_notification_bitmap_create();
 		if (ret) {
-			pr_info("Notification bitmap create error %d\n", ret);
+			pr_err("Notification bitmap create error %d\n", ret);
 			return;
 		}
 

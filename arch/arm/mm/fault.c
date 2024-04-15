@@ -292,7 +292,8 @@ do_page_fault(unsigned long addr, unsigned int fsr, struct pt_regs *regs)
 	if (!(vma->vm_flags & vm_flags)) {
 		vma_end_read(vma);
 		count_vm_vma_lock_event(VMA_LOCK_SUCCESS);
-		fault = VM_FAULT_BADACCESS;
+		fault = 0;
+		code = SEGV_ACCERR;
 		goto bad_area;
 	}
 	fault = handle_mm_fault(vma, addr, flags | FAULT_FLAG_VMA_LOCK, regs);
@@ -328,6 +329,7 @@ retry:
 	 * permissions on the VMA allow for the fault which occurred.
 	 */
 	if (!(vma->vm_flags & vm_flags)) {
+		mmap_read_unlock(mm);
 		fault = 0;
 		code = SEGV_ACCERR;
 		goto bad_area;
@@ -363,6 +365,7 @@ done:
 	if (likely(!(fault & VM_FAULT_ERROR)))
 		return 0;
 
+	code = SEGV_MAPERR;
 bad_area:
 	/*
 	 * If we are in kernel mode at this point, we
