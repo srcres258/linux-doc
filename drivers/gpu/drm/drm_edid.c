@@ -29,12 +29,14 @@
  */
 
 #include <linux/bitfield.h>
+#include <linux/byteorder/generic.h>
 #include <linux/cec.h>
 #include <linux/hdmi.h>
 #include <linux/i2c.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/pci.h>
+#include <linux/seq_buf.h>
 #include <linux/slab.h>
 #include <linux/vga_switcheroo.h>
 
@@ -2755,6 +2757,63 @@ const struct drm_edid *drm_edid_read(struct drm_connector *connector)
 	return drm_edid_read_ddc(connector, connector->ddc);
 }
 EXPORT_SYMBOL(drm_edid_read);
+
+/**
+ * drm_edid_get_product_id - Get the vendor and product identification
+ * @drm_edid: EDID
+ * @id: Where to place the product id
+ */
+void drm_edid_get_product_id(const struct drm_edid *drm_edid,
+			     struct drm_edid_product_id *id)
+{
+	if (drm_edid && drm_edid->edid && drm_edid->size >= EDID_LENGTH)
+		memcpy(id, &drm_edid->edid->product_id, sizeof(*id));
+	else
+		memset(id, 0, sizeof(*id));
+}
+EXPORT_SYMBOL(drm_edid_get_product_id);
+
+static void decode_date(struct seq_buf *s, const struct drm_edid_product_id *id)
+{
+	int week = id->week_of_manufacture;
+	int year = id->year_of_manufacture + 1990;
+
+	if (week == 0xff)
+		seq_buf_printf(s, "model year: %d", year);
+	else if (!week)
+		seq_buf_printf(s, "year of manufacture: %d", year);
+	else
+		seq_buf_printf(s, "week/year of manufacture: %d/%d", week, year);
+}
+
+/**
+ * drm_edid_print_product_id - Print decoded product id to printer
+ * @p: drm printer
+ * @id: EDID product id
+ * @raw: If true, also print the raw hex
+ *
+ * See VESA E-EDID 1.4 section 3.4.
+ */
+void drm_edid_print_product_id(struct drm_printer *p,
+			       const struct drm_edid_product_id *id, bool raw)
+{
+	DECLARE_SEQ_BUF(date, 40);
+	char vend[4];
+
+	drm_edid_decode_mfg_id(be16_to_cpu(id->manufacturer_name), vend);
+
+	decode_date(&date, id);
+
+	drm_printf(p, "manufacturer name: %s, product code: %u, serial number: %u, %s\n",
+		   vend, le16_to_cpu(id->product_code),
+		   le32_to_cpu(id->serial_number), seq_buf_str(&date));
+
+	if (raw)
+		drm_printf(p, "raw product id: %*ph\n", (int)sizeof(*id), id);
+
+	WARN_ON(seq_buf_has_overflowed(&date));
+}
+EXPORT_SYMBOL(drm_edid_print_product_id);
 
 /**
  * drm_edid_get_panel_id - Get a panel's ID from EDID
