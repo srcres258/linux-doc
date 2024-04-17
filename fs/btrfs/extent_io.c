@@ -760,6 +760,37 @@ error:
 }
 
 /*
+ * Populate every free slot in a provided array with folios.
+ *
+ * @nr_folios:   number of folios to allocate
+ * @folio_array: the array to fill with folios; any existing non-NULL entries in
+ *		 the array will be skipped
+ * @extra_gfp:	 the extra GFP flags for the allocation
+ *
+ * Return: 0        if all folios were able to be allocated;
+ *         -ENOMEM  otherwise, the partially allocated folios would be freed and
+ *                  the array slots zeroed
+ */
+int btrfs_alloc_folio_array(unsigned int nr_folios, struct folio **folio_array,
+			    gfp_t extra_gfp)
+{
+	for (int i = 0; i < nr_folios; i++) {
+		if (folio_array[i])
+			continue;
+		folio_array[i] = folio_alloc(GFP_NOFS | extra_gfp, 0);
+		if (!folio_array[i])
+			goto error;
+	}
+	return 0;
+error:
+	for (int i = 0; i < nr_folios; i++) {
+		if (folio_array[i])
+			folio_put(folio_array[i]);
+	}
+	return -ENOMEM;
+}
+
+/*
  * Populate every free slot in a provided array with pages.
  *
  * @nr_pages:   number of pages to allocate
@@ -2623,10 +2654,59 @@ if (gfpflags_allow_blocking(mask) &&
 		struct btrfs_fs_info *fs_info;
 		u64 cur_gen;
 
-		len = end - start + 1;
-		write_lock(&map->lock);
-		em = lookup_extent_mapping(map, start, len);
-		if (!em) {
+			len = end - start + 1;
+			write_lock(&map->lock);
+			em = lookup_extent_mapping(map, start, len);
+			if (!em) {
+				write_unlock(&map->lock);
+				break;
+			}
+			if ((em->flags & EXTENT_FLAG_PINNED) ||
+			    em->start != start) {
+				write_unlock(&map->lock);
+				free_extent_map(em);
+				break;
+			}
+			if (test_range_bit_exists(tree, em->start,
+						  extent_map_end(em) - 1,
+						  EXTENT_LOCKED))
+				goto next;
+			/*
+			 * If it's not in the list of modified extents, used
+			 * by a fast fsync, we can remove it. If it's being
+			 * logged we can safely remove it since fsync took an
+			 * extra reference on the em.
+			 */
+			if (list_empty(&em->list) ||
+			    (em->flags & EXTENT_FLAG_LOGGING))
+				goto remove_em;
+			/*
+			 * If it's in the list of modified extents, remove it
+			 * only if its generation is older then the current one,
+			 * in which case we don't need it for a fast fsync.
+			 * Otherwise don't remove it, we could be racing with an
+			 * ongoing fast fsync that could miss the new extent.
+			 */
+			fs_info = btrfs_inode->root->fs_info;
+			spin_lock(&fs_info->trans_lock);
+			cur_gen = fs_info->generation;
+			spin_unlock(&fs_info->trans_lock);
+			if (em->generation >= cur_gen)
+				goto next;
+remove_em:
+			/*
+			 * We only remove extent maps that are not in the list of
+			 * modified extents or that are in the list but with a
+			 * generation lower then the current generation, so there
+			 * is no need to set the full fsync flag on the inode (it
+			 * hurts the fsync performance for workloads with a data
+			 * size that exceeds or is close to the system's memory).
+			 */
+			remove_extent_mapping(btrfs_inode, em);
+			/* once for the rb tree */
+			free_extent_map(em);
+next:
+			start = extent_map_end(em);
 			write_unlock(&map->lock);
 			break;
 		}
@@ -3017,13 +3097,19 @@ if (key.objectid != btrfs_ino(inode) || key.type != BTRFS_EXTENT_DATA_KEY) {
 	goto out;
 }
 
-/* See the comment at fiemap_search_slot() about why we clone. */
-copy_extent_buffer_full(clone, path->nodes[0]);
-/*
- * Important to preserve the start field, for the optimizations when
- * checking if extents are shared (see extent_fiemap()).
- */
-clone->start = path->nodes[0]->start;
+	/*
+	 * Important to preserve the start field, for the optimizations when
+	 * checking if extents are shared (see extent_fiemap()).
+	 *
+	 * We must set ->start before calling copy_extent_buffer_full().  If we
+	 * are on sub-pagesize blocksize, we use ->start to determine the offset
+	 * into the folio where our eb exists, and if we update ->start after
+	 * the fact then any subsequent reads of the eb may read from a
+	 * different offset in the folio than where we originally copied into.
+	 */
+	clone->start = path->nodes[0]->start;
+	/* See the comment at fiemap_search_slot() about why we clone. */
+	copy_extent_buffer_full(clone, path->nodes[0]);
 
 slot = path->slots[0];
 btrfs_release_path(path);

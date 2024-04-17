@@ -1909,7 +1909,7 @@ struct file *kernel_tmpfile_open(struct mnt_idmap *idmap,
 				 umode_t mode, int open_flag,
 				 const struct cred *cred);
 struct file *kernel_file_open(const struct path *path, int flags,
-			      struct inode *inode, const struct cred *cred);
+			      const struct cred *cred);
 
 int vfs_mkobj(struct dentry *, umode_t,
 		int (*f)(struct dentry *, umode_t, void *),
@@ -2112,18 +2112,6 @@ struct inode_operations {
 	struct offset_ctx *(*get_offset_ctx)(struct inode *inode);
 } ____cacheline_aligned;
 
-static inline ssize_t call_read_iter(struct file *file, struct kiocb *kio,
-				     struct iov_iter *iter)
-{
-	return file->f_op->read_iter(kio, iter);
-}
-
-static inline ssize_t call_write_iter(struct file *file, struct kiocb *kio,
-				      struct iov_iter *iter)
-{
-	return file->f_op->write_iter(kio, iter);
-}
-
 static inline int call_mmap(struct file *file, struct vm_area_struct *vma)
 {
 	return file->f_op->mmap(file, vma);
@@ -2267,7 +2255,13 @@ static inline bool sb_rdonly(const struct super_block *sb) { return sb->s_flags 
 
 #define IS_DEADDIR(inode)	((inode)->i_flags & S_DEAD)
 #define IS_NOCMTIME(inode)	((inode)->i_flags & S_NOCMTIME)
+
+#ifdef CONFIG_SWAP
 #define IS_SWAPFILE(inode)	((inode)->i_flags & S_SWAPFILE)
+#else
+#define IS_SWAPFILE(inode)	((void)(inode), 0U)
+#endif
+
 #define IS_PRIVATE(inode)	((inode)->i_flags & S_PRIVATE)
 #define IS_IMA(inode)		((inode)->i_flags & S_IMA)
 #define IS_AUTOMOUNT(inode)	((inode)->i_flags & S_AUTOMOUNT)

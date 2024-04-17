@@ -2001,16 +2001,18 @@ static noinline void check_xas_get_order(struct xarray *xa)
 				xas_unlock(&xas);
 			} while (xas_nomem(&xas, GFP_KERNEL));
 
-			xas_lock(&xas);
 			for (j = i << order; j < (i + 1) << order; j++) {
 				xas_set_order(&xas, j, 0);
+				rcu_read_lock();
 				xas_load(&xas);
 				XA_BUG_ON(xa, xas_get_order(&xas) != order);
+				rcu_read_unlock();
 			}
-			xas_unlock(&xas);
 
+			xas_lock(&xas);
 			xas_set_order(&xas, i << order, order);
 			xas_store(&xas, NULL);
+			xas_unlock(&xas);
 		}
 	}
 }
@@ -2040,8 +2042,8 @@ static noinline void check_xas_conflict_get_order(struct xarray *xa)
 			j = i << order;
 			for (k = 0; k < order; k++) {
 				only_once = 0;
-				xas_lock(&xas);
 				xas_set_order(&xas, j + (1 << k), k);
+				xas_lock(&xas);
 				xas_for_each_conflict(&xas, entry) {
 					XA_BUG_ON(xa, entry != xa_mk_value(i));
 					XA_BUG_ON(xa, xas_get_order(&xas) != order);
@@ -2053,8 +2055,8 @@ static noinline void check_xas_conflict_get_order(struct xarray *xa)
 
 			if (order < max_order - 1) {
 				only_once = 0;
-				xas_lock(&xas);
 				xas_set_order(&xas, (i & ~1UL) << order, order + 1);
+				xas_lock(&xas);
 				xas_for_each_conflict(&xas, entry) {
 					XA_BUG_ON(xa, entry != xa_mk_value(i));
 					XA_BUG_ON(xa, xas_get_order(&xas) != order);
@@ -2065,7 +2067,9 @@ static noinline void check_xas_conflict_get_order(struct xarray *xa)
 			}
 
 			xas_set_order(&xas, i << order, order);
+			xas_lock(&xas);
 			xas_store(&xas, NULL);
+			xas_unlock(&xas);
 		}
 	}
 }

@@ -1138,7 +1138,7 @@ int bch2_btree_node_prefetch(struct btree_trans *trans,
 				 level, SIX_LOCK_read, false);
 	if (!IS_ERR_OR_NULL(b))
 		six_unlock_read(&b->c.lock);
-	return PTR_ERR_OR_ZERO(b);
+	return bch2_trans_relock(trans) ?: PTR_ERR_OR_ZERO(b);
 }
 
 void bch2_btree_node_evict(struct btree_trans *trans, const struct bkey_i *k)

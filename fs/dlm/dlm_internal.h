@@ -34,6 +34,7 @@
 #include <linux/kernel.h>
 #include <linux/jhash.h>
 #include <linux/miscdevice.h>
+#include <linux/rhashtable.h>
 #include <linux/mutex.h>
 #include <linux/idr.h>
 #include <linux/ratelimit.h>
@@ -98,17 +99,6 @@ do { \
     panic("DLM:  Record message above and reboot.\n"); \
   } \
 }
-
-
-#define DLM_RTF_SHRINK_BIT	0
-
-struct dlm_rsbtable {
-	struct rb_root		keep;
-	struct rb_root		toss;
-	spinlock_t		lock;
-	unsigned long		flags;
-};
-
 
 /*
  * Lockspace member (per node in a ls)
@@ -329,21 +319,22 @@ struct dlm_rsb {
 	int			res_id;		/* for ls_recover_idr */
 	uint32_t                res_lvbseq;
 	uint32_t		res_hash;
-	uint32_t		res_bucket;	/* rsbtbl */
 	unsigned long		res_toss_time;
 	uint32_t		res_first_lkid;
 	struct list_head	res_lookup;	/* lkbs waiting on first */
 	union {
 		struct list_head	res_hashchain;
-		struct rb_node		res_hashnode;	/* rsbtbl */
+		struct rhash_head	res_node; /* rsbtbl */
 	};
 	struct list_head	res_grantqueue;
 	struct list_head	res_convertqueue;
 	struct list_head	res_waitqueue;
 
+	struct list_head	res_rsbs_list;
 	struct list_head	res_root_list;	    /* used for recovery */
 	struct list_head	res_masters_list;   /* used for recovery */
 	struct list_head	res_recover_list;   /* used for recovery */
+	struct list_head	res_toss_q_list;
 	int			res_recover_locks_count;
 
 	char			*res_lvbptr;
@@ -377,6 +368,7 @@ enum rsb_flags {
 	RSB_RECOVER_CONVERT,
 	RSB_RECOVER_GRANT,
 	RSB_RECOVER_LVB_INVAL,
+	RSB_TOSS,
 };
 
 static inline void rsb_set_flag(struct dlm_rsb *r, enum rsb_flags flag)
@@ -590,10 +582,22 @@ struct dlm_ls {
 	struct kobject		ls_kobj;
 
 	struct idr		ls_lkbidr;
-	spinlock_t		ls_lkbidr_spin;
+	rwlock_t		ls_lkbidr_lock;
 
-	struct dlm_rsbtable	*ls_rsbtbl;
-	uint32_t		ls_rsbtbl_size;
+	struct rhashtable	ls_rsbtbl;
+	rwlock_t		ls_rsbtbl_lock;
+
+	struct list_head	ls_toss;
+	struct list_head	ls_keep;
+
+	struct timer_list	ls_timer;
+	/* this queue is ordered according the
+	 * absolute res_toss_time jiffies time
+	 * to mod_timer() with the first element
+	 * if necessary.
+	 */
+	struct list_head	ls_toss_q;
+	spinlock_t		ls_toss_q_lock;
 
 	spinlock_t		ls_waiters_lock;
 	struct list_head	ls_waiters;	/* lkbs needing a reply */
@@ -604,9 +608,6 @@ struct dlm_ls {
 	spinlock_t		ls_new_rsb_spin;
 	int			ls_new_rsb_count;
 	struct list_head	ls_new_rsb;	/* new rsb structs */
-
-	char			*ls_remove_names[DLM_REMOVE_NAMES_MAX];
-	int			ls_remove_lens[DLM_REMOVE_NAMES_MAX];
 
 	struct list_head	ls_nodes;	/* current nodes in ls */
 	struct list_head	ls_nodes_gone;	/* dead node list, recovery */
@@ -644,7 +645,6 @@ struct dlm_ls {
 
 	spinlock_t		ls_cb_lock;
 	struct list_head	ls_cb_delay; /* save for queue_work later */
-	struct timer_list	ls_timer;
 	struct task_struct	*ls_recoverd_task;
 	struct mutex		ls_recoverd_active;
 	spinlock_t		ls_recover_lock;

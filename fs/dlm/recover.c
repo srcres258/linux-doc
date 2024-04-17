@@ -881,22 +881,23 @@ void dlm_recover_rsbs(struct dlm_ls *ls, const struct list_head *root_list)
 
 void dlm_clear_toss(struct dlm_ls *ls)
 {
-	struct rb_node *n, *next;
-	struct dlm_rsb *r;
+	struct dlm_rsb *r, *safe;
 	unsigned int count = 0;
-	int i;
 
-	for (i = 0; i < ls->ls_rsbtbl_size; i++) {
-		spin_lock_bh(&ls->ls_rsbtbl[i].lock);
-		for (n = rb_first(&ls->ls_rsbtbl[i].toss); n; n = next) {
-			next = rb_next(n);
-			r = rb_entry(n, struct dlm_rsb, res_hashnode);
-			rb_erase(n, &ls->ls_rsbtbl[i].toss);
-			dlm_free_rsb(r);
-			count++;
-		}
-		spin_unlock_bh(&ls->ls_rsbtbl[i].lock);
+	write_lock_bh(&ls->ls_rsbtbl_lock);
+	list_for_each_entry_safe(r, safe, &ls->ls_toss, res_rsbs_list) {
+		list_del(&r->res_rsbs_list);
+		rhashtable_remove_fast(&ls->ls_rsbtbl, &r->res_node,
+				       dlm_rhash_rsb_params);
+
+		/* remove it from the toss queue if its part of it */
+		if (!list_empty(&r->res_toss_q_list))
+			list_del_init(&r->res_toss_q_list);
+
+		free_toss_rsb(r);
+		count++;
 	}
+	write_unlock_bh(&ls->ls_rsbtbl_lock);
 
 	if (count)
 		log_rinfo(ls, "dlm_clear_toss %u done", count);

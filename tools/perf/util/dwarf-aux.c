@@ -1361,7 +1361,7 @@ struct find_var_data {
 #define DWARF_OP_DIRECT_REGS  32
 
 static bool match_var_offset(Dwarf_Die *die_mem, struct find_var_data *data,
-			     u64 addr_offset, u64 addr_type)
+			     u64 addr_offset, u64 addr_type, bool is_pointer)
 {
 	Dwarf_Die type_die;
 	Dwarf_Word size;
@@ -1372,8 +1372,17 @@ static bool match_var_offset(Dwarf_Die *die_mem, struct find_var_data *data,
 		return true;
 	}
 
+	if (addr_offset < addr_type)
+		return false;
+
 	if (die_get_real_type(die_mem, &type_die) == NULL)
 		return false;
+
+	if (is_pointer && dwarf_tag(&type_die) == DW_TAG_pointer_type) {
+		/* Get the target type of the pointer */
+		if (die_get_real_type(&type_die, &type_die) == NULL)
+			return false;
+	}
 
 	if (dwarf_aggregate_size(&type_die, &size) < 0)
 		return false;
@@ -1440,33 +1449,39 @@ static int __die_find_var_reg_cb(Dwarf_Die *die_mem, void *arg)
 
 		/* Local variables accessed using frame base register */
 		if (data->is_fbreg && ops->atom == DW_OP_fbreg &&
-		    data->offset >= (int)ops->number &&
 		    check_allowed_ops(ops, nops) &&
-		    match_var_offset(die_mem, data, data->offset, ops->number))
+		    match_var_offset(die_mem, data, data->offset, ops->number,
+				     /*is_pointer=*/false))
 			return DIE_FIND_CB_END;
 
 		/* Only match with a simple case */
 		if (data->reg < DWARF_OP_DIRECT_REGS) {
 			/* pointer variables saved in a register 0 to 31 */
 			if (ops->atom == (DW_OP_reg0 + data->reg) &&
-			    check_allowed_ops(ops, nops))
+			    check_allowed_ops(ops, nops) &&
+			    match_var_offset(die_mem, data, data->offset, 0,
+					     /*is_pointer=*/true))
 				return DIE_FIND_CB_END;
 
 			/* Local variables accessed by a register + offset */
 			if (ops->atom == (DW_OP_breg0 + data->reg) &&
 			    check_allowed_ops(ops, nops) &&
-			    match_var_offset(die_mem, data, data->offset, ops->number))
+			    match_var_offset(die_mem, data, data->offset, ops->number,
+					     /*is_pointer=*/false))
 				return DIE_FIND_CB_END;
 		} else {
 			/* pointer variables saved in a register 32 or above */
 			if (ops->atom == DW_OP_regx && ops->number == data->reg &&
-			    check_allowed_ops(ops, nops))
+			    check_allowed_ops(ops, nops) &&
+			    match_var_offset(die_mem, data, data->offset, 0,
+					     /*is_pointer=*/true))
 				return DIE_FIND_CB_END;
 
 			/* Local variables accessed by a register + offset */
 			if (ops->atom == DW_OP_bregx && data->reg == ops->number &&
 			    check_allowed_ops(ops, nops) &&
-			    match_var_offset(die_mem, data, data->offset, ops->number2))
+			    match_var_offset(die_mem, data, data->offset, ops->number2,
+					     /*is_poitner=*/false))
 				return DIE_FIND_CB_END;
 		}
 	}
@@ -1524,11 +1539,9 @@ static int __die_find_var_addr_cb(Dwarf_Die *die_mem, void *arg)
 		if (ops->atom != DW_OP_addr)
 			continue;
 
-		if (data->addr < ops->number)
-			continue;
-
 		if (check_allowed_ops(ops, nops) &&
-		    match_var_offset(die_mem, data, data->addr, ops->number))
+		    match_var_offset(die_mem, data, data->addr, ops->number,
+				     /*is_pointer=*/false))
 			return DIE_FIND_CB_END;
 	}
 	return DIE_FIND_CB_SIBLING;

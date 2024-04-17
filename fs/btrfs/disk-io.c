@@ -776,7 +776,7 @@ int btrfs_global_root_insert(struct btrfs_root *root)
 	if (tmp) {
 		ret = -EEXIST;
 		btrfs_warn(fs_info, "global root %llu %llu already exists",
-				root->root_key.objectid, root->root_key.offset);
+			   btrfs_root_id(root), root->root_key.offset);
 	}
 	return ret;
 }
@@ -1012,7 +1012,7 @@ int btrfs_add_log_tree(struct btrfs_trans_handle *trans,
 	}
 
 	log_root->last_trans = trans->transid;
-	log_root->root_key.offset = root->root_key.objectid;
+	log_root->root_key.offset = btrfs_root_id(root);
 
 	inode_item = &log_root->root_item.inode;
 	btrfs_set_stack_inode_generation(inode_item, 1);
@@ -1077,14 +1077,14 @@ static struct btrfs_root *read_tree_root_path(struct btrfs_root *tree_root,
 	 * match its root node owner
 	 */
 	if (!test_bit(BTRFS_FS_STATE_DUMMY_FS_INFO, &fs_info->fs_state) &&
-	    root->root_key.objectid != BTRFS_TREE_LOG_OBJECTID &&
-	    root->root_key.objectid != BTRFS_TREE_RELOC_OBJECTID &&
-	    root->root_key.objectid != btrfs_header_owner(root->node)) {
+	    btrfs_root_id(root) != BTRFS_TREE_LOG_OBJECTID &&
+	    btrfs_root_id(root) != BTRFS_TREE_RELOC_OBJECTID &&
+	    btrfs_root_id(root) != btrfs_header_owner(root->node)) {
 		btrfs_crit(fs_info,
 "root=%llu block=%llu, tree root owner mismatch, have %llu expect %llu",
-			   root->root_key.objectid, root->node->start,
+			   btrfs_root_id(root), root->node->start,
 			   btrfs_header_owner(root->node),
-			   root->root_key.objectid);
+			   btrfs_root_id(root));
 		ret = -EUCLEAN;
 		goto fail;
 	}
@@ -1121,9 +1121,9 @@ static int btrfs_init_fs_root(struct btrfs_root *root, dev_t anon_dev)
 
 	btrfs_drew_lock_init(&root->snapshot_lock);
 
-	if (root->root_key.objectid != BTRFS_TREE_LOG_OBJECTID &&
+	if (btrfs_root_id(root) != BTRFS_TREE_LOG_OBJECTID &&
 	    !btrfs_is_data_reloc_root(root) &&
-	    is_fstree(root->root_key.objectid)) {
+	    is_fstree(btrfs_root_id(root))) {
 		set_bit(BTRFS_ROOT_SHAREABLE, &root->state);
 		btrfs_check_and_init_root_item(&root->root_item);
 	}
@@ -1132,7 +1132,7 @@ static int btrfs_init_fs_root(struct btrfs_root *root, dev_t anon_dev)
 	 * Don't assign anonymous block device to roots that are not exposed to
 	 * userspace, the id pool is limited to 1M
 	 */
-	if (is_fstree(root->root_key.objectid) &&
+	if (is_fstree(btrfs_root_id(root)) &&
 	    btrfs_root_refs(&root->root_item) > 0) {
 		if (!anon_dev) {
 			ret = get_anon_bdev(&root->anon_dev);
@@ -1219,7 +1219,7 @@ int btrfs_insert_fs_root(struct btrfs_fs_info *fs_info,
 
 	spin_lock(&fs_info->fs_roots_radix_lock);
 	ret = radix_tree_insert(&fs_info->fs_roots_radix,
-				(unsigned long)root->root_key.objectid,
+				(unsigned long)btrfs_root_id(root),
 				root);
 	if (ret == 0) {
 		btrfs_grab_root(root);
@@ -1266,11 +1266,14 @@ static void free_global_roots(struct btrfs_fs_info *fs_info)
 
 void btrfs_free_fs_info(struct btrfs_fs_info *fs_info)
 {
-	if (fs_info->fs_devices)
-		btrfs_close_devices(fs_info->fs_devices);
+	struct percpu_counter *em_counter = &fs_info->evictable_extent_maps;
+
 	percpu_counter_destroy(&fs_info->dirty_metadata_bytes);
 	percpu_counter_destroy(&fs_info->delalloc_bytes);
 	percpu_counter_destroy(&fs_info->ordered_bytes);
+	if (percpu_counter_initialized(em_counter))
+		ASSERT(percpu_counter_sum_positive(em_counter) == 0);
+	percpu_counter_destroy(em_counter);
 	percpu_counter_destroy(&fs_info->dev_replace.bio_counter);
 	btrfs_free_csum_hash(fs_info);
 	btrfs_free_stripe_hash_table(fs_info);
@@ -2587,7 +2590,7 @@ static int load_super_root(struct btrfs_root *root, u64 bytenr, u64 gen, int lev
 	struct btrfs_tree_parent_check check = {
 		.level = level,
 		.transid = gen,
-		.owner_root = root->root_key.objectid
+		.owner_root = btrfs_root_id(root)
 	};
 	int ret = 0;
 
@@ -2853,6 +2856,10 @@ static int init_mount_fs_info(struct btrfs_fs_info *fs_info, struct super_block 
 	if (ret)
 		return ret;
 
+	ret = percpu_counter_init(&fs_info->evictable_extent_maps, 0, GFP_KERNEL);
+	if (ret)
+		return ret;
+
 	ret = percpu_counter_init(&fs_info->dirty_metadata_bytes, 0, GFP_KERNEL);
 	if (ret)
 		return ret;
@@ -2935,7 +2942,7 @@ static int btrfs_cleanup_fs_roots(struct btrfs_fs_info *fs_info)
 			spin_unlock(&fs_info->fs_roots_radix_lock);
 			break;
 		}
-		root_objectid = gang[ret - 1]->root_key.objectid + 1;
+		root_objectid = btrfs_root_id(gang[ret - 1]) + 1;
 
 		for (i = 0; i < ret; i++) {
 			/* Avoid to grab roots in dead_roots. */
@@ -2951,7 +2958,7 @@ static int btrfs_cleanup_fs_roots(struct btrfs_fs_info *fs_info)
 		for (i = 0; i < ret; i++) {
 			if (!gang[i])
 				continue;
-			root_objectid = gang[i]->root_key.objectid;
+			root_objectid = btrfs_root_id(gang[i]);
 			err = btrfs_orphan_cleanup(gang[i]);
 			if (err)
 				goto out;
@@ -3664,7 +3671,7 @@ struct btrfs_super_block *btrfs_read_dev_one_super(struct block_device *bdev,
 	struct btrfs_super_block *super;
 	struct page *page;
 	u64 bytenr, bytenr_orig;
-	struct address_space *mapping = bdev_mapping(bdev);
+	struct address_space *mapping = bdev->bd_mapping;
 	int ret;
 
 	bytenr_orig = btrfs_sb_offset(copy_num);
@@ -3751,7 +3758,7 @@ static int write_dev_supers(struct btrfs_device *device,
 			    struct btrfs_super_block *sb, int max_mirrors)
 {
 	struct btrfs_fs_info *fs_info = device->fs_info;
-	struct address_space *mapping = bdev_mapping(device->bdev);
+	struct address_space *mapping = device->bdev->bd_mapping;
 	SHASH_DESC_ON_STACK(shash, fs_info->csum_shash);
 	int i;
 	int errors = 0;
@@ -3868,7 +3875,7 @@ static int wait_dev_supers(struct btrfs_device *device, int max_mirrors)
 		    device->commit_total_bytes)
 			break;
 
-		page = find_get_page(bdev_mapping(device->bdev),
+		page = find_get_page(device->bdev->bd_mapping,
 				     bytenr >> PAGE_SHIFT);
 		if (!page) {
 			errors++;
@@ -4152,7 +4159,7 @@ void btrfs_drop_and_free_fs_root(struct btrfs_fs_info *fs_info,
 
 	spin_lock(&fs_info->fs_roots_radix_lock);
 	radix_tree_delete(&fs_info->fs_roots_radix,
-			  (unsigned long)root->root_key.objectid);
+			  (unsigned long)btrfs_root_id(root));
 	if (test_and_clear_bit(BTRFS_ROOT_IN_RADIX, &root->state))
 		drop_ref = true;
 	spin_unlock(&fs_info->fs_roots_radix_lock);
@@ -4494,7 +4501,7 @@ static void btrfs_drop_all_logs(struct btrfs_fs_info *fs_info)
 		for (i = 0; i < ret; i++) {
 			if (!gang[i])
 				continue;
-			root_objectid = gang[i]->root_key.objectid;
+			root_objectid = btrfs_root_id(gang[i]);
 			btrfs_free_log(NULL, gang[i]);
 			btrfs_put_root(gang[i]);
 		}
@@ -4825,7 +4832,7 @@ static void btrfs_free_all_qgroup_pertrans(struct btrfs_fs_info *fs_info)
 
 			btrfs_qgroup_free_meta_all_pertrans(root);
 			radix_tree_tag_clear(&fs_info->fs_roots_radix,
-					(unsigned long)root->root_key.objectid,
+					(unsigned long)btrfs_root_id(root),
 					BTRFS_ROOT_TRANS_TAG);
 		}
 	}
@@ -4966,7 +4973,7 @@ int btrfs_get_free_objectid(struct btrfs_root *root, u64 *objectid)
 	if (unlikely(root->free_objectid >= BTRFS_LAST_FREE_OBJECTID)) {
 		btrfs_warn(root->fs_info,
 			   "the objectid of root %llu reaches its highest value",
-			   root->root_key.objectid);
+			   btrfs_root_id(root));
 		ret = -ENOSPC;
 		goto out;
 	}

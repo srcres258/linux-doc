@@ -172,7 +172,7 @@ static const char *read_super(struct cache_sb *sb, struct file *bdev_file,
 	struct page *page;
 	unsigned int i;
 
-	page = read_cache_page_gfp(file_mapping(bdev_file),
+	page = read_cache_page_gfp(bdev->bd_mapping,
 				   SB_OFFSET >> PAGE_SHIFT, GFP_KERNEL);
 	if (IS_ERR(page))
 		return "IO error";

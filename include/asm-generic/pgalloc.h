@@ -16,9 +16,9 @@
  *
  * Return: pointer to the allocated memory or %NULL on error
  */
-static inline pte_t *__pte_alloc_one_kernel(struct mm_struct *mm)
+static inline pte_t *__pte_alloc_one_kernel_noprof(struct mm_struct *mm)
 {
-	struct ptdesc *ptdesc = pagetable_alloc(GFP_PGTABLE_KERNEL &
+	struct ptdesc *ptdesc = pagetable_alloc_noprof(GFP_PGTABLE_KERNEL &
 			~__GFP_HIGHMEM, 0);
 
 	if (!ptdesc)
@@ -27,6 +27,7 @@ static inline pte_t *__pte_alloc_one_kernel(struct mm_struct *mm)
 	__pagetable_pte_ctor(ptdesc);
 	return ptdesc_address(ptdesc);
 }
+#define __pte_alloc_one_kernel(...)	alloc_hooks(__pte_alloc_one_kernel_noprof(__VA_ARGS__))
 
 #ifndef __HAVE_ARCH_PTE_ALLOC_ONE_KERNEL
 /**
@@ -35,10 +36,11 @@ static inline pte_t *__pte_alloc_one_kernel(struct mm_struct *mm)
  *
  * Return: pointer to the allocated memory or %NULL on error
  */
-static inline pte_t *pte_alloc_one_kernel(struct mm_struct *mm)
+static inline pte_t *pte_alloc_one_kernel_noprof(struct mm_struct *mm)
 {
-	return __pte_alloc_one_kernel(mm);
+	return __pte_alloc_one_kernel_noprof(mm);
 }
+#define pte_alloc_one_kernel(...)	alloc_hooks(pte_alloc_one_kernel_noprof(__VA_ARGS__))
 #endif
 
 /**
@@ -66,11 +68,11 @@ static inline void pte_free_kernel(struct mm_struct *mm, pte_t *pte)
  *
  * Return: `struct page` referencing the ptdesc or %NULL on error
  */
-static inline pgtable_t __pte_alloc_one(struct mm_struct *mm, gfp_t gfp)
+static inline pgtable_t __pte_alloc_one_noprof(struct mm_struct *mm, gfp_t gfp)
 {
 	struct ptdesc *ptdesc;
 
-	ptdesc = pagetable_alloc(gfp, 0);
+	ptdesc = pagetable_alloc_noprof(gfp, 0);
 	if (!ptdesc)
 		return NULL;
 	if (!pagetable_pte_ctor(ptdesc)) {
@@ -80,6 +82,7 @@ static inline pgtable_t __pte_alloc_one(struct mm_struct *mm, gfp_t gfp)
 
 	return ptdesc_page(ptdesc);
 }
+#define __pte_alloc_one(...)	alloc_hooks(__pte_alloc_one_noprof(__VA_ARGS__))
 
 #ifndef __HAVE_ARCH_PTE_ALLOC_ONE
 /**
@@ -90,10 +93,11 @@ static inline pgtable_t __pte_alloc_one(struct mm_struct *mm, gfp_t gfp)
  *
  * Return: `struct page` referencing the ptdesc or %NULL on error
  */
-static inline pgtable_t pte_alloc_one(struct mm_struct *mm)
+static inline pgtable_t pte_alloc_one_noprof(struct mm_struct *mm)
 {
-	return __pte_alloc_one(mm, GFP_PGTABLE_USER);
+	return __pte_alloc_one_noprof(mm, GFP_PGTABLE_USER);
 }
+#define pte_alloc_one(...)	alloc_hooks(pte_alloc_one_noprof(__VA_ARGS__))
 #endif
 
 /*
@@ -129,14 +133,14 @@ static inline void pte_free(struct mm_struct *mm, struct page *pte_page)
  *
  * Return: pointer to the allocated memory or %NULL on error
  */
-static inline pmd_t *pmd_alloc_one(struct mm_struct *mm, unsigned long addr)
+static inline pmd_t *pmd_alloc_one_noprof(struct mm_struct *mm, unsigned long addr)
 {
 	struct ptdesc *ptdesc;
 	gfp_t gfp = GFP_PGTABLE_USER;
 
 	if (mm == &init_mm)
 		gfp = GFP_PGTABLE_KERNEL;
-	ptdesc = pagetable_alloc(gfp, 0);
+	ptdesc = pagetable_alloc_noprof(gfp, 0);
 	if (!ptdesc)
 		return NULL;
 
@@ -148,6 +152,7 @@ static inline pmd_t *pmd_alloc_one(struct mm_struct *mm, unsigned long addr)
 	}
 	return ptdesc_address(ptdesc);
 }
+#define pmd_alloc_one(...)	alloc_hooks(pmd_alloc_one_noprof(__VA_ARGS__))
 #endif
 
 #ifndef __HAVE_ARCH_PMD_FREE
@@ -168,7 +173,7 @@ static inline void pmd_free(struct mm_struct *mm, pmd_t *pmd)
 
 #if CONFIG_PGTABLE_LEVELS > 3
 
-static inline pud_t *__pud_alloc_one(struct mm_struct *mm, unsigned long addr)
+static inline pud_t *__pud_alloc_one_noprof(struct mm_struct *mm, unsigned long addr)
 {
 	gfp_t gfp = GFP_PGTABLE_USER;
 	struct ptdesc *ptdesc;
@@ -177,13 +182,14 @@ static inline pud_t *__pud_alloc_one(struct mm_struct *mm, unsigned long addr)
 		gfp = GFP_PGTABLE_KERNEL;
 	gfp &= ~__GFP_HIGHMEM;
 
-	ptdesc = pagetable_alloc(gfp, 0);
+	ptdesc = pagetable_alloc_noprof(gfp, 0);
 	if (!ptdesc)
 		return NULL;
 
 	pagetable_pud_ctor(ptdesc);
 	return ptdesc_address(ptdesc);
 }
+#define __pud_alloc_one(...)	alloc_hooks(__pud_alloc_one_noprof(__VA_ARGS__))
 
 #ifndef __HAVE_ARCH_PUD_ALLOC_ONE
 /**
@@ -195,10 +201,11 @@ static inline pud_t *__pud_alloc_one(struct mm_struct *mm, unsigned long addr)
  *
  * Return: pointer to the allocated memory or %NULL on error
  */
-static inline pud_t *pud_alloc_one(struct mm_struct *mm, unsigned long addr)
+static inline pud_t *pud_alloc_one_noprof(struct mm_struct *mm, unsigned long addr)
 {
-	return __pud_alloc_one(mm, addr);
+	return __pud_alloc_one_noprof(mm, addr);
 }
+#define pud_alloc_one(...)	alloc_hooks(pud_alloc_one_noprof(__VA_ARGS__))
 #endif
 
 static inline void __pud_free(struct mm_struct *mm, pud_t *pud)

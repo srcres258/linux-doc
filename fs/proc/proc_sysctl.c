@@ -30,9 +30,7 @@ static const struct file_operations proc_sys_dir_file_operations;
 static const struct inode_operations proc_sys_dir_operations;
 
 /* Support for permanently empty directories */
-static const struct ctl_table sysctl_mount_point[] = {
-	{ }
-};
+static struct ctl_table sysctl_mount_point[] = { };
 
 /**
  * register_sysctl_mount_point() - registers a sysctl mount point
@@ -210,6 +208,8 @@ static void init_header(struct ctl_table_header *head,
 			node++;
 		}
 	}
+	if (table == sysctl_mount_point)
+		sysctl_set_perm_empty_ctl_header(head);
 }
 
 static void erase_header(struct ctl_table_header *head)
@@ -232,8 +232,7 @@ static int insert_header(struct ctl_dir *dir, struct ctl_table_header *header)
 		return -EROFS;
 
 	/* Am I creating a permanently empty directory? */
-	if (header->ctl_table_size > 0 &&
-	    sysctl_is_perm_empty_ctl_table(header->ctl_table)) {
+	if (sysctl_is_perm_empty_ctl_header(header)) {
 		if (!RB_EMPTY_ROOT(&dir->root))
 			return -EINVAL;
 		sysctl_set_perm_empty_ctl_header(dir_h);
@@ -480,7 +479,7 @@ static struct inode *proc_sys_make_inode(struct super_block *sb,
 	}
 
 	if (root->set_ownership)
-		root->set_ownership(head, table, &inode->i_uid, &inode->i_gid);
+		root->set_ownership(head, &inode->i_uid, &inode->i_gid);
 	else {
 		inode->i_uid = GLOBAL_ROOT_UID;
 		inode->i_gid = GLOBAL_ROOT_GID;
@@ -1210,7 +1209,7 @@ static bool get_links(struct ctl_dir *dir,
 		return true;
 
 	if (header->ctl_table_size == 0 ||
-	    sysctl_is_perm_empty_ctl_table(header->ctl_table))
+	    sysctl_is_perm_empty_ctl_header(header))
 		return true;
 
 	/* Are there links available for every entry in table? */

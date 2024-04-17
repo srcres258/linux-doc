@@ -198,19 +198,11 @@ static struct dlm_rsb *find_rsb_root(struct dlm_ls *ls, const char *name,
 				     int len)
 {
 	struct dlm_rsb *r;
-	uint32_t hash, bucket;
 	int rv;
 
-	hash = jhash(name, len, 0);
-	bucket = hash & (ls->ls_rsbtbl_size - 1);
-
-	spin_lock_bh(&ls->ls_rsbtbl[bucket].lock);
-	rv = dlm_search_rsb_tree(&ls->ls_rsbtbl[bucket].keep, name, len, &r);
-	if (rv)
-		rv = dlm_search_rsb_tree(&ls->ls_rsbtbl[bucket].toss,
-					 name, len, &r);
-	spin_unlock_bh(&ls->ls_rsbtbl[bucket].lock);
-
+	read_lock_bh(&ls->ls_rsbtbl_lock);
+	rv = dlm_search_rsb_tree(&ls->ls_rsbtbl, name, len, &r);
+	read_unlock_bh(&ls->ls_rsbtbl_lock);
 	if (!rv)
 		return r;
 

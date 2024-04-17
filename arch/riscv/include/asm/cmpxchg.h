@@ -9,7 +9,6 @@
 #include <linux/bug.h>
 
 #include <asm/fence.h>
-#include <linux/cmpxchg-emu.h>
 
 #define __arch_xchg_masked(prepend, append, r, p, n)			\
 ({									\

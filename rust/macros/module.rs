@@ -199,6 +199,17 @@ pub(crate) fn module(ts: TokenStream) -> TokenStream {
             /// Used by the printing macros, e.g. [`info!`].
             const __LOG_PREFIX: &[u8] = b\"{name}\\0\";
 
+            // SAFETY: `__this_module` is constructed by the kernel at load time and will not be
+            // freed until the module is unloaded.
+            #[cfg(MODULE)]
+            static THIS_MODULE: kernel::ThisModule = unsafe {{
+                kernel::ThisModule::from_ptr(&kernel::bindings::__this_module as *const _ as *mut _)
+            }};
+            #[cfg(not(MODULE))]
+            static THIS_MODULE: kernel::ThisModule = unsafe {{
+                kernel::ThisModule::from_ptr(core::ptr::null_mut())
+            }};
+
             // Double nested modules, since then nobody can access the public items inside.
             mod __module_init {{
                 mod __module_init {{
@@ -214,17 +225,6 @@ pub(crate) fn module(ts: TokenStream) -> TokenStream {
                     static __IS_RUST_MODULE: () = ();
 
                     static mut __MOD: Option<{type_}> = None;
-
-                    // SAFETY: `__this_module` is constructed by the kernel at load time and will not be
-                    // freed until the module is unloaded.
-                    #[cfg(MODULE)]
-                    static THIS_MODULE: kernel::ThisModule = unsafe {{
-                        kernel::ThisModule::from_ptr(&kernel::bindings::__this_module as *const _ as *mut _)
-                    }};
-                    #[cfg(not(MODULE))]
-                    static THIS_MODULE: kernel::ThisModule = unsafe {{
-                        kernel::ThisModule::from_ptr(core::ptr::null_mut())
-                    }};
 
                     // Loadable modules need to export the `{{init,cleanup}}_module` identifiers.
                     /// # Safety
@@ -301,7 +301,7 @@ pub(crate) fn module(ts: TokenStream) -> TokenStream {
                     ///
                     /// This function must only be called once.
                     unsafe fn __init() -> core::ffi::c_int {{
-                        match <{type_} as kernel::Module>::init(&THIS_MODULE) {{
+                        match <{type_} as kernel::Module>::init(&super::super::THIS_MODULE) {{
                             Ok(m) => {{
                                 // SAFETY: No data race, since `__MOD` can only be accessed by this
                                 // module and there only `__init` and `__exit` access it. These

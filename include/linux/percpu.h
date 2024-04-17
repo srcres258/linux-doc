@@ -151,6 +151,15 @@ extern size_t pcpu_alloc_size(void __percpu *__pdata);
 #define alloc_percpu(type)						\
 	(typeof(type) __percpu *)__alloc_percpu(sizeof(type),		\
 						__alignof__(type))
+#define alloc_percpu_noprof(type)					\
+	((typeof(type) __percpu *)pcpu_alloc_noprof(sizeof(type),	\
+					__alignof__(type), false, GFP_KERNEL))
+
+extern void free_percpu(void __percpu *__pdata);
+
+DEFINE_FREE(free_percpu, void __percpu *, free_percpu(_T))
+
+extern phys_addr_t per_cpu_ptr_to_phys(void *addr);
 
 extern void free_percpu(void __percpu *__pdata);
 

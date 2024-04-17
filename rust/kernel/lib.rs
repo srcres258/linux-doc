@@ -12,7 +12,6 @@
 //! do so first instead of bypassing this crate.
 
 #![no_std]
-#![feature(allocator_api)]
 #![feature(coerce_unsized)]
 #![feature(dispatch_from_dyn)]
 #![feature(new_uninit)]
@@ -27,9 +26,7 @@ compile_error!("Missing kernel configuration for conditional compilation");
 // Allow proc-macros to refer to `::kernel` inside the `kernel` crate (this crate).
 extern crate self as kernel;
 
-#[cfg(not(test))]
-#[cfg(not(testlib))]
-mod allocator;
+pub mod alloc;
 mod build_assert;
 pub mod error;
 pub mod init;

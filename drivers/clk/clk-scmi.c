@@ -5,6 +5,7 @@
  * Copyright (C) 2018-2024 ARM Ltd.
  */
 
+#include <linux/bits.h>
 #include <linux/clk-provider.h>
 #include <linux/device.h>
 #include <linux/err.h>
@@ -18,16 +19,15 @@
 
 enum scmi_clk_feats {
 	SCMI_CLK_ATOMIC_SUPPORTED,
-	SCMI_CLK_STATE_CTRL_FORBIDDEN,
-	SCMI_CLK_RATE_CTRL_FORBIDDEN,
-	SCMI_CLK_PARENT_CTRL_FORBIDDEN,
+	SCMI_CLK_STATE_CTRL_SUPPORTED,
+	SCMI_CLK_RATE_CTRL_SUPPORTED,
+	SCMI_CLK_PARENT_CTRL_SUPPORTED,
 	SCMI_CLK_DUTY_CYCLE_SUPPORTED,
-	SCMI_CLK_MAX_FEATS
+	SCMI_CLK_FEATS_COUNT
 };
 
-#define SCMI_MAX_CLK_OPS	(1 << SCMI_CLK_MAX_FEATS)
+#define SCMI_MAX_CLK_OPS	BIT(SCMI_CLK_FEATS_COUNT)
 
-static const struct clk_ops *clk_ops_db[SCMI_MAX_CLK_OPS];
 static const struct scmi_clk_proto_ops *scmi_proto_clk_ops;
 
 struct scmi_clk {
@@ -248,12 +248,12 @@ static int scmi_clk_ops_init(struct device *dev, struct scmi_clk *sclk,
 /**
  * scmi_clk_ops_alloc() - Alloc and configure clock operations
  * @dev: A device reference for devres
- * @feats_key: A bitmap representing the desired clk_ops capabilities.
+ * @feats_key: A bitmap representing the desired clk_ops capabilities
  *
  * Allocate and configure a proper set of clock operations depending on the
  * specifically required SCMI clock features.
  *
- * Return: A pointer to the allocated and configured clk_ops on Success,
+ * Return: A pointer to the allocated and configured clk_ops on success,
  *	   or NULL on allocation failure.
  */
 static const struct clk_ops *
@@ -273,7 +273,7 @@ scmi_clk_ops_alloc(struct device *dev, unsigned long feats_key)
 	 * only the prepare/unprepare API, as allowed by the clock framework
 	 * when atomic calls are not available.
 	 */
-	if (!(feats_key & BIT(SCMI_CLK_STATE_CTRL_FORBIDDEN))) {
+	if (feats_key & BIT(SCMI_CLK_STATE_CTRL_SUPPORTED)) {
 		if (feats_key & BIT(SCMI_CLK_ATOMIC_SUPPORTED)) {
 			ops->enable = scmi_clk_atomic_enable;
 			ops->disable = scmi_clk_atomic_disable;
@@ -290,12 +290,12 @@ scmi_clk_ops_alloc(struct device *dev, unsigned long feats_key)
 	ops->recalc_rate = scmi_clk_recalc_rate;
 	ops->round_rate = scmi_clk_round_rate;
 	ops->determine_rate = scmi_clk_determine_rate;
-	if (!(feats_key & BIT(SCMI_CLK_RATE_CTRL_FORBIDDEN)))
+	if (feats_key & BIT(SCMI_CLK_RATE_CTRL_SUPPORTED))
 		ops->set_rate = scmi_clk_set_rate;
 
 	/* Parent ops */
 	ops->get_parent = scmi_clk_get_parent;
-	if (!(feats_key & BIT(SCMI_CLK_PARENT_CTRL_FORBIDDEN)))
+	if (feats_key & BIT(SCMI_CLK_PARENT_CTRL_SUPPORTED))
 		ops->set_parent = scmi_clk_set_parent;
 
 	/* Duty cycle */
@@ -312,7 +312,12 @@ scmi_clk_ops_alloc(struct device *dev, unsigned long feats_key)
  * @sclk: A reference to an SCMI clock descriptor
  * @atomic_capable: A flag to indicate if atomic mode is supported by the
  *		    transport
- * @atomic_threshold: Platform atomic threshold value
+ * @atomic_threshold_us: Platform atomic threshold value in microseconds:
+ *			 clk_ops are atomic when clock enable latency is less
+ *			 than this threshold
+ * @clk_ops_db: A reference to the array used as a database to store all the
+ *		created clock operations combinations.
+ * @db_size: Maximum number of entries held by @clk_ops_db
  *
  * After having built a bitmap descriptor to represent the set of features
  * needed by this SCMI clock, at first use it to lookup into the set of
@@ -322,14 +327,15 @@ scmi_clk_ops_alloc(struct device *dev, unsigned long feats_key)
  * for future references.
  *
  * In this way only one set of clk_ops is ever created for each different
- * combination that is effectively needed.
+ * combination that is effectively needed by a driver instance.
  *
- * Return: A pointer to the allocated and configured clk_ops on Success, or
+ * Return: A pointer to the allocated and configured clk_ops on success, or
  *	   NULL otherwise.
  */
 static const struct clk_ops *
 scmi_clk_ops_select(struct scmi_clk *sclk, bool atomic_capable,
-		    unsigned int atomic_threshold)
+		    unsigned int atomic_threshold_us,
+		    const struct clk_ops **clk_ops_db, size_t db_size)
 {
 	const struct scmi_clock_info *ci = sclk->info;
 	unsigned int feats_key = 0;
@@ -340,31 +346,36 @@ scmi_clk_ops_select(struct scmi_clk *sclk, bool atomic_capable,
 	 * specify (or support) an enable_latency associated with a
 	 * clock, we default to use atomic operations mode.
 	 */
-	if (atomic_capable && ci->enable_latency <= atomic_threshold)
+	if (atomic_capable && ci->enable_latency <= atomic_threshold_us)
 		feats_key |= BIT(SCMI_CLK_ATOMIC_SUPPORTED);
 
-	if (ci->state_ctrl_forbidden)
-		feats_key |= BIT(SCMI_CLK_STATE_CTRL_FORBIDDEN);
+	if (!ci->state_ctrl_forbidden)
+		feats_key |= BIT(SCMI_CLK_STATE_CTRL_SUPPORTED);
 
-	if (ci->rate_ctrl_forbidden)
-		feats_key |= BIT(SCMI_CLK_RATE_CTRL_FORBIDDEN);
+	if (!ci->rate_ctrl_forbidden)
+		feats_key |= BIT(SCMI_CLK_RATE_CTRL_SUPPORTED);
 
-	if (ci->parent_ctrl_forbidden)
-		feats_key |= BIT(SCMI_CLK_PARENT_CTRL_FORBIDDEN);
+	if (!ci->parent_ctrl_forbidden)
+		feats_key |= BIT(SCMI_CLK_PARENT_CTRL_SUPPORTED);
 
 	if (ci->extended_config)
 		feats_key |= BIT(SCMI_CLK_DUTY_CYCLE_SUPPORTED);
 
+	if (WARN_ON(feats_key >= db_size))
+		return NULL;
+
 	/* Lookup previously allocated ops */
 	ops = clk_ops_db[feats_key];
-	if (!ops) {
-		ops = scmi_clk_ops_alloc(sclk->dev, feats_key);
-		if (!ops)
-			return NULL;
+	if (ops)
+		return ops;
 
-		/* Store new ops combinations */
-		clk_ops_db[feats_key] = ops;
-	}
+	/* Did not find a pre-allocated clock_ops */
+	ops = scmi_clk_ops_alloc(sclk->dev, feats_key);
+	if (!ops)
+		return NULL;
+
+	/* Store new ops combinations */
+	clk_ops_db[feats_key] = ops;
 
 	return ops;
 }
@@ -372,14 +383,15 @@ scmi_clk_ops_select(struct scmi_clk *sclk, bool atomic_capable,
 static int scmi_clocks_probe(struct scmi_device *sdev)
 {
 	int idx, count, err;
-	unsigned int atomic_threshold = 0;
-	bool is_atomic;
+	unsigned int atomic_threshold_us;
+	bool transport_is_atomic;
 	struct clk_hw **hws;
 	struct clk_hw_onecell_data *clk_data;
 	struct device *dev = &sdev->dev;
 	struct device_node *np = dev->of_node;
 	const struct scmi_handle *handle = sdev->handle;
 	struct scmi_protocol_handle *ph;
+	const struct clk_ops *scmi_clk_ops_db[SCMI_MAX_CLK_OPS] = {};
 
 	if (!handle)
 		return -ENODEV;
@@ -403,7 +415,8 @@ static int scmi_clocks_probe(struct scmi_device *sdev)
 	clk_data->num = count;
 	hws = clk_data->hws;
 
-	is_atomic = handle->is_transport_atomic(handle, &atomic_threshold);
+	transport_is_atomic = handle->is_transport_atomic(handle,
+							  &atomic_threshold_us);
 
 	for (idx = 0; idx < count; idx++) {
 		struct scmi_clk *sclk;
@@ -424,8 +437,16 @@ static int scmi_clocks_probe(struct scmi_device *sdev)
 		sclk->ph = ph;
 		sclk->dev = dev;
 
-		scmi_ops = scmi_clk_ops_select(sclk, is_atomic,
-					       atomic_threshold);
+		/*
+		 * Note that the scmi_clk_ops_db is on the stack, not global,
+		 * because it cannot be shared between mulitple probe-sequences
+		 * to avoid sharing the devm_ allocated clk_ops between multiple
+		 * SCMI clk driver instances.
+		 */
+		scmi_ops = scmi_clk_ops_select(sclk, transport_is_atomic,
+					       atomic_threshold_us,
+					       scmi_clk_ops_db,
+					       ARRAY_SIZE(scmi_clk_ops_db));
 		if (!scmi_ops)
 			return -ENOMEM;
 

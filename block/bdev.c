@@ -92,7 +92,7 @@ static void bdev_write_inode(struct block_device *bdev)
 /* Kill _all_ buffers and pagecache , dirty or not.. */
 static void kill_bdev(struct block_device *bdev)
 {
-	struct address_space *mapping = bdev_mapping(bdev);
+	struct address_space *mapping = bdev->bd_mapping;
 
 	if (mapping_empty(mapping))
 		return;
@@ -104,7 +104,7 @@ static void kill_bdev(struct block_device *bdev)
 /* Invalidate clean unused buffers and pagecache. */
 void invalidate_bdev(struct block_device *bdev)
 {
-	struct address_space *mapping = bdev_mapping(bdev);
+	struct address_space *mapping = bdev->bd_mapping;
 
 	if (mapping->nrpages) {
 		invalidate_bh_lrus();
@@ -132,7 +132,7 @@ int truncate_bdev_range(struct block_device *bdev, blk_mode_t mode,
 			goto invalidate;
 	}
 
-	truncate_inode_pages_range(bdev_mapping(bdev), lstart, lend);
+	truncate_inode_pages_range(bdev->bd_mapping, lstart, lend);
 	if (!(mode & BLK_OPEN_EXCL))
 		bd_abort_claiming(bdev, truncate_bdev_range);
 	return 0;
@@ -142,7 +142,7 @@ invalidate:
 	 * Someone else has handle exclusively open. Try invalidating instead.
 	 * The 'end' argument is inclusive so the rounding is safe.
 	 */
-	return invalidate_inode_pages2_range(bdev_mapping(bdev),
+	return invalidate_inode_pages2_range(bdev->bd_mapping,
 					     lstart >> PAGE_SHIFT,
 					     lend >> PAGE_SHIFT);
 }
@@ -204,6 +204,14 @@ int sb_min_blocksize(struct super_block *sb, int size)
 
 EXPORT_SYMBOL(sb_min_blocksize);
 
+int sync_blockdev_nowait(struct block_device *bdev)
+{
+	if (!bdev)
+		return 0;
+	return filemap_flush(bdev->bd_mapping);
+}
+EXPORT_SYMBOL_GPL(sync_blockdev_nowait);
+
 /*
  * Write out and wait upon all the dirty data associated with a block
  * device via its mapping.  Does not take the superblock lock.
@@ -212,9 +220,16 @@ int sync_blockdev(struct block_device *bdev)
 {
 	if (!bdev)
 		return 0;
-	return filemap_write_and_wait(bdev_mapping(bdev));
+	return filemap_write_and_wait(bdev->bd_mapping);
 }
 EXPORT_SYMBOL(sync_blockdev);
+
+int sync_blockdev_range(struct block_device *bdev, loff_t lstart, loff_t lend)
+{
+	return filemap_write_and_wait_range(bdev->bd_mapping,
+			lstart, lend);
+}
+EXPORT_SYMBOL(sync_blockdev_range);
 
 /**
  * bdev_freeze - lock a filesystem and force it into a consistent state
@@ -414,6 +429,7 @@ struct block_device *bdev_alloc(struct gendisk *disk, u8 partno)
 	mutex_init(&bdev->bd_holder_lock);
 	bdev->bd_partno = partno;
 	bdev->bd_inode = inode;
+	bdev->bd_mapping = &inode->i_data;
 	bdev->bd_queue = disk->queue;
 	if (partno)
 		bdev->bd_has_submit_bio = disk->part0->bd_has_submit_bio;
@@ -441,7 +457,7 @@ void bdev_add(struct block_device *bdev, dev_t dev)
 	struct inode *inode;
 
 	if (bdev_stable_writes(bdev))
-		mapping_set_stable_writes(bdev_mapping(bdev));
+		mapping_set_stable_writes(bdev->bd_mapping);
 	bdev->bd_dev = dev;
 	inode = bdev_inode(bdev);
 	inode->i_rdev = dev;
@@ -912,7 +928,7 @@ int bdev_open(struct block_device *bdev, blk_mode_t mode, void *holder,
 		bdev_file->f_mode |= FMODE_NOWAIT;
 	if (mode & BLK_OPEN_RESTRICT_WRITES)
 		bdev_file->f_mode |= FMODE_WRITE_RESTRICTED;
-	bdev_file->f_mapping = bdev_mapping(bdev);
+	bdev_file->f_mapping = bdev->bd_mapping;
 	bdev_file->f_wb_err = filemap_sample_wb_err(bdev_file->f_mapping);
 	bdev_file->private_data = holder;
 
@@ -1257,34 +1273,15 @@ void bdev_statx_dioalign(struct inode *inode, struct kstat *stat)
 
 bool disk_live(struct gendisk *disk)
 {
-	return !inode_unhashed(bdev_inode(disk->part0));
+	return !inode_unhashed(disk->part0->bd_inode);
 }
 EXPORT_SYMBOL_GPL(disk_live);
 
 unsigned int block_size(struct block_device *bdev)
 {
-	return 1 << bdev_inode(bdev)->i_blkbits;
+	return 1 << bdev->bd_inode->i_blkbits;
 }
 EXPORT_SYMBOL_GPL(block_size);
-
-/**
- * bdev_read_folio - Read into block device page cache.
- * @bdev: the block device which holds the cache to read.
- * @pos: the offset that allocated folio will contain.
- *
- * Read one page into the block device page cache. If it succeeds, the folio
- * returned will contain @pos;
- *
- * This is only used for scsi_bios_ptable(), the bdev is not opened as files.
- *
- * Return: Uptodate folio on success, ERR_PTR() on failure.
- */
-struct folio *bdev_read_folio(struct block_device *bdev, loff_t pos)
-{
-	return mapping_read_folio_gfp(bdev_mapping(bdev),
-				      pos >> PAGE_SHIFT, GFP_KERNEL);
-}
-EXPORT_SYMBOL_GPL(bdev_read_folio);
 
 static int __init setup_bdev_allow_write_mounted(char *str)
 {

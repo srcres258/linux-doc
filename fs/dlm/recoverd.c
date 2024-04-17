@@ -22,9 +22,8 @@
 
 static int dlm_create_masters_list(struct dlm_ls *ls)
 {
-	struct rb_node *n;
 	struct dlm_rsb *r;
-	int i, error = 0;
+	int error = 0;
 
 	write_lock_bh(&ls->ls_masters_lock);
 	if (!list_empty(&ls->ls_masters_list)) {
@@ -33,18 +32,15 @@ static int dlm_create_masters_list(struct dlm_ls *ls)
 		goto out;
 	}
 
-	for (i = 0; i < ls->ls_rsbtbl_size; i++) {
-		spin_lock_bh(&ls->ls_rsbtbl[i].lock);
-		for (n = rb_first(&ls->ls_rsbtbl[i].keep); n; n = rb_next(n)) {
-			r = rb_entry(n, struct dlm_rsb, res_hashnode);
-			if (r->res_nodeid)
-				continue;
+	read_lock_bh(&ls->ls_rsbtbl_lock);
+	list_for_each_entry(r, &ls->ls_keep, res_rsbs_list) {
+		if (r->res_nodeid)
+			continue;
 
-			list_add(&r->res_masters_list, &ls->ls_masters_list);
-			dlm_hold_rsb(r);
-		}
-		spin_unlock_bh(&ls->ls_rsbtbl[i].lock);
+		list_add(&r->res_masters_list, &ls->ls_masters_list);
+		dlm_hold_rsb(r);
 	}
+	read_unlock_bh(&ls->ls_rsbtbl_lock);
  out:
 	write_unlock_bh(&ls->ls_masters_lock);
 	return error;
@@ -64,22 +60,16 @@ static void dlm_release_masters_list(struct dlm_ls *ls)
 
 static void dlm_create_root_list(struct dlm_ls *ls, struct list_head *root_list)
 {
-	struct rb_node *n;
 	struct dlm_rsb *r;
-	int i;
 
-	for (i = 0; i < ls->ls_rsbtbl_size; i++) {
-		spin_lock_bh(&ls->ls_rsbtbl[i].lock);
-		for (n = rb_first(&ls->ls_rsbtbl[i].keep); n; n = rb_next(n)) {
-			r = rb_entry(n, struct dlm_rsb, res_hashnode);
-			list_add(&r->res_root_list, root_list);
-			dlm_hold_rsb(r);
-		}
-
-		if (!RB_EMPTY_ROOT(&ls->ls_rsbtbl[i].toss))
-			log_error(ls, "%s toss not empty", __func__);
-		spin_unlock_bh(&ls->ls_rsbtbl[i].lock);
+	read_lock_bh(&ls->ls_rsbtbl_lock);
+	list_for_each_entry(r, &ls->ls_keep, res_rsbs_list) {
+		list_add(&r->res_root_list, root_list);
+		dlm_hold_rsb(r);
 	}
+
+	WARN_ON_ONCE(!list_empty(&ls->ls_toss));
+	read_unlock_bh(&ls->ls_rsbtbl_lock);
 }
 
 static void dlm_release_root_list(struct list_head *root_list)
@@ -108,6 +98,16 @@ static int enable_locking(struct dlm_ls *ls, uint64_t seq)
 	spin_lock_bh(&ls->ls_recover_lock);
 	if (ls->ls_recover_seq == seq) {
 		set_bit(LSFL_RUNNING, &ls->ls_flags);
+		/* Schedule next timer if recovery put something on toss.
+		 *
+		 * The rsbs that was queued while recovery on toss hasn't
+		 * started yet because LSFL_RUNNING was set everything
+		 * else recovery hasn't started as well because ls_in_recovery
+		 * is still hold. So we should not run into the case that
+		 * dlm_timer_resume() queues a timer that can occur in
+		 * a no op.
+		 */
+		dlm_timer_resume(ls);
 		/* unblocks processes waiting to enter the dlm */
 		up_write(&ls->ls_in_recovery);
 		clear_bit(LSFL_RECOVER_LOCK, &ls->ls_flags);
