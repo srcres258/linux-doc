@@ -40,7 +40,6 @@
 #include <linux/slab.h>
 #include <linux/vga_switcheroo.h>
 
-#include <drm/drm_displayid.h>
 #include <drm/drm_drv.h>
 #include <drm/drm_edid.h>
 #include <drm/drm_eld.h>
@@ -48,6 +47,7 @@
 #include <drm/drm_print.h>
 
 #include "drm_crtc_internal.h"
+#include "drm_displayid_internal.h"
 #include "drm_internal.h"
 
 static int oui(u8 first, u8 second, u8 third)
@@ -1820,36 +1820,25 @@ static bool edid_block_is_zero(const void *edid)
 	return !memchr_inv(edid, 0, EDID_LENGTH);
 }
 
-/**
- * drm_edid_are_equal - compare two edid blobs.
- * @edid1: pointer to first blob
- * @edid2: pointer to second blob
- * This helper can be used during probing to determine if
- * edid had changed.
- */
-bool drm_edid_are_equal(const struct edid *edid1, const struct edid *edid2)
+static bool drm_edid_eq(const struct drm_edid *drm_edid,
+			const void *raw_edid, size_t raw_edid_size)
 {
-	int edid1_len, edid2_len;
-	bool edid1_present = edid1 != NULL;
-	bool edid2_present = edid2 != NULL;
+	bool edid1_present = drm_edid && drm_edid->edid && drm_edid->size;
+	bool edid2_present = raw_edid && raw_edid_size;
 
 	if (edid1_present != edid2_present)
 		return false;
 
-	if (edid1) {
-		edid1_len = edid_size(edid1);
-		edid2_len = edid_size(edid2);
-
-		if (edid1_len != edid2_len)
+	if (edid1_present) {
+		if (drm_edid->size != raw_edid_size)
 			return false;
 
-		if (memcmp(edid1, edid2, edid1_len))
+		if (memcmp(drm_edid->edid, raw_edid, drm_edid->size))
 			return false;
 	}
 
 	return true;
 }
-EXPORT_SYMBOL(drm_edid_are_equal);
 
 enum edid_block_status {
 	EDID_BLOCK_OK = 0,
@@ -4200,7 +4189,7 @@ static int add_detailed_modes(struct drm_connector *connector,
  *
  * FIXME: Prefer not returning pointers to raw EDID data.
  */
-const u8 *drm_find_edid_extension(const struct drm_edid *drm_edid,
+const u8 *drm_edid_find_extension(const struct drm_edid *drm_edid,
 				  int ext_id, int *ext_index)
 {
 	const u8 *edid_ext = NULL;
@@ -4230,11 +4219,21 @@ static bool drm_edid_has_cta_extension(const struct drm_edid *drm_edid)
 {
 	const struct displayid_block *block;
 	struct displayid_iter iter;
-	int ext_index = 0;
+	struct drm_edid_iter edid_iter;
+	const u8 *ext;
 	bool found = false;
 
 	/* Look for a top level CEA extension block */
-	if (drm_find_edid_extension(drm_edid, CEA_EXT, &ext_index))
+	drm_edid_iter_begin(drm_edid, &edid_iter);
+	drm_edid_iter_for_each(ext, &edid_iter) {
+		if (ext[0] == CEA_EXT) {
+			found = true;
+			break;
+		}
+	}
+	drm_edid_iter_end(&edid_iter);
+
+	if (found)
 		return true;
 
 	/* CEA blocks can also be found embedded in a DisplayID block */
@@ -6927,15 +6926,14 @@ static int _drm_edid_connector_property_update(struct drm_connector *connector,
 	int ret;
 
 	if (connector->edid_blob_ptr) {
-		const struct edid *old_edid = connector->edid_blob_ptr->data;
+		const void *old_edid = connector->edid_blob_ptr->data;
+		size_t old_edid_size = connector->edid_blob_ptr->length;
 
-		if (old_edid) {
-			if (!drm_edid_are_equal(drm_edid ? drm_edid->edid : NULL, old_edid)) {
-				connector->epoch_counter++;
-				drm_dbg_kms(dev, "[CONNECTOR:%d:%s] EDID changed, epoch counter %llu\n",
-					    connector->base.id, connector->name,
-					    connector->epoch_counter);
-			}
+		if (old_edid && !drm_edid_eq(drm_edid, old_edid, old_edid_size)) {
+			connector->epoch_counter++;
+			drm_dbg_kms(dev, "[CONNECTOR:%d:%s] EDID changed, epoch counter %llu\n",
+				    connector->base.id, connector->name,
+				    connector->epoch_counter);
 		}
 	}
 

@@ -185,7 +185,9 @@ void gfs2_glock_free(struct gfs2_glock *gl) {
 void gfs2_glock_free_later(struct gfs2_glock *gl) {
 	struct gfs2_sbd *sdp = gl->gl_name.ln_sbd;
 
+	spin_lock(&lru_lock);
 	list_add(&gl->gl_lru, &sdp->sd_dead_glocks);
+	spin_unlock(&lru_lock);
 	if (atomic_dec_and_test(&sdp->sd_glock_disposal))
 		wake_up(&sdp->sd_kill_wait);
 }

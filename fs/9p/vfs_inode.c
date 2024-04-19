@@ -381,7 +381,7 @@ v9fs_fid_iget(struct super_block *sb, struct p9_fid *fid, bool new)
 		if (!new) {
 			goto done;
 		} else {
-			p9_debug(P9_DEBUG_ERROR, "WARNING: Inode collision %ld\n",
+			p9_debug(P9_DEBUG_VFS, "WARNING: Inode collision %ld\n",
 						inode->i_ino);
 			iput(inode);
 			remove_inode_hash(inode);
@@ -452,7 +452,7 @@ static void v9fs_dec_count(struct inode *inode)
 		if (inode->i_nlink) {
 			drop_nlink(inode);
 		} else {
-			p9_debug(P9_DEBUG_ERROR,
+			p9_debug(P9_DEBUG_VFS,
 						"WARNING: unexpected i_nlink zero %d inode %ld\n",
 						inode->i_nlink, inode->i_ino);
 		}
@@ -507,13 +507,8 @@ static int v9fs_remove(struct inode *dir, struct dentry *dentry, int flags)
 		} else
 			v9fs_dec_count(inode);
 
-		if (inode->i_nlink <= 0) { /* no more refs unhash it */
+		if (inode->i_nlink <= 0)	/* no more refs unhash it */
 			remove_inode_hash(inode);
-		} else {
-			p9_debug(P9_DEBUG_ERROR,
-			"WARNING: unlink inode %lx %s qid->path=%llx w/i_nlink==%d\n",
-			inode->i_ino, dentry->d_name.name, v9fid->qid.path, inode->i_nlink);
-		}
 
 		v9fs_invalidate_inode_attr(inode);
 		v9fs_invalidate_inode_attr(dir);

@@ -187,13 +187,12 @@ EXPORT_SYMBOL(__page_table_check_pud_clear);
 /* Whether the swap entry cached writable information */
 static inline bool swap_cached_writable(swp_entry_t entry)
 {
-	unsigned type = swp_type(entry);
-
-	return type == SWP_DEVICE_EXCLUSIVE_WRITE ||
-	    type == SWP_MIGRATION_WRITE;
+	return is_writable_device_exclusive_entry(entry) ||
+	    is_writable_device_private_entry(entry) ||
+	    is_writable_migration_entry(entry);
 }
 
-static inline void __page_table_check_pte(pte_t pte)
+static inline void page_table_check_pte_flags(pte_t pte)
 {
 	if (pte_present(pte) && pte_uffd_wp(pte))
 		WARN_ON_ONCE(pte_write(pte));
@@ -209,8 +208,9 @@ void __page_table_check_ptes_set(struct mm_struct *mm, pte_t *ptep, pte_t pte,
 	if (&init_mm == mm)
 		return;
 
-	for (i = 0; i < nr; i++) {
-		__page_table_check_pte(pte);
+	page_table_check_pte_flags(pte);
+
+	for (i = 0; i < nr; i++)
 		__page_table_check_pte_clear(mm, ptep_get(ptep + i));
 	}
 	if (pte_user_accessible_page(pte))
@@ -218,7 +218,7 @@ void __page_table_check_ptes_set(struct mm_struct *mm, pte_t *ptep, pte_t pte,
 }
 EXPORT_SYMBOL(__page_table_check_ptes_set);
 
-static inline void __page_table_check_pmd(pmd_t pmd)
+static inline void page_table_check_pmd_flags(pmd_t pmd)
 {
 	if (pmd_present(pmd) && pmd_uffd_wp(pmd))
 		WARN_ON_ONCE(pmd_write(pmd));
@@ -231,7 +231,8 @@ void __page_table_check_pmd_set(struct mm_struct *mm, pmd_t *pmdp, pmd_t pmd)
 	if (&init_mm == mm)
 		return;
 
-	__page_table_check_pmd(pmd);
+	page_table_check_pmd_flags(pmd);
+
 	__page_table_check_pmd_clear(mm, *pmdp);
 	if (pmd_user_accessible_page(pmd)) {
 		page_table_check_set(pmd_pfn(pmd), PMD_SIZE >> PAGE_SHIFT,

@@ -351,32 +351,11 @@ static inline int madvise_folio_pte_batch(unsigned long addr, unsigned long end,
 					  pte_t pte, bool *any_young,
 					  bool *any_dirty)
 {
-	int max_nr = (end - addr) / PAGE_SIZE;
 	const fpb_t fpb_flags = FPB_IGNORE_DIRTY | FPB_IGNORE_SOFT_DIRTY;
+	int max_nr = (end - addr) / PAGE_SIZE;
 
 	return folio_pte_batch(folio, addr, ptep, pte, max_nr, fpb_flags, NULL,
 			       any_young, any_dirty);
-}
-
-static inline bool madvise_pte_split_folio(struct mm_struct *mm, pmd_t *pmd,
-					   unsigned long addr,
-					   struct folio *folio, pte_t **pte,
-					   spinlock_t **ptl)
-{
-	int err;
-
-	if (!folio_trylock(folio))
-		return false;
-
-	folio_get(folio);
-	pte_unmap_unlock(*pte, *ptl);
-	err = split_folio(folio);
-	folio_unlock(folio);
-	folio_put(folio);
-
-	*pte = pte_offset_map_lock(mm, pmd, addr, ptl);
-
-	return err == 0;
 }
 
 static int madvise_cold_or_pageout_pte_range(pmd_t *pmd,
@@ -514,13 +493,10 @@ restart:
 		 * next pte in the range.
 		 */
 		if (folio_test_large(folio)) {
-			const fpb_t fpb_flags = FPB_IGNORE_DIRTY |
-						FPB_IGNORE_SOFT_DIRTY;
-			int max_nr = (end - addr) / PAGE_SIZE;
 			bool any_young;
 
-			nr = folio_pte_batch(folio, addr, pte, ptent, max_nr,
-					     fpb_flags, NULL, &any_young);
+			nr = madvise_folio_pte_batch(addr, end, folio, pte,
+						     ptent, &any_young, NULL);
 			if (any_young)
 				ptent = pte_mkyoung(ptent);
 
@@ -565,7 +541,8 @@ restart:
 			continue;
 
 		if (!pageout && pte_young(ptent)) {
-			mkold_ptes(vma, addr, pte, nr);
+			clear_young_dirty_ptes(vma, addr, pte, nr,
+					       CYDP_CLEAR_YOUNG);
 			tlb_remove_tlb_entries(tlb, pte, nr, addr);
 		}
 
@@ -691,6 +668,7 @@ static int madvise_free_pte_range(pmd_t *pmd, unsigned long addr,
 				unsigned long end, struct mm_walk *walk)
 
 {
+	const cydp_t cydp_flags = CYDP_CLEAR_YOUNG | CYDP_CLEAR_DIRTY;
 	struct mmu_gather *tlb = walk->private;
 	struct mm_struct *mm = tlb->mm;
 	struct vm_area_struct *vma = walk->vma;
@@ -753,26 +731,53 @@ static int madvise_free_pte_range(pmd_t *pmd, unsigned long addr,
 		 */
 		if (folio_test_large(folio)) {
 			bool any_young, any_dirty;
+
 			nr = madvise_folio_pte_batch(addr, end, folio, pte,
 						     ptent, &any_young, &any_dirty);
 
-			if (folio_likely_mapped_shared(folio))
-				break;
-			if (!folio_trylock(folio))
-				break;
-			folio_get(folio);
-			arch_leave_lazy_mmu_mode();
-			pte_unmap_unlock(start_pte, ptl);
-			start_pte = NULL;
-			err = split_folio(folio);
-			folio_unlock(folio);
-			continue;
+			if (nr < folio_nr_pages(folio)) {
+				int err;
+
+				if (folio_likely_mapped_shared(folio))
+					continue;
+				if (!folio_trylock(folio))
+					continue;
+				folio_get(folio);
+				arch_leave_lazy_mmu_mode();
+				pte_unmap_unlock(start_pte, ptl);
+				start_pte = NULL;
+				err = split_folio(folio);
+				folio_unlock(folio);
+				folio_put(folio);
+				pte = pte_offset_map_lock(mm, pmd, addr, &ptl);
+				start_pte = pte;
+				if (!start_pte)
+					break;
+				arch_enter_lazy_mmu_mode();
+				if (!err)
+					nr = 0;
+				continue;
+			}
+
+			if (any_young)
+				ptent = pte_mkyoung(ptent);
+			if (any_dirty)
+				ptent = pte_mkdirty(ptent);
 		}
 		folio_unlock(folio);
 
 		if (folio_test_swapcache(folio) || folio_test_dirty(folio)) {
 			if (!folio_trylock(folio))
 				continue;
+			/*
+			 * If we have a large folio at this point, we know it is
+			 * fully mapped so if its mapcount is the same as its
+			 * number of pages, it must be exclusive.
+			 */
+			if (folio_mapcount(folio) != folio_nr_pages(folio)) {
+				folio_unlock(folio);
+				continue;
+			}
 
 			if (folio_test_swapcache(folio) &&
 			    !folio_free_swap(folio)) {
@@ -785,7 +790,7 @@ static int madvise_free_pte_range(pmd_t *pmd, unsigned long addr,
 		}
 
 		if (pte_young(ptent) || pte_dirty(ptent)) {
-			mkold_clean_ptes(mm, addr, pte, nr);
+			clear_young_dirty_ptes(vma, addr, pte, nr, cydp_flags);
 			tlb_remove_tlb_entries(tlb, pte, nr, addr);
 		}
 		folio_mark_lazyfree(folio);

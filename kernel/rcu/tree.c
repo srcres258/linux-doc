@@ -1594,6 +1594,7 @@ static struct llist_node *rcu_sr_get_wait_head(void)
 static void rcu_sr_put_wait_head(struct llist_node *node)
 {
 	struct sr_wait_node *sr_wn = container_of(node, struct sr_wait_node, node);
+
 	atomic_set_release(&sr_wn->inuse, 0);
 }
 

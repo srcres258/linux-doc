@@ -361,20 +361,34 @@ void contpte_wrprotect_ptes(struct mm_struct *mm, unsigned long addr,
 }
 EXPORT_SYMBOL_GPL(contpte_wrprotect_ptes);
 
-void contpte_mkold_clean_ptes(struct mm_struct *mm, unsigned long addr,
-			      pte_t *ptep, unsigned int nr)
+void contpte_clear_young_dirty_ptes(struct vm_area_struct *vma,
+				    unsigned long addr, pte_t *ptep,
+				    unsigned int nr, cydp_t flags)
 {
 	/*
-	 * If clearing the young and dirty bits for an entire contig range, we can
-	 * avoid unfolding. Just set old/clean and wait for the later mmu_gather
-	 * flush to invalidate the tlb. If it's a partial range though, we need to
-	 * unfold.
+	 * We can safely clear access/dirty without needing to unfold from
+	 * the architectures perspective, even when contpte is set. If the
+	 * range starts or ends midway through a contpte block, we can just
+	 * expand to include the full contpte block. While this is not
+	 * exactly what the core-mm asked for, it tracks access/dirty per
+	 * folio, not per page. And since we only create a contpte block
+	 * when it is covered by a single folio, we can get away with
+	 * clearing access/dirty for the whole block.
 	 */
+	unsigned long start = addr;
+	unsigned long end = start + nr;
 
-	contpte_try_unfold_partial(mm, addr, ptep, nr);
-	__mkold_clean_ptes(mm, addr, ptep, nr);
+	if (pte_cont(__ptep_get(ptep + nr - 1)))
+		end = ALIGN(end, CONT_PTE_SIZE);
+
+	if (pte_cont(__ptep_get(ptep))) {
+		start = ALIGN_DOWN(start, CONT_PTE_SIZE);
+		ptep = contpte_align_down(ptep);
+	}
+
+	__clear_young_dirty_ptes(vma, start, ptep, end - start, flags);
 }
-EXPORT_SYMBOL_GPL(contpte_mkold_clean_ptes);
+EXPORT_SYMBOL_GPL(contpte_clear_young_dirty_ptes);
 
 int contpte_ptep_set_access_flags(struct vm_area_struct *vma,
 					unsigned long addr, pte_t *ptep,

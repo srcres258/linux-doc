@@ -502,14 +502,15 @@ static inline pte_t ptep_get_and_clear(struct mm_struct *mm,
 }
 #endif
 
-#ifndef mkold_clean_ptes
+#ifndef clear_young_dirty_ptes
 /**
- * mkold_clean_ptes - Mark PTEs that map consecutive pages of the same folio
- *		as old and clean.
+ * clear_young_dirty_ptes - Mark PTEs that map consecutive pages of the
+ *		same folio as old/clean.
  * @mm: Address space the pages are mapped into.
  * @addr: Address the first page is mapped at.
  * @ptep: Page table pointer for the first entry.
- * @nr: Number of entries to mark old and clean.
+ * @nr: Number of entries to mark old/clean.
+ * @flags: Flags to modify the PTE batch semantics.
  *
  * May be overridden by the architecture; otherwise, implemented by
  * get_and_clear/modify/set for each pte in the range.
@@ -520,14 +521,23 @@ static inline pte_t ptep_get_and_clear(struct mm_struct *mm,
  * Context: The caller holds the page table lock.  The PTEs map consecutive
  * pages that belong to the same folio.  The PTEs are all in the same PMD.
  */
-static inline void mkold_clean_ptes(struct mm_struct *mm, unsigned long addr,
-				    pte_t *ptep, unsigned int nr)
+static inline void clear_young_dirty_ptes(struct vm_area_struct *vma,
+					  unsigned long addr, pte_t *ptep,
+					  unsigned int nr, cydp_t flags)
 {
 	pte_t pte;
 
 	for (;;) {
-		pte = ptep_get_and_clear(mm, addr, ptep);
-		set_pte_at(mm, addr, ptep, pte_mkclean(pte_mkold(pte)));
+		if (flags == CYDP_CLEAR_YOUNG)
+			ptep_test_and_clear_young(vma, addr, ptep);
+		else {
+			pte = ptep_get_and_clear(vma->vm_mm, addr, ptep);
+			if (flags & CYDP_CLEAR_YOUNG)
+				pte = pte_mkold(pte);
+			if (flags & CYDP_CLEAR_DIRTY)
+				pte = pte_mkclean(pte);
+			set_pte_at(vma->vm_mm, addr, ptep, pte);
+		}
 		if (--nr == 0)
 			break;
 		ptep++;

@@ -1151,17 +1151,17 @@ extern int rcu_expedited;
 extern int rcu_normal;
 
 DEFINE_LOCK_GUARD_0(rcu,
-		    do {
-			rcu_read_lock();
-			/*
-			 * sparse doesn't call the cleanup function,
-			 * so just release immediately and don't track
-			 * the context. We don't need to anyway, since
-			 * the whole point of the guard is to not need
-			 * the explicit unlock.
-			 */
-			__release(RCU);
-		    } while(0),
-		    rcu_read_unlock())
+	do {
+		rcu_read_lock();
+		/*
+		 * sparse doesn't call the cleanup function,
+		 * so just release immediately and don't track
+		 * the context. We don't need to anyway, since
+		 * the whole point of the guard is to not need
+		 * the explicit unlock.
+		 */
+		__release(RCU);
+	} while (0),
+	rcu_read_unlock())
 
 #endif /* __LINUX_RCUPDATE_H */

@@ -1208,7 +1208,7 @@ void __run_test(struct __fixture_metadata *f,
 		diagnostic = "unknown";
 
 	ksft_test_result_code(t->exit_code, test_name,
-			      diagnostic ? "%s" : "", diagnostic);
+			      diagnostic ? "%s" : NULL, diagnostic);
 	free(test_name);
 }
 

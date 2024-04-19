@@ -1491,6 +1491,7 @@ u8 rcu_trc_cmpxchg_need_qs(struct task_struct *t, u8 old, u8 new)
 	// only the .b.need_qs byte actually changes.
 	instrument_atomic_read_write(&t->trc_reader_special.b.need_qs,
 				     sizeof(t->trc_reader_special.b.need_qs));
+	// Avoid false-positive KCSAN failures.
 	ret.s = data_race(cmpxchg(&t->trc_reader_special.s, trs_old.s, trs_new.s));
 
 	return ret.b.need_qs;

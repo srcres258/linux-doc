@@ -2572,13 +2572,12 @@ int s390_enable_sie(void)
 EXPORT_SYMBOL_GPL(s390_enable_sie);
 
 static int find_zeropage_pte_entry(pte_t *pte, unsigned long addr,
-		unsigned long end, struct mm_walk *walk)
+				   unsigned long end, struct mm_walk *walk)
 {
 	unsigned long *found_addr = walk->private;
 
 	/* Return 1 of the page is a zeropage. */
 	if (is_zero_pfn(pte_pfn(*pte))) {
-
 		/*
 		 * Shared zeropage in e.g., a FS DAX mapping? We cannot do the
 		 * right thing and likely don't care: FAULT_FLAG_UNSHARE
@@ -2618,6 +2617,7 @@ static int __s390_unshare_zeropages(struct mm_struct *mm)
 	struct vm_area_struct *vma;
 	VMA_ITERATOR(vmi, mm, 0);
 	unsigned long addr;
+	vm_fault_t fault;
 	int rc;
 
 	for_each_vma(vmi, vma) {
@@ -2633,14 +2633,16 @@ static int __s390_unshare_zeropages(struct mm_struct *mm)
 retry:
 		rc = walk_page_range_vma(vma, addr, vma->vm_end,
 					 &find_zeropage_ops, &addr);
-		if (rc <= 0)
+		if (rc < 0)
+			return rc;
+		else if (!rc)
 			continue;
 
 		/* addr was updated by find_zeropage_pte_entry() */
-		rc = handle_mm_fault(vma, addr,
-				     FAULT_FLAG_UNSHARE | FAULT_FLAG_REMOTE,
-				     NULL);
-		if (rc & VM_FAULT_OOM)
+		fault = handle_mm_fault(vma, addr,
+					FAULT_FLAG_UNSHARE | FAULT_FLAG_REMOTE,
+					NULL);
+		if (fault & VM_FAULT_OOM)
 			return -ENOMEM;
 		/*
 		 * See break_ksm(): even after handle_mm_fault() returned 0, we
@@ -2656,7 +2658,7 @@ retry:
 		goto retry;
 	}
 
-	return rc;
+	return 0;
 }
 
 static int __s390_disable_cow_sharing(struct mm_struct *mm)

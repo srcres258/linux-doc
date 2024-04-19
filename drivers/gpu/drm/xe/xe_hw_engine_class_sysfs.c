@@ -520,9 +520,8 @@ kobj_xe_hw_engine_class(struct xe_device *xe, struct kobject *parent, const char
 	err = drmm_add_action_or_reset(&xe->drm, kobj_xe_hw_engine_class_fini,
 				       &keclass->base);
 	if (err)
-		drm_warn(&xe->drm,
-			 "%s: drmm_add_action_or_reset failed, err: %d\n",
-			 __func__, err);
+		return NULL;
+
 	return keclass;
 }
 
@@ -553,13 +552,8 @@ static int xe_add_hw_engine_class_defaults(struct xe_device *xe,
 	if (err)
 		goto err_object;
 
-	err = drmm_add_action_or_reset(&xe->drm, hw_engine_class_defaults_fini,
-				       kobj);
-	if (err)
-		drm_warn(&xe->drm,
-			 "%s: drmm_add_action_or_reset failed, err: %d\n",
-			 __func__, err);
-	return err;
+	return drmm_add_action_or_reset(&xe->drm, hw_engine_class_defaults_fini, kobj);
+
 err_object:
 	kobject_put(kobj);
 	return err;
@@ -696,26 +690,16 @@ int xe_hw_engine_class_sysfs_init(struct xe_gt *gt)
 
 		keclass->eclass = hwe->eclass;
 		err = xe_add_hw_engine_class_defaults(xe, &keclass->base);
-		if (err) {
-			drm_warn(&xe->drm,
-				 "Add .defaults to engines failed!, err: %d\n",
-				 err);
+		if (err)
 			goto err_object;
-		}
 
 		err = sysfs_create_files(&keclass->base, files);
 		if (err)
 			goto err_object;
 	}
 
-	err = drmm_add_action_or_reset(&xe->drm, hw_engine_class_sysfs_fini,
-				       kobj);
-	if (err)
-		drm_warn(&xe->drm,
-			 "%s: drmm_add_action_or_reset failed, err: %d\n",
-			 __func__, err);
+	return drmm_add_action_or_reset(&xe->drm, hw_engine_class_sysfs_fini, kobj);
 
-	return err;
 err_object:
 	kobject_put(kobj);
 	return err;

@@ -408,6 +408,12 @@ static int ntfs_fs_reconfigure(struct fs_context *fc)
 	struct ntfs_mount_options *new_opts = fc->fs_private;
 	int ro_rw;
 
+	/* If ntfs3 is used as legacy ntfs enforce read-only mode. */
+	if (is_legacy_ntfs(sb)) {
+		fc->sb_flags |= SB_RDONLY;
+		goto out;
+	}
+
 	ro_rw = sb_rdonly(sb) && !(fc->sb_flags & SB_RDONLY);
 	if (ro_rw && (sbi->flags & NTFS_FLAGS_NEED_REPLAY)) {
 		errorf(fc,
@@ -427,8 +433,6 @@ static int ntfs_fs_reconfigure(struct fs_context *fc)
 			fc,
 			"ntfs3: Cannot use different iocharset when remounting!");
 
-	sync_filesystem(sb);
-
 	if (ro_rw && (sbi->volume.flags & VOLUME_FLAG_DIRTY) &&
 	    !new_opts->force) {
 		errorf(fc,
@@ -436,6 +440,8 @@ static int ntfs_fs_reconfigure(struct fs_context *fc)
 		return -EINVAL;
 	}
 
+out:
+	sync_filesystem(sb);
 	swap(sbi->options, fc->fs_private);
 
 	return 0;
@@ -481,11 +487,39 @@ static int ntfs3_volinfo_open(struct inode *inode, struct file *file)
 /* read /proc/fs/ntfs3/<dev>/label */
 static int ntfs3_label_show(struct seq_file *m, void *o)
 {
+	int len;
 	struct super_block *sb = m->private;
 	struct ntfs_sb_info *sbi = sb->s_fs_info;
+	struct ATTRIB *attr;
+	u8 *label = kmalloc(PAGE_SIZE, GFP_NOFS);
 
-	seq_printf(m, "%s\n", sbi->volume.label);
+	if (!label)
+		return -ENOMEM;
 
+	attr = ni_find_attr(sbi->volume.ni, NULL, NULL, ATTR_LABEL, NULL, 0,
+			    NULL, NULL);
+
+	if (!attr) {
+		/* It is ok if no ATTR_LABEL */
+		label[0] = 0;
+		len = 0;
+	} else if (!attr_check(attr, sbi, sbi->volume.ni)) {
+		len = sprintf(label, "%pg: failed to get label", sb->s_bdev);
+	} else {
+		len = ntfs_utf16_to_nls(sbi, resident_data(attr),
+					le32_to_cpu(attr->res.data_size) >> 1,
+					label, PAGE_SIZE);
+		if (len < 0) {
+			label[0] = 0;
+			len = 0;
+		} else if (len >= PAGE_SIZE) {
+			len = PAGE_SIZE - 1;
+		}
+	}
+
+	seq_printf(m, "%.*s\n", len, label);
+
+	kfree(label);
 	return 0;
 }
 
@@ -624,7 +658,7 @@ static void ntfs3_free_sbi(struct ntfs_sb_info *sbi)
 {
 	kfree(sbi->new_rec);
 	kvfree(ntfs_put_shared(sbi->upcase));
-	kvfree(sbi->def_table);
+	kfree(sbi->attrdef.table);
 	kfree(sbi->compress.lznt);
 #ifdef CONFIG_NTFS3_LZX_XPRESS
 	xpress_free_decompressor(sbi->compress.xpress);
@@ -1157,8 +1191,6 @@ static int ntfs_fill_super(struct super_block *sb, struct fs_context *fc)
 	CLST vcn, lcn, len;
 	struct ATTRIB *attr;
 	const struct VOLUME_INFO *info;
-	u32 idx, done, bytes;
-	struct ATTR_DEF_ENTRY *t;
 	u16 *shared;
 	struct MFT_REF ref;
 	bool ro = sb_rdonly(sb);
@@ -1199,7 +1231,7 @@ static int ntfs_fill_super(struct super_block *sb, struct fs_context *fc)
 
 	/*
 	 * Load $Volume. This should be done before $LogFile
-	 * 'cause 'sbi->volume.ni' is used 'ntfs_set_state'.
+	 * 'cause 'sbi->volume.ni' is used in 'ntfs_set_state'.
 	 */
 	ref.low = cpu_to_le32(MFT_REC_VOL);
 	ref.seq = cpu_to_le16(MFT_REC_VOL);
@@ -1211,25 +1243,6 @@ static int ntfs_fill_super(struct super_block *sb, struct fs_context *fc)
 	}
 
 	ni = ntfs_i(inode);
-
-	/* Load and save label (not necessary). */
-	attr = ni_find_attr(ni, NULL, NULL, ATTR_LABEL, NULL, 0, NULL, NULL);
-
-	if (!attr) {
-		/* It is ok if no ATTR_LABEL */
-	} else if (!attr->non_res && !is_attr_ext(attr)) {
-		/* $AttrDef allows labels to be up to 128 symbols. */
-		err = utf16s_to_utf8s(resident_data(attr),
-				      le32_to_cpu(attr->res.data_size) >> 1,
-				      UTF16_LITTLE_ENDIAN, sbi->volume.label,
-				      sizeof(sbi->volume.label));
-		if (err < 0)
-			sbi->volume.label[0] = 0;
-	} else {
-		/* Should we break mounting here? */
-		//err = -EINVAL;
-		//goto put_inode_out;
-	}
 
 	attr = ni_find_attr(ni, attr, NULL, ATTR_VOL_INFO, NULL, 0, NULL, NULL);
 	if (!attr || is_attr_ext(attr) ||
@@ -1422,54 +1435,28 @@ static int ntfs_fill_super(struct super_block *sb, struct fs_context *fc)
 		goto put_inode_out;
 	}
 
-	bytes = inode->i_size;
-	sbi->def_table = t = kvmalloc(bytes, GFP_KERNEL);
-	if (!t) {
-		err = -ENOMEM;
-		goto put_inode_out;
-	}
+	{
+		u32 bytes = inode->i_size;
+		struct ATTR_DEF_ENTRY *def_table = kmalloc(bytes, GFP_KERNEL);
+		if (!def_table) {
+			err = -ENOMEM;
+			goto put_inode_out;
+		}
 
-	for (done = idx = 0; done < bytes; done += PAGE_SIZE, idx++) {
-		unsigned long tail = bytes - done;
-		struct page *page = ntfs_map_page(inode->i_mapping, idx);
-
-		if (IS_ERR(page)) {
-			err = PTR_ERR(page);
+		/* Read the entire file. */
+		err = inode_read_data(inode, def_table, bytes);
+		if (err) {
 			ntfs_err(sb, "Failed to read $AttrDef (%d).", err);
-			goto put_inode_out;
+		} else {
+			/* Check content and store sorted array. */
+			err = ntfs_check_attr_def(sbi, def_table, bytes);
+			if (err)
+				ntfs_err(sb, "$AttrDef is corrupted.");
 		}
-		memcpy(Add2Ptr(t, done), page_address(page),
-		       min(PAGE_SIZE, tail));
-		ntfs_unmap_page(page);
 
-		if (!idx && ATTR_STD != t->type) {
-			ntfs_err(sb, "$AttrDef is corrupted.");
-			err = -EINVAL;
+		kfree(def_table);
+		if (err)
 			goto put_inode_out;
-		}
-	}
-
-	t += 1;
-	sbi->def_entries = 1;
-	done = sizeof(struct ATTR_DEF_ENTRY);
-	sbi->reparse.max_size = MAXIMUM_REPARSE_DATA_BUFFER_SIZE;
-	sbi->ea_max_size = 0x10000; /* default formatter value */
-
-	while (done + sizeof(struct ATTR_DEF_ENTRY) <= bytes) {
-		u32 t32 = le32_to_cpu(t->type);
-		u64 sz = le64_to_cpu(t->max_sz);
-
-		if ((t32 & 0xF) || le32_to_cpu(t[-1].type) >= t32)
-			break;
-
-		if (t->type == ATTR_REPARSE)
-			sbi->reparse.max_size = sz;
-		else if (t->type == ATTR_EA)
-			sbi->ea_max_size = sz;
-
-		done += sizeof(struct ATTR_DEF_ENTRY);
-		t += 1;
-		sbi->def_entries += 1;
 	}
 	iput(inode);
 
@@ -1489,27 +1476,22 @@ static int ntfs_fill_super(struct super_block *sb, struct fs_context *fc)
 		goto put_inode_out;
 	}
 
-	for (idx = 0; idx < (0x10000 * sizeof(short) >> PAGE_SHIFT); idx++) {
-		const __le16 *src;
-		u16 *dst = Add2Ptr(sbi->upcase, idx << PAGE_SHIFT);
-		struct page *page = ntfs_map_page(inode->i_mapping, idx);
-
-		if (IS_ERR(page)) {
-			err = PTR_ERR(page);
-			ntfs_err(sb, "Failed to read $UpCase (%d).", err);
-			goto put_inode_out;
-		}
-
-		src = page_address(page);
+	/* Read the entire file. */
+	err = inode_read_data(inode, sbi->upcase, 0x10000 * sizeof(short));
+	if (err) {
+		ntfs_err(sb, "Failed to read $UpCase (%d).", err);
+		goto put_inode_out;
+	}
 
 #ifdef __BIG_ENDIAN
-		for (i = 0; i < PAGE_SIZE / sizeof(u16); i++)
+	{
+		const __le16 *src = sbi->upcase;
+		u16 *dst = sbi->upcase;
+
+		for (i = 0; i < 0x10000; i++)
 			*dst++ = le16_to_cpu(*src++);
-#else
-		memcpy(dst, src, PAGE_SIZE);
-#endif
-		ntfs_unmap_page(page);
 	}
+#endif
 
 	shared = ntfs_set_shared(sbi->upcase, 0x10000 * sizeof(short));
 	if (shared && sbi->upcase != shared) {
@@ -1730,7 +1712,7 @@ static const struct fs_context_operations ntfs_context_ops = {
  * This will called when mount/remount. We will first initialize
  * options so that if remount we can use just that.
  */
-static int ntfs_init_fs_context(struct fs_context *fc)
+static int __ntfs_init_fs_context(struct fs_context *fc)
 {
 	struct ntfs_mount_options *opts;
 	struct ntfs_sb_info *sbi;
@@ -1778,6 +1760,11 @@ free_opts:
 	return -ENOMEM;
 }
 
+static int ntfs_init_fs_context(struct fs_context *fc)
+{
+	return __ntfs_init_fs_context(fc);
+}
+
 static void ntfs3_kill_sb(struct super_block *sb)
 {
 	struct ntfs_sb_info *sbi = sb->s_fs_info;
@@ -1800,10 +1787,20 @@ static struct file_system_type ntfs_fs_type = {
 };
 
 #if IS_ENABLED(CONFIG_NTFS_FS)
+static int ntfs_legacy_init_fs_context(struct fs_context *fc)
+{
+	int ret;
+
+	ret = __ntfs_init_fs_context(fc);
+	/* If ntfs3 is used as legacy ntfs enforce read-only mode. */
+	fc->sb_flags |= SB_RDONLY;
+	return ret;
+}
+
 static struct file_system_type ntfs_legacy_fs_type = {
 	.owner			= THIS_MODULE,
 	.name			= "ntfs",
-	.init_fs_context	= ntfs_init_fs_context,
+	.init_fs_context	= ntfs_legacy_init_fs_context,
 	.parameters		= ntfs_fs_parameters,
 	.kill_sb		= ntfs3_kill_sb,
 	.fs_flags		= FS_REQUIRES_DEV | FS_ALLOW_IDMAP,
@@ -1821,9 +1818,14 @@ static inline void unregister_as_ntfs_legacy(void)
 {
 	unregister_filesystem(&ntfs_legacy_fs_type);
 }
+bool is_legacy_ntfs(struct super_block *sb)
+{
+	return sb->s_type == &ntfs_legacy_fs_type;
+}
 #else
 static inline void register_as_ntfs_legacy(void) {}
 static inline void unregister_as_ntfs_legacy(void) {}
+bool is_legacy_ntfs(struct super_block *sb) { return false; }
 #endif
 
 
@@ -1832,8 +1834,6 @@ static inline void unregister_as_ntfs_legacy(void) {}
 static int __init init_ntfs_fs(void)
 {
 	int err;
-
-	pr_info("ntfs3: Max link count %u\n", NTFS_LINK_MAX);
 
 	if (IS_ENABLED(CONFIG_NTFS3_FS_POSIX_ACL))
 		pr_info("ntfs3: Enabled Linux POSIX ACLs support\n");

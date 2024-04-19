@@ -576,6 +576,7 @@ static inline pud_t set_pud_bit(pud_t pud, pgprot_t prot)
  * mapped shared zeropages and prevent new shared zeropages from getting
  * mapped.
  */
+#define mm_forbids_zeropage mm_forbids_zeropage
 static inline int mm_forbids_zeropage(struct mm_struct *mm)
 {
 #ifdef CONFIG_PGSTE

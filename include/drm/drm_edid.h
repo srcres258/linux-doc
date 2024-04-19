@@ -348,8 +348,6 @@ int drm_edid_to_speaker_allocation(const struct edid *edid, u8 **sadb);
 int drm_av_sync_delay(struct drm_connector *connector,
 		      const struct drm_display_mode *mode);
 
-bool drm_edid_are_equal(const struct edid *edid1, const struct edid *edid2);
-
 int
 drm_hdmi_avi_infoframe_from_display_mode(struct hdmi_avi_infoframe *frame,
 					 const struct drm_connector *connector,
@@ -431,10 +429,6 @@ struct edid *drm_do_get_edid(struct drm_connector *connector,
 	void *data);
 struct edid *drm_get_edid(struct drm_connector *connector,
 			  struct i2c_adapter *adapter);
-const struct drm_edid *drm_edid_read_base_block(struct i2c_adapter *adapter);
-u32 drm_edid_get_panel_id(const struct drm_edid *drm_edid);
-bool drm_edid_match(const struct drm_edid *drm_edid,
-		    const struct drm_edid_ident *ident);
 struct edid *drm_get_edid_switcheroo(struct drm_connector *connector,
 				     struct i2c_adapter *adapter);
 struct edid *drm_edid_duplicate(const struct edid *edid);
@@ -474,6 +468,7 @@ const struct drm_edid *drm_edid_read_ddc(struct drm_connector *connector,
 const struct drm_edid *drm_edid_read_custom(struct drm_connector *connector,
 					    int (*read_block)(void *context, u8 *buf, unsigned int block, size_t len),
 					    void *context);
+const struct drm_edid *drm_edid_read_base_block(struct i2c_adapter *adapter);
 const struct drm_edid *drm_edid_read_switcheroo(struct drm_connector *connector,
 						struct i2c_adapter *adapter);
 int drm_edid_connector_update(struct drm_connector *connector,
@@ -484,8 +479,8 @@ void drm_edid_get_product_id(const struct drm_edid *drm_edid,
 			     struct drm_edid_product_id *id);
 void drm_edid_print_product_id(struct drm_printer *p,
 			       const struct drm_edid_product_id *id, bool raw);
-
-const u8 *drm_find_edid_extension(const struct drm_edid *drm_edid,
-				  int ext_id, int *ext_index);
+u32 drm_edid_get_panel_id(const struct drm_edid *drm_edid);
+bool drm_edid_match(const struct drm_edid *drm_edid,
+		    const struct drm_edid_ident *ident);
 
 #endif /* __DRM_EDID_H__ */
