@@ -342,12 +342,68 @@ ASSERT(orig_end > orig_start);
 ASSERT(!(orig_start >= page_offset(locked_page) + PAGE_SIZE ||
 	 orig_end <= page_offset(locked_page)));
 again:
-/* step one, find a bunch of delalloc bytes starting at start */
-delalloc_start = *start;
-delalloc_end = 0;
-found = btrfs_find_delalloc_range(tree, &delalloc_start, &delalloc_end,
-				  max_bytes, &cached_state);
-if (!found || delalloc_end <= *start || delalloc_start > orig_end) {
+	/* step one, find a bunch of delalloc bytes starting at start */
+	delalloc_start = *start;
+	delalloc_end = 0;
+	found = btrfs_find_delalloc_range(tree, &delalloc_start, &delalloc_end,
+					  max_bytes, &cached_state);
+	if (!found || delalloc_end <= *start || delalloc_start > orig_end) {
+		*start = delalloc_start;
+
+		/* @delalloc_end can be -1, never go beyond @orig_end */
+		*end = min(delalloc_end, orig_end);
+		free_extent_state(cached_state);
+		return false;
+	}
+
+	/*
+	 * start comes from the offset of locked_page.  We have to lock
+	 * pages in order, so we can't process delalloc bytes before
+	 * locked_page
+	 */
+	if (delalloc_start < *start)
+		delalloc_start = *start;
+
+	/*
+	 * make sure to limit the number of pages we try to lock down
+	 */
+	if (delalloc_end + 1 - delalloc_start > max_bytes)
+		delalloc_end = delalloc_start + max_bytes - 1;
+
+	/* step two, lock all the pages after the page that has start */
+	ret = lock_delalloc_pages(inode, locked_page,
+				  delalloc_start, delalloc_end);
+	ASSERT(!ret || ret == -EAGAIN);
+	if (ret == -EAGAIN) {
+		/* some of the pages are gone, lets avoid looping by
+		 * shortening the size of the delalloc range we're searching
+		 */
+		free_extent_state(cached_state);
+		cached_state = NULL;
+		if (!loops) {
+			max_bytes = PAGE_SIZE;
+			loops = 1;
+			goto again;
+		} else {
+			found = false;
+			goto out_failed;
+		}
+	}
+
+	/* step three, lock the state bits for the whole range */
+	lock_extent(tree, delalloc_start, delalloc_end, &cached_state);
+
+	/* then test to make sure it is all still delalloc */
+	ret = test_range_bit(tree, delalloc_start, delalloc_end,
+			     EXTENT_DELALLOC, cached_state);
+
+	unlock_extent(tree, delalloc_start, delalloc_end, &cached_state);
+	if (!ret) {
+		__unlock_for_delalloc(inode, locked_page,
+			      delalloc_start, delalloc_end);
+		cond_resched();
+		goto again;
+	}
 	*start = delalloc_start;
 
 	/* @delalloc_end can be -1, never go beyond @orig_end */
@@ -412,10 +468,11 @@ return found;
 }
 
 void extent_clear_unlock_delalloc(struct btrfs_inode *inode, u64 start, u64 end,
-			  struct page *locked_page,
-			  u32 clear_bits, unsigned long page_ops)
+				  struct page *locked_page,
+				  struct extent_state **cached,
+				  u32 clear_bits, unsigned long page_ops)
 {
-clear_extent_bit(&inode->io_tree, start, end, clear_bits, NULL);
+	clear_extent_bit(&inode->io_tree, start, end, clear_bits, cached);
 
 __process_pages_contig(inode->vfs_inode.i_mapping, locked_page,
 		       start, end, page_ops);
@@ -664,6 +721,37 @@ bio_for_each_folio_all(fi, &bbio->bio) {
 /* Release the last extent */
 endio_readpage_release_extent(&processed, NULL, 0, 0, false);
 bio_put(bio);
+}
+
+/*
+ * Populate every free slot in a provided array with folios.
+ *
+ * @nr_folios:   number of folios to allocate
+ * @folio_array: the array to fill with folios; any existing non-NULL entries in
+ *		 the array will be skipped
+ * @extra_gfp:	 the extra GFP flags for the allocation
+ *
+ * Return: 0        if all folios were able to be allocated;
+ *         -ENOMEM  otherwise, the partially allocated folios would be freed and
+ *                  the array slots zeroed
+ */
+int btrfs_alloc_folio_array(unsigned int nr_folios, struct folio **folio_array,
+			    gfp_t extra_gfp)
+{
+	for (int i = 0; i < nr_folios; i++) {
+		if (folio_array[i])
+			continue;
+		folio_array[i] = folio_alloc(GFP_NOFS | extra_gfp, 0);
+		if (!folio_array[i])
+			goto error;
+	}
+	return 0;
+error:
+	for (int i = 0; i < nr_folios; i++) {
+		if (folio_array[i])
+			folio_put(folio_array[i]);
+	}
+	return -ENOMEM;
 }
 
 /*
@@ -2358,76 +2446,35 @@ if (wbc->range_cyclic) {
  * The nr_to_write == LONG_MAX is needed to make sure other flushers do
  * not race in and drop the bit.
  */
-if (range_whole && wbc->nr_to_write == LONG_MAX &&
-    test_and_clear_bit(BTRFS_INODE_SNAPSHOT_FLUSH,
-		       &BTRFS_I(inode)->runtime_flags))
-	wbc->tagged_writepages = 1;
+static bool try_release_extent_state(struct extent_io_tree *tree,
+				    struct page *page, gfp_t mask)
+{
+	u64 start = page_offset(page);
+	u64 end = start + PAGE_SIZE - 1;
+	bool ret;
 
-if (wbc->sync_mode == WB_SYNC_ALL || wbc->tagged_writepages)
-	tag = PAGECACHE_TAG_TOWRITE;
-else
-	tag = PAGECACHE_TAG_DIRTY;
-retry:
-if (wbc->sync_mode == WB_SYNC_ALL || wbc->tagged_writepages)
-	tag_pages_for_writeback(mapping, index, end);
-done_index = index;
-while (!done && !nr_to_write_done && (index <= end) &&
-		(nr_folios = filemap_get_folios_tag(mapping, &index,
-						end, tag, &fbatch))) {
-	unsigned i;
-
-	for (i = 0; i < nr_folios; i++) {
-		struct folio *folio = fbatch.folios[i];
-
-		done_index = folio_next_index(folio);
-		/*
-		 * At this point we hold neither the i_pages lock nor
-		 * the page lock: the page may be truncated or
-		 * invalidated (changing page->mapping to NULL),
-		 * or even swizzled back from swapper_space to
-		 * tmpfs file mapping
-		 */
-		if (!folio_trylock(folio)) {
-			submit_write_bio(bio_ctrl, 0);
-			folio_lock(folio);
-		}
-
-		if (unlikely(folio->mapping != mapping)) {
-			folio_unlock(folio);
-			continue;
-		}
-
-		if (!folio_test_dirty(folio)) {
-			/* Someone wrote it for us. */
-			folio_unlock(folio);
-			continue;
-		}
-
-		if (wbc->sync_mode != WB_SYNC_NONE) {
-			if (folio_test_writeback(folio))
-				submit_write_bio(bio_ctrl, 0);
-			folio_wait_writeback(folio);
-		}
-
-		if (folio_test_writeback(folio) ||
-		    !folio_clear_dirty_for_io(folio)) {
-			folio_unlock(folio);
-			continue;
-		}
-
-		ret = __extent_writepage(&folio->page, bio_ctrl);
-		if (ret < 0) {
-			done = 1;
-			break;
-		}
+	if (test_range_bit_exists(tree, start, end, EXTENT_LOCKED)) {
+		ret = false;
+	} else {
+		u32 clear_bits = ~(EXTENT_LOCKED | EXTENT_NODATASUM |
+				   EXTENT_DELALLOC_NEW | EXTENT_CTLBITS |
+				   EXTENT_QGROUP_RESERVED);
+		int ret2;
 
 		/*
 		 * The filesystem may choose to bump up nr_to_write.
 		 * We have to make sure to honor the new nr_to_write
 		 * at any time.
 		 */
-		nr_to_write_done = (wbc->sync_mode == WB_SYNC_NONE &&
-				    wbc->nr_to_write <= 0);
+		ret2 = __clear_extent_bit(tree, start, end, clear_bits, NULL, NULL);
+
+		/* if clear_extent_bit failed for enomem reasons,
+		 * we can't allow the release to continue.
+		 */
+		if (ret2 < 0)
+			ret = false;
+		else
+			ret = true;
 	}
 	folio_batch_release(&fbatch);
 	cond_resched();
@@ -2535,180 +2582,77 @@ struct btrfs_bio_ctrl bio_ctrl = {
  * Allow only a single thread to do the reloc work in zoned mode to
  * protect the write pointer updates.
  */
-btrfs_zoned_data_reloc_lock(BTRFS_I(inode));
-ret = extent_write_cache_pages(mapping, &bio_ctrl);
-submit_write_bio(&bio_ctrl, ret);
-btrfs_zoned_data_reloc_unlock(BTRFS_I(inode));
-return ret;
-}
-
-void btrfs_readahead(struct readahead_control *rac)
+bool try_release_extent_mapping(struct page *page, gfp_t mask)
 {
-struct btrfs_bio_ctrl bio_ctrl = { .opf = REQ_OP_READ | REQ_RAHEAD };
-struct page *pagepool[16];
-struct extent_map *em_cached = NULL;
-u64 prev_em_start = (u64)-1;
-int nr;
+	u64 start = page_offset(page);
+	u64 end = start + PAGE_SIZE - 1;
+	struct btrfs_inode *inode = page_to_inode(page);
+	struct extent_io_tree *io_tree = &inode->io_tree;
 
-while ((nr = readahead_page_batch(rac, pagepool))) {
-	u64 contig_start = readahead_pos(rac);
-	u64 contig_end = contig_start + readahead_batch_length(rac) - 1;
-
-	contiguous_readpages(pagepool, nr, contig_start, contig_end,
-			&em_cached, &bio_ctrl, &prev_em_start);
-}
-
-if (em_cached)
-	free_extent_map(em_cached);
-submit_one_bio(&bio_ctrl);
-}
-
-/*
-* basic invalidate_folio code, this waits on any locked or writeback
-* ranges corresponding to the folio, and then deletes any extent state
-* records from the tree
-*/
-int extent_invalidate_folio(struct extent_io_tree *tree,
-		  struct folio *folio, size_t offset)
-{
-struct extent_state *cached_state = NULL;
-u64 start = folio_pos(folio);
-u64 end = start + folio_size(folio) - 1;
-size_t blocksize = folio_to_fs_info(folio)->sectorsize;
-
-/* This function is only called for the btree inode */
-ASSERT(tree->owner == IO_TREE_BTREE_INODE_IO);
-
-start += ALIGN(offset, blocksize);
-if (start > end)
-	return 0;
-
-lock_extent(tree, start, end, &cached_state);
-folio_wait_writeback(folio);
-
-/*
- * Currently for btree io tree, only EXTENT_LOCKED is utilized,
- * so here we only need to unlock the extent range to free any
- * existing extent state.
- */
-unlock_extent(tree, start, end, &cached_state);
-return 0;
-}
-
-/*
-* a helper for release_folio, this tests for areas of the page that
-* are locked or under IO and drops the related state bits if it is safe
-* to drop the page.
-*/
-static int try_release_extent_state(struct extent_io_tree *tree,
-			    struct page *page, gfp_t mask)
-{
-u64 start = page_offset(page);
-u64 end = start + PAGE_SIZE - 1;
-int ret = 1;
-
-if (test_range_bit_exists(tree, start, end, EXTENT_LOCKED)) {
-	ret = 0;
-} else {
-	u32 clear_bits = ~(EXTENT_LOCKED | EXTENT_NODATASUM |
-			   EXTENT_DELALLOC_NEW | EXTENT_CTLBITS |
-			   EXTENT_QGROUP_RESERVED);
-
-	/*
-	 * At this point we can safely clear everything except the
-	 * locked bit, the nodatasum bit and the delalloc new bit.
-	 * The delalloc new bit will be cleared by ordered extent
-	 * completion.
-	 */
-	ret = __clear_extent_bit(tree, start, end, clear_bits, NULL, NULL);
-
-	/* if clear_extent_bit failed for enomem reasons,
-	 * we can't allow the release to continue.
-	 */
-	if (ret < 0)
-		ret = 0;
-	else
-		ret = 1;
-}
-return ret;
-}
-
-/*
-* a helper for release_folio.  As long as there are no locked extents
-* in the range corresponding to the page, both state records and extent
-* map records are removed
-*/
-int try_release_extent_mapping(struct page *page, gfp_t mask)
-{
-struct extent_map *em;
-u64 start = page_offset(page);
-u64 end = start + PAGE_SIZE - 1;
-struct btrfs_inode *btrfs_inode = page_to_inode(page);
-struct extent_io_tree *tree = &btrfs_inode->io_tree;
-struct extent_map_tree *map = &btrfs_inode->extent_tree;
-
-if (gfpflags_allow_blocking(mask) &&
-    page->mapping->host->i_size > SZ_16M) {
-	u64 len;
 	while (start <= end) {
-		struct btrfs_fs_info *fs_info;
-		u64 cur_gen;
+		const u64 cur_gen = btrfs_get_fs_generation(inode->root->fs_info);
+		const u64 len = end - start + 1;
+		struct extent_map_tree *extent_tree = &inode->extent_tree;
+		struct extent_map *em;
 
-			len = end - start + 1;
-			write_lock(&map->lock);
-			em = lookup_extent_mapping(map, start, len);
-			if (!em) {
-				write_unlock(&map->lock);
-				break;
-			}
-			if ((em->flags & EXTENT_FLAG_PINNED) ||
-			    em->start != start) {
-				write_unlock(&map->lock);
-				free_extent_map(em);
-				break;
-			}
-			if (test_range_bit_exists(tree, em->start,
-						  extent_map_end(em) - 1,
-						  EXTENT_LOCKED))
-				goto next;
-			/*
-			 * If it's not in the list of modified extents, used
-			 * by a fast fsync, we can remove it. If it's being
-			 * logged we can safely remove it since fsync took an
-			 * extra reference on the em.
-			 */
-			if (list_empty(&em->list) ||
-			    (em->flags & EXTENT_FLAG_LOGGING))
-				goto remove_em;
-			/*
-			 * If it's in the list of modified extents, remove it
-			 * only if its generation is older then the current one,
-			 * in which case we don't need it for a fast fsync.
-			 * Otherwise don't remove it, we could be racing with an
-			 * ongoing fast fsync that could miss the new extent.
-			 */
-			fs_info = btrfs_inode->root->fs_info;
-			spin_lock(&fs_info->trans_lock);
-			cur_gen = fs_info->generation;
-			spin_unlock(&fs_info->trans_lock);
-			if (em->generation >= cur_gen)
-				goto next;
-remove_em:
-			/*
-			 * We only remove extent maps that are not in the list of
-			 * modified extents or that are in the list but with a
-			 * generation lower then the current generation, so there
-			 * is no need to set the full fsync flag on the inode (it
-			 * hurts the fsync performance for workloads with a data
-			 * size that exceeds or is close to the system's memory).
-			 */
-			remove_extent_mapping(btrfs_inode, em);
-			/* once for the rb tree */
-			free_extent_map(em);
-next:
-			start = extent_map_end(em);
-			write_unlock(&map->lock);
+		write_lock(&extent_tree->lock);
+		em = lookup_extent_mapping(extent_tree, start, len);
+		if (!em) {
+			write_unlock(&extent_tree->lock);
 			break;
+		}
+		if ((em->flags & EXTENT_FLAG_PINNED) || em->start != start) {
+			write_unlock(&extent_tree->lock);
+			free_extent_map(em);
+			break;
+		}
+		if (test_range_bit_exists(io_tree, em->start,
+					  extent_map_end(em) - 1, EXTENT_LOCKED))
+			goto next;
+		/*
+		 * If it's not in the list of modified extents, used by a fast
+		 * fsync, we can remove it. If it's being logged we can safely
+		 * remove it since fsync took an extra reference on the em.
+		 */
+		if (list_empty(&em->list) || (em->flags & EXTENT_FLAG_LOGGING))
+			goto remove_em;
+		/*
+		 * If it's in the list of modified extents, remove it only if
+		 * its generation is older then the current one, in which case
+		 * we don't need it for a fast fsync. Otherwise don't remove it,
+		 * we could be racing with an ongoing fast fsync that could miss
+		 * the new extent.
+		 */
+		if (em->generation >= cur_gen)
+			goto next;
+remove_em:
+		/*
+		 * We only remove extent maps that are not in the list of
+		 * modified extents or that are in the list but with a
+		 * generation lower then the current generation, so there is no
+		 * need to set the full fsync flag on the inode (it hurts the
+		 * fsync performance for workloads with a data size that exceeds
+		 * or is close to the system's memory).
+		 */
+		remove_extent_mapping(inode, em);
+		/* Once for the inode's extent map tree. */
+		free_extent_map(em);
+next:
+		start = extent_map_end(em);
+		write_unlock(&extent_tree->lock);
+
+		/* Once for us, for the lookup_extent_mapping() reference. */
+		free_extent_map(em);
+
+		if (need_resched()) {
+			/*
+			 * If we need to resched but we can't block just exit
+			 * and leave any remaining extent maps.
+			 */
+			if (!gfpflags_allow_blocking(mask))
+				break;
+
+			cond_resched();
 		}
 		if ((em->flags & EXTENT_FLAG_PINNED) ||
 		    em->start != start) {
@@ -2763,8 +2707,7 @@ next:
 
 		cond_resched(); /* Allow large-extent preemption. */
 	}
-}
-return try_release_extent_state(tree, page, mask);
+	return try_release_extent_state(io_tree, page, mask);
 }
 
 struct btrfs_fiemap_entry {

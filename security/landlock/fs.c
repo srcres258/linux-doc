@@ -5,6 +5,8 @@
  * Copyright © 2016-2020 Mickaël Salaün <mic@digikod.net>
  * Copyright © 2018-2020 ANSSI
  * Copyright © 2021-2022 Microsoft Corporation
+ * Copyright © 2022 Günther Noack <gnoack3000@gmail.com>
+ * Copyright © 2023-2024 Google LLC
  */
 
 #include <asm/ioctls.h>
@@ -90,7 +92,7 @@ static const struct landlock_object_underops landlock_fs_underops = {
 /* IOCTL helpers */
 
 /**
- * is_masked_device_ioctl(): Determine whether an IOCTL command is always
+ * is_masked_device_ioctl - Determine whether an IOCTL command is always
  * permitted with Landlock for device files.  These commands can not be
  * restricted on device files by enforcing a Landlock policy.
  *
@@ -175,11 +177,6 @@ static __attribute_const__ bool is_masked_device_ioctl(const unsigned int cmd)
 	case FICLONERANGE:
 	case FIDEDUPERANGE:
 	/*
-	 * FIONREAD, FS_IOC_GETFLAGS, FS_IOC_SETFLAGS, FS_IOC_FSGETXATTR and
-	 * FS_IOC_FSSETXATTR are forwarded to device implementations.
-	 */
-
-	/*
 	 * FS_IOC_GETFSUUID and FS_IOC_GETFSSYSFSPATH both operate on
 	 * the file system superblock, not on the specific file, so
 	 * these operations are available through any other file on the
@@ -188,6 +185,11 @@ static __attribute_const__ bool is_masked_device_ioctl(const unsigned int cmd)
 	case FS_IOC_GETFSUUID:
 	case FS_IOC_GETFSSYSFSPATH:
 		return true;
+
+	/*
+	 * FIONREAD, FS_IOC_GETFLAGS, FS_IOC_SETFLAGS, FS_IOC_FSGETXATTR and
+	 * FS_IOC_FSSETXATTR are forwarded to device implementations.
+	 */
 
 	/*
 	 * file_ioctl() commands (FIBMAP, FS_IOC_RESVSP, FS_IOC_RESVSP64,
@@ -215,6 +217,7 @@ is_masked_device_ioctl_compat(const unsigned int cmd)
 	/* FICLONE is permitted, same as in the non-compat variant. */
 	case FICLONE:
 		return true;
+
 #if defined(CONFIG_X86_64)
 	/*
 	 * FS_IOC_RESVSP_32, FS_IOC_RESVSP64_32, FS_IOC_UNRESVSP_32,
@@ -227,6 +230,7 @@ is_masked_device_ioctl_compat(const unsigned int cmd)
 	case FS_IOC_UNRESVSP64_32:
 	case FS_IOC_ZERO_RANGE_32:
 #endif
+
 	/*
 	 * FS_IOC32_GETFLAGS, FS_IOC32_SETFLAGS are forwarded to their device
 	 * implementations.

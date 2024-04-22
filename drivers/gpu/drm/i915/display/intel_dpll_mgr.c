@@ -24,6 +24,7 @@
 #include <linux/math.h>
 #include <linux/string_helpers.h>
 
+#include "bxt_dpio_phy_regs.h"
 #include "i915_reg.h"
 #include "intel_de.h"
 #include "intel_display_types.h"
@@ -2117,7 +2118,7 @@ static void bxt_ddi_pll_enable(struct drm_i915_private *i915,
 		drm_err(&i915->drm, "PLL %d not locked\n", port);
 
 	if (IS_GEMINILAKE(i915)) {
-		temp = intel_de_read(i915, BXT_PORT_TX_DW5_LN0(phy, ch));
+		temp = intel_de_read(i915, BXT_PORT_TX_DW5_LN(phy, ch, 0));
 		temp |= DCC_DELAY_RANGE_2;
 		intel_de_write(i915, BXT_PORT_TX_DW5_GRP(phy, ch), temp);
 	}

@@ -1050,8 +1050,7 @@ static int add_delayed_ref(struct btrfs_trans_handle *trans,
 		record = kzalloc(sizeof(*record), GFP_NOFS);
 		if (!record) {
 			kmem_cache_free(btrfs_delayed_ref_node_cachep, node);
-			kmem_cache_free(btrfs_delayed_ref_head_cachep,
-					head_ref);
+			kmem_cache_free(btrfs_delayed_ref_head_cachep, head_ref);
 			return -ENOMEM;
 		}
 	}
@@ -1092,9 +1091,8 @@ static int add_delayed_ref(struct btrfs_trans_handle *trans,
 }
 
 /*
- * add a delayed tree ref.  This does all of the accounting required
- * to make sure the delayed ref is eventually processed before this
- * transaction commits.
+ * Add a delayed tree ref. This does all of the accounting required to make sure
+ * the delayed ref is eventually processed before this transaction commits.
  */
 int btrfs_add_delayed_tree_ref(struct btrfs_trans_handle *trans,
 			       struct btrfs_ref *generic_ref,

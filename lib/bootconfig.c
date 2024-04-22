@@ -902,7 +902,7 @@ static int __init xbc_parse_tree(void)
 
 /**
  * _xbc_exit() - Clean up all parsed bootconfig
- * @early: in early xbc init error
+ * @early: Set true if this is called before budy system is initialized.
  *
  * This clears all data structures of parsed bootconfig on memory.
  * If you need to reuse xbc_init() with new boot config, you can
