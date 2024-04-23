@@ -41,28 +41,23 @@ static void bch2_data_update_opts_to_text(struct printbuf *out, struct bch_fs *c
 					  struct data_update_opts *data_opts)
 {
 	printbuf_tabstop_push(out, 20);
-	prt_str(out, "rewrite ptrs:");
-	prt_tab(out);
+	prt_str(out, "rewrite ptrs:\t");
 	bch2_prt_u64_base2(out, data_opts->rewrite_ptrs);
 	prt_newline(out);
 
-	prt_str(out, "kill ptrs: ");
-	prt_tab(out);
+	prt_str(out, "kill ptrs:\t");
 	bch2_prt_u64_base2(out, data_opts->kill_ptrs);
 	prt_newline(out);
 
-	prt_str(out, "target: ");
-	prt_tab(out);
+	prt_str(out, "target:\t");
 	bch2_target_to_text(out, c, data_opts->target);
 	prt_newline(out);
 
-	prt_str(out, "compression: ");
-	prt_tab(out);
+	prt_str(out, "compression:\t");
 	bch2_compression_opt_to_text(out, background_compression(*io_opts));
 	prt_newline(out);
 
-	prt_str(out, "extra replicas: ");
-	prt_tab(out);
+	prt_str(out, "extra replicas:\t");
 	prt_u64(out, data_opts->extra_replicas);
 }
 
@@ -421,7 +416,7 @@ struct bch_io_opts *bch2_move_get_io_opts(struct btree_trans *trans,
 		io_opts->d.nr = 0;
 
 		ret = for_each_btree_key(trans, iter, BTREE_ID_inodes, POS(0, extent_k.k->p.inode),
-					 BTREE_ITER_ALL_SNAPSHOTS, k, ({
+					 BTREE_ITER_all_snapshots, k, ({
 			if (k.k->p.offset != extent_k.k->p.inode)
 				break;
 
@@ -467,7 +462,7 @@ int bch2_move_get_io_opts_one(struct btree_trans *trans,
 
 	k = bch2_bkey_get_iter(trans, &iter, BTREE_ID_inodes,
 			       SPOS(0, extent_k.k->p.inode, extent_k.k->p.snapshot),
-			       BTREE_ITER_CACHED);
+			       BTREE_ITER_cached);
 	ret = bkey_err(k);
 	if (bch2_err_matches(ret, BCH_ERR_transaction_restart))
 		return ret;
@@ -553,8 +548,8 @@ static int bch2_move_data_btree(struct moving_context *ctxt,
 	}
 
 	bch2_trans_iter_init(trans, &iter, btree_id, start,
-			     BTREE_ITER_PREFETCH|
-			     BTREE_ITER_ALL_SNAPSHOTS);
+			     BTREE_ITER_prefetch|
+			     BTREE_ITER_all_snapshots);
 
 	if (ctxt->rate)
 		bch2_ratelimit_reset(ctxt->rate);
@@ -705,7 +700,7 @@ int bch2_evacuate_bucket(struct moving_context *ctxt,
 	bch2_trans_begin(trans);
 
 	bch2_trans_iter_init(trans, &iter, BTREE_ID_alloc,
-			     bucket, BTREE_ITER_CACHED);
+			     bucket, BTREE_ITER_cached);
 	ret = lockrestart_do(trans,
 			bkey_err(k = bch2_btree_iter_peek_slot(&iter)));
 	bch2_trans_iter_exit(trans, &iter);
@@ -716,7 +711,7 @@ int bch2_evacuate_bucket(struct moving_context *ctxt,
 
 	a = bch2_alloc_to_v4(k, &a_convert);
 	dirty_sectors = bch2_bucket_sectors_dirty(*a);
-	bucket_size = bch_dev_bkey_exists(c, bucket.inode)->mi.bucket_size;
+	bucket_size = bch2_dev_bkey_exists(c, bucket.inode)->mi.bucket_size;
 	fragmentation = a->fragmentation_lru;
 
 	ret = bch2_btree_write_buffer_tryflush(trans);
@@ -732,7 +727,7 @@ int bch2_evacuate_bucket(struct moving_context *ctxt,
 
 		ret = bch2_get_next_backpointer(trans, bucket, gen,
 						&bp_pos, &bp,
-						BTREE_ITER_CACHED);
+						BTREE_ITER_cached);
 		if (bch2_err_matches(ret, BCH_ERR_transaction_restart))
 			continue;
 		if (ret)
@@ -868,7 +863,7 @@ static int bch2_move_btree(struct bch_fs *c,
 			continue;
 
 		bch2_trans_node_iter_init(trans, &iter, btree, POS_MIN, 0, 0,
-					  BTREE_ITER_PREFETCH);
+					  BTREE_ITER_prefetch);
 retry:
 		ret = 0;
 		while (bch2_trans_begin(trans),
@@ -1137,23 +1132,17 @@ void bch2_move_stats_to_text(struct printbuf *out, struct bch_move_stats *stats)
 	prt_newline(out);
 	printbuf_indent_add(out, 2);
 
-	prt_str(out, "keys moved:  ");
-	prt_u64(out, atomic64_read(&stats->keys_moved));
-	prt_newline(out);
-
-	prt_str(out, "keys raced:  ");
-	prt_u64(out, atomic64_read(&stats->keys_raced));
-	prt_newline(out);
-
-	prt_str(out, "bytes seen:  ");
+	prt_printf(out, "keys moved:  %llu\n",	atomic64_read(&stats->keys_moved));
+	prt_printf(out, "keys raced:  %llu\n",	atomic64_read(&stats->keys_raced));
+	prt_printf(out, "bytes seen:  ");
 	prt_human_readable_u64(out, atomic64_read(&stats->sectors_seen) << 9);
 	prt_newline(out);
 
-	prt_str(out, "bytes moved: ");
+	prt_printf(out, "bytes moved: ");
 	prt_human_readable_u64(out, atomic64_read(&stats->sectors_moved) << 9);
 	prt_newline(out);
 
-	prt_str(out, "bytes raced: ");
+	prt_printf(out, "bytes raced: ");
 	prt_human_readable_u64(out, atomic64_read(&stats->sectors_raced) << 9);
 	prt_newline(out);
 
@@ -1167,19 +1156,17 @@ static void bch2_moving_ctxt_to_text(struct printbuf *out, struct bch_fs *c, str
 	bch2_move_stats_to_text(out, ctxt->stats);
 	printbuf_indent_add(out, 2);
 
-	prt_printf(out, "reads: ios %u/%u sectors %u/%u",
+	prt_printf(out, "reads: ios %u/%u sectors %u/%u\n",
 		   atomic_read(&ctxt->read_ios),
 		   c->opts.move_ios_in_flight,
 		   atomic_read(&ctxt->read_sectors),
 		   c->opts.move_bytes_in_flight >> 9);
-	prt_newline(out);
 
-	prt_printf(out, "writes: ios %u/%u sectors %u/%u",
+	prt_printf(out, "writes: ios %u/%u sectors %u/%u\n",
 		   atomic_read(&ctxt->write_ios),
 		   c->opts.move_ios_in_flight,
 		   atomic_read(&ctxt->write_sectors),
 		   c->opts.move_bytes_in_flight >> 9);
-	prt_newline(out);
 
 	printbuf_indent_add(out, 2);
 
