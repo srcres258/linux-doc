@@ -90,7 +90,7 @@ retry:
 	bch2_trans_begin(trans);
 
 	ret   = bch2_inode_peek(trans, &iter, &inode_u, inode_inum(inode),
-				BTREE_ITER_INTENT) ?:
+				BTREE_ITER_intent) ?:
 		(set ? set(trans, inode, &inode_u, p) : 0) ?:
 		bch2_inode_write(trans, &iter, &inode_u) ?:
 		bch2_trans_commit(trans, NULL, NULL, BCH_TRANS_COMMIT_no_enospc);
@@ -213,19 +213,43 @@ static struct bch_inode_info *bch2_inode_insert(struct bch_fs *c, struct bch_ino
 	_ret;									\
 })
 
+static struct inode *bch2_alloc_inode(struct super_block *sb)
+{
+	BUG();
+}
+
+static struct bch_inode_info *__bch2_new_inode(struct bch_fs *c)
+{
+	struct bch_inode_info *inode = kmem_cache_alloc(bch2_inode_cache, GFP_NOFS);
+	if (!inode)
+		return NULL;
+
+	inode_init_once(&inode->v);
+	mutex_init(&inode->ei_update_lock);
+	two_state_lock_init(&inode->ei_pagecache_lock);
+	INIT_LIST_HEAD(&inode->ei_vfs_inode_list);
+	mutex_init(&inode->ei_quota_lock);
+	inode->v.i_state = 0;
+
+	if (unlikely(inode_init_always(c->vfs_sb, &inode->v))) {
+		kmem_cache_free(bch2_inode_cache, inode);
+		return NULL;
+	}
+
+	return inode;
+}
+
 /*
  * Allocate a new inode, dropping/retaking btree locks if necessary:
  */
 static struct bch_inode_info *bch2_new_inode(struct btree_trans *trans)
 {
-	struct bch_fs *c = trans->c;
-
 	struct bch_inode_info *inode =
 		memalloc_flags_do(PF_MEMALLOC_NORECLAIM|PF_MEMALLOC_NOWARN,
-				  to_bch_ei(new_inode(c->vfs_sb)));
+				  __bch2_new_inode(trans->c));
 
 	if (unlikely(!inode)) {
-		int ret = drop_locks_do(trans, (inode = to_bch_ei(new_inode(c->vfs_sb))) ? 0 : -ENOMEM);
+		int ret = drop_locks_do(trans, (inode = __bch2_new_inode(trans->c)) ? 0 : -ENOMEM);
 		if (ret && inode) {
 			__destroy_inode(&inode->v);
 			kmem_cache_free(bch2_inode_cache, inode);
@@ -290,7 +314,7 @@ __bch2_create(struct mnt_idmap *idmap,
 	if (ret)
 		return ERR_PTR(ret);
 #endif
-	inode = to_bch_ei(new_inode(c->vfs_sb));
+	inode = __bch2_new_inode(c);
 	if (unlikely(!inode)) {
 		inode = ERR_PTR(-ENOMEM);
 		goto err;
@@ -323,7 +347,7 @@ retry:
 	inum.inum = inode_u.bi_inum;
 
 	ret   = bch2_subvolume_get(trans, inum.subvol, true,
-				   BTREE_ITER_WITH_UPDATES, &subvol) ?:
+				   BTREE_ITER_with_updates, &subvol) ?:
 		bch2_trans_commit(trans, NULL, &journal_seq, 0);
 	if (unlikely(ret)) {
 		bch2_quota_acct(c, bch_qid(&inode_u), Q_INO, -1,
@@ -377,15 +401,11 @@ static struct bch_inode_info *bch2_lookup_trans(struct btree_trans *trans,
 	struct btree_iter dirent_iter = {};
 	subvol_inum inum = {};
 
-	int ret = bch2_hash_lookup(trans, &dirent_iter, bch2_dirent_hash_desc,
-				   dir_hash_info, dir, name, 0);
+	struct bkey_s_c k = bch2_hash_lookup(trans, &dirent_iter, bch2_dirent_hash_desc,
+					     dir_hash_info, dir, name, 0);
+	int ret = bkey_err(k);
 	if (ret)
 		return ERR_PTR(ret);
-
-	struct bkey_s_c k = bch2_btree_iter_peek_slot(&dirent_iter);
-	ret = bkey_err(k);
-	if (ret)
-		goto err;
 
 	ret = bch2_dirent_read_target(trans, dir, bkey_s_c_to_dirent(k), &inum);
 	if (ret > 0)
@@ -787,7 +807,7 @@ retry:
 	acl = NULL;
 
 	ret = bch2_inode_peek(trans, &inode_iter, &inode_u, inode_inum(inode),
-			      BTREE_ITER_INTENT);
+			      BTREE_ITER_intent);
 	if (ret)
 		goto btree_err;
 
@@ -1040,6 +1060,10 @@ retry:
 
 		bch2_btree_iter_set_pos(&iter,
 			POS(iter.pos.inode, iter.pos.offset + sectors));
+
+		ret = bch2_trans_relock(trans);
+		if (ret)
+			break;
 	}
 	start = iter.pos.offset;
 	bch2_trans_iter_exit(trans, &iter);
@@ -1485,23 +1509,6 @@ static void bch2_vfs_inode_init(struct btree_trans *trans, subvol_inum inum,
 	}
 
 	mapping_set_large_folios(inode->v.i_mapping);
-}
-
-static struct inode *bch2_alloc_inode(struct super_block *sb)
-{
-	struct bch_inode_info *inode;
-
-	inode = kmem_cache_alloc(bch2_inode_cache, GFP_NOFS);
-	if (!inode)
-		return NULL;
-
-	inode_init_once(&inode->v);
-	mutex_init(&inode->ei_update_lock);
-	two_state_lock_init(&inode->ei_pagecache_lock);
-	INIT_LIST_HEAD(&inode->ei_vfs_inode_list);
-	mutex_init(&inode->ei_quota_lock);
-
-	return &inode->v;
 }
 
 static void bch2_i_callback(struct rcu_head *head)
