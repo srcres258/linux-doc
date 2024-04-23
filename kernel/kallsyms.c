@@ -35,6 +35,31 @@
 #include "kallsyms_internal.h"
 
 /*
+ * The real definitions of the symbols below will not exist yet during the
+ * first pass of the link, but are guaranteed to exist in the final link.
+ * Provide preliminary weak definitions that will be superseded in the final
+ * link, to avoid having to rely on weak references, which require a GOT when
+ * used in position independent code.
+ */
+
+#ifndef CONFIG_KALLSYMS_BASE_RELATIVE
+const unsigned long __weak kallsyms_addresses[1];
+#else
+const int __weak kallsyms_offsets[1];
+const unsigned long __weak kallsyms_relative_base;
+#endif
+
+const u8 __weak kallsyms_names[1];
+
+const unsigned int __weak kallsyms_num_syms;
+
+const char __weak kallsyms_token_table[1];
+const u16 __weak kallsyms_token_index[1];
+
+const unsigned int __weak kallsyms_markers[1];
+const u8 __weak kallsyms_seqs_of_names[3];
+
+/*
  * Expand a compressed symbol data into the resulting uncompressed string,
  * if uncompressed string is too long (>= maxlen), it will be truncated,
  * given the offset to where the symbol is in the compressed stream.
@@ -324,12 +349,6 @@ static unsigned long get_symbol_pos(unsigned long addr,
 {
 	unsigned long symbol_start = 0, symbol_end = 0;
 	unsigned long i, low, high, mid;
-
-	/* This kernel should never had been booted. */
-	if (!IS_ENABLED(CONFIG_KALLSYMS_BASE_RELATIVE))
-		BUG_ON(!kallsyms_addresses);
-	else
-		BUG_ON(!kallsyms_offsets);
 
 	/* Do a binary search on the sorted kallsyms_addresses array. */
 	low = 0;
