@@ -17,6 +17,8 @@
 #include "xfs_scrub.h"
 #include "xfs_buf_mem.h"
 #include "xfs_rmap.h"
+#include "xfs_exchrange.h"
+#include "xfs_exchmaps.h"
 #include "scrub/scrub.h"
 #include "scrub/common.h"
 #include "scrub/trace.h"
@@ -24,6 +26,8 @@
 #include "scrub/health.h"
 #include "scrub/stats.h"
 #include "scrub/xfile.h"
+#include "scrub/tempfile.h"
+#include "scrub/orphanage.h"
 
 /*
  * Online Scrub and Repair
@@ -147,14 +151,15 @@ xchk_probe(
 
 /* Scrub setup and teardown */
 
+#define FSGATES_MASK	(XCHK_FSGATES_ALL | XREP_FSGATES_ALL)
 static inline void
 xchk_fsgates_disable(
 	struct xfs_scrub	*sc)
 {
-	if (!(sc->flags & XCHK_FSGATES_ALL))
+	if (!(sc->flags & FSGATES_MASK))
 		return;
 
-	trace_xchk_fsgates_disable(sc, sc->flags & XCHK_FSGATES_ALL);
+	trace_xchk_fsgates_disable(sc, sc->flags & FSGATES_MASK);
 
 	if (sc->flags & XCHK_FSGATES_DRAIN)
 		xfs_drain_wait_disable();
@@ -168,7 +173,41 @@ xchk_fsgates_disable(
 	if (sc->flags & XCHK_FSGATES_RMAP)
 		xfs_rmap_hook_disable();
 
-	sc->flags &= ~XCHK_FSGATES_ALL;
+	sc->flags &= ~FSGATES_MASK;
+}
+#undef FSGATES_MASK
+
+/* Free the resources associated with a scrub subtype. */
+void
+xchk_scrub_free_subord(
+	struct xfs_scrub_subord	*sub)
+{
+	struct xfs_scrub	*sc = sub->parent_sc;
+
+	ASSERT(sc->ip == sub->sc.ip);
+	ASSERT(sc->orphanage == sub->sc.orphanage);
+	ASSERT(sc->tempip == sub->sc.tempip);
+
+	sc->sm->sm_type = sub->old_smtype;
+	sc->sm->sm_flags = sub->old_smflags |
+				(sc->sm->sm_flags & XFS_SCRUB_FLAGS_OUT);
+	sc->tp = sub->sc.tp;
+
+	if (sub->sc.buf) {
+		if (sub->sc.buf_cleanup)
+			sub->sc.buf_cleanup(sub->sc.buf);
+		kvfree(sub->sc.buf);
+	}
+	if (sub->sc.xmbtp)
+		xmbuf_free(sub->sc.xmbtp);
+	if (sub->sc.xfile)
+		xfile_destroy(sub->sc.xfile);
+
+	sc->ilock_flags = sub->sc.ilock_flags;
+	sc->orphanage_ilock_flags = sub->sc.orphanage_ilock_flags;
+	sc->temp_ilock_flags = sub->sc.temp_ilock_flags;
+
+	kfree(sub);
 }
 
 /* Free all the resources and finish the transactions. */
@@ -211,6 +250,8 @@ xchk_teardown(
 		sc->buf = NULL;
 	}
 
+	xrep_tempfile_rele(sc);
+	xrep_orphanage_rele(sc);
 	xchk_fsgates_disable(sc);
 	return error;
 }
@@ -319,25 +360,25 @@ static const struct xchk_meta_ops meta_scrub_ops[] = {
 		.type	= ST_INODE,
 		.setup	= xchk_setup_directory,
 		.scrub	= xchk_directory,
-		.repair	= xrep_notsupported,
+		.repair	= xrep_directory,
 	},
 	[XFS_SCRUB_TYPE_XATTR] = {	/* extended attributes */
 		.type	= ST_INODE,
 		.setup	= xchk_setup_xattr,
 		.scrub	= xchk_xattr,
-		.repair	= xrep_notsupported,
+		.repair	= xrep_xattr,
 	},
 	[XFS_SCRUB_TYPE_SYMLINK] = {	/* symbolic link */
 		.type	= ST_INODE,
 		.setup	= xchk_setup_symlink,
 		.scrub	= xchk_symlink,
-		.repair	= xrep_notsupported,
+		.repair	= xrep_symlink,
 	},
 	[XFS_SCRUB_TYPE_PARENT] = {	/* parent pointers */
 		.type	= ST_INODE,
 		.setup	= xchk_setup_parent,
 		.scrub	= xchk_parent,
-		.repair	= xrep_notsupported,
+		.repair	= xrep_parent,
 	},
 	[XFS_SCRUB_TYPE_RTBITMAP] = {	/* realtime bitmap */
 		.type	= ST_FS,
@@ -349,7 +390,7 @@ static const struct xchk_meta_ops meta_scrub_ops[] = {
 		.type	= ST_FS,
 		.setup	= xchk_setup_rtsummary,
 		.scrub	= xchk_rtsummary,
-		.repair	= xrep_notsupported,
+		.repair	= xrep_rtsummary,
 	},
 	[XFS_SCRUB_TYPE_UQUOTA] = {	/* user quota */
 		.type	= ST_FS,
@@ -496,6 +537,36 @@ static inline void xchk_postmortem(struct xfs_scrub *sc)
 				"Corruption detected during scrub.");
 }
 #endif /* CONFIG_XFS_ONLINE_REPAIR */
+
+/*
+ * Create a new scrub context from an existing one, but with a different scrub
+ * type.
+ */
+struct xfs_scrub_subord *
+xchk_scrub_create_subord(
+	struct xfs_scrub	*sc,
+	unsigned int		subtype)
+{
+	struct xfs_scrub_subord	*sub;
+
+	sub = kzalloc(sizeof(*sub), XCHK_GFP_FLAGS);
+	if (!sub)
+		return ERR_PTR(-ENOMEM);
+
+	sub->old_smtype = sc->sm->sm_type;
+	sub->old_smflags = sc->sm->sm_flags;
+	sub->parent_sc = sc;
+	memcpy(&sub->sc, sc, sizeof(struct xfs_scrub));
+	sub->sc.ops = &meta_scrub_ops[subtype];
+	sub->sc.sm->sm_type = subtype;
+	sub->sc.sm->sm_flags &= ~XFS_SCRUB_FLAGS_OUT;
+	sub->sc.buf = NULL;
+	sub->sc.buf_cleanup = NULL;
+	sub->sc.xfile = NULL;
+	sub->sc.xmbtp = NULL;
+
+	return sub;
+}
 
 /* Dispatch metadata scrubbing. */
 int
