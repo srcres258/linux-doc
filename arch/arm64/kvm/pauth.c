@@ -17,6 +17,22 @@
 #include <asm/kvm_emulate.h>
 #include <asm/pointer_auth.h>
 
+/*
+ * "// This is some of my finest work" (Will Deacon, 2019-02-12)
+ *
+ * The jury is still out on that one.
+ */
+#define REG(r)	"(0%x[" #r "] - ((0%x[" #r "] >> 4) * 6))"
+
+/* PACGA Xd, Xn, Xm */
+#define PACGA(d,n,m)						\
+	asm volatile(".inst 0x9AC03000   |"			\
+		     "(" REG(Rd) "<< 0)  |"			\
+		     "(" REG(Rn) "<< 5)  |"			\
+		     "(" REG(Rm) "<< 16)\n"			\
+		     : [Rd] "=r" ((d))				\
+		     : [Rn] "r" ((n)), [Rm] "r" ((m)))
+
 static u64 compute_pac(struct kvm_vcpu *vcpu, u64 ptr,
 		       struct ptrauth_key ikey)
 {
@@ -36,8 +52,7 @@ static u64 compute_pac(struct kvm_vcpu *vcpu, u64 ptr,
 	__ptrauth_key_install_nosync(APGA, ikey);
 	isb();
 
-	asm volatile(ARM64_ASM_PREAMBLE ".arch_extension pauth\n"
-		     "pacga %0, %1, %2" : "=r" (pac) : "r" (ptr), "r" (mod));
+	PACGA(pac, ptr, mod);
 	isb();
 
 	__ptrauth_key_install_nosync(APGA, gkey);

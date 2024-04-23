@@ -72,7 +72,7 @@ static void *sys_mmap(void *addr, unsigned long len, unsigned long prot,
 	return sret;
 }
 
-inline int sys_mprotect(void *ptr, size_t size, unsigned long prot)
+static inline int sys_mprotect(void *ptr, size_t size, unsigned long prot)
 {
 	int sret;
 
@@ -105,7 +105,6 @@ static void test_seal_elf(void)
 	int ret;
 	FILE *maps;
 	char line[512];
-	int size = 0;
 	uintptr_t  addr_start, addr_end;
 	char prot[5];
 	char filename[256];
@@ -136,7 +135,7 @@ static void test_seal_elf(void)
 	 */
 	while (fgets(line, sizeof(line), maps)) {
 		if (sscanf(line, "%lx-%lx %4s %*x %*x:%*x %*u %255[^\n]",
-			&addr_start, &addr_end, &prot, &filename) == 4) {
+			&addr_start, &addr_end, prot, filename) == 4) {
 			if (strlen(filename)) {
 				/*
 				 * seal the mapping if read only.

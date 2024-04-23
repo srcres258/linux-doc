@@ -172,7 +172,7 @@ static bool bpf_global_percpu_ma_set;
 
 /* verifier_state + insn_idx are pushed to stack when branch is encountered */
 struct bpf_verifier_stack_elem {
-	/* verifer state is 'st'
+	/* verifier state is 'st'
 	 * before processing instruction 'insn_idx'
 	 * and after processing instruction 'prev_insn_idx'
 	 */
@@ -2131,7 +2131,7 @@ static void __reg64_deduce_bounds(struct bpf_reg_state *reg)
 static void __reg_deduce_mixed_bounds(struct bpf_reg_state *reg)
 {
 	/* Try to tighten 64-bit bounds from 32-bit knowledge, using 32-bit
-	 * values on both sides of 64-bit range in hope to have tigher range.
+	 * values on both sides of 64-bit range in hope to have tighter range.
 	 * E.g., if r1 is [0x1'00000000, 0x3'80000000], and we learn from
 	 * 32-bit signed > 0 operation that s32 bounds are now [1; 0x7fffffff].
 	 * With this, we can substitute 1 as low 32-bits of _low_ 64-bit bound
@@ -2139,7 +2139,7 @@ static void __reg_deduce_mixed_bounds(struct bpf_reg_state *reg)
 	 * _high_ 64-bit bound (0x380000000 -> 0x37fffffff) and arrive at a
 	 * better overall bounds for r1 as [0x1'000000001; 0x3'7fffffff].
 	 * We just need to make sure that derived bounds we are intersecting
-	 * with are well-formed ranges in respecitve s64 or u64 domain, just
+	 * with are well-formed ranges in respective s64 or u64 domain, just
 	 * like we do with similar kinds of 32-to-64 or 64-to-32 adjustments.
 	 */
 	__u64 new_umin, new_umax;
@@ -6971,7 +6971,7 @@ static int check_mem_access(struct bpf_verifier_env *env, int insn_idx, u32 regn
 }
 
 static int save_aux_ptr_type(struct bpf_verifier_env *env, enum bpf_reg_type type,
-			     bool allow_trust_missmatch);
+			     bool allow_trust_mismatch);
 
 static int check_atomic(struct bpf_verifier_env *env, int insn_idx, struct bpf_insn *insn)
 {
@@ -14714,7 +14714,7 @@ static void regs_refine_cond_op(struct bpf_reg_state *reg1, struct bpf_reg_state
 
 /* Adjusts the register min/max values in the case that the dst_reg and
  * src_reg are both SCALAR_VALUE registers (or we are simply doing a BPF_K
- * check, in which case we havea fake SCALAR_VALUE representing insn->imm).
+ * check, in which case we have a fake SCALAR_VALUE representing insn->imm).
  * Technically we can do similar adjustments for pointers to the same object,
  * but we don't support that right now.
  */
@@ -17352,7 +17352,7 @@ hit:
 			err = propagate_liveness(env, &sl->state, cur);
 
 			/* if previous state reached the exit with precision and
-			 * current state is equivalent to it (except precsion marks)
+			 * current state is equivalent to it (except precision marks)
 			 * the precision needs to be propagated back in
 			 * the current state.
 			 */
@@ -17530,7 +17530,7 @@ static bool reg_type_mismatch(enum bpf_reg_type src, enum bpf_reg_type prev)
 }
 
 static int save_aux_ptr_type(struct bpf_verifier_env *env, enum bpf_reg_type type,
-			     bool allow_trust_missmatch)
+			     bool allow_trust_mismatch)
 {
 	enum bpf_reg_type *prev_type = &env->insn_aux_data[env->insn_idx].ptr_type;
 
@@ -17548,7 +17548,7 @@ static int save_aux_ptr_type(struct bpf_verifier_env *env, enum bpf_reg_type typ
 		 * src_reg == stack|map in some other branch.
 		 * Reject it.
 		 */
-		if (allow_trust_missmatch &&
+		if (allow_trust_mismatch &&
 		    base_type(type) == PTR_TO_BTF_ID &&
 		    base_type(*prev_type) == PTR_TO_BTF_ID) {
 			/*
@@ -20211,7 +20211,7 @@ patch_map_ops_generic:
 			 * divide-by-3 through multiplication, followed by further
 			 * division by 8 through 3-bit right shift.
 			 * Refer to book "Hacker's Delight, 2nd ed." by Henry S. Warren, Jr.,
-			 * p. 227, chapter "Unsigned Divison by 3" for details and proofs.
+			 * p. 227, chapter "Unsigned Division by 3" for details and proofs.
 			 *
 			 * N / 3 <=> M * N / 2^33, where M = (2^33 + 1) / 3 = 0xaaaaaaab.
 			 */

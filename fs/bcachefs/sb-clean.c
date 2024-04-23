@@ -29,6 +29,14 @@ int bch2_sb_clean_validate_late(struct bch_fs *c, struct bch_sb_field_clean *cle
 	for (entry = clean->start;
 	     entry < (struct jset_entry *) vstruct_end(&clean->field);
 	     entry = vstruct_next(entry)) {
+		if (vstruct_end(entry) > vstruct_end(&clean->field)) {
+			bch_err(c, "journal entry (u64s %u) overran end of superblock clean section (u64s %u) by %zu",
+				le16_to_cpu(entry->u64s), le32_to_cpu(clean->field.u64s),
+				(u64 *) vstruct_end(entry) - (u64 *) vstruct_end(&clean->field));
+			bch2_sb_error_count(c, BCH_FSCK_ERR_sb_clean_entry_overrun);
+			return -BCH_ERR_fsck_repair_unimplemented;
+		}
+
 		ret = bch2_journal_entry_validate(c, NULL, entry,
 						  le16_to_cpu(c->disk_sb.sb->version),
 						  BCH_SB_BIG_ENDIAN(c->disk_sb.sb),
@@ -279,10 +287,8 @@ static void bch2_sb_clean_to_text(struct printbuf *out, struct bch_sb *sb,
 	struct bch_sb_field_clean *clean = field_to_type(f, clean);
 	struct jset_entry *entry;
 
-	prt_printf(out, "flags:          %x",	le32_to_cpu(clean->flags));
-	prt_newline(out);
-	prt_printf(out, "journal_seq:    %llu",	le64_to_cpu(clean->journal_seq));
-	prt_newline(out);
+	prt_printf(out, "flags:          %x\n",		le32_to_cpu(clean->flags));
+	prt_printf(out, "journal_seq:    %llu\n",	le64_to_cpu(clean->journal_seq));
 
 	for (entry = clean->start;
 	     entry != vstruct_end(&clean->field);

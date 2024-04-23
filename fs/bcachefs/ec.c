@@ -244,7 +244,7 @@ err:
 static int mark_stripe_bucket(struct btree_trans *trans,
 			      struct bkey_s_c k,
 			      unsigned ptr_idx,
-			      unsigned flags)
+			      enum btree_iter_update_trigger_flags flags)
 {
 	struct bch_fs *c = trans->c;
 	const struct bch_stripe *s = bkey_s_c_to_stripe(k).v;
@@ -253,12 +253,12 @@ static int mark_stripe_bucket(struct btree_trans *trans,
 	enum bch_data_type data_type = parity ? BCH_DATA_parity : BCH_DATA_stripe;
 	s64 sectors = parity ? le16_to_cpu(s->sectors) : 0;
 	const struct bch_extent_ptr *ptr = s->ptrs + ptr_idx;
-	struct bch_dev *ca = bch_dev_bkey_exists(c, ptr->dev);
+	struct bch_dev *ca = bch2_dev_bkey_exists(c, ptr->dev);
 	struct bucket old, new, *g;
 	struct printbuf buf = PRINTBUF;
 	int ret = 0;
 
-	BUG_ON(!(flags & BTREE_TRIGGER_GC));
+	BUG_ON(!(flags & BTREE_TRIGGER_gc));
 
 	/* * XXX doesn't handle deletion */
 
@@ -302,7 +302,7 @@ err:
 int bch2_trigger_stripe(struct btree_trans *trans,
 			enum btree_id btree_id, unsigned level,
 			struct bkey_s_c old, struct bkey_s _new,
-			unsigned flags)
+			enum btree_iter_update_trigger_flags flags)
 {
 	struct bkey_s_c new = _new.s_c;
 	struct bch_fs *c = trans->c;
@@ -312,7 +312,7 @@ int bch2_trigger_stripe(struct btree_trans *trans,
 	const struct bch_stripe *new_s = new.k->type == KEY_TYPE_stripe
 		? bkey_s_c_to_stripe(new).v : NULL;
 
-	if (flags & BTREE_TRIGGER_TRANSACTIONAL) {
+	if (flags & BTREE_TRIGGER_transactional) {
 		/*
 		 * If the pointers aren't changing, we don't need to do anything:
 		 */
@@ -371,7 +371,7 @@ int bch2_trigger_stripe(struct btree_trans *trans,
 		}
 	}
 
-	if (flags & BTREE_TRIGGER_ATOMIC) {
+	if (flags & BTREE_TRIGGER_atomic) {
 		struct stripe *m = genradix_ptr(&c->stripes, idx);
 
 		if (!m) {
@@ -410,7 +410,7 @@ int bch2_trigger_stripe(struct btree_trans *trans,
 		}
 	}
 
-	if (flags & BTREE_TRIGGER_GC) {
+	if (flags & BTREE_TRIGGER_gc) {
 		struct gc_stripe *m =
 			genradix_ptr_alloc(&c->gc_stripes, idx, GFP_KERNEL);
 
@@ -609,7 +609,7 @@ static void ec_validate_checksums(struct bch_fs *c, struct ec_stripe_buf *buf)
 
 			if (bch2_crc_cmp(want, got)) {
 				struct printbuf err = PRINTBUF;
-				struct bch_dev *ca = bch_dev_bkey_exists(c, v->ptrs[i].dev);
+				struct bch_dev *ca = bch2_dev_bkey_exists(c, v->ptrs[i].dev);
 
 				prt_str(&err, "stripe ");
 				bch2_csum_err_msg(&err, v->csum_type, want, got);
@@ -705,7 +705,7 @@ static void ec_block_io(struct bch_fs *c, struct ec_stripe_buf *buf,
 	struct bch_stripe *v = &bkey_i_to_stripe(&buf->key)->v;
 	unsigned offset = 0, bytes = buf->size << 9;
 	struct bch_extent_ptr *ptr = &v->ptrs[idx];
-	struct bch_dev *ca = bch_dev_bkey_exists(c, ptr->dev);
+	struct bch_dev *ca = bch2_dev_bkey_exists(c, ptr->dev);
 	enum bch_data_type data_type = idx < v->nr_blocks - v->nr_redundant
 		? BCH_DATA_user
 		: BCH_DATA_parity;
@@ -769,7 +769,7 @@ static int get_stripe_key_trans(struct btree_trans *trans, u64 idx,
 	int ret;
 
 	k = bch2_bkey_get_iter(trans, &iter, BTREE_ID_stripes,
-			       POS(0, idx), BTREE_ITER_SLOTS);
+			       POS(0, idx), BTREE_ITER_slots);
 	ret = bkey_err(k);
 	if (ret)
 		goto err;
@@ -1060,7 +1060,7 @@ static int ec_stripe_delete(struct btree_trans *trans, u64 idx)
 	int ret;
 
 	k = bch2_bkey_get_iter(trans, &iter, BTREE_ID_stripes, POS(0, idx),
-			       BTREE_ITER_INTENT);
+			       BTREE_ITER_intent);
 	ret = bkey_err(k);
 	if (ret)
 		goto err;
@@ -1131,7 +1131,7 @@ static int ec_stripe_key_update(struct btree_trans *trans,
 	int ret;
 
 	k = bch2_bkey_get_iter(trans, &iter, BTREE_ID_stripes,
-			       new->k.p, BTREE_ITER_INTENT);
+			       new->k.p, BTREE_ITER_intent);
 	ret = bkey_err(k);
 	if (ret)
 		goto err;
@@ -1189,7 +1189,7 @@ static int ec_stripe_update_extent(struct btree_trans *trans,
 	int ret, dev, block;
 
 	ret = bch2_get_next_backpointer(trans, bucket, gen,
-				bp_pos, &bp, BTREE_ITER_CACHED);
+				bp_pos, &bp, BTREE_ITER_cached);
 	if (ret)
 		return ret;
 	if (bpos_eq(*bp_pos, SPOS_MAX))
@@ -1214,7 +1214,7 @@ static int ec_stripe_update_extent(struct btree_trans *trans,
 		return -EIO;
 	}
 
-	k = bch2_backpointer_get_key(trans, &iter, *bp_pos, bp, BTREE_ITER_INTENT);
+	k = bch2_backpointer_get_key(trans, &iter, *bp_pos, bp, BTREE_ITER_intent);
 	ret = bkey_err(k);
 	if (ret)
 		return ret;
@@ -1321,7 +1321,7 @@ static void zero_out_rest_of_ec_bucket(struct bch_fs *c,
 				       unsigned block,
 				       struct open_bucket *ob)
 {
-	struct bch_dev *ca = bch_dev_bkey_exists(c, ob->dev);
+	struct bch_dev *ca = bch2_dev_bkey_exists(c, ob->dev);
 	unsigned offset = ca->mi.bucket_size - ob->sectors_free;
 	int ret;
 
@@ -1527,7 +1527,7 @@ void *bch2_writepoint_ec_buf(struct bch_fs *c, struct write_point *wp)
 
 	BUG_ON(!ob->ec->new_stripe.data[ob->ec_idx]);
 
-	ca	= bch_dev_bkey_exists(c, ob->dev);
+	ca	= bch2_dev_bkey_exists(c, ob->dev);
 	offset	= ca->mi.bucket_size - ob->sectors_free;
 
 	return ob->ec->new_stripe.data[ob->ec_idx] + (offset << 9);
@@ -1937,7 +1937,7 @@ static int __bch2_ec_stripe_head_reserve(struct btree_trans *trans, struct ec_st
 	}
 
 	for_each_btree_key_norestart(trans, iter, BTREE_ID_stripes, start_pos,
-			   BTREE_ITER_SLOTS|BTREE_ITER_INTENT, k, ret) {
+			   BTREE_ITER_slots|BTREE_ITER_intent, k, ret) {
 		if (bkey_gt(k.k->p, POS(0, U32_MAX))) {
 			if (start_pos.offset) {
 				start_pos = min_pos;
@@ -2127,7 +2127,7 @@ int bch2_stripes_read(struct bch_fs *c)
 {
 	int ret = bch2_trans_run(c,
 		for_each_btree_key(trans, iter, BTREE_ID_stripes, POS_MIN,
-				   BTREE_ITER_PREFETCH, k, ({
+				   BTREE_ITER_prefetch, k, ({
 			if (k.k->type != KEY_TYPE_stripe)
 				continue;
 

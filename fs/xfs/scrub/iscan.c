@@ -243,6 +243,51 @@ xchk_iscan_finish(
 	mutex_unlock(&iscan->lock);
 }
 
+/* Mark an inode scan finished before we actually scan anything. */
+void
+xchk_iscan_finish_early(
+	struct xchk_iscan	*iscan)
+{
+	ASSERT(iscan->cursor_ino == iscan->scan_start_ino);
+	ASSERT(iscan->__visited_ino == iscan->scan_start_ino);
+
+	xchk_iscan_finish(iscan);
+}
+
+/*
+ * Grab the AGI to advance the inode scan.  Returns 0 if *agi_bpp is now set,
+ * -ECANCELED if the live scan aborted, -EBUSY if the AGI could not be grabbed,
+ * or the usual negative errno.
+ */
+STATIC int
+xchk_iscan_read_agi(
+	struct xchk_iscan	*iscan,
+	struct xfs_perag	*pag,
+	struct xfs_buf		**agi_bpp)
+{
+	struct xfs_scrub	*sc = iscan->sc;
+	unsigned long		relax;
+	int			ret;
+
+	if (!xchk_iscan_agi_needs_trylock(iscan))
+		return xfs_ialloc_read_agi(pag, sc->tp, 0, agi_bpp);
+
+	relax = msecs_to_jiffies(iscan->iget_retry_delay);
+	do {
+		ret = xfs_ialloc_read_agi(pag, sc->tp, XFS_IALLOC_FLAG_TRYLOCK,
+				agi_bpp);
+		if (ret != -EAGAIN)
+			return ret;
+		if (!iscan->iget_timeout ||
+		    time_is_before_jiffies(iscan->__iget_deadline))
+			return -EBUSY;
+
+		trace_xchk_iscan_agi_retry_wait(iscan);
+	} while (!schedule_timeout_killable(relax) &&
+		 !xchk_iscan_aborted(iscan));
+	return -ECANCELED;
+}
+
 /*
  * Advance ino to the next inode that the inobt thinks is allocated, being
  * careful to jump to the next AG if we've reached the right end of this AG's
@@ -281,7 +326,7 @@ xchk_iscan_advance(
 		if (!pag)
 			return -ECANCELED;
 
-		ret = xfs_ialloc_read_agi(pag, sc->tp, &agi_bp);
+		ret = xchk_iscan_read_agi(iscan, pag, &agi_bp);
 		if (ret)
 			goto out_pag;
 
@@ -402,8 +447,13 @@ xchk_iscan_iget(
 		 * It's possible that this inode has lost all of its links but
 		 * hasn't yet been inactivated.  If we don't have a transaction
 		 * or it's not writable, flush the inodegc workers and wait.
+		 * If we have a non-empty transaction, we must not block on
+		 * inodegc, which allocates its own transactions.
 		 */
-		xfs_inodegc_flush(mp);
+		if (sc->tp && !(sc->tp->t_flags & XFS_TRANS_NO_WRITECOUNT))
+			xfs_inodegc_push(mp);
+		else
+			xfs_inodegc_flush(mp);
 		return xchk_iscan_iget_retry(iscan, true);
 	}
 

@@ -138,21 +138,13 @@ static int bch2_xattr_get_trans(struct btree_trans *trans, struct bch_inode_info
 	struct bch_hash_info hash = bch2_hash_info_init(trans->c, &inode->ei_inode);
 	struct xattr_search_key search = X_SEARCH(type, name, strlen(name));
 	struct btree_iter iter;
-	struct bkey_s_c_xattr xattr;
-	struct bkey_s_c k;
-	int ret;
-
-	ret = bch2_hash_lookup(trans, &iter, bch2_xattr_hash_desc, &hash,
-			       inode_inum(inode), &search, 0);
+	struct bkey_s_c k = bch2_hash_lookup(trans, &iter, bch2_xattr_hash_desc, &hash,
+					     inode_inum(inode), &search, 0);
+	int ret = bkey_err(k);
 	if (ret)
-		goto err1;
+		return ret;
 
-	k = bch2_btree_iter_peek_slot(&iter);
-	ret = bkey_err(k);
-	if (ret)
-		goto err2;
-
-	xattr = bkey_s_c_to_xattr(k);
+	struct bkey_s_c_xattr xattr = bkey_s_c_to_xattr(k);
 	ret = le16_to_cpu(xattr.v->x_val_len);
 	if (buffer) {
 		if (ret > size)
@@ -160,10 +152,8 @@ static int bch2_xattr_get_trans(struct btree_trans *trans, struct bch_inode_info
 		else
 			memcpy(buffer, xattr_val(xattr.v), ret);
 	}
-err2:
 	bch2_trans_iter_exit(trans, &iter);
-err1:
-	return ret < 0 && bch2_err_matches(ret, ENOENT) ? -ENODATA : ret;
+	return ret;
 }
 
 int bch2_xattr_set(struct btree_trans *trans, subvol_inum inum,
@@ -177,7 +167,7 @@ int bch2_xattr_set(struct btree_trans *trans, subvol_inum inum,
 	int ret;
 
 	ret   = bch2_subvol_is_ro_trans(trans, inum.subvol) ?:
-		bch2_inode_peek(trans, &inode_iter, inode_u, inum, BTREE_ITER_INTENT);
+		bch2_inode_peek(trans, &inode_iter, inode_u, inum, BTREE_ITER_intent);
 	if (ret)
 		return ret;
 
@@ -212,8 +202,8 @@ int bch2_xattr_set(struct btree_trans *trans, subvol_inum inum,
 
 		ret = bch2_hash_set(trans, bch2_xattr_hash_desc, hash_info,
 			      inum, &xattr->k_i,
-			      (flags & XATTR_CREATE ? BCH_HASH_SET_MUST_CREATE : 0)|
-			      (flags & XATTR_REPLACE ? BCH_HASH_SET_MUST_REPLACE : 0));
+			      (flags & XATTR_CREATE ? STR_HASH_must_create : 0)|
+			      (flags & XATTR_REPLACE ? STR_HASH_must_replace : 0));
 	} else {
 		struct xattr_search_key search =
 			X_SEARCH(type, name, strlen(name));
@@ -358,6 +348,9 @@ static int bch2_xattr_get_handler(const struct xattr_handler *handler,
 	struct bch_fs *c = inode->v.i_sb->s_fs_info;
 	int ret = bch2_trans_do(c, NULL, NULL, 0,
 		bch2_xattr_get_trans(trans, inode, name, buffer, size, handler->flags));
+
+	if (ret < 0 && bch2_err_matches(ret, ENOENT))
+		ret = -ENODATA;
 
 	return bch2_err_class(ret);
 }

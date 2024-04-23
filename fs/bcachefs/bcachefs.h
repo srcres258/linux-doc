@@ -361,6 +361,8 @@ do {									\
 #define BCH_DEBUG_PARAMS_ALWAYS()					\
 	BCH_DEBUG_PARAM(key_merging_disabled,				\
 		"Disables merging of extents")				\
+	BCH_DEBUG_PARAM(btree_node_merging_disabled,			\
+		"Disables merging of btree nodes")			\
 	BCH_DEBUG_PARAM(btree_gc_always_rewrite,			\
 		"Causes mark and sweep to compact and rewrite every "	\
 		"btree node it traverses")				\
@@ -470,6 +472,7 @@ enum bch_time_stats {
 #include "quota_types.h"
 #include "rebalance_types.h"
 #include "replicas_types.h"
+#include "sb-members_types.h"
 #include "subvolume_types.h"
 #include "super_types.h"
 
@@ -716,6 +719,7 @@ struct btree_trans_buf {
 	x(discard_fast)							\
 	x(invalidate)							\
 	x(delete_dead_snapshots)					\
+	x(gc_gens)							\
 	x(snapshot_delete_pagecache)					\
 	x(sysfs)							\
 	x(btree_write_buffer)
@@ -927,7 +931,6 @@ struct bch_fs {
 	/* JOURNAL SEQ BLACKLIST */
 	struct journal_seq_blacklist_table *
 				journal_seq_blacklist_table;
-	struct work_struct	journal_seq_blacklist_gc_work;
 
 	/* ALLOCATOR */
 	spinlock_t		freelist_lock;
@@ -958,8 +961,7 @@ struct bch_fs {
 	struct work_struct	discard_fast_work;
 
 	/* GARBAGE COLLECTION */
-	struct task_struct	*gc_thread;
-	atomic_t		kick_gc;
+	struct work_struct	gc_gens_work;
 	unsigned long		gc_count;
 
 	enum btree_id		gc_gens_btree;
@@ -1116,7 +1118,6 @@ struct bch_fs {
 	u64			counters_on_mount[BCH_COUNTER_NR];
 	u64 __percpu		*counters;
 
-	unsigned		btree_gc_periodic:1;
 	unsigned		copy_gc_enabled:1;
 	bool			promote_whole_extents;
 
@@ -1249,11 +1250,6 @@ static inline s64 bch2_current_time(const struct bch_fs *c)
 
 	ktime_get_coarse_real_ts64(&now);
 	return timespec_to_bch2_time(c, now);
-}
-
-static inline bool bch2_dev_exists2(const struct bch_fs *c, unsigned dev)
-{
-	return dev < c->sb.nr_devices && c->devs[dev];
 }
 
 static inline struct stdio_redirect *bch2_fs_stdio_redirect(struct bch_fs *c)

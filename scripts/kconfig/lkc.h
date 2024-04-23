@@ -79,6 +79,11 @@ void str_printf(struct gstr *gs, const char *fmt, ...);
 char *str_get(struct gstr *gs);
 
 /* menu.c */
+struct menu *menu_next(struct menu *menu, struct menu *root);
+#define menu_for_each_sub_entry(menu, root) \
+	for (menu = menu_next(root, root); menu; menu = menu_next(menu, root))
+#define menu_for_each_entry(menu) \
+	menu_for_each_sub_entry(menu, &rootmenu)
 void _menu_init(void);
 struct menu *menu_add_menu(void);
 void menu_end_menu(void);

@@ -1759,7 +1759,7 @@ static void __update_and_free_hugetlb_folio(struct hstate *h,
 	 * If vmemmap pages were allocated above, then we need to clear the
 	 * hugetlb flag under the hugetlb lock.
 	 */
-	if (clear_flag) {
+	if (folio_test_hugetlb(folio)) {
 		spin_lock_irq(&hugetlb_lock);
 		__folio_clear_hugetlb(folio);
 		spin_unlock_irq(&hugetlb_lock);

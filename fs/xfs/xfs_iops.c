@@ -25,6 +25,7 @@
 #include "xfs_error.h"
 #include "xfs_ioctl.h"
 #include "xfs_xattr.h"
+#include "xfs_file.h"
 
 #include <linux/posix_acl.h>
 #include <linux/security.h>
@@ -363,6 +364,9 @@ xfs_vn_link(
 	error = xfs_dentry_mode_to_name(&name, dentry, inode->i_mode);
 	if (unlikely(error))
 		return error;
+
+	if (IS_PRIVATE(inode))
+		return -EPERM;
 
 	error = xfs_link(XFS_I(dir), XFS_I(inode), &name);
 	if (unlikely(error))

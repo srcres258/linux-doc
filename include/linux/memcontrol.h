@@ -1091,8 +1091,6 @@ static inline unsigned long lruvec_page_state_local(struct lruvec *lruvec,
 void mem_cgroup_flush_stats(struct mem_cgroup *memcg);
 void mem_cgroup_flush_stats_ratelimited(struct mem_cgroup *memcg);
 
-void __mod_memcg_lruvec_state(struct lruvec *lruvec, enum node_stat_item idx,
-			      int val);
 void __mod_lruvec_kmem_state(void *p, enum node_stat_item idx, int val);
 
 static inline void mod_lruvec_kmem_state(void *p, enum node_stat_item idx,
@@ -1102,16 +1100,6 @@ static inline void mod_lruvec_kmem_state(void *p, enum node_stat_item idx,
 
 	local_irq_save(flags);
 	__mod_lruvec_kmem_state(p, idx, val);
-	local_irq_restore(flags);
-}
-
-static inline void mod_memcg_lruvec_state(struct lruvec *lruvec,
-					  enum node_stat_item idx, int val)
-{
-	unsigned long flags;
-
-	local_irq_save(flags);
-	__mod_memcg_lruvec_state(lruvec, idx, val);
 	local_irq_restore(flags);
 }
 
@@ -1619,11 +1607,6 @@ static inline void mem_cgroup_flush_stats(struct mem_cgroup *memcg)
 }
 
 static inline void mem_cgroup_flush_stats_ratelimited(struct mem_cgroup *memcg)
-{
-}
-
-static inline void __mod_memcg_lruvec_state(struct lruvec *lruvec,
-					    enum node_stat_item idx, int val)
 {
 }
 
