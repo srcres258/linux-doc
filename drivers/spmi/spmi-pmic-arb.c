@@ -1672,7 +1672,7 @@ static int spmi_pmic_arb_bus_init(struct platform_device *pdev,
 	void __iomem *intr;
 	void __iomem *cnfg;
 	int index, ret;
-	u32 irq;
+	int irq;
 
 	ctrl = devm_spmi_controller_alloc(dev, sizeof(*bus));
 	if (IS_ERR(ctrl))
@@ -1721,8 +1721,8 @@ static int spmi_pmic_arb_bus_init(struct platform_device *pdev,
 		return PTR_ERR(intr);
 
 	irq = of_irq_get_byname(node, "periph_irq");
-	if (irq < 0)
-		return irq;
+	if (irq <= 0)
+		return irq ?: -ENXIO;
 
 	bus->pmic_arb = pmic_arb;
 	bus->intr = intr;
