@@ -14,23 +14,18 @@
 
 #include <linux/kvm_host.h>
 
+#include <asm/gpr-num.h>
 #include <asm/kvm_emulate.h>
 #include <asm/pointer_auth.h>
 
-/*
- * "// This is some of my finest work" (Will Deacon, 2019-02-12)
- *
- * The jury is still out on that one.
- */
-#define REG(r)	"(0%x[" #r "] - ((0%x[" #r "] >> 4) * 6))"
-
 /* PACGA Xd, Xn, Xm */
-#define PACGA(d,n,m)						\
-	asm volatile(".inst 0x9AC03000   |"			\
-		     "(" REG(Rd) "<< 0)  |"			\
-		     "(" REG(Rn) "<< 5)  |"			\
-		     "(" REG(Rm) "<< 16)\n"			\
-		     : [Rd] "=r" ((d))				\
+#define PACGA(d,n,m)					\
+	asm volatile(__DEFINE_ASM_GPR_NUMS		\
+		     ".inst 0x9AC03000          |"	\
+		     "(.L__gpr_num_%[Rd] << 0)  |"	\
+		     "(.L__gpr_num_%[Rn] << 5)  |"	\
+		     "(.L__gpr_num_%[Rm] << 16)\n"	\
+		     : [Rd] "=r" ((d))			\
 		     : [Rn] "r" ((n)), [Rm] "r" ((m)))
 
 static u64 compute_pac(struct kvm_vcpu *vcpu, u64 ptr,

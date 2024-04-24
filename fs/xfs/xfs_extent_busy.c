@@ -518,47 +518,26 @@ fail:
 	goto out;
 }
 
-STATIC void
+static bool
 xfs_extent_busy_clear_one(
-	struct xfs_mount	*mp,
 	struct xfs_perag	*pag,
-	struct xfs_extent_busy	*busyp)
+	struct xfs_extent_busy	*busyp,
+	bool			do_discard)
 {
 	if (busyp->length) {
-		trace_xfs_extent_busy_clear(mp, busyp->agno, busyp->bno,
-						busyp->length);
+		if (do_discard &&
+		    !(busyp->flags & XFS_EXTENT_BUSY_SKIP_DISCARD)) {
+			busyp->flags = XFS_EXTENT_BUSY_DISCARDED;
+			return false;
+		}
+		trace_xfs_extent_busy_clear(pag->pag_mount, busyp->agno,
+				busyp->bno, busyp->length);
 		rb_erase(&busyp->rb_node, &pag->pagb_tree);
 	}
 
 	list_del_init(&busyp->list);
 	kfree(busyp);
-}
-
-/*
- * Sparse has real trouble with the structure of xfs_extent_busy_clear() and it
- * is impossible to annotate it correctly if we leave the 'if (pag)' conditional
- * in xfs_extent_busy_clear(). Hence we always "release" the lock in
- * xfs_extent_busy_put_pag() so sparse only ever sees one possible path to
- * drop the lock.
- */
-static void
-xfs_extent_busy_put_pag(
-	struct xfs_perag	*pag,
-	bool			wakeup)
-		__releases(pag->pagb_lock)
-{
-	if (!pag) {
-		__release(pag->pagb_lock);
-		return;
-	}
-
-	if (wakeup) {
-		pag->pagb_gen++;
-		wake_up_all(&pag->pagb_wait);
-	}
-
-	spin_unlock(&pag->pagb_lock);
-	xfs_perag_put(pag);
+	return true;
 }
 
 /*
@@ -572,39 +551,33 @@ xfs_extent_busy_clear(
 	struct list_head	*list,
 	bool			do_discard)
 {
-	struct xfs_extent_busy	*busyp, *n;
-	struct xfs_perag	*pag = NULL;
-	xfs_agnumber_t		agno = NULLAGNUMBER;
-	bool			wakeup = false;
+	struct xfs_extent_busy	*busyp, *next;
 
-	/*
-	 * Sparse thinks the locking in the loop below is balanced (one unlock,
-	 * one lock per loop iteration) and doesn't understand that we enter
-	 * with no lock held and exit with a lock held. Hence we need to
-	 * "acquire" the lock to create the correct initial condition for the
-	 * cleanup after loop termination to avoid an unexpected unlock warning.
-	 */
-	__acquire(pag->pagb_lock);
+	busyp = list_first_entry_or_null(list, typeof(*busyp), list);
+	if (!busyp)
+		return;
 
-	list_for_each_entry_safe(busyp, n, list, list) {
-		if (busyp->agno != agno) {
-			xfs_extent_busy_put_pag(pag, wakeup);
-			agno = busyp->agno;
-			pag = xfs_perag_get(mp, agno);
-			spin_lock(&pag->pagb_lock);
-			wakeup = false;
+	do {
+		bool			wakeup = false;
+		struct xfs_perag	*pag;
+
+		pag = xfs_perag_get(mp, busyp->agno);
+		spin_lock(&pag->pagb_lock);
+		do {
+			next = list_next_entry(busyp, list);
+			if (xfs_extent_busy_clear_one(pag, busyp, do_discard))
+				wakeup = true;
+			busyp = next;
+		} while (!list_entry_is_head(busyp, list, list) &&
+			 busyp->agno == pag->pag_agno);
+
+		if (wakeup) {
+			pag->pagb_gen++;
+			wake_up_all(&pag->pagb_wait);
 		}
-
-		if (do_discard && busyp->length &&
-		    !(busyp->flags & XFS_EXTENT_BUSY_SKIP_DISCARD)) {
-			busyp->flags = XFS_EXTENT_BUSY_DISCARDED;
-		} else {
-			xfs_extent_busy_clear_one(mp, pag, busyp);
-			wakeup = true;
-		}
-	}
-
-	xfs_extent_busy_put_pag(pag, wakeup);
+		spin_unlock(&pag->pagb_lock);
+		xfs_perag_put(pag);
+	} while (!list_entry_is_head(busyp, list, list));
 }
 
 /*

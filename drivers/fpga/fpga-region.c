@@ -184,7 +184,7 @@ ATTRIBUTE_GROUPS(fpga_region);
  * __fpga_region_register_full - create and register an FPGA Region device
  * @parent: device parent
  * @info: parameters for FPGA Region
- * @owner: owner module containing the get_bridges function
+ * @owner: module containing the get_bridges function
  *
  * Return: struct fpga_region or ERR_PTR()
  */
@@ -251,7 +251,7 @@ EXPORT_SYMBOL_GPL(__fpga_region_register_full);
  * @parent: device parent
  * @mgr: manager that programs this region
  * @get_bridges: optional function to get bridges to a list
- * @owner: owner module containing get_bridges function
+ * @owner: module containing the get_bridges function
  *
  * This simple version of the register function should be sufficient for most users.
  * The fpga_region_register_full() function is available for users that need to

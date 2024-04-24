@@ -221,9 +221,9 @@ static ssize_t ntfs_list_ea(struct ntfs_inode *ni, char *buffer,
 		if (!name_len)
 			break;
 
-		if (name_len > ea_size) {
+		if (ea->name_len > ea_size) {
 			ntfs_set_state(ni->mi.sbi, NTFS_DIRTY_ERROR);
-			err = -EINVAL; /* corrupted fs. */
+			err = -EINVAL; /* corrupted fs */
 			break;
 		}
 
