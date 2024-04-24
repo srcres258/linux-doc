@@ -24,9 +24,11 @@
 #include "scrub/xfile.h"
 #include "scrub/xfarray.h"
 #include "scrub/iscan.h"
+#include "scrub/orphanage.h"
 #include "scrub/nlinks.h"
 #include "scrub/trace.h"
 #include "scrub/readdir.h"
+#include "scrub/tempfile.h"
 
 /*
  * Live Inode Link Count Checking
@@ -43,11 +45,23 @@ int
 xchk_setup_nlinks(
 	struct xfs_scrub	*sc)
 {
+	struct xchk_nlink_ctrs	*xnc;
+	int			error;
+
 	xchk_fsgates_enable(sc, XCHK_FSGATES_DIRENTS);
 
-	sc->buf = kzalloc(sizeof(struct xchk_nlink_ctrs), XCHK_GFP_FLAGS);
-	if (!sc->buf)
+	if (xchk_could_repair(sc)) {
+		error = xrep_setup_nlinks(sc);
+		if (error)
+			return error;
+	}
+
+	xnc = kvzalloc(sizeof(struct xchk_nlink_ctrs), XCHK_GFP_FLAGS);
+	if (!xnc)
 		return -ENOMEM;
+	xnc->xname.name = xnc->namebuf;
+	xnc->sc = sc;
+	sc->buf = xnc;
 
 	return xchk_setup_fs(sc);
 }
@@ -151,6 +165,13 @@ xchk_nlinks_live_update(
 	int				error;
 
 	xnc = container_of(nb, struct xchk_nlink_ctrs, dhook.dirent_hook.nb);
+
+	/*
+	 * Ignore temporary directories being used to stage dir repairs, since
+	 * we don't bump the link counts of the children.
+	 */
+	if (xrep_is_tempfile(p->dp))
+		return NOTIFY_DONE;
 
 	trace_xchk_nlinks_live_update(xnc->sc->mp, p->dp, action, p->ip->i_ino,
 			p->delta, p->name->name, p->name->len);
@@ -302,6 +323,13 @@ xchk_nlinks_collect_dir(
 	struct xfs_scrub	*sc = xnc->sc;
 	unsigned int		lock_mode;
 	int			error = 0;
+
+	/*
+	 * Ignore temporary directories being used to stage dir repairs, since
+	 * we don't bump the link counts of the children.
+	 */
+	if (xrep_is_tempfile(dp))
+		return 0;
 
 	/* Prevent anyone from changing this directory while we walk it. */
 	xfs_ilock(dp, XFS_IOLOCK_SHARED);
@@ -537,6 +565,14 @@ xchk_nlinks_compare_inode(
 	unsigned int		actual_nlink;
 	int			error;
 
+	/*
+	 * Ignore temporary files being used to stage repairs, since we assume
+	 * they're correct for non-directories, and the directory repair code
+	 * doesn't bump the link counts for the children.
+	 */
+	if (xrep_is_tempfile(ip))
+		return 0;
+
 	xfs_ilock(ip, XFS_ILOCK_SHARED);
 	mutex_lock(&xnc->lock);
 
@@ -571,9 +607,11 @@ xchk_nlinks_compare_inode(
 	 * this as a corruption.  The VFS won't let users increase the link
 	 * count, but it will let them decrease it.
 	 */
-	if (total_links > XFS_MAXLINK) {
+	if (total_links > XFS_NLINK_PINNED) {
 		xchk_ino_set_corrupt(sc, ip->i_ino);
 		goto out_corrupt;
+	} else if (total_links > XFS_MAXLINK) {
+		xchk_ino_set_warning(sc, ip->i_ino);
 	}
 
 	/* Link counts should match. */
@@ -849,9 +887,6 @@ xchk_nlinks_setup_scan(
 	xfs_agnumber_t		last_agno = mp->m_sb.sb_agcount - 1;
 	xfs_agino_t		first_agino, last_agino;
 	int			error;
-
-	ASSERT(xnc->sc == NULL);
-	xnc->sc = sc;
 
 	mutex_init(&xnc->lock);
 

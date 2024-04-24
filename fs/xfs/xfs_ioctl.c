@@ -39,6 +39,8 @@
 #include "xfs_ioctl.h"
 #include "xfs_xattr.h"
 #include "xfs_rtbitmap.h"
+#include "xfs_file.h"
+#include "xfs_exchrange.h"
 
 #include <linux/mount.h>
 #include <linux/namei.h>
@@ -2168,6 +2170,9 @@ xfs_file_ioctl(
 		sb_end_write(mp->m_super);
 		return error;
 	}
+
+	case XFS_IOC_EXCHANGE_RANGE:
+		return xfs_ioc_exchange_range(filp, arg);
 
 	default:
 		return -ENOTTY;
