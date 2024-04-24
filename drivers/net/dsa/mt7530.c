@@ -74,73 +74,6 @@ static const struct mt7530_mib_desc mt7530_mib[] = {
 	MIB_DESC(1, 0xb8, "RxArlDrop"),
 };
 
-/* Since phy_device has not yet been created and
- * phy_{read,write}_mmd_indirect is not available, we provide our own
- * core_{read,write}_mmd_indirect with core_{clear,write,set} wrappers
- * to complete this function.
- */
-static int
-core_read_mmd_indirect(struct mt7530_priv *priv, int prtad, int devad)
-{
-	struct mii_bus *bus = priv->bus;
-	int value, ret;
-
-	/* Write the desired MMD Devad */
-	ret = bus->write(bus, 0, MII_MMD_CTRL, devad);
-	if (ret < 0)
-		goto err;
-
-	/* Write the desired MMD register address */
-	ret = bus->write(bus, 0, MII_MMD_DATA, prtad);
-	if (ret < 0)
-		goto err;
-
-	/* Select the Function : DATA with no post increment */
-	ret = bus->write(bus, 0, MII_MMD_CTRL, (devad | MII_MMD_CTRL_NOINCR));
-	if (ret < 0)
-		goto err;
-
-	/* Read the content of the MMD's selected register */
-	value = bus->read(bus, 0, MII_MMD_DATA);
-
-	return value;
-err:
-	dev_err(&bus->dev,  "failed to read mmd register\n");
-
-	return ret;
-}
-
-static int
-core_write_mmd_indirect(struct mt7530_priv *priv, int prtad,
-			int devad, u32 data)
-{
-	struct mii_bus *bus = priv->bus;
-	int ret;
-
-	/* Write the desired MMD Devad */
-	ret = bus->write(bus, 0, MII_MMD_CTRL, devad);
-	if (ret < 0)
-		goto err;
-
-	/* Write the desired MMD register address */
-	ret = bus->write(bus, 0, MII_MMD_DATA, prtad);
-	if (ret < 0)
-		goto err;
-
-	/* Select the Function : DATA with no post increment */
-	ret = bus->write(bus, 0, MII_MMD_CTRL, (devad | MII_MMD_CTRL_NOINCR));
-	if (ret < 0)
-		goto err;
-
-	/* Write the data into MMD's selected register */
-	ret = bus->write(bus, 0, MII_MMD_DATA, data);
-err:
-	if (ret < 0)
-		dev_err(&bus->dev,
-			"failed to write mmd register\n");
-	return ret;
-}
-
 static void
 mt7530_mutex_lock(struct mt7530_priv *priv)
 {
@@ -158,9 +91,35 @@ mt7530_mutex_unlock(struct mt7530_priv *priv)
 static void
 core_write(struct mt7530_priv *priv, u32 reg, u32 val)
 {
+	struct mii_bus *bus = priv->bus;
+	int ret;
+
 	mt7530_mutex_lock(priv);
 
-	core_write_mmd_indirect(priv, reg, MDIO_MMD_VEND2, val);
+	/* Write the desired MMD Devad */
+	ret = bus->write(bus, MT753X_CTRL_PHY_ADDR(priv->mdiodev->addr),
+			 MII_MMD_CTRL, MDIO_MMD_VEND2);
+	if (ret < 0)
+		goto err;
+
+	/* Write the desired MMD register address */
+	ret = bus->write(bus, MT753X_CTRL_PHY_ADDR(priv->mdiodev->addr),
+			 MII_MMD_DATA, reg);
+	if (ret < 0)
+		goto err;
+
+	/* Select the Function : DATA with no post increment */
+	ret = bus->write(bus, MT753X_CTRL_PHY_ADDR(priv->mdiodev->addr),
+			 MII_MMD_CTRL, MDIO_MMD_VEND2 | MII_MMD_CTRL_NOINCR);
+	if (ret < 0)
+		goto err;
+
+	/* Write the data into MMD's selected register */
+	ret = bus->write(bus, MT753X_CTRL_PHY_ADDR(priv->mdiodev->addr),
+			 MII_MMD_DATA, val);
+err:
+	if (ret < 0)
+		dev_err(&bus->dev, "failed to write mmd register\n");
 
 	mt7530_mutex_unlock(priv);
 }
@@ -168,14 +127,41 @@ core_write(struct mt7530_priv *priv, u32 reg, u32 val)
 static void
 core_rmw(struct mt7530_priv *priv, u32 reg, u32 mask, u32 set)
 {
+	struct mii_bus *bus = priv->bus;
 	u32 val;
+	int ret;
 
 	mt7530_mutex_lock(priv);
 
-	val = core_read_mmd_indirect(priv, reg, MDIO_MMD_VEND2);
+	/* Write the desired MMD Devad */
+	ret = bus->write(bus, MT753X_CTRL_PHY_ADDR(priv->mdiodev->addr),
+			 MII_MMD_CTRL, MDIO_MMD_VEND2);
+	if (ret < 0)
+		goto err;
+
+	/* Write the desired MMD register address */
+	ret = bus->write(bus, MT753X_CTRL_PHY_ADDR(priv->mdiodev->addr),
+			 MII_MMD_DATA, reg);
+	if (ret < 0)
+		goto err;
+
+	/* Select the Function : DATA with no post increment */
+	ret = bus->write(bus, MT753X_CTRL_PHY_ADDR(priv->mdiodev->addr),
+			 MII_MMD_CTRL, MDIO_MMD_VEND2 | MII_MMD_CTRL_NOINCR);
+	if (ret < 0)
+		goto err;
+
+	/* Read the content of the MMD's selected register */
+	val = bus->read(bus, MT753X_CTRL_PHY_ADDR(priv->mdiodev->addr),
+			MII_MMD_DATA);
 	val &= ~mask;
 	val |= set;
-	core_write_mmd_indirect(priv, reg, MDIO_MMD_VEND2, val);
+	/* Write the data into MMD's selected register */
+	ret = bus->write(bus, MT753X_CTRL_PHY_ADDR(priv->mdiodev->addr),
+			 MII_MMD_DATA, val);
+err:
+	if (ret < 0)
+		dev_err(&bus->dev, "failed to write mmd register\n");
 
 	mt7530_mutex_unlock(priv);
 }
@@ -2679,16 +2665,19 @@ mt7531_setup(struct dsa_switch *ds)
 	 * phy_[read,write]_mmd_indirect is called, we provide our own
 	 * mt7531_ind_mmd_phy_[read,write] to complete this function.
 	 */
-	val = mt7531_ind_c45_phy_read(priv, MT753X_CTRL_PHY_ADDR,
+	val = mt7531_ind_c45_phy_read(priv,
+				      MT753X_CTRL_PHY_ADDR(priv->mdiodev->addr),
 				      MDIO_MMD_VEND2, CORE_PLL_GROUP4);
 	val |= MT7531_RG_SYSPLL_DMY2 | MT7531_PHY_PLL_BYPASS_MODE;
 	val &= ~MT7531_PHY_PLL_OFF;
-	mt7531_ind_c45_phy_write(priv, MT753X_CTRL_PHY_ADDR, MDIO_MMD_VEND2,
-				 CORE_PLL_GROUP4, val);
+	mt7531_ind_c45_phy_write(priv,
+				 MT753X_CTRL_PHY_ADDR(priv->mdiodev->addr),
+				 MDIO_MMD_VEND2, CORE_PLL_GROUP4, val);
 
 	/* Disable EEE advertisement on the switch PHYs. */
-	for (i = MT753X_CTRL_PHY_ADDR;
-	     i < MT753X_CTRL_PHY_ADDR + MT7530_NUM_PHYS; i++) {
+	for (i = MT753X_CTRL_PHY_ADDR(priv->mdiodev->addr);
+	     i < MT753X_CTRL_PHY_ADDR(priv->mdiodev->addr) + MT7530_NUM_PHYS;
+	     i++) {
 		mt7531_ind_c45_phy_write(priv, i, MDIO_MMD_AN, MDIO_AN_EEE_ADV,
 					 0);
 	}
@@ -2858,28 +2847,34 @@ mt7531_mac_config(struct dsa_switch *ds, int port, unsigned int mode,
 }
 
 static struct phylink_pcs *
-mt753x_phylink_mac_select_pcs(struct dsa_switch *ds, int port,
+mt753x_phylink_mac_select_pcs(struct phylink_config *config,
 			      phy_interface_t interface)
 {
-	struct mt7530_priv *priv = ds->priv;
+	struct dsa_port *dp = dsa_phylink_to_port(config);
+	struct mt7530_priv *priv = dp->ds->priv;
 
 	switch (interface) {
 	case PHY_INTERFACE_MODE_TRGMII:
-		return &priv->pcs[port].pcs;
+		return &priv->pcs[dp->index].pcs;
 	case PHY_INTERFACE_MODE_SGMII:
 	case PHY_INTERFACE_MODE_1000BASEX:
 	case PHY_INTERFACE_MODE_2500BASEX:
-		return priv->ports[port].sgmii_pcs;
+		return priv->ports[dp->index].sgmii_pcs;
 	default:
 		return NULL;
 	}
 }
 
 static void
-mt753x_phylink_mac_config(struct dsa_switch *ds, int port, unsigned int mode,
+mt753x_phylink_mac_config(struct phylink_config *config, unsigned int mode,
 			  const struct phylink_link_state *state)
 {
-	struct mt7530_priv *priv = ds->priv;
+	struct dsa_port *dp = dsa_phylink_to_port(config);
+	struct dsa_switch *ds = dp->ds;
+	struct mt7530_priv *priv;
+	int port = dp->index;
+
+	priv = ds->priv;
 
 	if ((port == 5 || port == 6) && priv->info->mac_port_config)
 		priv->info->mac_port_config(ds, port, mode, state->interface);
@@ -2889,23 +2884,25 @@ mt753x_phylink_mac_config(struct dsa_switch *ds, int port, unsigned int mode,
 		mt7530_set(priv, MT7530_PMCR_P(port), PMCR_EXT_PHY);
 }
 
-static void mt753x_phylink_mac_link_down(struct dsa_switch *ds, int port,
+static void mt753x_phylink_mac_link_down(struct phylink_config *config,
 					 unsigned int mode,
 					 phy_interface_t interface)
 {
-	struct mt7530_priv *priv = ds->priv;
+	struct dsa_port *dp = dsa_phylink_to_port(config);
+	struct mt7530_priv *priv = dp->ds->priv;
 
-	mt7530_clear(priv, MT7530_PMCR_P(port), PMCR_LINK_SETTINGS_MASK);
+	mt7530_clear(priv, MT7530_PMCR_P(dp->index), PMCR_LINK_SETTINGS_MASK);
 }
 
-static void mt753x_phylink_mac_link_up(struct dsa_switch *ds, int port,
+static void mt753x_phylink_mac_link_up(struct phylink_config *config,
+				       struct phy_device *phydev,
 				       unsigned int mode,
 				       phy_interface_t interface,
-				       struct phy_device *phydev,
 				       int speed, int duplex,
 				       bool tx_pause, bool rx_pause)
 {
-	struct mt7530_priv *priv = ds->priv;
+	struct dsa_port *dp = dsa_phylink_to_port(config);
+	struct mt7530_priv *priv = dp->ds->priv;
 	u32 mcr;
 
 	mcr = PMCR_RX_EN | PMCR_TX_EN | PMCR_FORCE_LNK;
@@ -2940,7 +2937,7 @@ static void mt753x_phylink_mac_link_up(struct dsa_switch *ds, int port,
 		}
 	}
 
-	mt7530_set(priv, MT7530_PMCR_P(port), mcr);
+	mt7530_set(priv, MT7530_PMCR_P(dp->index), mcr);
 }
 
 static void mt753x_phylink_get_caps(struct dsa_switch *ds, int port,
@@ -3160,15 +3157,18 @@ const struct dsa_switch_ops mt7530_switch_ops = {
 	.port_mirror_add	= mt753x_port_mirror_add,
 	.port_mirror_del	= mt753x_port_mirror_del,
 	.phylink_get_caps	= mt753x_phylink_get_caps,
-	.phylink_mac_select_pcs	= mt753x_phylink_mac_select_pcs,
-	.phylink_mac_config	= mt753x_phylink_mac_config,
-	.phylink_mac_link_down	= mt753x_phylink_mac_link_down,
-	.phylink_mac_link_up	= mt753x_phylink_mac_link_up,
 	.get_mac_eee		= mt753x_get_mac_eee,
 	.set_mac_eee		= mt753x_set_mac_eee,
 	.conduit_state_change	= mt753x_conduit_state_change,
 };
 EXPORT_SYMBOL_GPL(mt7530_switch_ops);
+
+static const struct phylink_mac_ops mt753x_phylink_mac_ops = {
+	.mac_select_pcs	= mt753x_phylink_mac_select_pcs,
+	.mac_config	= mt753x_phylink_mac_config,
+	.mac_link_down	= mt753x_phylink_mac_link_down,
+	.mac_link_up	= mt753x_phylink_mac_link_up,
+};
 
 const struct mt753x_info mt753x_table[] = {
 	[ID_MT7621] = {
@@ -3247,6 +3247,7 @@ mt7530_probe_common(struct mt7530_priv *priv)
 	priv->dev = dev;
 	priv->ds->priv = priv;
 	priv->ds->ops = &mt7530_switch_ops;
+	priv->ds->phylink_mac_ops = &mt753x_phylink_mac_ops;
 	mutex_init(&priv->reg_mutex);
 	dev_set_drvdata(dev, priv);
 
