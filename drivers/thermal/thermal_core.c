@@ -302,11 +302,12 @@ static void monitor_thermal_zone(struct thermal_zone_device *tz)
 		thermal_zone_device_set_polling(tz, tz->polling_delay_jiffies);
 }
 
-static void handle_non_critical_trips(struct thermal_zone_device *tz,
-				      const struct thermal_trip *trip)
+static struct thermal_governor *thermal_get_tz_governor(struct thermal_zone_device *tz)
 {
-	tz->governor ? tz->governor->throttle(tz, trip) :
-		       def_governor->throttle(tz, trip);
+	if (tz->governor)
+		return tz->governor;
+
+	return def_governor;
 }
 
 void thermal_governor_update_tz(struct thermal_zone_device *tz,
@@ -349,10 +350,6 @@ void thermal_zone_device_critical_reboot(struct thermal_zone_device *tz)
 static void handle_critical_trips(struct thermal_zone_device *tz,
 				  const struct thermal_trip *trip)
 {
-	/* If we have not crossed the trip_temp, we do not care. */
-	if (trip->temperature <= 0 || tz->temperature < trip->temperature)
-		return;
-
 	trace_thermal_zone_trip(tz, thermal_zone_trip_id(tz, trip), trip->type);
 
 	if (trip->type == THERMAL_TRIP_CRITICAL)
@@ -404,12 +401,11 @@ static void handle_thermal_trip(struct thermal_zone_device *tz,
 		list_add_tail(&td->notify_list_node, way_up_list);
 		td->notify_temp = trip->temperature;
 		td->threshold -= trip->hysteresis;
-	}
 
-	if (trip->type == THERMAL_TRIP_CRITICAL || trip->type == THERMAL_TRIP_HOT)
-		handle_critical_trips(tz, trip);
-	else
-		handle_non_critical_trips(tz, trip);
+		if (trip->type == THERMAL_TRIP_CRITICAL ||
+		    trip->type == THERMAL_TRIP_HOT)
+			handle_critical_trips(tz, trip);
+	}
 }
 
 static void update_temperature(struct thermal_zone_device *tz)
@@ -431,7 +427,6 @@ static void update_temperature(struct thermal_zone_device *tz)
 	trace_thermal_temperature(tz);
 
 	thermal_genl_sampling_temp(tz->id, temp);
-	thermal_debug_update_temp(tz);
 }
 
 static void thermal_zone_device_check(struct work_struct *work)
@@ -470,6 +465,7 @@ static int thermal_trip_notify_cmp(void *ascending, const struct list_head *a,
 void __thermal_zone_device_update(struct thermal_zone_device *tz,
 				  enum thermal_notify_event event)
 {
+	struct thermal_governor *governor = thermal_get_tz_governor(tz);
 	struct thermal_trip_desc *td;
 	LIST_HEAD(way_down_list);
 	LIST_HEAD(way_up_list);
@@ -493,13 +489,22 @@ void __thermal_zone_device_update(struct thermal_zone_device *tz,
 	list_for_each_entry(td, &way_up_list, notify_list_node) {
 		thermal_notify_tz_trip_up(tz, &td->trip);
 		thermal_debug_tz_trip_up(tz, &td->trip);
+		if (governor->trip_crossed)
+			governor->trip_crossed(tz, &td->trip, true);
 	}
 
 	list_sort(NULL, &way_down_list, thermal_trip_notify_cmp);
 	list_for_each_entry(td, &way_down_list, notify_list_node) {
 		thermal_notify_tz_trip_down(tz, &td->trip);
 		thermal_debug_tz_trip_down(tz, &td->trip);
+		if (governor->trip_crossed)
+			governor->trip_crossed(tz, &td->trip, false);
 	}
+
+	if (governor->manage)
+		governor->manage(tz);
+
+	thermal_debug_update_trip_stats(tz);
 
 	monitor_thermal_zone(tz);
 }
