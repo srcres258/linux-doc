@@ -534,6 +534,12 @@ static const struct dmi_system_id irq1_level_low_skip_override[] = {
  */
 static const struct dmi_system_id irq1_edge_low_force_override[] = {
 	{
+		/* XMG APEX 17 (M23) */
+		.matches = {
+			DMI_MATCH(DMI_BOARD_NAME, "GMxBGxx"),
+		},
+	},
+	{
 		/* TongFang GMxRGxx/XMG CORE 15 (M22)/TUXEDO Stellaris 15 Gen4 AMD */
 		.matches = {
 			DMI_MATCH(DMI_BOARD_NAME, "GMxRGxx"),
@@ -628,6 +634,18 @@ static const struct dmi_system_id irq1_edge_low_force_override[] = {
 		.matches = {
 			DMI_MATCH(DMI_SYS_VENDOR, "MAIBENBEN"),
 			DMI_MATCH(DMI_BOARD_NAME, "X565"),
+		},
+	},
+	{
+		/* TongFang GXxHRXx/TUXEDO InfinityBook Pro Gen9 AMD */
+		.matches = {
+			DMI_MATCH(DMI_BOARD_NAME, "GXxHRXx"),
+		},
+	},
+	{
+		/* TongFang GMxHGxx/TUXEDO Stellaris Slim Gen1 AMD */
+		.matches = {
+			DMI_MATCH(DMI_BOARD_NAME, "GMxHGxx"),
 		},
 	},
 	{ }
