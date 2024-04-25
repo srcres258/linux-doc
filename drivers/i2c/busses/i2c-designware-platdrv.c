@@ -33,6 +33,8 @@
 #include <linux/suspend.h>
 #include <linux/units.h>
 
+#include <linux/platform_data/i2c-designware.h>
+
 #include "i2c-designware-core.h"
 
 static u32 i2c_dw_get_clk_rate_khz(struct dw_i2c_dev *dev)
@@ -490,7 +492,7 @@ static struct platform_driver dw_i2c_driver = {
 	.probe = dw_i2c_plat_probe,
 	.remove_new = dw_i2c_plat_remove,
 	.driver		= {
-		.name	= "i2c_designware",
+		.name	= I2C_DESIGNWARE_NAME,
 		.of_match_table = of_match_ptr(dw_i2c_of_match),
 		.acpi_match_table = ACPI_PTR(dw_i2c_acpi_match),
 		.pm	= pm_ptr(&dw_i2c_dev_pm_ops),
