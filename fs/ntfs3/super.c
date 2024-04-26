@@ -1595,6 +1595,8 @@ load_root:
 	}
 #endif
 
+	if (is_legacy_ntfs(sb))
+		sb->s_flags |= SB_RDONLY;
 	return 0;
 
 put_inode_out:

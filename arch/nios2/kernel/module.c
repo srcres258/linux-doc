@@ -13,7 +13,6 @@
 #include <linux/moduleloader.h>
 #include <linux/elf.h>
 #include <linux/mm.h>
-#include <linux/vmalloc.h>
 #include <linux/slab.h>
 #include <linux/fs.h>
 #include <linux/string.h>
@@ -21,14 +20,6 @@
 #include <linux/execmem.h>
 
 #include <asm/cacheflush.h>
-
-void *module_alloc(unsigned long size)
-{
-	return __vmalloc_node_range(size, 1, MODULES_VADDR, MODULES_END,
-				    GFP_KERNEL, PAGE_KERNEL_EXEC,
-				    VM_FLUSH_RESET_PERMS, NUMA_NO_NODE,
-				    __builtin_return_address(0));
-}
 
 int apply_relocate_add(Elf32_Shdr *sechdrs, const char *strtab,
 			unsigned int symindex, unsigned int relsec,

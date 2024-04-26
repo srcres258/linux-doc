@@ -518,49 +518,57 @@ static int __init module_init_limits(void)
 	return 0;
 }
 
-static struct execmem_params execmem_params __ro_after_init = {
-	.ranges = {
-		[EXECMEM_DEFAULT] = {
-			.flags = EXECMEM_KASAN_SHADOW,
-			.alignment = MODULE_ALIGN,
-		},
-		[EXECMEM_KPROBES] = {
-			.start = VMALLOC_START,
-			.end = VMALLOC_END,
-			.alignment = 1,
-		},
-		[EXECMEM_BPF] = {
-			.start = VMALLOC_START,
-			.end = VMALLOC_END,
-			.alignment = 1,
-		},
-	},
-};
+static struct execmem_info execmem_info __ro_after_init;
 
-struct execmem_params __init *execmem_arch_params(void)
+struct execmem_info __init *execmem_arch_setup(void)
 {
-	struct execmem_range *r = &execmem_params.ranges[EXECMEM_DEFAULT];
+	unsigned long fallback_start = 0, fallback_end = 0;
+	unsigned long start = 0, end = 0;
 
 	module_init_limits();
 
-	r->pgprot = PAGE_KERNEL;
-
+	/*
+	 * Where possible, prefer to allocate within direct branch range of the
+	 * kernel such that no PLTs are necessary.
+	 */
 	if (module_direct_base) {
-		r->start = module_direct_base;
-		r->end = module_direct_base + SZ_128M;
+		start = module_direct_base;
+		end = module_direct_base + SZ_128M;
 
 		if (module_plt_base) {
-			r->fallback_start = module_plt_base;
-			r->fallback_end = module_plt_base + SZ_2G;
+			fallback_start = module_plt_base;
+			fallback_end = module_plt_base + SZ_2G;
 		}
 	} else if (module_plt_base) {
-		r->start = module_plt_base;
-		r->end = module_plt_base + SZ_2G;
+		start = module_plt_base;
+		end = module_plt_base + SZ_2G;
 	}
 
-	execmem_params.ranges[EXECMEM_KPROBES].pgprot = PAGE_KERNEL_ROX;
-	execmem_params.ranges[EXECMEM_BPF].pgprot = PAGE_KERNEL;
+	execmem_info = (struct execmem_info){
+		.ranges = {
+			[EXECMEM_DEFAULT] = {
+				.start	= start,
+				.end	= end,
+				.pgprot	= PAGE_KERNEL,
+				.alignment = 1,
+				.fallback_start	= fallback_start,
+				.fallback_end	= fallback_end,
+			},
+			[EXECMEM_KPROBES] = {
+				.start	= VMALLOC_START,
+				.end	= VMALLOC_END,
+				.pgprot	= PAGE_KERNEL_ROX,
+				.alignment = 1,
+			},
+			[EXECMEM_BPF] = {
+				.start	= VMALLOC_START,
+				.end	= VMALLOC_END,
+				.pgprot	= PAGE_KERNEL,
+				.alignment = 1,
+			},
+		},
+	};
 
-	return &execmem_params;
+	return &execmem_info;
 }
-#endif
+#endif /* CONFIG_EXECMEM */

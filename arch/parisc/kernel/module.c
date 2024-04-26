@@ -41,7 +41,6 @@
 
 #include <linux/moduleloader.h>
 #include <linux/elf.h>
-#include <linux/vmalloc.h>
 #include <linux/fs.h>
 #include <linux/ftrace.h>
 #include <linux/string.h>

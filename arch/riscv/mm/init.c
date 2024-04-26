@@ -1483,40 +1483,46 @@ void __init pgtable_cache_init(void)
 }
 #endif
 
-#if defined(CONFIG_MMU) && defined(CONFIG_EXECMEM)
-static struct execmem_params execmem_params __ro_after_init = {
-	.ranges = {
-		[EXECMEM_DEFAULT] = {
-			.pgprot = PAGE_KERNEL,
-			.alignment = 1,
-		},
-		[EXECMEM_KPROBES] = {
-			.pgprot = PAGE_KERNEL_READ_EXEC,
-			.alignment = 1,
-		},
-		[EXECMEM_BPF] = {
-			.pgprot = PAGE_KERNEL,
-			.alignment = 1,
-		},
-	},
-};
+#ifdef CONFIG_EXECMEM
+#ifdef CONFIG_MMU
+static struct execmem_info execmem_info __ro_after_init;
 
-struct execmem_params __init *execmem_arch_params(void)
+struct execmem_info __init *execmem_arch_setup(void)
 {
-#ifdef CONFIG_64BIT
-	execmem_params.ranges[EXECMEM_DEFAULT].start = MODULES_VADDR;
-	execmem_params.ranges[EXECMEM_DEFAULT].end = MODULES_END;
-#else
-	execmem_params.ranges[EXECMEM_DEFAULT].start = VMALLOC_START;
-	execmem_params.ranges[EXECMEM_DEFAULT].end = VMALLOC_END;
-#endif
+	unsigned long start, end;
 
-	execmem_params.ranges[EXECMEM_KPROBES].start = VMALLOC_START;
-	execmem_params.ranges[EXECMEM_KPROBES].end = VMALLOC_END;
+	if (IS_ENABLED(CONFIG_64BIT)) {
+		start = MODULES_VADDR;
+		end = MODULES_END;
+	} else {
+		start = VMALLOC_START;
+		end = VMALLOC_END;
+	}
 
-	execmem_params.ranges[EXECMEM_BPF].start = BPF_JIT_REGION_START;
-	execmem_params.ranges[EXECMEM_BPF].end = BPF_JIT_REGION_END;
+	execmem_info = (struct execmem_info){
+		.ranges = {
+			[EXECMEM_DEFAULT] = {
+				.start	= start,
+				.end	= end,
+				.pgprot	= PAGE_KERNEL,
+				.alignment = 1,
+			},
+			[EXECMEM_KPROBES] = {
+				.start	= VMALLOC_START,
+				.end	= VMALLOC_END,
+				.pgprot	= PAGE_KERNEL_READ_EXEC,
+				.alignment = 1,
+			},
+			[EXECMEM_BPF] = {
+				.start	= BPF_JIT_REGION_START,
+				.end	= BPF_JIT_REGION_END,
+				.pgprot	= PAGE_KERNEL,
+				.alignment = PAGE_SIZE,
+			},
+		},
+	};
 
-	return &execmem_params;
+	return &execmem_info;
 }
-#endif
+#endif /* CONFIG_MMU */
+#endif /* CONFIG_EXECMEM */

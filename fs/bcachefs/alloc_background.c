@@ -724,7 +724,7 @@ static noinline int bch2_bucket_gen_update(struct btree_trans *trans,
 int bch2_trigger_alloc(struct btree_trans *trans,
 		       enum btree_id btree, unsigned level,
 		       struct bkey_s_c old, struct bkey_s new,
-		       unsigned flags)
+		       enum btree_iter_update_trigger_flags flags)
 {
 	struct bch_fs *c = trans->c;
 	int ret = 0;
@@ -1303,7 +1303,7 @@ static noinline_for_stack int bch2_check_discard_freespace_key(struct btree_tran
 		goto delete;
 out:
 fsck_err:
-	set_btree_iter_dontneed(&alloc_iter);
+	bch2_set_btree_iter_dontneed(&alloc_iter);
 	bch2_trans_iter_exit(trans, &alloc_iter);
 	printbuf_exit(&buf);
 	return ret;

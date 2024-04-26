@@ -1153,30 +1153,6 @@ static inline void le64_sub_cpu(__le64 *var, u64 val)
 	*var = cpu_to_le64(le64_to_cpu(*var) - val);
 }
 
-/*
- * Attributes types: 0x10, 0x20, 0x30....
- * indexes in attribute table:  0, 1, 2...
- */
-static inline const struct ATTR_DEF_ENTRY_SMALL *
-ntfs_query_def(const struct ntfs_sb_info *sbi, enum ATTR_TYPE type)
-{
-	const struct ATTR_DEF_ENTRY_SMALL *q;
-	u32 idx = (le32_to_cpu(type) >> 4) - 1;
-
-	if (idx >= sbi->attrdef.entries) {
-		/* such attribute is not allowed in this ntfs. */
-		return NULL;
-	}
-
-	q = sbi->attrdef.table + idx;
-	if (!q->type) {
-		/* such attribute is not allowed in this ntfs. */
-		return NULL;
-	}
-
-	return q;
-}
-
 bool is_legacy_ntfs(struct super_block *sb);
 
 #endif /* _LINUX_NTFS3_NTFS_FS_H */

@@ -995,20 +995,21 @@ static const pgprot_t protection_map[16] = {
 DECLARE_VM_GET_PAGE_PROT
 
 #ifdef CONFIG_EXECMEM
-static struct execmem_params execmem_params __ro_after_init = {
-	.ranges = {
-		[EXECMEM_DEFAULT] = {
-			.pgprot = PAGE_KERNEL_RWX,
-			.alignment = 1,
-		},
-	},
-};
+static struct execmem_info execmem_info __ro_after_init;
 
-struct execmem_params __init *execmem_arch_params(void)
+struct execmem_info __init *execmem_arch_setup(void)
 {
-	execmem_params.ranges[EXECMEM_DEFAULT].start = VMALLOC_START;
-	execmem_params.ranges[EXECMEM_DEFAULT].end = VMALLOC_END;
+	execmem_info = (struct execmem_info){
+		.ranges = {
+			[EXECMEM_DEFAULT] = {
+				.start	= VMALLOC_START,
+				.end	= VMALLOC_END,
+				.pgprot	= PAGE_KERNEL_RWX,
+				.alignment = 1,
+			},
+		},
+	};
 
-	return &execmem_params;
+	return &execmem_info;
 }
-#endif
+#endif /* CONFIG_EXECMEM */

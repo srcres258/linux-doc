@@ -879,6 +879,37 @@ error:
 }
 
 /*
+ * Populate every free slot in a provided array with folios.
+ *
+ * @nr_folios:   number of folios to allocate
+ * @folio_array: the array to fill with folios; any existing non-NULL entries in
+ *		 the array will be skipped
+ * @extra_gfp:	 the extra GFP flags for the allocation
+ *
+ * Return: 0        if all folios were able to be allocated;
+ *         -ENOMEM  otherwise, the partially allocated folios would be freed and
+ *                  the array slots zeroed
+ */
+int btrfs_alloc_folio_array(unsigned int nr_folios, struct folio **folio_array,
+			    gfp_t extra_gfp)
+{
+	for (int i = 0; i < nr_folios; i++) {
+		if (folio_array[i])
+			continue;
+		folio_array[i] = folio_alloc(GFP_NOFS | extra_gfp, 0);
+		if (!folio_array[i])
+			goto error;
+	}
+	return 0;
+error:
+	for (int i = 0; i < nr_folios; i++) {
+		if (folio_array[i])
+			folio_put(folio_array[i]);
+	}
+	return -ENOMEM;
+}
+
+/*
  * Populate every free slot in a provided array with pages.
  *
  * @nr_pages:   number of pages to allocate
@@ -2505,82 +2536,9 @@ return ret;
 }
 
 /*
-* Submit the pages in the range to bio for call sites which delalloc range has
-* already been ran (aka, ordered extent inserted) and all pages are still
-* locked.
-*/
-void extent_write_locked_range(struct inode *inode, struct page *locked_page,
-		       u64 start, u64 end, struct writeback_control *wbc,
-		       bool pages_dirty)
-{
-bool found_error = false;
-int ret = 0;
-struct address_space *mapping = inode->i_mapping;
-struct btrfs_fs_info *fs_info = inode_to_fs_info(inode);
-const u32 sectorsize = fs_info->sectorsize;
-loff_t i_size = i_size_read(inode);
-u64 cur = start;
-struct btrfs_bio_ctrl bio_ctrl = {
-	.wbc = wbc,
-	.opf = REQ_OP_WRITE | wbc_to_write_flags(wbc),
-};
-
-if (wbc->no_cgroup_owner)
-	bio_ctrl.opf |= REQ_BTRFS_CGROUP_PUNT;
-
-ASSERT(IS_ALIGNED(start, sectorsize) && IS_ALIGNED(end + 1, sectorsize));
-
-while (cur <= end) {
-	u64 cur_end = min(round_down(cur, PAGE_SIZE) + PAGE_SIZE - 1, end);
-	u32 cur_len = cur_end + 1 - cur;
-	struct page *page;
-	int nr = 0;
-
-	page = find_get_page(mapping, cur >> PAGE_SHIFT);
-	ASSERT(PageLocked(page));
-	if (pages_dirty && page != locked_page) {
-		ASSERT(PageDirty(page));
-		clear_page_dirty_for_io(page);
-	}
-
-	ret = __extent_writepage_io(BTRFS_I(inode), page, &bio_ctrl,
-				    i_size, &nr);
-	if (ret == 1)
-		goto next_page;
-
-	/* Make sure the mapping tag for page dirty gets cleared. */
-	if (nr == 0) {
-		set_page_writeback(page);
-		end_page_writeback(page);
-	}
-	if (ret) {
-		btrfs_mark_ordered_io_finished(BTRFS_I(inode), page,
-					       cur, cur_len, !ret);
-		mapping_set_error(page->mapping, ret);
-	}
-	btrfs_folio_unlock_writer(fs_info, page_folio(page), cur, cur_len);
-	if (ret < 0)
-		found_error = true;
-next_page:
-	put_page(page);
-	cur = cur_end + 1;
-}
-
-submit_write_bio(&bio_ctrl, found_error ? ret : 0);
-}
-
-int btrfs_writepages(struct address_space *mapping, struct writeback_control *wbc)
-{
-struct inode *inode = mapping->host;
-int ret = 0;
-struct btrfs_bio_ctrl bio_ctrl = {
-	.wbc = wbc,
-	.opf = REQ_OP_WRITE | wbc_to_write_flags(wbc),
-};
-
-/*
- * Allow only a single thread to do the reloc work in zoned mode to
- * protect the write pointer updates.
+ * a helper for release_folio.  As long as there are no locked extents
+ * in the range corresponding to the page, both state records and extent
+ * map records are removed
  */
 bool try_release_extent_mapping(struct page *page, gfp_t mask)
 {
@@ -2600,6 +2558,59 @@ bool try_release_extent_mapping(struct page *page, gfp_t mask)
 		if (!em) {
 			write_unlock(&extent_tree->lock);
 			break;
+		}
+		if ((em->flags & EXTENT_FLAG_PINNED) || em->start != start) {
+			write_unlock(&extent_tree->lock);
+			free_extent_map(em);
+			break;
+		}
+		if (test_range_bit_exists(io_tree, em->start,
+					  extent_map_end(em) - 1, EXTENT_LOCKED))
+			goto next;
+		/*
+		 * If it's not in the list of modified extents, used by a fast
+		 * fsync, we can remove it. If it's being logged we can safely
+		 * remove it since fsync took an extra reference on the em.
+		 */
+		if (list_empty(&em->list) || (em->flags & EXTENT_FLAG_LOGGING))
+			goto remove_em;
+		/*
+		 * If it's in the list of modified extents, remove it only if
+		 * its generation is older then the current one, in which case
+		 * we don't need it for a fast fsync. Otherwise don't remove it,
+		 * we could be racing with an ongoing fast fsync that could miss
+		 * the new extent.
+		 */
+		if (em->generation >= cur_gen)
+			goto next;
+remove_em:
+		/*
+		 * We only remove extent maps that are not in the list of
+		 * modified extents or that are in the list but with a
+		 * generation lower then the current generation, so there is no
+		 * need to set the full fsync flag on the inode (it hurts the
+		 * fsync performance for workloads with a data size that exceeds
+		 * or is close to the system's memory).
+		 */
+		remove_extent_mapping(inode, em);
+		/* Once for the inode's extent map tree. */
+		free_extent_map(em);
+next:
+		start = extent_map_end(em);
+		write_unlock(&extent_tree->lock);
+
+		/* Once for us, for the lookup_extent_mapping() reference. */
+		free_extent_map(em);
+
+		if (need_resched()) {
+			/*
+			 * If we need to resched but we can't block just exit
+			 * and leave any remaining extent maps.
+			 */
+			if (!gfpflags_allow_blocking(mask))
+				break;
+
+			cond_resched();
 		}
 		if ((em->flags & EXTENT_FLAG_PINNED) || em->start != start) {
 			write_unlock(&extent_tree->lock);

@@ -7,6 +7,8 @@
 #ifndef __LOONGARCH_PERF_EVENT_H__
 #define __LOONGARCH_PERF_EVENT_H__
 
+#include <asm/ptrace.h>
+
 #define perf_arch_bpf_user_pt_regs(regs) (struct user_pt_regs *)regs
 
 #define perf_arch_fetch_caller_regs(regs, __ip) { \

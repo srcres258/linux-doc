@@ -456,7 +456,7 @@ static int btree_key_cache_fill(struct btree_trans *trans,
 	bch2_btree_node_unlock_write(trans, ck_path, ck_path->l[0].b);
 
 	/* We're not likely to need this iterator again: */
-	set_btree_iter_dontneed(&iter);
+	bch2_set_btree_iter_dontneed(&iter);
 err:
 	bch2_trans_iter_exit(trans, &iter);
 	return ret;
@@ -1043,8 +1043,8 @@ void bch2_btree_key_cache_to_text(struct printbuf *out, struct btree_key_cache *
 	prt_printf(out, "keys:\t%lu\r\n",		atomic_long_read(&bc->nr_keys));
 	prt_printf(out, "dirty:\t%lu\r\n",		atomic_long_read(&bc->nr_dirty));
 	prt_printf(out, "freelist:\t%lu\r\n",		atomic_long_read(&bc->nr_freed));
-	prt_printf(out, "nonpcpu freelist:\t%lu\r\n",	bc->nr_freed_nonpcpu);
-	prt_printf(out, "pcpu freelist:\t%lu\r\n",	bc->nr_freed_pcpu);
+	prt_printf(out, "nonpcpu freelist:\t%zu\r\n",	bc->nr_freed_nonpcpu);
+	prt_printf(out, "pcpu freelist:\t%zu\r\n",	bc->nr_freed_pcpu);
 
 	prt_printf(out, "\nshrinker:\n");
 	prt_printf(out, "requested_to_free:\t%lu\r\n",	bc->requested_to_free);
@@ -1054,7 +1054,7 @@ void bch2_btree_key_cache_to_text(struct printbuf *out, struct btree_key_cache *
 	prt_printf(out, "skipped_accessed:\t%lu\r\n",	bc->skipped_accessed);
 	prt_printf(out, "skipped_lock_fail:\t%lu\r\n",	bc->skipped_lock_fail);
 
-	prt_printf(out, "srcu seq:\t%lu\r\n",		c->btree_trans_barrier.srcu_sup->srcu_gp_seq);
+	prt_printf(out, "srcu seq:\t%lu\r\n",		get_state_synchronize_srcu(&c->btree_trans_barrier));
 
 	struct bkey_cached *ck;
 	unsigned iter = 0;

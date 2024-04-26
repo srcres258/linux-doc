@@ -164,10 +164,13 @@ static s64 gc_trigger_reflink_p_segment(struct btree_trans *trans,
 
 	BUG_ON((s64) r->refcount + add < 0);
 
-	r->refcount += add;
+	if (flags & BTREE_TRIGGER_gc)
+		r->refcount += add;
 	*idx = r->offset;
 	return 0;
 not_found:
+	BUG_ON(!(flags & BTREE_TRIGGER_check_repair));
+
 	if (fsck_err(c, reflink_p_to_missing_reflink_v,
 		     "pointer to missing indirect extent\n"
 		     "  %s\n"
@@ -216,7 +219,7 @@ static int __trigger_reflink_p(struct btree_trans *trans,
 			ret = trans_trigger_reflink_p_segment(trans, p, &idx, flags);
 	}
 
-	if (flags & BTREE_TRIGGER_gc) {
+	if (flags & (BTREE_TRIGGER_check_repair|BTREE_TRIGGER_gc)) {
 		size_t l = 0, r = c->reflink_gc_nr;
 
 		while (l < r) {
@@ -282,7 +285,9 @@ bool bch2_reflink_v_merge(struct bch_fs *c, struct bkey_s _l, struct bkey_s_c _r
 }
 #endif
 
-static inline void check_indirect_extent_deleting(struct bkey_s new, unsigned *flags)
+static inline void
+check_indirect_extent_deleting(struct bkey_s new,
+			       enum btree_iter_update_trigger_flags *flags)
 {
 	if ((*flags & BTREE_TRIGGER_insert) && !*bkey_refcount(new)) {
 		new.k->type = KEY_TYPE_deleted;
@@ -327,7 +332,7 @@ void bch2_indirect_inline_data_to_text(struct printbuf *out,
 int bch2_trigger_indirect_inline_data(struct btree_trans *trans,
 			      enum btree_id btree_id, unsigned level,
 			      struct bkey_s_c old, struct bkey_s new,
-			      unsigned flags)
+			      enum btree_iter_update_trigger_flags flags)
 {
 	check_indirect_extent_deleting(new, &flags);
 

@@ -578,21 +578,24 @@ EXPORT_SYMBOL_GPL(invalid_pmd_table);
 pte_t invalid_pte_table[PTRS_PER_PTE] __page_aligned_bss;
 EXPORT_SYMBOL(invalid_pte_table);
 
-#if defined(CONFIG_EXECMEM) && defined(MODULE_START)
-static struct execmem_params execmem_params __ro_after_init = {
-	.ranges = {
-		[EXECMEM_DEFAULT] = {
-			.start = MODULE_START,
-			.end = MODULE_END,
-			.alignment = 1,
-		},
-	},
-};
+#ifdef CONFIG_EXECMEM
+#ifdef MODULES_VADDR
+static struct execmem_info execmem_info __ro_after_init;
 
-struct execmem_params __init *execmem_arch_params(void)
+struct execmem_info __init *execmem_arch_setup(void)
 {
-	execmem_params.ranges[EXECMEM_DEFAULT].pgprot = PAGE_KERNEL;
+	execmem_info = (struct execmem_info){
+		.ranges = {
+			[EXECMEM_DEFAULT] = {
+				.start	= MODULES_VADDR,
+				.end	= MODULES_END,
+				.pgprot	= PAGE_KERNEL,
+				.alignment = 1,
+			},
+		},
+	};
 
-	return &execmem_params;
+	return &execmem_info;
 }
 #endif
+#endif /* CONFIG_EXECMEM */

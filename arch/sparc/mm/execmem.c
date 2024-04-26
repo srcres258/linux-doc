@@ -2,24 +2,20 @@
 #include <linux/mm.h>
 #include <linux/execmem.h>
 
-static struct execmem_params execmem_params __ro_after_init = {
-	.ranges = {
-		[EXECMEM_DEFAULT] = {
-#ifdef CONFIG_SPARC64
-			.start = MODULES_VADDR,
-			.end = MODULES_END,
-#else
-			.start = VMALLOC_START,
-			.end = VMALLOC_END,
-#endif
-			.alignment = 1,
-		},
-	},
-};
+static struct execmem_info execmem_info __ro_after_init;
 
-struct execmem_params __init *execmem_arch_params(void)
+struct execmem_info __init *execmem_arch_setup(void)
 {
-	execmem_params.ranges[EXECMEM_DEFAULT].pgprot = PAGE_KERNEL;
+	execmem_info = (struct execmem_info){
+		.ranges = {
+			[EXECMEM_DEFAULT] = {
+				.start	= MODULES_VADDR,
+				.end	= MODULES_END,
+				.pgprot	= PAGE_KERNEL,
+				.alignment = 1,
+			},
+		},
+	};
 
-	return &execmem_params;
+	return &execmem_info;
 }

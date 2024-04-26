@@ -1208,10 +1208,6 @@ static bool get_links(struct ctl_dir *dir,
 	    sysctl_is_perm_empty_ctl_header(header))
 		return true;
 
-	if (header->ctl_table_size == 0 ||
-	    sysctl_is_perm_empty_ctl_header(header))
-		return true;
-
 	/* Are there links available for every entry in table? */
 	list_for_each_table_entry(entry, header) {
 		const char *procname = entry->procname;

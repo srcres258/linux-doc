@@ -414,7 +414,6 @@ static inline void filemap_nr_thps_dec(struct address_space *mapping)
 #endif
 }
 
-struct address_space *page_mapping(struct page *);
 struct address_space *folio_mapping(struct folio *);
 struct address_space *swapcache_mapping(struct folio *);
 
@@ -571,11 +570,6 @@ static inline struct folio *filemap_alloc_folio_noprof(gfp_t gfp, unsigned int o
 static inline struct page *__page_cache_alloc(gfp_t gfp)
 {
 	return &filemap_alloc_folio(gfp, 0)->page;
-}
-
-static inline struct page *page_cache_alloc(struct address_space *x)
-{
-	return __page_cache_alloc(mapping_gfp_mask(x));
 }
 
 static inline gfp_t readahead_gfp_mask(struct address_space *x)

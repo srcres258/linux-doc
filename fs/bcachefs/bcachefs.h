@@ -520,8 +520,8 @@ enum gc_phase {
 
 struct gc_pos {
 	enum gc_phase		phase;
+	u16			level;
 	struct bpos		pos;
-	unsigned		level;
 };
 
 struct reflink_gc {
@@ -631,7 +631,6 @@ struct bch_dev {
 	x(clean_shutdown)		\
 	x(fsck_running)			\
 	x(initial_gc_unfixed)		\
-	x(need_another_gc)		\
 	x(need_delete_dead_snapshots)	\
 	x(error)			\
 	x(topology_error)		\

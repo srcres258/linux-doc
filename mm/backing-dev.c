@@ -175,7 +175,7 @@ static void wb_stats_show(struct seq_file *m, struct bdi_writeback *wb,
 #ifdef CONFIG_CGROUP_WRITEBACK
 		   cgroup_ino(wb->memcg_css->cgroup),
 #else
-		   (ino_t)0,
+		   1ul,
 #endif
 		   K(stats->nr_writeback),
 		   K(stats->nr_reclaimable),

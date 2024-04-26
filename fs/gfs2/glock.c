@@ -192,7 +192,7 @@ void gfs2_glock_free_later(struct gfs2_glock *gl) {
 		wake_up(&sdp->sd_kill_wait);
 }
 
-void gfs2_free_dead_glocks(struct gfs2_sbd *sdp)
+static void gfs2_free_dead_glocks(struct gfs2_sbd *sdp)
 {
 	struct list_head *list = &sdp->sd_dead_glocks;
 
@@ -2019,12 +2019,12 @@ static bool can_free_glock(struct gfs2_glock *gl)
  * private)
  */
 
-static long gfs2_dispose_glock_lru(struct list_head *list)
+static unsigned long gfs2_dispose_glock_lru(struct list_head *list)
 __releases(&lru_lock)
 __acquires(&lru_lock)
 {
 	struct gfs2_glock *gl;
-	long freed = 0;
+	unsigned long freed = 0;
 
 	list_sort(NULL, list, glock_cmp);
 
@@ -2062,15 +2062,15 @@ add_back_to_lru:
  * gfs2_dispose_glock_lru() above.
  */
 
-static long gfs2_scan_glock_lru(int nr)
+static unsigned long gfs2_scan_glock_lru(unsigned long nr)
 {
 	struct gfs2_glock *gl, *next;
 	LIST_HEAD(dispose);
-	long freed = 0;
+	unsigned long freed = 0;
 
 	spin_lock(&lru_lock);
 	list_for_each_entry_safe(gl, next, &lru_list, gl_lru) {
-		if (nr-- <= 0)
+		if (!nr--)
 			break;
 		if (can_free_glock(gl))
 			list_move(&gl->gl_lru, &dispose);
@@ -2247,6 +2247,8 @@ void gfs2_gl_hash_clear(struct gfs2_sbd *sdp)
 	wait_event_timeout(sdp->sd_kill_wait,
 			   atomic_read(&sdp->sd_glock_disposal) == 0,
 			   HZ * 600);
+	gfs2_lm_unmount(sdp);
+	gfs2_free_dead_glocks(sdp);
 	glock_hash_walk(dump_glock_func, sdp);
 }
 

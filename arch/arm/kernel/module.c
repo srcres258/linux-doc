@@ -12,10 +12,8 @@
 #include <linux/kernel.h>
 #include <linux/mm.h>
 #include <linux/elf.h>
-#include <linux/vmalloc.h>
 #include <linux/fs.h>
 #include <linux/string.h>
-#include <linux/gfp.h>
 
 #include <asm/sections.h>
 #include <asm/smp_plat.h>

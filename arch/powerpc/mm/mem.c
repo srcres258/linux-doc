@@ -17,6 +17,7 @@
 #include <linux/suspend.h>
 #include <linux/dma-direct.h>
 #include <linux/vmalloc.h>
+#include <linux/execmem.h>
 
 #include <asm/swiotlb.h>
 #include <asm/machdep.h>
@@ -409,62 +410,64 @@ int devmem_is_allowed(unsigned long pfn)
 EXPORT_SYMBOL_GPL(walk_system_ram_range);
 
 #ifdef CONFIG_EXECMEM
-static struct execmem_params execmem_params __ro_after_init = {
-	.ranges = {
-		[EXECMEM_DEFAULT] = {
-			.alignment = 1,
-		},
-		[EXECMEM_KPROBES] = {
-			.alignment = 1,
-		},
-		[EXECMEM_MODULE_DATA] = {
-			.alignment = 1,
-		},
-	},
-};
+static struct execmem_info execmem_info __ro_after_init;
 
-struct execmem_params __init *execmem_arch_params(void)
+struct execmem_info __init *execmem_arch_setup(void)
 {
+	pgprot_t kprobes_prot = strict_module_rwx_enabled() ? PAGE_KERNEL_ROX : PAGE_KERNEL_EXEC;
 	pgprot_t prot = strict_module_rwx_enabled() ? PAGE_KERNEL : PAGE_KERNEL_EXEC;
-	struct execmem_range *range = &execmem_params.ranges[EXECMEM_DEFAULT];
+	unsigned long fallback_start = 0, fallback_end = 0;
+	unsigned long start, end;
 
 	/*
 	 * BOOK3S_32 and 8xx define MODULES_VADDR for text allocations and
 	 * allow allocating data in the entire vmalloc space
 	 */
 #ifdef MODULES_VADDR
-	struct execmem_range *data = &execmem_params.ranges[EXECMEM_MODULE_DATA];
 	unsigned long limit = (unsigned long)_etext - SZ_32M;
+
+	BUILD_BUG_ON(TASK_SIZE > MODULES_VADDR);
 
 	/* First try within 32M limit from _etext to avoid branch trampolines */
 	if (MODULES_VADDR < PAGE_OFFSET && MODULES_END > limit) {
-		range->start = limit;
-		range->end = MODULES_END;
-		range->fallback_start = MODULES_VADDR;
-		range->fallback_end = MODULES_END;
+		start = limit;
+		fallback_start = MODULES_VADDR;
+		fallback_end = MODULES_END;
 	} else {
-		range->start = MODULES_VADDR;
-		range->end = MODULES_END;
+		start = MODULES_VADDR;
 	}
-	data->start = VMALLOC_START;
-	data->end = VMALLOC_END;
-	data->pgprot = PAGE_KERNEL;
-	data->alignment = 1;
+
+	end = MODULES_END;
 #else
-	range->start = VMALLOC_START;
-	range->end = VMALLOC_END;
+	start = VMALLOC_START;
+	end = VMALLOC_END;
 #endif
 
-	range->pgprot = prot;
+	execmem_info = (struct execmem_info){
+		.ranges = {
+			[EXECMEM_DEFAULT] = {
+				.start	= start,
+				.end	= end,
+				.pgprot	= prot,
+				.alignment = 1,
+				.fallback_start	= fallback_start,
+				.fallback_end	= fallback_end,
+			},
+			[EXECMEM_KPROBES] = {
+				.start	= VMALLOC_START,
+				.end	= VMALLOC_END,
+				.pgprot	= kprobes_prot,
+				.alignment = 1,
+			},
+			[EXECMEM_MODULE_DATA] = {
+				.start	= VMALLOC_START,
+				.end	= VMALLOC_END,
+				.pgprot	= PAGE_KERNEL,
+				.alignment = 1,
+			},
+		},
+	};
 
-	execmem_params.ranges[EXECMEM_KPROBES].start = range->start;
-	execmem_params.ranges[EXECMEM_KPROBES].end = range->end;
-
-	if (strict_module_rwx_enabled())
-		execmem_params.ranges[EXECMEM_KPROBES].pgprot = PAGE_KERNEL_ROX;
-	else
-		execmem_params.ranges[EXECMEM_KPROBES].pgprot = PAGE_KERNEL_EXEC;
-
-	return &execmem_params;
+	return &execmem_info;
 }
-#endif
+#endif /* CONFIG_EXECMEM */

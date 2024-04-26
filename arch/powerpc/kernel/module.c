@@ -7,7 +7,6 @@
 #include <linux/elf.h>
 #include <linux/moduleloader.h>
 #include <linux/err.h>
-#include <linux/vmalloc.h>
 #include <linux/mm.h>
 #include <linux/bug.h>
 #include <asm/module.h>
