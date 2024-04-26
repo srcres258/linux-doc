@@ -52,9 +52,9 @@ config GENERIC_ENTRY
 
 config KPROBES
 	bool "Kprobes"
-	depends on MODULES
 	depends on HAVE_KPROBES
 	select KALLSYMS
+	select EXECMEM
 	select TASKS_RCU if PREEMPTION
 	help
 	  Kprobes allows you to trap at almost any kernel address and
@@ -959,6 +959,12 @@ config ARCH_WANTS_MODULES_DATA_IN_VMALLOC
 	help
 	  For architectures like powerpc/32 which have constraints on module
 	  allocation and need to allocate module data outside of module area.
+
+config ARCH_WANTS_EXECMEM_EARLY
+	bool
+	help
+	  For architectures that might allocate executable memory early on
+	  boot, for instance ftrace on x86.
 
 config HAVE_IRQ_EXIT_ON_IRQ_STACK
 	bool
