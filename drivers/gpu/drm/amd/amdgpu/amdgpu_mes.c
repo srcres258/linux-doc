@@ -32,6 +32,18 @@
 #define AMDGPU_MES_MAX_NUM_OF_QUEUES_PER_PROCESS 1024
 #define AMDGPU_ONE_DOORBELL_SIZE 8
 
+signed long amdgpu_mes_fence_wait_polling(u64 *fence,
+					  u64 wait_seq,
+					  signed long timeout)
+{
+
+	while ((s64)(wait_seq - *fence) > 0 && timeout > 0) {
+		udelay(2);
+		timeout -= 2;
+	}
+	return timeout > 0 ? timeout : 0;
+}
+
 int amdgpu_mes_doorbell_process_slice(struct amdgpu_device *adev)
 {
 	return roundup(AMDGPU_ONE_DOORBELL_SIZE *
@@ -1128,6 +1140,7 @@ void amdgpu_mes_remove_ring(struct amdgpu_device *adev,
 		return;
 
 	amdgpu_mes_remove_hw_queue(adev, ring->hw_queue_id);
+	del_timer_sync(&ring->fence_drv.fallback_timer);
 	amdgpu_ring_fini(ring);
 	kfree(ring);
 }

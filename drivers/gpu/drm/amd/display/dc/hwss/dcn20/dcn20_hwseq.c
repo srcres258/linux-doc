@@ -155,7 +155,7 @@ void dcn20_log_color_state(struct dc *dc,
 	DTN_INFO("MPCC:  OPP  DPP  MPCCBOT  MODE  ALPHA_MODE  PREMULT  OVERLAP_ONLY  IDLE"
 		 "  OGAM mode\n");
 
-	for (i = 0; i < pool->pipe_count; i++) {
+	for (i = 0; i < pool->mpcc_count; i++) {
 		struct mpcc_state s = {0};
 
 		pool->mpc->funcs->read_mpcc_state(pool->mpc, i, &s);
@@ -204,7 +204,7 @@ static int find_free_gsl_group(const struct dc *dc)
  * gsl_0 <=> pipe_ctx->stream_res.gsl_group == 1
  * Using a magic value like -1 would require tracking all inits/resets
  */
- void dcn20_setup_gsl_group_as_lock(
+void dcn20_setup_gsl_group_as_lock(
 		const struct dc *dc,
 		struct pipe_ctx *pipe_ctx,
 		bool enable)
@@ -403,7 +403,7 @@ void dcn20_init_blank(
 	struct output_pixel_processor *opp = NULL;
 	struct output_pixel_processor *bottom_opp = NULL;
 	uint32_t num_opps, opp_id_src0, opp_id_src1;
-	uint32_t otg_active_width, otg_active_height;
+	uint32_t otg_active_width = 0, otg_active_height = 0;
 
 	/* program opp dpg blank color */
 	color_space = COLOR_SPACE_SRGB;
@@ -1109,12 +1109,6 @@ bool dcn20_set_input_transfer_func(struct dc *dc,
 
 	tf = &plane_state->in_transfer_func;
 
-	if (tf == NULL) {
-		dpp_base->funcs->dpp_set_degamma(dpp_base,
-				IPP_DEGAMMA_MODE_BYPASS);
-		return true;
-	}
-
 	if (tf->type == TF_TYPE_HWPWL || tf->type == TF_TYPE_DISTRIBUTED_POINTS)
 		use_degamma_ram = true;
 
@@ -1715,6 +1709,11 @@ static void dcn20_update_dchubp_dpp(
 				plane_state->color_space,
 				NULL);
 
+		if (dpp->funcs->set_cursor_matrix) {
+			dpp->funcs->set_cursor_matrix(dpp,
+				plane_state->color_space,
+				plane_state->cursor_csc_color_matrix);
+		}
 		if (dpp->funcs->dpp_program_bias_and_scale) {
 			//TODO :for CNVC set scale and bias registers if necessary
 			build_prescale_params(&bns_params, plane_state);
@@ -1914,6 +1913,10 @@ static void dcn20_program_pipe(
 		if (dc->res_pool->hubbub->funcs->program_det_size)
 			dc->res_pool->hubbub->funcs->program_det_size(
 				dc->res_pool->hubbub, pipe_ctx->plane_res.hubp->inst, pipe_ctx->det_buffer_size_kb);
+
+		if (dc->res_pool->hubbub->funcs->program_det_segments)
+			dc->res_pool->hubbub->funcs->program_det_segments(
+				dc->res_pool->hubbub, pipe_ctx->plane_res.hubp->inst, pipe_ctx->hubp_regs.det_size);
 	}
 
 	if (pipe_ctx->update_flags.raw || pipe_ctx->plane_state->update_flags.raw || pipe_ctx->stream->update_flags.raw)
@@ -1923,6 +1926,11 @@ static void dcn20_program_pipe(
 			|| pipe_ctx->plane_state->update_flags.bits.hdr_mult)
 		hws->funcs.set_hdr_multiplier(pipe_ctx);
 
+	if (hws->funcs.populate_mcm_luts) {
+		hws->funcs.populate_mcm_luts(dc, pipe_ctx, pipe_ctx->plane_state->mcm_luts,
+				pipe_ctx->plane_state->lut_bank_a);
+		pipe_ctx->plane_state->lut_bank_a = !pipe_ctx->plane_state->lut_bank_a;
+	}
 	if (pipe_ctx->update_flags.bits.enable ||
 	    pipe_ctx->plane_state->update_flags.bits.in_transfer_func_change ||
 	    pipe_ctx->plane_state->update_flags.bits.gamma_change ||
@@ -2079,6 +2087,8 @@ void dcn20_program_front_end_for_ctx(
 					(context->res_ctx.pipe_ctx[i].plane_state && dc_state_get_pipe_subvp_type(context, &context->res_ctx.pipe_ctx[i]) == SUBVP_PHANTOM))) {
 				if (hubbub->funcs->program_det_size)
 					hubbub->funcs->program_det_size(hubbub, dc->current_state->res_ctx.pipe_ctx[i].plane_res.hubp->inst, 0);
+				if (dc->res_pool->hubbub->funcs->program_det_segments)
+					dc->res_pool->hubbub->funcs->program_det_segments(hubbub, dc->current_state->res_ctx.pipe_ctx[i].plane_res.hubp->inst, 0);
 			}
 			hws->funcs.plane_atomic_disconnect(dc, dc->current_state, &dc->current_state->res_ctx.pipe_ctx[i]);
 			DC_LOG_DC("Reset mpcc for pipe %d\n", dc->current_state->res_ctx.pipe_ctx[i].pipe_idx);
