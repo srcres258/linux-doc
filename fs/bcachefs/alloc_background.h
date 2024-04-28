@@ -17,12 +17,11 @@ static inline bool bch2_dev_bucket_exists(struct bch_fs *c, struct bpos pos)
 {
 	struct bch_dev *ca;
 
-	if (!bch2_dev_exists2(c, pos.inode))
+	if (!bch2_dev_exists(c, pos.inode))
 		return false;
 
-	ca = bch_dev_bkey_exists(c, pos.inode);
-	return pos.offset >= ca->mi.first_bucket &&
-		pos.offset < ca->mi.nbuckets;
+	ca = bch2_dev_bkey_exists(c, pos.inode);
+	return bucket_valid(ca, pos.offset);
 }
 
 static inline u64 bucket_to_u64(struct bpos bucket)
@@ -68,7 +67,20 @@ static inline enum bch_data_type alloc_data_type(struct bch_alloc_v4 a,
 
 static inline enum bch_data_type bucket_data_type(enum bch_data_type data_type)
 {
-	return data_type == BCH_DATA_stripe ? BCH_DATA_user : data_type;
+	switch (data_type) {
+	case BCH_DATA_cached:
+	case BCH_DATA_stripe:
+		return BCH_DATA_user;
+	default:
+		return data_type;
+	}
+}
+
+static inline bool bucket_data_type_mismatch(enum bch_data_type bucket,
+					     enum bch_data_type ptr)
+{
+	return !data_type_is_empty(bucket) &&
+		bucket_data_type(bucket) != bucket_data_type(ptr);
 }
 
 static inline unsigned bch2_bucket_sectors(struct bch_alloc_v4 a)
@@ -229,7 +241,8 @@ static inline bool bkey_is_alloc(const struct bkey *k)
 int bch2_alloc_read(struct bch_fs *);
 
 int bch2_trigger_alloc(struct btree_trans *, enum btree_id, unsigned,
-		       struct bkey_s_c, struct bkey_s, unsigned);
+		       struct bkey_s_c, struct bkey_s,
+		       enum btree_iter_update_trigger_flags);
 int bch2_check_alloc_info(struct bch_fs *);
 int bch2_check_alloc_to_lru_refs(struct bch_fs *);
 void bch2_do_discards(struct bch_fs *);

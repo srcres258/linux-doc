@@ -166,7 +166,7 @@ int bch2_sum_sector_overwrites(struct btree_trans *trans,
 	bch2_trans_copy_iter(&iter, extent_iter);
 
 	for_each_btree_key_upto_continue_norestart(iter,
-				new->k.p, BTREE_ITER_SLOTS, old, ret) {
+				new->k.p, BTREE_ITER_slots, old, ret) {
 		s64 sectors = min(new->k.p.offset, old.k->p.offset) -
 			max(bkey_start_offset(&new->k),
 			    bkey_start_offset(old.k));
@@ -213,14 +213,14 @@ static inline int bch2_extent_update_i_size_sectors(struct btree_trans *trans,
 	 * to be journalled - if we crash, the bi_journal_seq update will be
 	 * lost, but that's fine.
 	 */
-	unsigned inode_update_flags = BTREE_UPDATE_NOJOURNAL;
+	unsigned inode_update_flags = BTREE_UPDATE_nojournal;
 	int ret;
 
 	k = bch2_bkey_get_mut_noupdate(trans, &iter, BTREE_ID_inodes,
 			      SPOS(0,
 				   extent_iter->pos.inode,
 				   extent_iter->snapshot),
-			      BTREE_ITER_CACHED);
+			      BTREE_ITER_cached);
 	ret = PTR_ERR_OR_ZERO(k);
 	if (unlikely(ret))
 		return ret;
@@ -251,7 +251,7 @@ static inline int bch2_extent_update_i_size_sectors(struct btree_trans *trans,
 	}
 
 	ret = bch2_trans_update(trans, &iter, &inode->k_i,
-				BTREE_UPDATE_INTERNAL_SNAPSHOT_NODE|
+				BTREE_UPDATE_internal_snapshot_node|
 				inode_update_flags);
 err:
 	bch2_trans_iter_exit(trans, &iter);
@@ -360,7 +360,7 @@ static int bch2_write_index_default(struct bch_write_op *op)
 
 		bch2_trans_iter_init(trans, &iter, BTREE_ID_extents,
 				     bkey_start_pos(&sk.k->k),
-				     BTREE_ITER_SLOTS|BTREE_ITER_INTENT);
+				     BTREE_ITER_slots|BTREE_ITER_intent);
 
 		ret =   bch2_bkey_set_needs_rebalance(c, sk.k, &op->opts) ?:
 			bch2_extent_update(trans, inum, &iter, sk.k,
@@ -399,9 +399,9 @@ void bch2_submit_wbio_replicas(struct bch_write_bio *wbio, struct bch_fs *c,
 	BUG_ON(c->opts.nochanges);
 
 	bkey_for_each_ptr(ptrs, ptr) {
-		BUG_ON(!bch2_dev_exists2(c, ptr->dev));
+		BUG_ON(!bch2_dev_exists(c, ptr->dev));
 
-		struct bch_dev *ca = bch_dev_bkey_exists(c, ptr->dev);
+		struct bch_dev *ca = bch2_dev_bkey_exists(c, ptr->dev);
 
 		if (to_entry(ptr + 1) < ptrs.end) {
 			n = to_wbio(bio_alloc_clone(NULL, &wbio->bio,
@@ -642,7 +642,7 @@ static void bch2_write_endio(struct bio *bio)
 	struct bch_write_bio *wbio	= to_wbio(bio);
 	struct bch_write_bio *parent	= wbio->split ? wbio->parent : NULL;
 	struct bch_fs *c		= wbio->c;
-	struct bch_dev *ca		= bch_dev_bkey_exists(c, wbio->dev);
+	struct bch_dev *ca		= bch2_dev_bkey_exists(c, wbio->dev);
 
 	if (bch2_dev_inum_io_err_on(bio->bi_status, ca, BCH_MEMBER_ERROR_write,
 				    op->pos.inode,
@@ -1150,7 +1150,7 @@ static int bch2_nocow_write_convert_one_unwritten(struct btree_trans *trans,
 	return  bch2_extent_update_i_size_sectors(trans, iter,
 					min(new->k.p.offset << 9, new_i_size), 0) ?:
 		bch2_trans_update(trans, iter, new,
-				  BTREE_UPDATE_INTERNAL_SNAPSHOT_NODE);
+				  BTREE_UPDATE_internal_snapshot_node);
 }
 
 static void bch2_nocow_write_convert_unwritten(struct bch_write_op *op)
@@ -1161,7 +1161,7 @@ static void bch2_nocow_write_convert_unwritten(struct bch_write_op *op)
 	for_each_keylist_key(&op->insert_keys, orig) {
 		int ret = for_each_btree_key_upto_commit(trans, iter, BTREE_ID_extents,
 				     bkey_start_pos(&orig->k), orig->k.p,
-				     BTREE_ITER_INTENT, k,
+				     BTREE_ITER_intent, k,
 				     NULL, NULL, BCH_TRANS_COMMIT_no_enospc, ({
 			bch2_nocow_write_convert_one_unwritten(trans, &iter, orig, k, op->new_i_size);
 		}));
@@ -1234,11 +1234,15 @@ retry:
 
 	bch2_trans_iter_init(trans, &iter, BTREE_ID_extents,
 			     SPOS(op->pos.inode, op->pos.offset, snapshot),
-			     BTREE_ITER_SLOTS);
+			     BTREE_ITER_slots);
 	while (1) {
 		struct bio *bio = &op->wbio.bio;
 
 		buckets.nr = 0;
+
+		ret = bch2_trans_relock(trans);
+		if (ret)
+			break;
 
 		k = bch2_btree_iter_peek_slot(&iter);
 		ret = bkey_err(k);
@@ -1264,7 +1268,7 @@ retry:
 				bucket_nocow_lock(&c->nocow_locks, bucket_to_u64(b));
 			prefetch(l);
 
-			if (unlikely(!bch2_dev_get_ioref(bch_dev_bkey_exists(c, ptr->dev), WRITE)))
+			if (unlikely(!bch2_dev_get_ioref(bch2_dev_bkey_exists(c, ptr->dev), WRITE)))
 				goto err_get_ioref;
 
 			/* XXX allocating memory with btree locks held - rare */
@@ -1285,7 +1289,7 @@ retry:
 			bch2_cut_back(POS(op->pos.inode, op->pos.offset + bio_sectors(bio)), op->insert_keys.top);
 
 		darray_for_each(buckets, i) {
-			struct bch_dev *ca = bch_dev_bkey_exists(c, i->b.inode);
+			struct bch_dev *ca = bch2_dev_bkey_exists(c, i->b.inode);
 
 			__bch2_bucket_nocow_lock(&c->nocow_locks, i->l,
 						 bucket_to_u64(i->b),
@@ -1362,7 +1366,7 @@ err:
 	return;
 err_get_ioref:
 	darray_for_each(buckets, i)
-		percpu_ref_put(&bch_dev_bkey_exists(c, i->b.inode)->io_ref);
+		percpu_ref_put(&bch2_dev_bkey_exists(c, i->b.inode)->io_ref);
 
 	/* Fall back to COW path: */
 	goto out;
@@ -1639,8 +1643,7 @@ void bch2_write_op_to_text(struct printbuf *out, struct bch_write_op *op)
 	prt_bitflags(out, bch2_write_flags, op->flags);
 	prt_newline(out);
 
-	prt_printf(out, "ref: %u", closure_nr_remaining(&op->cl));
-	prt_newline(out);
+	prt_printf(out, "ref: %u\n", closure_nr_remaining(&op->cl));
 
 	printbuf_indent_sub(out, 2);
 }
