@@ -967,7 +967,8 @@ static unsigned int demote_folio_list(struct list_head *demote_folios,
 		.gfp_mask = (GFP_HIGHUSER_MOVABLE & ~__GFP_RECLAIM) | __GFP_NOWARN |
 			__GFP_NOMEMALLOC | GFP_NOWAIT,
 		.nid = target_nid,
-		.nmask = &allowed_mask
+		.nmask = &allowed_mask,
+		.reason = MR_DEMOTION,
 	};
 
 	if (list_empty(demote_folios))
@@ -1205,25 +1206,25 @@ retry:
 					if (!can_split_folio(folio, NULL))
 						goto activate_locked;
 					/*
-					 * Split folios without a PMD map right
-					 * away. Chances are some or all of the
-					 * tail pages can be freed without IO.
+					 * Split partially mapped folios right away.
+					 * We can free the unmapped pages without IO.
 					 */
-					if (!folio_entire_mapcount(folio) &&
-					    split_folio_to_list(folio,
-								folio_list))
+					if (data_race(!list_empty(&folio->_deferred_list)) &&
+					    split_folio_to_list(folio, folio_list))
 						goto activate_locked;
 				}
 				if (!add_to_swap(folio)) {
 					if (!folio_test_large(folio))
 						goto activate_locked_split;
 					/* Fallback to swap normal pages */
-					if (split_folio_to_list(folio,
-								folio_list))
+					if (split_folio_to_list(folio, folio_list))
 						goto activate_locked;
 #ifdef CONFIG_TRANSPARENT_HUGEPAGE
-					count_memcg_folio_events(folio, THP_SWPOUT_FALLBACK, 1);
-					count_vm_event(THP_SWPOUT_FALLBACK);
+					if (nr_pages >= HPAGE_PMD_NR) {
+						count_memcg_folio_events(folio,
+							THP_SWPOUT_FALLBACK, 1);
+						count_vm_event(THP_SWPOUT_FALLBACK);
+					}
 #endif
 					if (!add_to_swap(folio))
 						goto activate_locked_split;
@@ -1256,6 +1257,20 @@ retry:
 
 			if (folio_test_pmd_mappable(folio))
 				flags |= TTU_SPLIT_HUGE_PMD;
+			/*
+			 * Without TTU_SYNC, try_to_unmap will only begin to
+			 * hold PTL from the first present PTE within a large
+			 * folio. Some initial PTEs might be skipped due to
+			 * races with parallel PTE writes in which PTEs can be
+			 * cleared temporarily before being written new present
+			 * values. This will lead to a large folio is still
+			 * mapped while some subpages have been partially
+			 * unmapped after try_to_unmap; TTU_SYNC helps
+			 * try_to_unmap acquire PTL from the first PTE,
+			 * eliminating the influence of temporary PTE values.
+			 */
+			if (folio_test_large(folio) && list_empty(&folio->_deferred_list))
+				flags |= TTU_SYNC;
 
 			try_to_unmap(folio, flags);
 			if (folio_mapped(folio)) {
