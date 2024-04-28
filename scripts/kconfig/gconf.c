@@ -83,14 +83,10 @@ static const char *dbg_sym_flags(int val)
 		strcat(buf, "const/");
 	if (val & SYMBOL_CHECK)
 		strcat(buf, "check/");
-	if (val & SYMBOL_CHOICE)
-		strcat(buf, "choice/");
 	if (val & SYMBOL_CHOICEVAL)
 		strcat(buf, "choiceval/");
 	if (val & SYMBOL_VALID)
 		strcat(buf, "valid/");
-	if (val & SYMBOL_OPTIONAL)
-		strcat(buf, "optional/");
 	if (val & SYMBOL_WRITE)
 		strcat(buf, "write/");
 	if (val & SYMBOL_CHANGED)

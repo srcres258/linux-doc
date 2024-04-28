@@ -17,6 +17,27 @@ static const char nohelp_text[] = "There is no help available for this option.";
 struct menu rootmenu;
 static struct menu **last_entry_ptr;
 
+/**
+ * menu_next - return the next menu entry with depth-first traversal
+ * @menu: pointer to the current menu
+ * @root: root of the sub-tree to traverse. If NULL is given, the traveral
+ *        continues until it reaches the end of the entire menu tree.
+ * return: the menu to visit next, or NULL when it reaches the end.
+ */
+struct menu *menu_next(struct menu *menu, struct menu *root)
+{
+	if (menu->list)
+		return menu->list;
+
+	while (menu != root && !menu->next)
+		menu = menu->parent;
+
+	if (menu == root)
+		return NULL;
+
+	return menu->next;
+}
+
 void menu_warn(struct menu *menu, const char *fmt, ...)
 {
 	va_list ap;
@@ -572,15 +593,11 @@ static void _menu_finalize(struct menu *parent, bool inside_choice)
 	}
 
 	/*
-	 * For non-optional choices, add a reverse dependency (corresponding to
-	 * a select) of '<visibility> && m'. This prevents the user from
-	 * setting the choice mode to 'n' when the choice is visible.
-	 *
-	 * This would also work for non-choice symbols, but only non-optional
-	 * choices clear SYMBOL_OPTIONAL as of writing. Choices are implemented
-	 * as a type of symbol.
+	 * For choices, add a reverse dependency (corresponding to a select) of
+	 * '<visibility> && m'. This prevents the user from setting the choice
+	 * mode to 'n' when the choice is visible.
 	 */
-	if (sym && !sym_is_optional(sym) && parent->prompt) {
+	if (sym && sym_is_choice(sym) && parent->prompt) {
 		sym->rev_dep.expr = expr_alloc_or(sym->rev_dep.expr,
 				expr_alloc_and(parent->prompt->visible.expr,
 					expr_alloc_symbol(&symbol_mod)));
