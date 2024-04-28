@@ -458,6 +458,16 @@ void bdev_add(struct block_device *bdev, dev_t dev)
 	insert_inode_hash(inode);
 }
 
+void bdev_unhash(struct block_device *bdev)
+{
+	remove_inode_hash(BD_INODE(bdev));
+}
+
+void bdev_drop(struct block_device *bdev)
+{
+	iput(BD_INODE(bdev));
+}
+
 long nr_blockdev_pages(void)
 {
 	struct inode *inode;
