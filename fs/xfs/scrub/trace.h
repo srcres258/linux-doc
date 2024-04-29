@@ -26,6 +26,10 @@ struct xchk_iscan;
 struct xchk_nlink;
 struct xchk_fscounters;
 struct xfs_rmap_update_params;
+struct xfs_parent_rec;
+enum xchk_dirpath_outcome;
+struct xchk_dirtree;
+struct xchk_dirtree_outcomes;
 
 /*
  * ftrace's __print_symbolic requires that all enum values be wrapped in the
@@ -64,6 +68,8 @@ TRACE_DEFINE_ENUM(XFS_SCRUB_TYPE_FSCOUNTERS);
 TRACE_DEFINE_ENUM(XFS_SCRUB_TYPE_QUOTACHECK);
 TRACE_DEFINE_ENUM(XFS_SCRUB_TYPE_NLINKS);
 TRACE_DEFINE_ENUM(XFS_SCRUB_TYPE_HEALTHY);
+TRACE_DEFINE_ENUM(XFS_SCRUB_TYPE_DIRTREE);
+TRACE_DEFINE_ENUM(XFS_SCRUB_TYPE_BARRIER);
 
 #define XFS_SCRUB_TYPE_STRINGS \
 	{ XFS_SCRUB_TYPE_PROBE,		"probe" }, \
@@ -93,7 +99,9 @@ TRACE_DEFINE_ENUM(XFS_SCRUB_TYPE_HEALTHY);
 	{ XFS_SCRUB_TYPE_FSCOUNTERS,	"fscounters" }, \
 	{ XFS_SCRUB_TYPE_QUOTACHECK,	"quotacheck" }, \
 	{ XFS_SCRUB_TYPE_NLINKS,	"nlinks" }, \
-	{ XFS_SCRUB_TYPE_HEALTHY,	"healthy" }
+	{ XFS_SCRUB_TYPE_HEALTHY,	"healthy" }, \
+	{ XFS_SCRUB_TYPE_DIRTREE,	"dirtree" }, \
+	{ XFS_SCRUB_TYPE_BARRIER,	"barrier" }
 
 #define XFS_SCRUB_FLAG_STRINGS \
 	{ XFS_SCRUB_IFLAG_REPAIR,		"repair" }, \
@@ -114,7 +122,6 @@ TRACE_DEFINE_ENUM(XFS_SCRUB_TYPE_HEALTHY);
 	{ XCHK_FSGATES_QUOTA,			"fsgates_quota" }, \
 	{ XCHK_FSGATES_DIRENTS,			"fsgates_dirents" }, \
 	{ XCHK_FSGATES_RMAP,			"fsgates_rmap" }, \
-	{ XREP_FSGATES_EXCHANGE_RANGE,		"fsgates_exchrange" }, \
 	{ XREP_RESET_PERAG_RESV,		"reset_perag_resv" }, \
 	{ XREP_ALREADY_FIXED,			"already_fixed" }
 
@@ -170,6 +177,8 @@ DEFINE_EVENT(xchk_class, name, \
 DEFINE_SCRUB_EVENT(xchk_start);
 DEFINE_SCRUB_EVENT(xchk_done);
 DEFINE_SCRUB_EVENT(xchk_deadlock_retry);
+DEFINE_SCRUB_EVENT(xchk_dirtree_start);
+DEFINE_SCRUB_EVENT(xchk_dirtree_done);
 DEFINE_SCRUB_EVENT(xrep_attempt);
 DEFINE_SCRUB_EVENT(xrep_done);
 
@@ -199,6 +208,81 @@ DEFINE_EVENT(xchk_fsgate_class, name, \
 
 DEFINE_SCRUB_FSHOOK_EVENT(xchk_fsgates_enable);
 DEFINE_SCRUB_FSHOOK_EVENT(xchk_fsgates_disable);
+
+DECLARE_EVENT_CLASS(xchk_vector_head_class,
+	TP_PROTO(struct xfs_inode *ip, struct xfs_scrub_vec_head *vhead),
+	TP_ARGS(ip, vhead),
+	TP_STRUCT__entry(
+		__field(dev_t, dev)
+		__field(xfs_ino_t, ino)
+		__field(xfs_agnumber_t, agno)
+		__field(xfs_ino_t, inum)
+		__field(unsigned int, gen)
+		__field(unsigned int, flags)
+		__field(unsigned short, rest_us)
+		__field(unsigned short, nr_vecs)
+	),
+	TP_fast_assign(
+		__entry->dev = ip->i_mount->m_super->s_dev;
+		__entry->ino = ip->i_ino;
+		__entry->agno = vhead->svh_agno;
+		__entry->inum = vhead->svh_ino;
+		__entry->gen = vhead->svh_gen;
+		__entry->flags = vhead->svh_flags;
+		__entry->rest_us = vhead->svh_rest_us;
+		__entry->nr_vecs = vhead->svh_nr;
+	),
+	TP_printk("dev %d:%d ino 0x%llx agno 0x%x inum 0x%llx gen 0x%x flags 0x%x rest_us %u nr_vecs %u",
+		  MAJOR(__entry->dev), MINOR(__entry->dev),
+		  __entry->ino,
+		  __entry->agno,
+		  __entry->inum,
+		  __entry->gen,
+		  __entry->flags,
+		  __entry->rest_us,
+		  __entry->nr_vecs)
+)
+#define DEFINE_SCRUBV_HEAD_EVENT(name) \
+DEFINE_EVENT(xchk_vector_head_class, name, \
+	TP_PROTO(struct xfs_inode *ip, struct xfs_scrub_vec_head *vhead), \
+	TP_ARGS(ip, vhead))
+
+DEFINE_SCRUBV_HEAD_EVENT(xchk_scrubv_start);
+
+DECLARE_EVENT_CLASS(xchk_vector_class,
+	TP_PROTO(struct xfs_mount *mp, struct xfs_scrub_vec_head *vhead,
+		 unsigned int vec_nr, struct xfs_scrub_vec *v),
+	TP_ARGS(mp, vhead, vec_nr, v),
+	TP_STRUCT__entry(
+		__field(dev_t, dev)
+		__field(unsigned int, vec_nr)
+		__field(unsigned int, vec_type)
+		__field(unsigned int, vec_flags)
+		__field(int, vec_ret)
+	),
+	TP_fast_assign(
+		__entry->dev = mp->m_super->s_dev;
+		__entry->vec_nr = vec_nr;
+		__entry->vec_type = v->sv_type;
+		__entry->vec_flags = v->sv_flags;
+		__entry->vec_ret = v->sv_ret;
+	),
+	TP_printk("dev %d:%d vec[%u] type %s flags %s ret %d",
+		  MAJOR(__entry->dev), MINOR(__entry->dev),
+		  __entry->vec_nr,
+		  __print_symbolic(__entry->vec_type, XFS_SCRUB_TYPE_STRINGS),
+		  __print_flags(__entry->vec_flags, "|", XFS_SCRUB_FLAG_STRINGS),
+		  __entry->vec_ret)
+)
+#define DEFINE_SCRUBV_EVENT(name) \
+DEFINE_EVENT(xchk_vector_class, name, \
+	TP_PROTO(struct xfs_mount *mp, struct xfs_scrub_vec_head *vhead, \
+		 unsigned int vec_nr, struct xfs_scrub_vec *v), \
+	TP_ARGS(mp, vhead, vec_nr, v))
+
+DEFINE_SCRUBV_EVENT(xchk_scrubv_barrier_fail);
+DEFINE_SCRUBV_EVENT(xchk_scrubv_item);
+DEFINE_SCRUBV_EVENT(xchk_scrubv_outcome);
 
 TRACE_EVENT(xchk_op_error,
 	TP_PROTO(struct xfs_scrub *sc, xfs_agnumber_t agno,
@@ -1363,6 +1447,33 @@ TRACE_EVENT(xchk_nlinks_collect_dirent,
 		  __get_str(name))
 );
 
+TRACE_EVENT(xchk_nlinks_collect_pptr,
+	TP_PROTO(struct xfs_mount *mp, struct xfs_inode *dp,
+		 const struct xfs_name *name,
+		 const struct xfs_parent_rec *pptr),
+	TP_ARGS(mp, dp, name, pptr),
+	TP_STRUCT__entry(
+		__field(dev_t, dev)
+		__field(xfs_ino_t, dir)
+		__field(xfs_ino_t, ino)
+		__field(unsigned int, namelen)
+		__dynamic_array(char, name, name->len)
+	),
+	TP_fast_assign(
+		__entry->dev = mp->m_super->s_dev;
+		__entry->dir = dp->i_ino;
+		__entry->ino = be64_to_cpu(pptr->p_ino);
+		__entry->namelen = name->len;
+		memcpy(__get_str(name), name->name, name->len);
+	),
+	TP_printk("dev %d:%d dir 0x%llx -> ino 0x%llx name '%.*s'",
+		  MAJOR(__entry->dev), MINOR(__entry->dev),
+		  __entry->dir,
+		  __entry->ino,
+		  __entry->namelen,
+		  __get_str(name))
+);
+
 TRACE_EVENT(xchk_nlinks_collect_metafile,
 	TP_PROTO(struct xfs_mount *mp, xfs_ino_t ino),
 	TP_ARGS(mp, ino),
@@ -1510,6 +1621,300 @@ DEFINE_EVENT(xchk_nlinks_diff_class, name, \
 		 const struct xchk_nlink *live), \
 	TP_ARGS(mp, ip, live))
 DEFINE_SCRUB_NLINKS_DIFF_EVENT(xchk_nlinks_compare_inode);
+
+DECLARE_EVENT_CLASS(xchk_pptr_class,
+	TP_PROTO(struct xfs_inode *ip, const struct xfs_name *name,
+		 xfs_ino_t far_ino),
+	TP_ARGS(ip, name, far_ino),
+	TP_STRUCT__entry(
+		__field(dev_t, dev)
+		__field(xfs_ino_t, ino)
+		__field(unsigned int, namelen)
+		__dynamic_array(char, name, name->len)
+		__field(xfs_ino_t, far_ino)
+	),
+	TP_fast_assign(
+		__entry->dev = ip->i_mount->m_super->s_dev;
+		__entry->ino = ip->i_ino;
+		__entry->namelen = name->len;
+		memcpy(__get_str(name), name, name->len);
+		__entry->far_ino = far_ino;
+	),
+	TP_printk("dev %d:%d ino 0x%llx name '%.*s' far_ino 0x%llx",
+		  MAJOR(__entry->dev), MINOR(__entry->dev),
+		  __entry->ino,
+		  __entry->namelen,
+		  __get_str(name),
+		  __entry->far_ino)
+)
+#define DEFINE_XCHK_PPTR_EVENT(name) \
+DEFINE_EVENT(xchk_pptr_class, name, \
+	TP_PROTO(struct xfs_inode *ip, const struct xfs_name *name, \
+		 xfs_ino_t far_ino), \
+	TP_ARGS(ip, name, far_ino))
+DEFINE_XCHK_PPTR_EVENT(xchk_dir_defer);
+DEFINE_XCHK_PPTR_EVENT(xchk_dir_slowpath);
+DEFINE_XCHK_PPTR_EVENT(xchk_dir_ultraslowpath);
+DEFINE_XCHK_PPTR_EVENT(xchk_parent_defer);
+DEFINE_XCHK_PPTR_EVENT(xchk_parent_slowpath);
+DEFINE_XCHK_PPTR_EVENT(xchk_parent_ultraslowpath);
+
+DECLARE_EVENT_CLASS(xchk_dirtree_class,
+	TP_PROTO(struct xfs_scrub *sc, struct xfs_inode *ip,
+		 unsigned int path_nr, const struct xfs_name *name,
+		 const struct xfs_parent_rec *pptr),
+	TP_ARGS(sc, ip, path_nr, name, pptr),
+	TP_STRUCT__entry(
+		__field(dev_t, dev)
+		__field(unsigned int, path_nr)
+		__field(xfs_ino_t, child_ino)
+		__field(unsigned int, child_gen)
+		__field(xfs_ino_t, parent_ino)
+		__field(unsigned int, parent_gen)
+		__field(unsigned int, namelen)
+		__dynamic_array(char, name, name->len)
+	),
+	TP_fast_assign(
+		__entry->dev = sc->mp->m_super->s_dev;
+		__entry->path_nr = path_nr;
+		__entry->child_ino = ip->i_ino;
+		__entry->child_gen = VFS_I(ip)->i_generation;
+		__entry->parent_ino = be64_to_cpu(pptr->p_ino);
+		__entry->parent_gen = be32_to_cpu(pptr->p_gen);
+		__entry->namelen = name->len;
+		memcpy(__get_str(name), name->name, name->len);
+	),
+	TP_printk("dev %d:%d path %u child_ino 0x%llx child_gen 0x%x parent_ino 0x%llx parent_gen 0x%x name '%.*s'",
+		  MAJOR(__entry->dev), MINOR(__entry->dev),
+		  __entry->path_nr,
+		  __entry->child_ino,
+		  __entry->child_gen,
+		  __entry->parent_ino,
+		  __entry->parent_gen,
+		  __entry->namelen,
+		  __get_str(name))
+);
+#define DEFINE_XCHK_DIRTREE_EVENT(name) \
+DEFINE_EVENT(xchk_dirtree_class, name, \
+	TP_PROTO(struct xfs_scrub *sc, struct xfs_inode *ip, \
+		 unsigned int path_nr, const struct xfs_name *name, \
+		 const struct xfs_parent_rec *pptr), \
+	TP_ARGS(sc, ip, path_nr, name, pptr))
+DEFINE_XCHK_DIRTREE_EVENT(xchk_dirtree_create_path);
+DEFINE_XCHK_DIRTREE_EVENT(xchk_dirpath_walk_upwards);
+
+DECLARE_EVENT_CLASS(xchk_dirpath_class,
+	TP_PROTO(struct xfs_scrub *sc, struct xfs_inode *ip,
+		 unsigned int path_nr, unsigned int step_nr,
+		 const struct xfs_name *name,
+		 const struct xfs_parent_rec *pptr),
+	TP_ARGS(sc, ip, path_nr, step_nr, name, pptr),
+	TP_STRUCT__entry(
+		__field(dev_t, dev)
+		__field(unsigned int, path_nr)
+		__field(unsigned int, step_nr)
+		__field(xfs_ino_t, child_ino)
+		__field(unsigned int, child_gen)
+		__field(xfs_ino_t, parent_ino)
+		__field(unsigned int, parent_gen)
+		__field(unsigned int, namelen)
+		__dynamic_array(char, name, name->len)
+	),
+	TP_fast_assign(
+		__entry->dev = sc->mp->m_super->s_dev;
+		__entry->path_nr = path_nr;
+		__entry->step_nr = step_nr;
+		__entry->child_ino = ip->i_ino;
+		__entry->child_gen = VFS_I(ip)->i_generation;
+		__entry->parent_ino = be64_to_cpu(pptr->p_ino);
+		__entry->parent_gen = be32_to_cpu(pptr->p_gen);
+		__entry->namelen = name->len;
+		memcpy(__get_str(name), name->name, name->len);
+	),
+	TP_printk("dev %d:%d path %u step %u child_ino 0x%llx child_gen 0x%x parent_ino 0x%llx parent_gen 0x%x name '%.*s'",
+		  MAJOR(__entry->dev), MINOR(__entry->dev),
+		  __entry->path_nr,
+		  __entry->step_nr,
+		  __entry->child_ino,
+		  __entry->child_gen,
+		  __entry->parent_ino,
+		  __entry->parent_gen,
+		  __entry->namelen,
+		  __get_str(name))
+);
+#define DEFINE_XCHK_DIRPATH_EVENT(name) \
+DEFINE_EVENT(xchk_dirpath_class, name, \
+	TP_PROTO(struct xfs_scrub *sc, struct xfs_inode *ip, \
+		 unsigned int path_nr, unsigned int step_nr, \
+		 const struct xfs_name *name, \
+		 const struct xfs_parent_rec *pptr), \
+	TP_ARGS(sc, ip, path_nr, step_nr, name, pptr))
+DEFINE_XCHK_DIRPATH_EVENT(xchk_dirpath_disappeared);
+DEFINE_XCHK_DIRPATH_EVENT(xchk_dirpath_badgen);
+DEFINE_XCHK_DIRPATH_EVENT(xchk_dirpath_nondir_parent);
+DEFINE_XCHK_DIRPATH_EVENT(xchk_dirpath_unlinked_parent);
+DEFINE_XCHK_DIRPATH_EVENT(xchk_dirpath_found_next_step);
+
+TRACE_DEFINE_ENUM(XCHK_DIRPATH_SCANNING);
+TRACE_DEFINE_ENUM(XCHK_DIRPATH_DELETE);
+TRACE_DEFINE_ENUM(XCHK_DIRPATH_CORRUPT);
+TRACE_DEFINE_ENUM(XCHK_DIRPATH_LOOP);
+TRACE_DEFINE_ENUM(XCHK_DIRPATH_STALE);
+TRACE_DEFINE_ENUM(XCHK_DIRPATH_OK);
+TRACE_DEFINE_ENUM(XREP_DIRPATH_DELETING);
+TRACE_DEFINE_ENUM(XREP_DIRPATH_DELETED);
+TRACE_DEFINE_ENUM(XREP_DIRPATH_ADOPTING);
+TRACE_DEFINE_ENUM(XREP_DIRPATH_ADOPTED);
+
+#define XCHK_DIRPATH_OUTCOME_STRINGS \
+	{ XCHK_DIRPATH_SCANNING,	"scanning" }, \
+	{ XCHK_DIRPATH_DELETE,		"delete" }, \
+	{ XCHK_DIRPATH_CORRUPT,		"corrupt" }, \
+	{ XCHK_DIRPATH_LOOP,		"loop" }, \
+	{ XCHK_DIRPATH_STALE,		"stale" }, \
+	{ XCHK_DIRPATH_OK,		"ok" }, \
+	{ XREP_DIRPATH_DELETING,	"deleting" }, \
+	{ XREP_DIRPATH_DELETED,		"deleted" }, \
+	{ XREP_DIRPATH_ADOPTING,	"adopting" }, \
+	{ XREP_DIRPATH_ADOPTED,		"adopted" }
+
+DECLARE_EVENT_CLASS(xchk_dirpath_outcome_class,
+	TP_PROTO(struct xfs_scrub *sc, unsigned long long path_nr,
+		 unsigned int nr_steps, \
+		 unsigned int outcome),
+	TP_ARGS(sc, path_nr, nr_steps, outcome),
+	TP_STRUCT__entry(
+		__field(dev_t, dev)
+		__field(unsigned long long, path_nr)
+		__field(unsigned int, nr_steps)
+		__field(unsigned int, outcome)
+	),
+	TP_fast_assign(
+		__entry->dev = sc->mp->m_super->s_dev;
+		__entry->path_nr = path_nr;
+		__entry->nr_steps = nr_steps;
+		__entry->outcome = outcome;
+	),
+	TP_printk("dev %d:%d path %llu steps %u outcome %s",
+		  MAJOR(__entry->dev), MINOR(__entry->dev),
+		  __entry->path_nr,
+		  __entry->nr_steps,
+		  __print_symbolic(__entry->outcome, XCHK_DIRPATH_OUTCOME_STRINGS))
+);
+#define DEFINE_XCHK_DIRPATH_OUTCOME_EVENT(name) \
+DEFINE_EVENT(xchk_dirpath_outcome_class, name, \
+	TP_PROTO(struct xfs_scrub *sc, unsigned long long path_nr, \
+		 unsigned int nr_steps, \
+		 unsigned int outcome), \
+	TP_ARGS(sc, path_nr, nr_steps, outcome))
+DEFINE_XCHK_DIRPATH_OUTCOME_EVENT(xchk_dirpath_set_outcome);
+DEFINE_XCHK_DIRPATH_OUTCOME_EVENT(xchk_dirpath_evaluate_path);
+
+DECLARE_EVENT_CLASS(xchk_dirtree_evaluate_class,
+	TP_PROTO(const struct xchk_dirtree *dl,
+		 const struct xchk_dirtree_outcomes *oc),
+	TP_ARGS(dl, oc),
+	TP_STRUCT__entry(
+		__field(dev_t, dev)
+		__field(xfs_ino_t, ino)
+		__field(xfs_ino_t, rootino)
+		__field(unsigned int, nr_paths)
+		__field(unsigned int, bad)
+		__field(unsigned int, suspect)
+		__field(unsigned int, good)
+		__field(bool, needs_adoption)
+	),
+	TP_fast_assign(
+		__entry->dev = dl->sc->mp->m_super->s_dev;
+		__entry->ino = dl->sc->ip->i_ino;
+		__entry->rootino = dl->root_ino;
+		__entry->nr_paths = dl->nr_paths;
+		__entry->bad = oc->bad;
+		__entry->suspect = oc->suspect;
+		__entry->good = oc->good;
+		__entry->needs_adoption = oc->needs_adoption ? 1 : 0;
+	),
+	TP_printk("dev %d:%d ino 0x%llx rootino 0x%llx nr_paths %u bad %u suspect %u good %u adopt? %d",
+		  MAJOR(__entry->dev), MINOR(__entry->dev),
+		  __entry->ino,
+		  __entry->rootino,
+		  __entry->nr_paths,
+		  __entry->bad,
+		  __entry->suspect,
+		  __entry->good,
+		  __entry->needs_adoption)
+);
+#define DEFINE_XCHK_DIRTREE_EVALUATE_EVENT(name) \
+DEFINE_EVENT(xchk_dirtree_evaluate_class, name, \
+	TP_PROTO(const struct xchk_dirtree *dl, \
+		 const struct xchk_dirtree_outcomes *oc), \
+	TP_ARGS(dl, oc))
+DEFINE_XCHK_DIRTREE_EVALUATE_EVENT(xchk_dirtree_evaluate);
+
+TRACE_EVENT(xchk_dirpath_changed,
+	TP_PROTO(struct xfs_scrub *sc, unsigned int path_nr,
+		 unsigned int step_nr, const struct xfs_inode *dp,
+		 const struct xfs_inode *ip, const struct xfs_name *xname),
+	TP_ARGS(sc, path_nr, step_nr, dp, ip, xname),
+	TP_STRUCT__entry(
+		__field(dev_t, dev)
+		__field(unsigned int, path_nr)
+		__field(unsigned int, step_nr)
+		__field(xfs_ino_t, child_ino)
+		__field(xfs_ino_t, parent_ino)
+		__field(unsigned int, namelen)
+		__dynamic_array(char, name, xname->len)
+	),
+	TP_fast_assign(
+		__entry->dev = sc->mp->m_super->s_dev;
+		__entry->path_nr = path_nr;
+		__entry->step_nr = step_nr;
+		__entry->child_ino = ip->i_ino;
+		__entry->parent_ino = dp->i_ino;
+		__entry->namelen = xname->len;
+		memcpy(__get_str(name), xname->name, xname->len);
+	),
+	TP_printk("dev %d:%d path %u step %u child_ino 0x%llx parent_ino 0x%llx name '%.*s'",
+		  MAJOR(__entry->dev), MINOR(__entry->dev),
+		  __entry->path_nr,
+		  __entry->step_nr,
+		  __entry->child_ino,
+		  __entry->parent_ino,
+		  __entry->namelen,
+		  __get_str(name))
+);
+
+TRACE_EVENT(xchk_dirtree_live_update,
+	TP_PROTO(struct xfs_scrub *sc, const struct xfs_inode *dp,
+		 int action, const struct xfs_inode *ip, int delta,
+		 const struct xfs_name *xname),
+	TP_ARGS(sc, dp, action, ip, delta, xname),
+	TP_STRUCT__entry(
+		__field(dev_t, dev)
+		__field(xfs_ino_t, parent_ino)
+		__field(int, action)
+		__field(xfs_ino_t, child_ino)
+		__field(int, delta)
+		__field(unsigned int, namelen)
+		__dynamic_array(char, name, xname->len)
+	),
+	TP_fast_assign(
+		__entry->dev = sc->mp->m_super->s_dev;
+		__entry->parent_ino = dp->i_ino;
+		__entry->action = action;
+		__entry->child_ino = ip->i_ino;
+		__entry->delta = delta;
+		__entry->namelen = xname->len;
+		memcpy(__get_str(name), xname->name, xname->len);
+	),
+	TP_printk("dev %d:%d parent_ino 0x%llx child_ino 0x%llx nlink_delta %d name '%.*s'",
+		  MAJOR(__entry->dev), MINOR(__entry->dev),
+		  __entry->parent_ino,
+		  __entry->child_ino,
+		  __entry->delta,
+		  __entry->namelen,
+		  __get_str(name))
+);
 
 /* repair tracepoints */
 #if IS_ENABLED(CONFIG_XFS_ONLINE_REPAIR)
@@ -2474,6 +2879,46 @@ DEFINE_EVENT(xrep_xattr_salvage_class, name, \
 	TP_ARGS(ip, flags, name, namelen, valuelen))
 DEFINE_XREP_XATTR_SALVAGE_EVENT(xrep_xattr_salvage_rec);
 DEFINE_XREP_XATTR_SALVAGE_EVENT(xrep_xattr_insert_rec);
+DEFINE_XREP_XATTR_SALVAGE_EVENT(xrep_parent_stash_xattr);
+DEFINE_XREP_XATTR_SALVAGE_EVENT(xrep_parent_insert_xattr);
+
+DECLARE_EVENT_CLASS(xrep_pptr_salvage_class,
+	TP_PROTO(struct xfs_inode *ip, unsigned int flags, const void *name,
+		 unsigned int namelen, const void *value, unsigned int valuelen),
+	TP_ARGS(ip, flags, name, namelen, value, valuelen),
+	TP_STRUCT__entry(
+		__field(dev_t, dev)
+		__field(xfs_ino_t, ino)
+		__field(xfs_ino_t, parent_ino)
+		__field(unsigned int, parent_gen)
+		__field(unsigned int, namelen)
+		__dynamic_array(char, name, namelen)
+	),
+	TP_fast_assign(
+		const struct xfs_parent_rec	*rec = value;
+
+		__entry->dev = ip->i_mount->m_super->s_dev;
+		__entry->ino = ip->i_ino;
+		__entry->parent_ino = be64_to_cpu(rec->p_ino);
+		__entry->parent_gen = be32_to_cpu(rec->p_gen);
+		__entry->namelen = namelen;
+		memcpy(__get_str(name), name, namelen);
+	),
+	TP_printk("dev %d:%d ino 0x%llx parent_ino 0x%llx parent_gen 0x%x name '%.*s'",
+		  MAJOR(__entry->dev), MINOR(__entry->dev),
+		  __entry->ino,
+		  __entry->parent_ino,
+		  __entry->parent_gen,
+		  __entry->namelen,
+		  __get_str(name))
+)
+#define DEFINE_XREP_PPTR_SALVAGE_EVENT(name) \
+DEFINE_EVENT(xrep_pptr_salvage_class, name, \
+	TP_PROTO(struct xfs_inode *ip, unsigned int flags, const void *name, \
+		 unsigned int namelen, const void *value, unsigned int valuelen), \
+	TP_ARGS(ip, flags, name, namelen, value, valuelen))
+DEFINE_XREP_PPTR_SALVAGE_EVENT(xrep_xattr_salvage_pptr);
+DEFINE_XREP_PPTR_SALVAGE_EVENT(xrep_xattr_insert_pptr);
 
 TRACE_EVENT(xrep_xattr_class,
 	TP_PROTO(struct xfs_inode *ip, struct xfs_inode *arg_ip),
@@ -2499,6 +2944,43 @@ DEFINE_EVENT(xrep_xattr_class, name, \
 	TP_ARGS(ip, arg_ip))
 DEFINE_XREP_XATTR_EVENT(xrep_xattr_rebuild_tree);
 DEFINE_XREP_XATTR_EVENT(xrep_xattr_reset_fork);
+DEFINE_XREP_XATTR_EVENT(xrep_xattr_full_reset);
+
+DECLARE_EVENT_CLASS(xrep_xattr_pptr_scan_class,
+	TP_PROTO(struct xfs_inode *ip, const struct xfs_inode *dp,
+		 const struct xfs_name *name),
+	TP_ARGS(ip, dp, name),
+	TP_STRUCT__entry(
+		__field(dev_t, dev)
+		__field(xfs_ino_t, ino)
+		__field(xfs_ino_t, parent_ino)
+		__field(unsigned int, parent_gen)
+		__field(unsigned int, namelen)
+		__dynamic_array(char, name, name->len)
+	),
+	TP_fast_assign(
+		__entry->dev = ip->i_mount->m_super->s_dev;
+		__entry->ino = ip->i_ino;
+		__entry->parent_ino = dp->i_ino;
+		__entry->parent_gen = VFS_IC(dp)->i_generation;
+		__entry->namelen = name->len;
+		memcpy(__get_str(name), name->name, name->len);
+	),
+	TP_printk("dev %d:%d ino 0x%llx parent_ino 0x%llx parent_gen 0x%x name '%.*s'",
+		  MAJOR(__entry->dev), MINOR(__entry->dev),
+		  __entry->ino,
+		  __entry->parent_ino,
+		  __entry->parent_gen,
+		  __entry->namelen,
+		  __get_str(name))
+)
+#define DEFINE_XREP_XATTR_PPTR_SCAN_EVENT(name) \
+DEFINE_EVENT(xrep_xattr_pptr_scan_class, name, \
+	TP_PROTO(struct xfs_inode *ip, const struct xfs_inode *dp, \
+		 const struct xfs_name *name), \
+	TP_ARGS(ip, dp, name))
+DEFINE_XREP_XATTR_PPTR_SCAN_EVENT(xrep_xattr_stash_parentadd);
+DEFINE_XREP_XATTR_PPTR_SCAN_EVENT(xrep_xattr_stash_parentremove);
 
 TRACE_EVENT(xrep_dir_recover_dirblock,
 	TP_PROTO(struct xfs_inode *dp, xfs_dablk_t dabno, uint32_t magic,
@@ -2589,6 +3071,8 @@ DEFINE_XREP_DIRENT_EVENT(xrep_dir_salvage_entry);
 DEFINE_XREP_DIRENT_EVENT(xrep_dir_stash_createname);
 DEFINE_XREP_DIRENT_EVENT(xrep_dir_replay_createname);
 DEFINE_XREP_DIRENT_EVENT(xrep_adoption_reparent);
+DEFINE_XREP_DIRENT_EVENT(xrep_dir_stash_removename);
+DEFINE_XREP_DIRENT_EVENT(xrep_dir_replay_removename);
 
 DECLARE_EVENT_CLASS(xrep_adoption_class,
 	TP_PROTO(struct xfs_inode *dp, struct xfs_inode *ip, bool moved),
@@ -2642,6 +3126,80 @@ DEFINE_EVENT(xrep_parent_salvage_class, name, \
 DEFINE_XREP_PARENT_SALVAGE_EVENT(xrep_dir_salvaged_parent);
 DEFINE_XREP_PARENT_SALVAGE_EVENT(xrep_findparent_dirent);
 DEFINE_XREP_PARENT_SALVAGE_EVENT(xrep_findparent_from_dcache);
+
+DECLARE_EVENT_CLASS(xrep_pptr_class,
+	TP_PROTO(struct xfs_inode *ip, const struct xfs_name *name,
+		 const struct xfs_parent_rec *pptr),
+	TP_ARGS(ip, name, pptr),
+	TP_STRUCT__entry(
+		__field(dev_t, dev)
+		__field(xfs_ino_t, ino)
+		__field(xfs_ino_t, parent_ino)
+		__field(unsigned int, parent_gen)
+		__field(unsigned int, namelen)
+		__dynamic_array(char, name, name->len)
+	),
+	TP_fast_assign(
+		__entry->dev = ip->i_mount->m_super->s_dev;
+		__entry->ino = ip->i_ino;
+		__entry->parent_ino = be64_to_cpu(pptr->p_ino);
+		__entry->parent_gen = be32_to_cpu(pptr->p_gen);
+		__entry->namelen = name->len;
+		memcpy(__get_str(name), name->name, name->len);
+	),
+	TP_printk("dev %d:%d ino 0x%llx parent_ino 0x%llx parent_gen 0x%x name '%.*s'",
+		  MAJOR(__entry->dev), MINOR(__entry->dev),
+		  __entry->ino,
+		  __entry->parent_ino,
+		  __entry->parent_gen,
+		  __entry->namelen,
+		  __get_str(name))
+)
+#define DEFINE_XREP_PPTR_EVENT(name) \
+DEFINE_EVENT(xrep_pptr_class, name, \
+	TP_PROTO(struct xfs_inode *ip, const struct xfs_name *name, \
+		 const struct xfs_parent_rec *pptr), \
+	TP_ARGS(ip, name, pptr))
+DEFINE_XREP_PPTR_EVENT(xrep_xattr_replay_parentadd);
+DEFINE_XREP_PPTR_EVENT(xrep_xattr_replay_parentremove);
+DEFINE_XREP_PPTR_EVENT(xrep_parent_replay_parentadd);
+DEFINE_XREP_PPTR_EVENT(xrep_parent_replay_parentremove);
+
+DECLARE_EVENT_CLASS(xrep_pptr_scan_class,
+	TP_PROTO(struct xfs_inode *ip, const struct xfs_inode *dp,
+		 const struct xfs_name *name),
+	TP_ARGS(ip, dp, name),
+	TP_STRUCT__entry(
+		__field(dev_t, dev)
+		__field(xfs_ino_t, ino)
+		__field(xfs_ino_t, parent_ino)
+		__field(unsigned int, parent_gen)
+		__field(unsigned int, namelen)
+		__dynamic_array(char, name, name->len)
+	),
+	TP_fast_assign(
+		__entry->dev = ip->i_mount->m_super->s_dev;
+		__entry->ino = ip->i_ino;
+		__entry->parent_ino = dp->i_ino;
+		__entry->parent_gen = VFS_IC(dp)->i_generation;
+		__entry->namelen = name->len;
+		memcpy(__get_str(name), name->name, name->len);
+	),
+	TP_printk("dev %d:%d ino 0x%llx parent_ino 0x%llx parent_gen 0x%x name '%.*s'",
+		  MAJOR(__entry->dev), MINOR(__entry->dev),
+		  __entry->ino,
+		  __entry->parent_ino,
+		  __entry->parent_gen,
+		  __entry->namelen,
+		  __get_str(name))
+)
+#define DEFINE_XREP_PPTR_SCAN_EVENT(name) \
+DEFINE_EVENT(xrep_pptr_scan_class, name, \
+	TP_PROTO(struct xfs_inode *ip, const struct xfs_inode *dp, \
+		 const struct xfs_name *name), \
+	TP_ARGS(ip, dp, name))
+DEFINE_XREP_PPTR_SCAN_EVENT(xrep_parent_stash_parentadd);
+DEFINE_XREP_PPTR_SCAN_EVENT(xrep_parent_stash_parentremove);
 
 TRACE_EVENT(xrep_nlinks_set_record,
 	TP_PROTO(struct xfs_mount *mp, xfs_ino_t ino,
@@ -2707,9 +3265,8 @@ DEFINE_EVENT(xrep_dentry_class, name, \
 	TP_PROTO(struct xfs_mount *mp, const struct dentry *dentry), \
 	TP_ARGS(mp, dentry))
 DEFINE_REPAIR_DENTRY_EVENT(xrep_adoption_check_child);
-DEFINE_REPAIR_DENTRY_EVENT(xrep_adoption_check_alias);
-DEFINE_REPAIR_DENTRY_EVENT(xrep_adoption_check_dentry);
 DEFINE_REPAIR_DENTRY_EVENT(xrep_adoption_invalidate_child);
+DEFINE_REPAIR_DENTRY_EVENT(xrep_dirtree_delete_child);
 
 TRACE_EVENT(xrep_symlink_salvage_target,
 	TP_PROTO(struct xfs_inode *ip, char *target, unsigned int targetlen),
@@ -3011,6 +3568,11 @@ TRACE_EVENT(xrep_iunlink_commit_bucket,
 		  __entry->old_agino,
 		  __entry->agino)
 );
+
+DEFINE_XCHK_DIRPATH_OUTCOME_EVENT(xrep_dirpath_set_outcome);
+DEFINE_XCHK_DIRTREE_EVENT(xrep_dirtree_delete_path);
+DEFINE_XCHK_DIRTREE_EVENT(xrep_dirtree_create_adoption);
+DEFINE_XCHK_DIRTREE_EVALUATE_EVENT(xrep_dirtree_decided_fate);
 
 #endif /* IS_ENABLED(CONFIG_XFS_ONLINE_REPAIR) */
 

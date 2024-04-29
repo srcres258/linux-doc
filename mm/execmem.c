@@ -108,7 +108,7 @@ struct execmem_info * __weak execmem_arch_setup(void)
 	return NULL;
 }
 
-static int __init __execmem_init(void)
+static void __init __execmem_init(void)
 {
 	struct execmem_info *info = execmem_arch_setup();
 
@@ -118,28 +118,27 @@ static int __init __execmem_init(void)
 		info->ranges[EXECMEM_DEFAULT].end = VMALLOC_END;
 		info->ranges[EXECMEM_DEFAULT].pgprot = PAGE_KERNEL_EXEC;
 		info->ranges[EXECMEM_DEFAULT].alignment = 1;
-		return 0;
+		return;
 	}
 
 	if (!execmem_validate(info))
-		return -EINVAL;
+		return;
 
 	execmem_init_missing(info);
 
 	execmem_info = info;
+}
 
+#ifdef CONFIG_ARCH_WANTS_EXECMEM_LATE
+static int __init execmem_late_init(void)
+{
+	__execmem_init();
 	return 0;
 }
-
-#ifndef CONFIG_ARCH_WANTS_EXECMEM_EARLY
-static int __init execmem_init(void)
-{
-	return __execmem_init();
-}
-core_initcall(execmem_init);
+core_initcall(execmem_late_init);
 #else
-void __init execmem_early_init(void)
+void __init execmem_init(void)
 {
-	(void)__execmem_init();
+	__execmem_init();
 }
 #endif

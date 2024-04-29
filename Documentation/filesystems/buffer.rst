@@ -10,4 +10,3 @@ Functions
 .. kernel-doc:: include/linux/buffer_head.h
 .. kernel-doc:: fs/buffer.c
    :export:
-

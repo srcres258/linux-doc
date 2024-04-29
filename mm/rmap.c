@@ -182,8 +182,6 @@ static void anon_vma_chain_link(struct vm_area_struct *vma,
  * for the new allocation. At the same time, we do not want
  * to do any locking for the common case of already having
  * an anon_vma.
- *
- * This must be called with the mmap_lock held for reading.
  */
 int __anon_vma_prepare(struct vm_area_struct *vma)
 {
@@ -191,6 +189,7 @@ int __anon_vma_prepare(struct vm_area_struct *vma)
 	struct anon_vma *anon_vma, *allocated;
 	struct anon_vma_chain *avc;
 
+	mmap_assert_locked(mm);
 	might_sleep();
 
 	avc = anon_vma_chain_alloc(GFP_KERNEL);
@@ -1497,6 +1496,7 @@ static __always_inline void __folio_remove_rmap(struct folio *folio,
 {
 	atomic_t *mapped = &folio->_nr_pages_mapped;
 	int last, nr = 0, nr_pmdmapped = 0;
+	bool partially_mapped = false;
 	enum node_stat_item idx;
 
 	__folio_rmap_sanity_checks(folio, page, nr_pages, level);
@@ -1517,6 +1517,8 @@ static __always_inline void __folio_remove_rmap(struct folio *folio,
 					nr++;
 			}
 		} while (page++, --nr_pages > 0);
+
+		partially_mapped = nr && atomic_read(mapped);
 		break;
 	case RMAP_LEVEL_PMD:
 		atomic_dec(&folio->_large_mapcount);
@@ -1534,6 +1536,8 @@ static __always_inline void __folio_remove_rmap(struct folio *folio,
 				nr = 0;
 			}
 		}
+
+		partially_mapped = nr < nr_pmdmapped;
 		break;
 	}
 
@@ -1557,9 +1561,10 @@ static __always_inline void __folio_remove_rmap(struct folio *folio,
 		 * page of the folio is unmapped and at least one page
 		 * is still mapped.
 		 */
-		if (folio_test_large(folio) && folio_test_anon(folio))
-			if (level == RMAP_LEVEL_PTE || nr < nr_pmdmapped)
-				deferred_split_folio(folio);
+		if (folio_test_anon(folio) &&
+		    list_empty(&folio->_deferred_list) &&
+		    partially_mapped)
+			deferred_split_folio(folio);
 	}
 
 	/*

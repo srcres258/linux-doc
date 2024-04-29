@@ -8,6 +8,49 @@
 
 struct xfs_scrub;
 
+struct xchk_relax {
+	unsigned long	next_resched;
+	unsigned int	resched_nr;
+	bool		interruptible;
+};
+
+/* Yield to the scheduler at most 10x per second. */
+#define XCHK_RELAX_NEXT		(jiffies + (HZ / 10))
+
+#define INIT_XCHK_RELAX	\
+	(struct xchk_relax){ \
+		.next_resched	= XCHK_RELAX_NEXT, \
+		.resched_nr	= 0, \
+		.interruptible	= true, \
+	}
+
+/*
+ * Relax during a scrub operation and exit if there's a fatal signal pending.
+ *
+ * If preemption is disabled, we need to yield to the scheduler every now and
+ * then so that we don't run afoul of the soft lockup watchdog or RCU stall
+ * detector.  cond_resched calls are somewhat expensive (~5ns) so we want to
+ * ratelimit this to 10x per second.  Amortize the cost of the other checks by
+ * only doing it once every 100 calls.
+ */
+static inline int xchk_maybe_relax(struct xchk_relax *widget)
+{
+	/* Amortize the cost of scheduling and checking signals. */
+	if (likely(++widget->resched_nr < 100))
+		return 0;
+	widget->resched_nr = 0;
+
+	if (unlikely(widget->next_resched <= jiffies)) {
+		cond_resched();
+		widget->next_resched = XCHK_RELAX_NEXT;
+	}
+
+	if (widget->interruptible && fatal_signal_pending(current))
+		return -EINTR;
+
+	return 0;
+}
+
 /*
  * Standard flags for allocating memory within scrub.  NOFS context is
  * configured by the process allocation scope.  Scrub and repair must be able
@@ -16,6 +59,13 @@ struct xfs_scrub;
  */
 #define XCHK_GFP_FLAGS	((__force gfp_t)(GFP_KERNEL | __GFP_NOWARN | \
 					 __GFP_RETRY_MAYFAIL))
+
+/*
+ * For opening files by handle for fsck operations, we don't trust the inumber
+ * or the allocation state; therefore, perform an untrusted lookup.  We don't
+ * want these inodes to pollute the cache, so mark them for immediate removal.
+ */
+#define XCHK_IGET_FLAGS	(XFS_IGET_UNTRUSTED | XFS_IGET_DONTCACHE)
 
 /* Type info and names for the scrub types. */
 enum xchk_type {
@@ -123,6 +173,9 @@ struct xfs_scrub {
 	 */
 	unsigned int			sick_mask;
 
+	/* next time we want to cond_resched() */
+	struct xchk_relax		relax;
+
 	/* State tracking for single-AG operations. */
 	struct xchk_ag			sa;
 };
@@ -135,7 +188,6 @@ struct xfs_scrub {
 #define XCHK_FSGATES_QUOTA	(1U << 4)  /* quota live update enabled */
 #define XCHK_FSGATES_DIRENTS	(1U << 5)  /* directory live update enabled */
 #define XCHK_FSGATES_RMAP	(1U << 6)  /* rmapbt live update enabled */
-#define XREP_FSGATES_EXCHANGE_RANGE (1U << 29) /* uses file content exchange */
 #define XREP_RESET_PERAG_RESV	(1U << 30) /* must reset AG space reservation */
 #define XREP_ALREADY_FIXED	(1U << 31) /* checking our repair work */
 
@@ -150,12 +202,6 @@ struct xfs_scrub {
 				 XCHK_FSGATES_DIRENTS | \
 				 XCHK_FSGATES_RMAP)
 
-/*
- * The sole XREP_FSGATES* flag reflects a log intent item that is protected
- * by a log-incompat feature flag.  No code patching in use here.
- */
-#define XREP_FSGATES_ALL	(XREP_FSGATES_EXCHANGE_RANGE)
-
 struct xfs_scrub_subord {
 	struct xfs_scrub	sc;
 	struct xfs_scrub	*parent_sc;
@@ -166,6 +212,24 @@ struct xfs_scrub_subord {
 struct xfs_scrub_subord *xchk_scrub_create_subord(struct xfs_scrub *sc,
 		unsigned int subtype);
 void xchk_scrub_free_subord(struct xfs_scrub_subord *sub);
+
+/*
+ * We /could/ terminate a scrub/repair operation early.  If we're not
+ * in a good place to continue (fatal signal, etc.) then bail out.
+ * Note that we're careful not to make any judgements about *error.
+ */
+static inline bool
+xchk_should_terminate(
+	struct xfs_scrub	*sc,
+	int			*error)
+{
+	if (xchk_maybe_relax(&sc->relax)) {
+		if (*error == 0)
+			*error = -EINTR;
+		return true;
+	}
+	return false;
+}
 
 /* Metadata scrubbers */
 int xchk_tester(struct xfs_scrub *sc);
@@ -185,6 +249,7 @@ int xchk_directory(struct xfs_scrub *sc);
 int xchk_xattr(struct xfs_scrub *sc);
 int xchk_symlink(struct xfs_scrub *sc);
 int xchk_parent(struct xfs_scrub *sc);
+int xchk_dirtree(struct xfs_scrub *sc);
 #ifdef CONFIG_XFS_RT
 int xchk_rtbitmap(struct xfs_scrub *sc);
 int xchk_rtsummary(struct xfs_scrub *sc);

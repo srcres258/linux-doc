@@ -421,7 +421,7 @@ xrep_symlink_rebuild(
 	 * unlikely.
 	 */
 	fs_blocks = xfs_symlink_blocks(sc->mp, target_len);
-	resblks = XFS_SYMLINK_SPACE_RES(sc->mp, target_len, fs_blocks);
+	resblks = xfs_symlink_space_res(sc->mp, target_len, fs_blocks);
 	error = xfs_trans_reserve_quota_nblks(sc->tp, sc->tempip, resblks, 0,
 			true);
 	if (error)
@@ -489,6 +489,9 @@ xrep_symlink(
 
 	/* The rmapbt is required to reap the old data fork. */
 	if (!xfs_has_rmapbt(sc->mp))
+		return -EOPNOTSUPP;
+	/* We require atomic file exchange range to rebuild anything. */
+	if (!xfs_has_exchange_range(sc->mp))
 		return -EOPNOTSUPP;
 
 	ASSERT(sc->ilock_flags & XFS_ILOCK_EXCL);

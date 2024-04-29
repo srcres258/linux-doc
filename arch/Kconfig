@@ -9,6 +9,14 @@
 #
 source "arch/$(SRCARCH)/Kconfig"
 
+config ARCH_CONFIGURES_CPU_MITIGATIONS
+	bool
+
+if !ARCH_CONFIGURES_CPU_MITIGATIONS
+config CPU_MITIGATIONS
+	def_bool y
+endif
+
 menu "General architecture-dependent options"
 
 config ARCH_HAS_SUBPAGE_FAULTS
@@ -969,11 +977,13 @@ config ARCH_WANTS_MODULES_DATA_IN_VMALLOC
 	  For architectures like powerpc/32 which have constraints on module
 	  allocation and need to allocate module data outside of module area.
 
-config ARCH_WANTS_EXECMEM_EARLY
+config ARCH_WANTS_EXECMEM_LATE
 	bool
 	help
-	  For architectures that might allocate executable memory early on
-	  boot, for instance ftrace on x86.
+	  For architectures that do not allocate executable memory early on
+	  boot, but rather require its initialization late when there is
+	  enough entropy for module space randomization, for instance
+	  arm64.
 
 config HAVE_IRQ_EXIT_ON_IRQ_STACK
 	bool

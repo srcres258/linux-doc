@@ -18,6 +18,8 @@
 #include "xfs_ialloc.h"
 #include "xfs_sb.h"
 #include "xfs_ag.h"
+#include "xfs_dir2.h"
+#include "xfs_parent.h"
 #include "scrub/scrub.h"
 #include "scrub/common.h"
 #include "scrub/repair.h"
@@ -136,8 +138,10 @@ xrep_nlinks_repair_inode(
 
 		error = xfs_trans_alloc(mp, &M_RES(mp)->tr_link, 0, 0, 0,
 				&sc->tp);
-		if (error)
+		if (error) {
+			xchk_iunlock(sc, XFS_IOLOCK_EXCL);
 			return error;
+		}
 
 		xchk_ilock(sc, XFS_ILOCK_EXCL);
 		xfs_trans_ijoin(sc->tp, ip, 0);

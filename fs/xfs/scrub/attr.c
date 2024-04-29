@@ -17,6 +17,7 @@
 #include "xfs_attr.h"
 #include "xfs_attr_leaf.h"
 #include "xfs_attr_sf.h"
+#include "xfs_parent.h"
 #include "scrub/scrub.h"
 #include "scrub/common.h"
 #include "scrub/dabtree.h"
@@ -173,14 +174,12 @@ xchk_xattr_actor(
 	void			*priv)
 {
 	struct xfs_da_args		args = {
-		.op_flags		= XFS_DA_OP_NOTIME,
 		.attr_filter		= attr_flags & XFS_ATTR_NSP_ONDISK_MASK,
 		.geo			= sc->mp->m_attr_geo,
 		.whichfork		= XFS_ATTR_FORK,
 		.dp			= ip,
 		.name			= name,
 		.namelen		= namelen,
-		.hashval		= xfs_da_hashname(name, namelen),
 		.trans			= sc->tp,
 		.valuelen		= valuelen,
 		.owner			= ip->i_ino,
@@ -193,31 +192,29 @@ xchk_xattr_actor(
 	if (xchk_should_terminate(sc, &error))
 		return error;
 
+	if (attr_flags & ~XFS_ATTR_ONDISK_MASK) {
+		xchk_fblock_set_corrupt(sc, XFS_ATTR_FORK, args.blkno);
+		return -ECANCELED;
+	}
+
 	if (attr_flags & XFS_ATTR_INCOMPLETE) {
 		/* Incomplete attr key, just mark the inode for preening. */
 		xchk_ino_set_preen(sc, ip->i_ino);
 		return 0;
 	}
 
-	/* Only one namespace bit allowed. */
-	if (hweight32(attr_flags & XFS_ATTR_NSP_ONDISK_MASK) > 1) {
-		xchk_fblock_set_corrupt(sc, XFS_ATTR_FORK, args.blkno);
-		return -ECANCELED;
-	}
-
 	/* Does this name make sense? */
-	if (!xfs_attr_namecheck(name, namelen)) {
+	if (!xfs_attr_namecheck(attr_flags, name, namelen)) {
 		xchk_fblock_set_corrupt(sc, XFS_ATTR_FORK, args.blkno);
 		return -ECANCELED;
 	}
 
-	/*
-	 * Local and shortform xattr values are stored in the attr leaf block,
-	 * so we don't need to retrieve the value from a remote block to detect
-	 * corruption problems.
-	 */
-	if (value)
-		return 0;
+	/* Check parent pointer record. */
+	if ((attr_flags & XFS_ATTR_PARENT) &&
+	    !xfs_parent_valuecheck(sc->mp, value, valuelen)) {
+		xchk_fblock_set_corrupt(sc, XFS_ATTR_FORK, args.blkno);
+		return -ECANCELED;
+	}
 
 	/*
 	 * Try to allocate enough memory to extract the attr value.  If that
@@ -230,8 +227,22 @@ xchk_xattr_actor(
 	if (error)
 		return error;
 
+	/*
+	 * Parent pointers are matched on attr name and value, so we must
+	 * supply the xfs_parent_rec here when confirming that the dabtree
+	 * indexing works correctly.
+	 */
+	if (attr_flags & XFS_ATTR_PARENT)
+		memcpy(ab->value, value, valuelen);
+
 	args.value = ab->value;
 
+	/*
+	 * Get the attr value to ensure that lookup can find this attribute
+	 * through the dabtree indexing and that remote value retrieval also
+	 * works correctly.
+	 */
+	xfs_attr_sethash(&args);
 	error = xfs_attr_get_ilocked(&args);
 	/* ENODATA means the hash lookup failed and the attr is bad */
 	if (error == -ENODATA)
@@ -482,7 +493,6 @@ xchk_xattr_rec(
 	xfs_dahash_t			hash;
 	int				nameidx;
 	int				hdrsize;
-	unsigned int			badflags;
 	int				error;
 
 	ASSERT(blk->magic == XFS_ATTR_LEAF_MAGIC);
@@ -512,10 +522,15 @@ xchk_xattr_rec(
 
 	/* Retrieve the entry and check it. */
 	hash = be32_to_cpu(ent->hashval);
-	badflags = ~(XFS_ATTR_LOCAL | XFS_ATTR_ROOT | XFS_ATTR_SECURE |
-			XFS_ATTR_INCOMPLETE);
-	if ((ent->flags & badflags) != 0)
+	if (ent->flags & ~XFS_ATTR_ONDISK_MASK) {
 		xchk_da_set_corrupt(ds, level);
+		return 0;
+	}
+	if (!xfs_attr_check_namespace(ent->flags)) {
+		xchk_da_set_corrupt(ds, level);
+		return 0;
+	}
+
 	if (ent->flags & XFS_ATTR_LOCAL) {
 		lentry = (struct xfs_attr_leaf_name_local *)
 				(((char *)bp->b_addr) + nameidx);
@@ -523,7 +538,10 @@ xchk_xattr_rec(
 			xchk_da_set_corrupt(ds, level);
 			goto out;
 		}
-		calc_hash = xfs_da_hashname(lentry->nameval, lentry->namelen);
+		calc_hash = xfs_attr_hashval(mp, ent->flags, lentry->nameval,
+					     lentry->namelen,
+					     lentry->nameval + lentry->namelen,
+					     be16_to_cpu(lentry->valuelen));
 	} else {
 		rentry = (struct xfs_attr_leaf_name_remote *)
 				(((char *)bp->b_addr) + nameidx);
@@ -531,7 +549,13 @@ xchk_xattr_rec(
 			xchk_da_set_corrupt(ds, level);
 			goto out;
 		}
-		calc_hash = xfs_da_hashname(rentry->name, rentry->namelen);
+		if (ent->flags & XFS_ATTR_PARENT) {
+			xchk_da_set_corrupt(ds, level);
+			goto out;
+		}
+		calc_hash = xfs_attr_hashval(mp, ent->flags, rentry->name,
+					     rentry->namelen, NULL,
+					     be32_to_cpu(rentry->valuelen));
 	}
 	if (calc_hash != hash)
 		xchk_da_set_corrupt(ds, level);
@@ -571,6 +595,15 @@ xchk_xattr_check_sf(
 
 		next = xfs_attr_sf_nextentry(sfe);
 		if ((unsigned char *)next > end) {
+			xchk_fblock_set_corrupt(sc, XFS_ATTR_FORK, 0);
+			break;
+		}
+
+		/*
+		 * Shortform entries do not set LOCAL or INCOMPLETE, so the
+		 * only valid flag bits here are for namespaces.
+		 */
+		if (sfe->flags & ~XFS_ATTR_NSP_ONDISK_MASK) {
 			xchk_fblock_set_corrupt(sc, XFS_ATTR_FORK, 0);
 			break;
 		}
@@ -642,7 +675,7 @@ xchk_xattr(
 	 * iteration, which doesn't really follow the usual buffer
 	 * locking order.
 	 */
-	error = xchk_xattr_walk(sc, sc->ip, xchk_xattr_actor, NULL);
+	error = xchk_xattr_walk(sc, sc->ip, xchk_xattr_actor, NULL, NULL);
 	if (!xchk_fblock_process_error(sc, XFS_ATTR_FORK, 0, &error))
 		return error;
 

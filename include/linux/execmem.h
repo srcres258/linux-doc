@@ -123,10 +123,10 @@ void *execmem_alloc(enum execmem_type type, size_t size);
  */
 void execmem_free(void *ptr);
 
-#ifdef CONFIG_ARCH_WANTS_EXECMEM_EARLY
-void execmem_early_init(void);
+#if defined(CONFIG_EXECMEM) && !defined(CONFIG_ARCH_WANTS_EXECMEM_LATE)
+void execmem_init(void);
 #else
-static inline void execmem_early_init(void) {}
+static inline void execmem_init(void) {}
 #endif
 
 #endif /* _LINUX_EXECMEM_ALLOC_H */

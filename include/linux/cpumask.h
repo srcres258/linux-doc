@@ -188,6 +188,23 @@ unsigned int cpumask_first_and(const struct cpumask *srcp1, const struct cpumask
 }
 
 /**
+ * cpumask_first_and_and - return the first cpu from *srcp1 & *srcp2 & *srcp3
+ * @srcp1: the first input
+ * @srcp2: the second input
+ * @srcp3: the third input
+ *
+ * Return: >= nr_cpu_ids if no cpus set in all.
+ */
+static inline
+unsigned int cpumask_first_and_and(const struct cpumask *srcp1,
+				   const struct cpumask *srcp2,
+				   const struct cpumask *srcp3)
+{
+	return find_first_and_and_bit(cpumask_bits(srcp1), cpumask_bits(srcp2),
+				      cpumask_bits(srcp3), small_cpumask_bits);
+}
+
+/**
  * cpumask_last - get the last CPU in a cpumask
  * @srcp:	- the cpumask pointer
  *
@@ -547,6 +564,22 @@ static __always_inline void cpumask_clear_cpu(int cpu, struct cpumask *dstp)
 static __always_inline void __cpumask_clear_cpu(int cpu, struct cpumask *dstp)
 {
 	__clear_bit(cpumask_check(cpu), cpumask_bits(dstp));
+}
+
+/**
+ * cpumask_assign_cpu - assign a cpu in a cpumask
+ * @cpu: cpu number (< nr_cpu_ids)
+ * @dstp: the cpumask pointer
+ * @bool: the value to assign
+ */
+static __always_inline void cpumask_assign_cpu(int cpu, struct cpumask *dstp, bool value)
+{
+	assign_bit(cpumask_check(cpu), cpumask_bits(dstp), value);
+}
+
+static __always_inline void __cpumask_assign_cpu(int cpu, struct cpumask *dstp, bool value)
+{
+	__assign_bit(cpumask_check(cpu), cpumask_bits(dstp), value);
 }
 
 /**

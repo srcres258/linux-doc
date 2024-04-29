@@ -522,7 +522,7 @@ int		xfs_create(struct mnt_idmap *idmap,
 			   umode_t mode, dev_t rdev, bool need_xattr,
 			   struct xfs_inode **ipp);
 int		xfs_create_tmpfile(struct mnt_idmap *idmap,
-			   struct xfs_inode *dp, umode_t mode,
+			   struct xfs_inode *dp, umode_t mode, bool init_xattrs,
 			   struct xfs_inode **ipp);
 int		xfs_remove(struct xfs_inode *dp, struct xfs_name *name,
 			   struct xfs_inode *ip);
@@ -626,6 +626,7 @@ void xfs_end_io(struct work_struct *work);
 int xfs_ilock2_io_mmap(struct xfs_inode *ip1, struct xfs_inode *ip2);
 void xfs_iunlock2_io_mmap(struct xfs_inode *ip1, struct xfs_inode *ip2);
 void xfs_iunlock2_remapping(struct xfs_inode *ip1, struct xfs_inode *ip2);
+int xfs_droplink(struct xfs_trans *tp, struct xfs_inode *ip);
 void xfs_bumplink(struct xfs_trans *tp, struct xfs_inode *ip);
 void xfs_lock_inodes(struct xfs_inode **ips, int inodes, uint lock_mode);
 void xfs_sort_inodes(struct xfs_inode **i_tab, unsigned int num_inodes);

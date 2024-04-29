@@ -1013,9 +1013,8 @@ static void lan9303_get_strings(struct dsa_switch *ds, int port,
 	if (stringset != ETH_SS_STATS)
 		return;
 
-	for (u = 0; u < ARRAY_SIZE(lan9303_mib); u++) {
-		ethtool_sprintf(&buf, "%s", lan9303_mib[u].name);
-	}
+	for (u = 0; u < ARRAY_SIZE(lan9303_mib); u++)
+		ethtool_puts(&buf, lan9303_mib[u].name);
 }
 
 static void lan9303_get_ethtool_stats(struct dsa_switch *ds, int port,

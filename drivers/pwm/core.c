@@ -1059,7 +1059,6 @@ struct pwm_chip *pwmchip_alloc(struct device *parent, unsigned int npwm, size_t 
 
 	chip->npwm = npwm;
 	chip->uses_pwmchip_alloc = true;
-	chip->operational = false;
 
 	pwmchip_dev = &chip->dev;
 	device_initialize(pwmchip_dev);
@@ -1415,11 +1414,6 @@ int __pwmchip_add(struct pwm_chip *chip, struct module *owner)
 
 	chip->owner = owner;
 
-	if (chip->atomic)
-		spin_lock_init(&chip->atomic_lock);
-	else
-		mutex_init(&chip->nonatomic_lock);
-
 	mutex_lock(&pwm_lock);
 
 	ret = idr_alloc(&pwm_chips, chip, 0, 0, GFP_KERNEL);
@@ -1433,17 +1427,7 @@ int __pwmchip_add(struct pwm_chip *chip, struct module *owner)
 	if (IS_ENABLED(CONFIG_OF))
 		of_pwmchip_add(chip);
 
-	pwmchip_lock(chip);
-	chip->operational = true;
-	pwmchip_unlock(chip);
-
-	if (chip->id < 256)
-		chip->dev.devt = MKDEV(MAJOR(pwm_devt), chip->id);
-
-	cdev_init(&chip->cdev, &pwm_cdev_fileops);
-	chip->cdev.owner = owner;
-
-	ret = cdev_device_add(&chip->cdev, &chip->dev);
+	ret = device_add(&chip->dev);
 	if (ret)
 		goto err_device_add;
 
@@ -1452,10 +1436,6 @@ int __pwmchip_add(struct pwm_chip *chip, struct module *owner)
 	return 0;
 
 err_device_add:
-	pwmchip_lock(chip);
-	chip->operational = false;
-	pwmchip_unlock(chip);
-
 	if (IS_ENABLED(CONFIG_OF))
 		of_pwmchip_remove(chip);
 
@@ -1502,7 +1482,7 @@ void pwmchip_remove(struct pwm_chip *chip)
 
 	mutex_unlock(&pwm_lock);
 
-	cdev_device_del(&chip->cdev, &chip->dev);
+	device_del(&chip->dev);
 }
 EXPORT_SYMBOL_GPL(pwmchip_remove);
 
@@ -1872,7 +1852,7 @@ EXPORT_SYMBOL_GPL(pwm_get);
  */
 void pwm_put(struct pwm_device *pwm)
 {
-	struct pwm_chip *chip;
+	struct pwm_chip *chip = pwm->chip;
 
 	if (!pwm)
 		return;
@@ -1891,7 +1871,7 @@ void pwm_put(struct pwm_device *pwm)
 		goto out;
 	}
 
-	if (chip->operational && chip->ops->free)
+	if (chip->ops->free)
 		pwm->chip->ops->free(pwm->chip, pwm);
 
 	pwm->label = NULL;
@@ -2057,29 +2037,9 @@ DEFINE_SEQ_ATTRIBUTE(pwm_debugfs);
 
 static int __init pwm_init(void)
 {
-	struct dentry *pwm_debugfs = NULL;
-	int ret;
-
 	if (IS_ENABLED(CONFIG_DEBUG_FS))
-		pwm_debugfs = debugfs_create_file("pwm", 0444, NULL, NULL,
-						  &pwm_debugfs_fops);
+		debugfs_create_file("pwm", 0444, NULL, NULL, &pwm_debugfs_fops);
 
-	ret = alloc_chrdev_region(&pwm_devt, 0, 256, "pwm");
-	if (ret) {
-		pr_warn("Failed to initialize chrdev region for PWM usage\n");
-		goto err_alloc_chrdev;
-	}
-
-	ret = class_register(&pwm_class);
-	if (ret) {
-		pr_warn("Failed to initialize PWM class\n");
-
-		unregister_chrdev_region(pwm_devt, 256);
-err_alloc_chrdev:
-
-		debugfs_remove(pwm_debugfs);
-	}
-
-	return ret;
+	return class_register(&pwm_class);
 }
 subsys_initcall(pwm_init);
