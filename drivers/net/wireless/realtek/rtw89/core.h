@@ -7,6 +7,7 @@
 
 #include <linux/average.h>
 #include <linux/bitfield.h>
+#include <linux/dmi.h>
 #include <linux/firmware.h>
 #include <linux/iopoll.h>
 #include <linux/workqueue.h>
@@ -799,6 +800,7 @@ struct rtw89_rx_phy_ppdu {
 enum rtw89_mac_idx {
 	RTW89_MAC_0 = 0,
 	RTW89_MAC_1 = 1,
+	RTW89_MAC_NUM,
 };
 
 enum rtw89_phy_idx {
@@ -1230,6 +1232,13 @@ enum rtw89_btc_wl_state_cnt {
 	BTC_WCNT_RFK_REJECT,
 	BTC_WCNT_RFK_TIMEOUT,
 	BTC_WCNT_CH_UPDATE,
+	BTC_WCNT_DBCC_ALL_2G,
+	BTC_WCNT_DBCC_CHG,
+	BTC_WCNT_RX_OK_LAST,
+	BTC_WCNT_RX_OK_LAST2S,
+	BTC_WCNT_RX_ERR_LAST,
+	BTC_WCNT_RX_ERR_LAST2S,
+	BTC_WCNT_RX_LAST,
 	BTC_WCNT_NUM
 };
 
@@ -1349,6 +1358,14 @@ struct rtw89_traffic_stats {
 	u16 rx_rate;
 };
 
+struct rtw89_btc_chdef {
+	u8 center_ch;
+	u8 band;
+	u8 chan;
+	enum rtw89_sc_offset offset;
+	enum rtw89_bandwidth bw;
+};
+
 struct rtw89_btc_statistic {
 	u8 rssi; /* 0%~110% (dBm = rssi -110) */
 	struct rtw89_traffic_stats traffic;
@@ -1357,6 +1374,7 @@ struct rtw89_btc_statistic {
 #define BTC_WL_RSSI_THMAX 4
 
 struct rtw89_btc_wl_link_info {
+	struct rtw89_btc_chdef chdef;
 	struct rtw89_btc_statistic stat;
 	enum rtw89_tfc_dir dir;
 	u8 rssi_state[BTC_WL_RSSI_THMAX];
@@ -1370,6 +1388,7 @@ struct rtw89_btc_wl_link_info {
 	u8 phy;
 	u8 dtim_period;
 	u8 mode;
+	u8 tx_1ss_limit;
 
 	u8 mac_id;
 	u8 tx_retry;
@@ -1379,6 +1398,7 @@ struct rtw89_btc_wl_link_info {
 	u32 tx_time;
 	u32 client_cnt;
 	u32 rx_rate_drop_cnt;
+	u32 noa_duration;
 
 	u32 active: 1;
 	u32 noa: 1;
@@ -1589,6 +1609,42 @@ struct rtw89_btc_wl_role_info_v2 { /* struct size must be n*4 bytes */
 	u32 rsvd: 27;
 };
 
+struct rtw89_btc_wl_rlink { /* H2C info, struct size must be n*4 bytes */
+	u8 connected;
+	u8 pid;
+	u8 phy;
+	u8 noa;
+
+	u8 rf_band; /* enum band_type RF band: 2.4G/5G/6G */
+	u8 active; /* 0:rlink is under doze */
+	u8 bw; /* enum channel_width */
+	u8 role; /*enum role_type */
+
+	u8 ch;
+	u8 noa_dur; /* ms */
+	u8 client_cnt; /* for Role = P2P-Go/AP */
+	u8 mode; /* wifi protocol */
+} __packed;
+
+#define RTW89_BE_BTC_WL_MAX_ROLE_NUMBER 6
+struct rtw89_btc_wl_role_info_v8 { /* H2C info, struct size must be n*4 bytes */
+	u8 connect_cnt;
+	u8 link_mode;
+	u8 link_mode_chg;
+	u8 p2p_2g;
+
+	u8 pta_req_band;
+	u8 dbcc_en; /* 1+1 and 2.4G-included */
+	u8 dbcc_chg;
+	u8 dbcc_2g_phy; /* which phy operate in 2G, HW_PHY_0 or HW_PHY_1 */
+
+	struct rtw89_btc_wl_rlink rlink[RTW89_BE_BTC_WL_MAX_ROLE_NUMBER][RTW89_MAC_NUM];
+
+	u32 role_map;
+	u32 mrole_type; /* btc_wl_mrole_type */
+	u32 mrole_noa_duration; /* ms */
+} __packed;
+
 struct rtw89_btc_wl_ver_info {
 	u32 fw_coex; /* match with which coex_ver */
 	u32 fw;
@@ -1724,12 +1780,14 @@ struct rtw89_btc_wl_nhm {
 
 struct rtw89_btc_wl_info {
 	struct rtw89_btc_wl_link_info link_info[RTW89_PORT_NUM];
+	struct rtw89_btc_wl_link_info rlink_info[RTW89_BE_BTC_WL_MAX_ROLE_NUMBER][RTW89_MAC_NUM];
 	struct rtw89_btc_wl_rfk_info rfk_info;
 	struct rtw89_btc_wl_ver_info  ver_info;
 	struct rtw89_btc_wl_afh_info afh_info;
 	struct rtw89_btc_wl_role_info role_info;
 	struct rtw89_btc_wl_role_info_v1 role_info_v1;
 	struct rtw89_btc_wl_role_info_v2 role_info_v2;
+	struct rtw89_btc_wl_role_info_v8 role_info_v8;
 	struct rtw89_btc_wl_scan_info scan_info;
 	struct rtw89_btc_wl_dbcc_info dbcc_info;
 	struct rtw89_btc_rf_para rf_para;
@@ -1740,7 +1798,10 @@ struct rtw89_btc_wl_info {
 	u8 rssi_level;
 	u8 cn_report;
 	u8 coex_mode;
+	u8 pta_req_mac;
 
+	bool is_5g_hi_channel;
+	bool pta_reg_mac_chg;
 	bool bg_mode;
 	bool scbd_change;
 	u32 scbd;
@@ -2233,6 +2294,40 @@ struct rtw89_btc_fbtc_slots {
 	struct rtw89_btc_fbtc_slot slot[CXST_MAX];
 } __packed;
 
+struct rtw89_btc_fbtc_slot_v7 {
+	__le16 dur; /* slot duration */
+	__le16 cxtype;
+	__le32 cxtbl;
+} __packed;
+
+struct rtw89_btc_fbtc_slot_u16 {
+	__le16 dur; /* slot duration */
+	__le16 cxtype;
+	__le16 cxtbl_l16; /* coex table [15:0] */
+	__le16 cxtbl_h16; /* coex table [31:16] */
+} __packed;
+
+struct rtw89_btc_fbtc_1slot_v7 {
+	u8 fver;
+	u8 sid; /* slot id */
+	__le16 rsvd;
+	struct rtw89_btc_fbtc_slot_v7 slot;
+} __packed;
+
+struct rtw89_btc_fbtc_slots_v7 {
+	u8 fver;
+	u8 slot_cnt;
+	u8 rsvd0;
+	u8 rsvd1;
+	struct rtw89_btc_fbtc_slot_u16 slot[CXST_MAX];
+	__le32 update_map;
+} __packed;
+
+union rtw89_btc_fbtc_slots_info {
+	struct rtw89_btc_fbtc_slots v1;
+	struct rtw89_btc_fbtc_slots_v7 v7;
+} __packed;
+
 struct rtw89_btc_fbtc_step {
 	u8 type;
 	u8 val;
@@ -2551,9 +2646,14 @@ struct rtw89_btc_trx_info {
 	u32 rx_err_ratio;
 };
 
+union rtw89_btc_fbtc_slot_u {
+	struct rtw89_btc_fbtc_slot v1[CXST_MAX];
+	struct rtw89_btc_fbtc_slot_v7 v7[CXST_MAX];
+};
+
 struct rtw89_btc_dm {
-	struct rtw89_btc_fbtc_slot slot[CXST_MAX];
-	struct rtw89_btc_fbtc_slot slot_now[CXST_MAX];
+	union rtw89_btc_fbtc_slot_u slot;
+	union rtw89_btc_fbtc_slot_u slot_now;
 	struct rtw89_btc_fbtc_tdma tdma;
 	struct rtw89_btc_fbtc_tdma tdma_now;
 	struct rtw89_mac_ax_coex_gnt gnt;
@@ -2569,6 +2669,8 @@ struct rtw89_btc_dm {
 
 	u32 update_slot_map;
 	u32 set_ant_path;
+	u32 e2g_slot_limit;
+	u32 e2g_slot_nulltx_time;
 
 	u32 wl_only: 1;
 	u32 wl_fw_cx_offload: 1;
@@ -2596,6 +2698,7 @@ struct rtw89_btc_dm {
 	u8 wl_pre_agc: 2;
 	u8 wl_lna2: 1;
 	u8 wl_pre_agc_rb: 2;
+	u8 bt_select: 2; /* 0:s0, 1:s1, 2:s0 & s1, refer to enum btc_bt_index */
 };
 
 struct rtw89_btc_ctrl {
@@ -2691,7 +2794,7 @@ struct rtw89_btc_rpt_fbtc_tdma {
 
 struct rtw89_btc_rpt_fbtc_slots {
 	struct rtw89_btc_rpt_cmn_info cinfo; /* common info, by driver */
-	struct rtw89_btc_fbtc_slots finfo; /* info from fw */
+	union rtw89_btc_fbtc_slots_info finfo; /* info from fw */
 };
 
 struct rtw89_btc_rpt_fbtc_cysta {
@@ -3879,6 +3982,7 @@ struct rtw89_chip_info {
 	u8 support_bands;
 	u16 support_bandwidths;
 	bool support_unii4;
+	bool support_rnr;
 	bool ul_tb_waveform_ctrl;
 	bool ul_tb_pwr_diff;
 	bool hw_sec_hdr;
@@ -3977,6 +4081,7 @@ union rtw89_bus_info {
 
 struct rtw89_driver_info {
 	const struct rtw89_chip_info *chip;
+	const struct dmi_system_id *quirks;
 	union rtw89_bus_info bus;
 };
 
@@ -4322,6 +4427,12 @@ enum rtw89_flags {
 	RTW89_FLAG_CHANGING_INTERFACE,
 
 	NUM_OF_RTW89_FLAGS,
+};
+
+enum rtw89_quirks {
+	RTW89_QUIRK_PCI_BER,
+
+	NUM_OF_RTW89_QUIRKS,
 };
 
 enum rtw89_pkt_drop_sel {
@@ -5084,6 +5195,7 @@ struct rtw89_dev {
 	DECLARE_BITMAP(mac_id_map, RTW89_MAX_MAC_ID_NUM);
 	DECLARE_BITMAP(flags, NUM_OF_RTW89_FLAGS);
 	DECLARE_BITMAP(pkt_offload, RTW89_MAX_PKT_OFLD_NUM);
+	DECLARE_BITMAP(quirks, NUM_OF_RTW89_QUIRKS);
 
 	struct rtw89_phy_stat phystat;
 	struct rtw89_rfk_wait_info rfk_wait;
@@ -6129,6 +6241,7 @@ int rtw89_core_sta_remove(struct rtw89_dev *rtwdev,
 void rtw89_core_set_tid_config(struct rtw89_dev *rtwdev,
 			       struct ieee80211_sta *sta,
 			       struct cfg80211_tid_config *tid_config);
+void rtw89_check_quirks(struct rtw89_dev *rtwdev, const struct dmi_system_id *quirks);
 int rtw89_core_init(struct rtw89_dev *rtwdev);
 void rtw89_core_deinit(struct rtw89_dev *rtwdev);
 int rtw89_core_register(struct rtw89_dev *rtwdev);
