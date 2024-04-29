@@ -423,7 +423,6 @@ struct block_device *bdev_alloc(struct gendisk *disk, u8 partno)
 	spin_lock_init(&bdev->bd_size_lock);
 	mutex_init(&bdev->bd_holder_lock);
 	atomic_set(&bdev->__bd_flags, partno);
-	bdev->bd_inode = inode;
 	bdev->bd_mapping = &inode->i_data;
 	bdev->bd_queue = disk->queue;
 	if (partno && bdev_test_flag(disk->part0, BD_HAS_SUBMIT_BIO))

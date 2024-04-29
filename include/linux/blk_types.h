@@ -55,7 +55,6 @@ struct block_device {
 #define BD_MAKE_IT_FAIL		(1u<<12)
 #endif
 	dev_t			bd_dev;
-	struct inode		*bd_inode;	/* will die */
 	struct address_space	*bd_mapping;	/* page cache */
 
 	atomic_t		bd_openers;
