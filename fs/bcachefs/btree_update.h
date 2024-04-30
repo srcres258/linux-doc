@@ -44,16 +44,18 @@ enum bch_trans_commit_flags {
 #undef x
 };
 
+void bch2_trans_commit_flags_to_text(struct printbuf *, enum bch_trans_commit_flags);
+
 int bch2_btree_delete_extent_at(struct btree_trans *, struct btree_iter *,
 				unsigned, unsigned);
 int bch2_btree_delete_at(struct btree_trans *, struct btree_iter *, unsigned);
 int bch2_btree_delete(struct btree_trans *, enum btree_id, struct bpos, unsigned);
 
 int bch2_btree_insert_nonextent(struct btree_trans *, enum btree_id,
-				struct bkey_i *, enum btree_update_flags);
+				struct bkey_i *, enum btree_iter_update_trigger_flags);
 
 int bch2_btree_insert_trans(struct btree_trans *, enum btree_id, struct bkey_i *,
-			enum btree_update_flags);
+			enum btree_iter_update_trigger_flags);
 int bch2_btree_insert(struct bch_fs *, enum btree_id, struct bkey_i *,
 		     struct disk_reservation *, int flags);
 
@@ -94,14 +96,14 @@ static inline int bch2_insert_snapshot_whiteouts(struct btree_trans *trans,
 }
 
 int bch2_trans_update_extent_overwrite(struct btree_trans *, struct btree_iter *,
-				       enum btree_update_flags,
+				       enum btree_iter_update_trigger_flags,
 				       struct bkey_s_c, struct bkey_s_c);
 
 int bch2_bkey_get_empty_slot(struct btree_trans *, struct btree_iter *,
 			     enum btree_id, struct bpos);
 
 int __must_check bch2_trans_update(struct btree_trans *, struct btree_iter *,
-				   struct bkey_i *, enum btree_update_flags);
+				   struct bkey_i *, enum btree_iter_update_trigger_flags);
 
 struct jset_entry *__bch2_trans_jset_entry_alloc(struct btree_trans *, unsigned);
 
@@ -175,14 +177,6 @@ static inline int bch2_trans_commit(struct btree_trans *trans,
 #define nested_commit_do(_trans, _disk_res, _journal_seq, _flags, _do)	\
 	nested_lockrestart_do(_trans, _do ?: bch2_trans_commit(_trans, (_disk_res),\
 					(_journal_seq), (_flags)))
-
-#define bch2_trans_run(_c, _do)						\
-({									\
-	struct btree_trans *trans = bch2_trans_get(_c);			\
-	int _ret = (_do);						\
-	bch2_trans_put(trans);						\
-	_ret;								\
-})
 
 #define bch2_trans_do(_c, _disk_res, _journal_seq, _flags, _do)		\
 	bch2_trans_run(_c, commit_do(trans, _disk_res, _journal_seq, _flags, _do))
@@ -276,7 +270,7 @@ static inline struct bkey_i *__bch2_bkey_get_mut_noupdate(struct btree_trans *tr
 					 unsigned flags, unsigned type, unsigned min_bytes)
 {
 	struct bkey_s_c k = __bch2_bkey_get_iter(trans, iter,
-				btree_id, pos, flags|BTREE_ITER_INTENT, type);
+				btree_id, pos, flags|BTREE_ITER_intent, type);
 	struct bkey_i *ret = IS_ERR(k.k)
 		? ERR_CAST(k.k)
 		: __bch2_bkey_make_mut_noupdate(trans, k, 0, min_bytes);
@@ -299,7 +293,7 @@ static inline struct bkey_i *__bch2_bkey_get_mut(struct btree_trans *trans,
 					 unsigned flags, unsigned type, unsigned min_bytes)
 {
 	struct bkey_i *mut = __bch2_bkey_get_mut_noupdate(trans, iter,
-				btree_id, pos, flags|BTREE_ITER_INTENT, type, min_bytes);
+				btree_id, pos, flags|BTREE_ITER_intent, type, min_bytes);
 	int ret;
 
 	if (IS_ERR(mut))
