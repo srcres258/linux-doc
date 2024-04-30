@@ -589,6 +589,13 @@ struct bch_member {
 	__le64			errors_reset_time;
 	__le64			seq;
 	__le64			btree_allocated_bitmap;
+	/*
+	 * On recovery from a clean shutdown we don't normally read the journal,
+	 * but we still want to resume writing from where we left off so we
+	 * don't overwrite more than is necessary, for list journal debugging:
+	 */
+	__le32			last_journal_bucket;
+	__le32			last_journal_bucket_offset;
 };
 
 #define BCH_MEMBER_V1_BYTES	56
@@ -692,7 +699,8 @@ LE64_BITMASK(BCH_KDF_SCRYPT_P,	struct bch_sb_field_crypt, kdf_flags, 32, 48);
 	x(parity,	6)		\
 	x(stripe,	7)		\
 	x(need_gc_gens,	8)		\
-	x(need_discard,	9)
+	x(need_discard,	9)		\
+	x(unstriped,	10)
 
 enum bch_data_type {
 #define x(t, n) BCH_DATA_##t,
@@ -879,7 +887,8 @@ struct bch_sb_field_downgrade {
 	x(member_seq,			BCH_VERSION(1,  4))		\
 	x(subvolume_fs_parent,		BCH_VERSION(1,  5))		\
 	x(btree_subvolume_children,	BCH_VERSION(1,  6))		\
-	x(mi_btree_bitmap,		BCH_VERSION(1,  7))
+	x(mi_btree_bitmap,		BCH_VERSION(1,  7))		\
+	x(bucket_stripe_sectors,	BCH_VERSION(1,  8))
 
 enum bcachefs_metadata_version {
 	bcachefs_metadata_version_min = 9,

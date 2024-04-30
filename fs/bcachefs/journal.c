@@ -1177,7 +1177,8 @@ void bch2_fs_journal_stop(struct journal *j)
 	       test_bit(JOURNAL_REPLAY_DONE, &j->flags) &&
 	       j->last_empty_seq != journal_cur_seq(j));
 
-	clear_bit(JOURNAL_RUNNING, &j->flags);
+	if (!bch2_journal_error(j))
+		clear_bit(JOURNAL_RUNNING, &j->flags);
 }
 
 int bch2_fs_journal_start(struct journal *j, u64 cur_seq)

@@ -29,6 +29,7 @@
 #include <asm/byteorder.h>
 
 #include "core.h"
+#include <trace/events/firewire.h>
 #include "packet-header-definitions.h"
 
 #define HEADER_DESTINATION_IS_BROADCAST(header) \
@@ -172,6 +173,9 @@ static void transmit_complete_callback(struct fw_packet *packet,
 {
 	struct fw_transaction *t =
 	    container_of(packet, struct fw_transaction, packet);
+
+	trace_async_request_outbound_complete((uintptr_t)t, packet->generation, packet->speed,
+					      status, packet->timestamp);
 
 	switch (status) {
 	case ACK_COMPLETE:
@@ -393,6 +397,9 @@ void __fw_send_request(struct fw_card *card, struct fw_transaction *t, int tcode
 	list_add_tail(&t->link, &card->transaction_list);
 
 	spin_unlock_irqrestore(&card->lock, flags);
+
+	trace_async_request_outbound_initiate((uintptr_t)t, generation, speed, t->packet.header, payload,
+					      tcode_is_read_request(tcode) ? 0 : length / 4);
 
 	card->driver->send_request(card, &t->packet);
 }
@@ -661,6 +668,9 @@ static void free_response_callback(struct fw_packet *packet,
 {
 	struct fw_request *request = container_of(packet, struct fw_request, response);
 
+	trace_async_response_outbound_complete((uintptr_t)request, packet->generation,
+					       packet->speed, status, packet->timestamp);
+
 	// Decrease the reference count since not at in-flight.
 	fw_request_put(request);
 
@@ -843,6 +853,9 @@ static struct fw_request *allocate_request(struct fw_card *card,
 void fw_send_response(struct fw_card *card,
 		      struct fw_request *request, int rcode)
 {
+	u32 *data = NULL;
+	unsigned int data_length = 0;
+
 	/* unified transaction or broadcast transaction: don't respond */
 	if (request->ack != ACK_PENDING ||
 	    HEADER_DESTINATION_IS_BROADCAST(request->request_header)) {
@@ -850,16 +863,19 @@ void fw_send_response(struct fw_card *card,
 		return;
 	}
 
-	if (rcode == RCODE_COMPLETE)
-		fw_fill_response(&request->response, request->request_header,
-				 rcode, request->data,
-				 fw_get_response_length(request));
-	else
-		fw_fill_response(&request->response, request->request_header,
-				 rcode, NULL, 0);
+	if (rcode == RCODE_COMPLETE) {
+		data = request->data;
+		data_length = fw_get_response_length(request);
+	}
+
+	fw_fill_response(&request->response, request->request_header, rcode, data, data_length);
 
 	// Increase the reference count so that the object is kept during in-flight.
 	fw_request_get(request);
+
+	trace_async_response_outbound_initiate((uintptr_t)request, request->response.generation,
+					       request->response.speed, request->response.header,
+					       data, data ? data_length / 4 : 0);
 
 	card->driver->send_response(card, &request->response);
 }
@@ -966,11 +982,13 @@ void fw_core_handle_request(struct fw_card *card, struct fw_packet *p)
 {
 	struct fw_request *request;
 	unsigned long long offset;
+	unsigned int tcode;
 
 	if (p->ack != ACK_PENDING && p->ack != ACK_COMPLETE)
 		return;
 
-	if (tcode_is_link_internal(async_header_get_tcode(p->header))) {
+	tcode = async_header_get_tcode(p->header);
+	if (tcode_is_link_internal(tcode)) {
 		fw_cdev_handle_phy_packet(card, p);
 		return;
 	}
@@ -980,6 +998,10 @@ void fw_core_handle_request(struct fw_card *card, struct fw_packet *p)
 		/* FIXME: send statically allocated busy packet. */
 		return;
 	}
+
+	trace_async_request_inbound((uintptr_t)request, p->generation, p->speed, p->ack,
+				    p->timestamp, p->header, request->data,
+				    tcode_is_read_request(tcode) ? 0 : request->length / 4);
 
 	offset = async_header_get_offset(p->header);
 
@@ -1004,32 +1026,10 @@ void fw_core_handle_response(struct fw_card *card, struct fw_packet *p)
 	source = async_header_get_source(p->header);
 	rcode = async_header_get_rcode(p->header);
 
-	spin_lock_irqsave(&card->lock, flags);
-	list_for_each_entry(iter, &card->transaction_list, link) {
-		if (iter->node_id == source && iter->tlabel == tlabel) {
-			if (!try_cancel_split_timeout(iter)) {
-				spin_unlock_irqrestore(&card->lock, flags);
-				goto timed_out;
-			}
-			list_del_init(&iter->link);
-			card->tlabel_mask &= ~(1ULL << iter->tlabel);
-			t = iter;
-			break;
-		}
-	}
-	spin_unlock_irqrestore(&card->lock, flags);
-
-	if (!t) {
- timed_out:
-		fw_notice(card, "unsolicited response (source %x, tlabel %x)\n",
-			  source, tlabel);
-		return;
-	}
-
-	/*
-	 * FIXME: sanity check packet, is length correct, does tcodes
-	 * and addresses match.
-	 */
+	// FIXME: sanity check packet, is length correct, does tcodes
+	// and addresses match to the transaction request queried later.
+	//
+	// For the tracepoints event, let us decode the header here against the concern.
 
 	switch (tcode) {
 	case TCODE_READ_QUADLET_RESPONSE:
@@ -1053,6 +1053,31 @@ void fw_core_handle_response(struct fw_card *card, struct fw_packet *p)
 		data = NULL;
 		data_length = 0;
 		break;
+	}
+
+	spin_lock_irqsave(&card->lock, flags);
+	list_for_each_entry(iter, &card->transaction_list, link) {
+		if (iter->node_id == source && iter->tlabel == tlabel) {
+			if (!try_cancel_split_timeout(iter)) {
+				spin_unlock_irqrestore(&card->lock, flags);
+				goto timed_out;
+			}
+			list_del_init(&iter->link);
+			card->tlabel_mask &= ~(1ULL << iter->tlabel);
+			t = iter;
+			break;
+		}
+	}
+	spin_unlock_irqrestore(&card->lock, flags);
+
+	trace_async_response_inbound((uintptr_t)t, p->generation, p->speed, p->ack, p->timestamp,
+				     p->header, data, data_length / 4);
+
+	if (!t) {
+ timed_out:
+		fw_notice(card, "unsolicited response (source %x, tlabel %x)\n",
+			  source, tlabel);
+		return;
 	}
 
 	/*

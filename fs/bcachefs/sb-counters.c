@@ -34,7 +34,7 @@ static void bch2_sb_counters_to_text(struct printbuf *out, struct bch_sb *sb,
 	unsigned int nr = bch2_sb_counter_nr_entries(ctrs);
 
 	for (unsigned i = 0; i < nr; i++)
-		prt_printf(out, "%s\t%llu\n",
+		prt_printf(out, "%s \t%llu\n",
 			   i < BCH_COUNTER_NR ? bch2_counter_names[i] : "(unknown)",
 			   le64_to_cpu(ctrs->d[i]));
 };

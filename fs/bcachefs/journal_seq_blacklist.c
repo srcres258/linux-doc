@@ -223,10 +223,6 @@ bool bch2_blacklist_entries_gc(struct bch_fs *c)
 {
 	struct journal_seq_blacklist_entry *src, *dst;
 
-	spin_lock(&c->journal.lock);
-	u64 last_seq = journal_last_seq(&c->journal);
-	spin_unlock(&c->journal.lock);
-
 	struct bch_sb_field_journal_seq_blacklist *bl =
 		bch2_sb_field_get(c->disk_sb.sb, journal_seq_blacklist);
 	if (!bl)
@@ -245,7 +241,7 @@ bool bch2_blacklist_entries_gc(struct bch_fs *c)
 		BUG_ON(t->entries[i].start	!= le64_to_cpu(src->start));
 		BUG_ON(t->entries[i].end	!= le64_to_cpu(src->end));
 
-		if (t->entries[i].dirty || t->entries[i].end >= last_seq)
+		if (t->entries[i].dirty || t->entries[i].end >= c->journal.oldest_seq_found_ondisk)
 			*dst++ = *src;
 	}
 

@@ -1503,21 +1503,11 @@ static struct execmem_info execmem_info __ro_after_init;
 
 struct execmem_info __init *execmem_arch_setup(void)
 {
-	unsigned long start, end;
-
-	if (IS_ENABLED(CONFIG_64BIT)) {
-		start = MODULES_VADDR;
-		end = MODULES_END;
-	} else {
-		start = VMALLOC_START;
-		end = VMALLOC_END;
-	}
-
 	execmem_info = (struct execmem_info){
 		.ranges = {
 			[EXECMEM_DEFAULT] = {
-				.start	= start,
-				.end	= end,
+				.start	= MODULES_VADDR,
+				.end	= MODULES_END,
 				.pgprot	= PAGE_KERNEL,
 				.alignment = 1,
 			},
