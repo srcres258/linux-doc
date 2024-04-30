@@ -357,10 +357,11 @@ void bch2_data_update_exit(struct data_update *update)
 		bch2_bkey_ptrs_c(bkey_i_to_s_c(update->k.k));
 
 	bkey_for_each_ptr(ptrs, ptr) {
+		struct bch_dev *ca = bch2_dev_bkey_exists(c, ptr->dev);
 		if (c->opts.nocow_enabled)
 			bch2_bucket_nocow_unlock(&c->nocow_locks,
-						 PTR_BUCKET_POS(c, ptr), 0);
-		percpu_ref_put(&bch2_dev_bkey_exists(c, ptr->dev)->ref);
+						 PTR_BUCKET_POS(ca, ptr), 0);
+		percpu_ref_put(&ca->ref);
 	}
 
 	bch2_bkey_buf_exit(&update->k, c);
@@ -548,6 +549,8 @@ int bch2_data_update_init(struct btree_trans *trans,
 
 	i = 0;
 	bkey_for_each_ptr_decode(k.k, ptrs, p, entry) {
+		struct bch_dev *ca = bch2_dev_bkey_exists(c, p.ptr.dev);
+		struct bpos bucket = PTR_BUCKET_POS(ca, &p.ptr);
 		bool locked;
 
 		if (((1U << i) & m->data_opts.rewrite_ptrs)) {
@@ -581,15 +584,13 @@ int bch2_data_update_init(struct btree_trans *trans,
 			if (ctxt) {
 				move_ctxt_wait_event(ctxt,
 						(locked = bch2_bucket_nocow_trylock(&c->nocow_locks,
-									  PTR_BUCKET_POS(c, &p.ptr), 0)) ||
+									  bucket, 0)) ||
 						list_empty(&ctxt->ios));
 
 				if (!locked)
-					bch2_bucket_nocow_lock(&c->nocow_locks,
-							       PTR_BUCKET_POS(c, &p.ptr), 0);
+					bch2_bucket_nocow_lock(&c->nocow_locks, bucket, 0);
 			} else {
-				if (!bch2_bucket_nocow_trylock(&c->nocow_locks,
-							       PTR_BUCKET_POS(c, &p.ptr), 0)) {
+				if (!bch2_bucket_nocow_trylock(&c->nocow_locks, bucket, 0)) {
 					ret = -BCH_ERR_nocow_lock_blocked;
 					goto err;
 				}
@@ -651,10 +652,11 @@ int bch2_data_update_init(struct btree_trans *trans,
 err:
 	i = 0;
 	bkey_for_each_ptr_decode(k.k, ptrs, p, entry) {
+		struct bch_dev *ca = bch2_dev_bkey_exists(c, p.ptr.dev);
+		struct bpos bucket = PTR_BUCKET_POS(ca, &p.ptr);
 		if ((1U << i) & ptrs_locked)
-			bch2_bucket_nocow_unlock(&c->nocow_locks,
-						 PTR_BUCKET_POS(c, &p.ptr), 0);
-		percpu_ref_put(&bch2_dev_bkey_exists(c, p.ptr.dev)->ref);
+			bch2_bucket_nocow_unlock(&c->nocow_locks, bucket, 0);
+		percpu_ref_put(&ca->ref);
 		i++;
 	}
 
