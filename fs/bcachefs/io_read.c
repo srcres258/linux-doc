@@ -378,7 +378,7 @@ static void bch2_read_retry_nodecode(struct bch_fs *c, struct bch_read_bio *rbio
 	bch2_bkey_buf_init(&sk);
 
 	bch2_trans_iter_init(trans, &iter, rbio->data_btree,
-			     rbio->read_pos, BTREE_ITER_SLOTS);
+			     rbio->read_pos, BTREE_ITER_slots);
 retry:
 	rbio->bio.bi_status = 0;
 
@@ -487,7 +487,7 @@ static int __bch2_rbio_narrow_crcs(struct btree_trans *trans,
 		return 0;
 
 	k = bch2_bkey_get_iter(trans, &iter, rbio->data_btree, rbio->data_pos,
-			       BTREE_ITER_SLOTS|BTREE_ITER_INTENT);
+			       BTREE_ITER_slots|BTREE_ITER_intent);
 	if ((ret = bkey_err(k)))
 		goto out;
 
@@ -523,7 +523,7 @@ static int __bch2_rbio_narrow_crcs(struct btree_trans *trans,
 		goto out;
 
 	ret = bch2_trans_update(trans, &iter, new,
-				BTREE_UPDATE_INTERNAL_SNAPSHOT_NODE);
+				BTREE_UPDATE_internal_snapshot_node);
 out:
 	bch2_trans_iter_exit(trans, &iter);
 	return ret;
@@ -541,7 +541,7 @@ static void __bch2_read_endio(struct work_struct *work)
 	struct bch_read_bio *rbio =
 		container_of(work, struct bch_read_bio, work);
 	struct bch_fs *c	= rbio->c;
-	struct bch_dev *ca	= bch_dev_bkey_exists(c, rbio->pick.ptr.dev);
+	struct bch_dev *ca	= bch2_dev_bkey_exists(c, rbio->pick.ptr.dev);
 	struct bio *src		= &rbio->bio;
 	struct bio *dst		= &bch2_rbio_parent(rbio)->bio;
 	struct bvec_iter dst_iter = rbio->bvec_iter;
@@ -675,7 +675,7 @@ static void bch2_read_endio(struct bio *bio)
 	struct bch_read_bio *rbio =
 		container_of(bio, struct bch_read_bio, bio);
 	struct bch_fs *c	= rbio->c;
-	struct bch_dev *ca	= bch_dev_bkey_exists(c, rbio->pick.ptr.dev);
+	struct bch_dev *ca	= bch2_dev_bkey_exists(c, rbio->pick.ptr.dev);
 	struct workqueue_struct *wq = NULL;
 	enum rbio_context context = RBIO_CONTEXT_NULL;
 
@@ -697,7 +697,7 @@ static void bch2_read_endio(struct bio *bio)
 	}
 
 	if (((rbio->flags & BCH_READ_RETRY_IF_STALE) && race_fault()) ||
-	    ptr_stale(ca, &rbio->pick.ptr)) {
+	    dev_ptr_stale(ca, &rbio->pick.ptr)) {
 		trace_and_count(c, read_reuse_race, &rbio->bio);
 
 		if (rbio->flags & BCH_READ_RETRY_IF_STALE)
@@ -758,22 +758,21 @@ err:
 }
 
 static noinline void read_from_stale_dirty_pointer(struct btree_trans *trans,
+						   struct bch_dev *ca,
 						   struct bkey_s_c k,
 						   struct bch_extent_ptr ptr)
 {
 	struct bch_fs *c = trans->c;
-	struct bch_dev *ca = bch_dev_bkey_exists(c, ptr.dev);
 	struct btree_iter iter;
 	struct printbuf buf = PRINTBUF;
 	int ret;
 
 	bch2_trans_iter_init(trans, &iter, BTREE_ID_alloc,
-			     PTR_BUCKET_POS(c, &ptr),
-			     BTREE_ITER_CACHED);
+			     PTR_BUCKET_POS(ca, &ptr),
+			     BTREE_ITER_cached);
 
-	prt_printf(&buf, "Attempting to read from stale dirty pointer:");
+	prt_printf(&buf, "Attempting to read from stale dirty pointer:\n");
 	printbuf_indent_add(&buf, 2);
-	prt_newline(&buf);
 
 	bch2_bkey_val_to_text(&buf, c, k);
 	prt_newline(&buf);
@@ -832,7 +831,7 @@ retry_pick:
 		goto err;
 	}
 
-	ca = bch_dev_bkey_exists(c, pick.ptr.dev);
+	ca = bch2_dev_bkey_exists(c, pick.ptr.dev);
 
 	/*
 	 * Stale dirty pointers are treated as IO errors, but @failed isn't
@@ -842,8 +841,8 @@ retry_pick:
 	 */
 	if ((flags & BCH_READ_IN_RETRY) &&
 	    !pick.ptr.cached &&
-	    unlikely(ptr_stale(ca, &pick.ptr))) {
-		read_from_stale_dirty_pointer(trans, k, pick.ptr);
+	    unlikely(dev_ptr_stale(ca, &pick.ptr))) {
+		read_from_stale_dirty_pointer(trans, ca, k, pick.ptr);
 		bch2_mark_io_failure(failed, &pick);
 		goto retry_pick;
 	}
@@ -1113,7 +1112,7 @@ retry:
 
 	bch2_trans_iter_init(trans, &iter, BTREE_ID_extents,
 			     SPOS(inum.inum, bvec_iter.bi_sector, snapshot),
-			     BTREE_ITER_SLOTS);
+			     BTREE_ITER_slots);
 	while (1) {
 		unsigned bytes, sectors, offset_into_extent;
 		enum btree_id data_btree = BTREE_ID_extents;

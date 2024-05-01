@@ -287,10 +287,8 @@ static void bch2_sb_clean_to_text(struct printbuf *out, struct bch_sb *sb,
 	struct bch_sb_field_clean *clean = field_to_type(f, clean);
 	struct jset_entry *entry;
 
-	prt_printf(out, "flags:          %x",	le32_to_cpu(clean->flags));
-	prt_newline(out);
-	prt_printf(out, "journal_seq:    %llu",	le64_to_cpu(clean->journal_seq));
-	prt_newline(out);
+	prt_printf(out, "flags:          %x\n",		le32_to_cpu(clean->flags));
+	prt_printf(out, "journal_seq:    %llu\n",	le64_to_cpu(clean->journal_seq));
 
 	for (entry = clean->start;
 	     entry != vstruct_end(&clean->field);
@@ -377,6 +375,8 @@ void bch2_fs_mark_clean(struct bch_fs *c)
 		bch_err(c, "error writing marking filesystem clean: validate error");
 		goto out;
 	}
+
+	bch2_journal_pos_from_member_info_set(c);
 
 	bch2_write_super(c);
 out:
