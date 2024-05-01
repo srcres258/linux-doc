@@ -7219,7 +7219,9 @@ static void alc287_fixup_lenovo_thinkpad_with_alc1318(struct hda_codec *codec,
 
 	if (action != HDA_FIXUP_ACT_PRE_PROBE)
 		return;
+#ifdef CONFIG_PM
 	spec->power_hook = alc287_s4_power_gpio3_default;
+#endif
 	spec->gen.pcm_playback_hook = alc287_alc1318_playback_pcm_hook;
 }
 
