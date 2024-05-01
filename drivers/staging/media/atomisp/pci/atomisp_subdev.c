@@ -149,18 +149,6 @@ static long isp_subdev_ioctl(struct v4l2_subdev *sd,
 	return 0;
 }
 
-/*
- * isp_subdev_set_power - Power on/off the CCDC module
- * @sd: ISP V4L2 subdevice
- * @on: power on/off
- *
- * Return 0 on success or a negative error code otherwise.
- */
-static int isp_subdev_set_power(struct v4l2_subdev *sd, int on)
-{
-	return 0;
-}
-
 static int isp_subdev_subscribe_event(struct v4l2_subdev *sd,
 				      struct v4l2_fh *fh,
 				      struct v4l2_event_subscription *sub)
@@ -362,11 +350,12 @@ int atomisp_subdev_set_selection(struct v4l2_subdev *sd,
 
 		if (isp_sd->params.video_dis_en &&
 		    isp_sd->run_mode->val == ATOMISP_RUN_MODE_VIDEO) {
-			/* This resolution contains 20 % of DVS slack
+			/*
+			 * This resolution contains 20 % of DVS slack
 			 * (of the desired captured image before
 			 * scaling, or 1 / 6 of what we get from the
-			 * sensor) in both width and height. Remove
-			 * it. */
+			 * sensor) in both width and height. Remove it.
+			 */
 			crop[pad]->width = roundup(crop[pad]->width * 5 / 6,
 						   ATOM_ISP_STEP_WIDTH);
 			crop[pad]->height = roundup(crop[pad]->height * 5 / 6,
@@ -595,7 +584,7 @@ static int isp_subdev_set_format(struct v4l2_subdev *sd,
 
 /* V4L2 subdev core operations */
 static const struct v4l2_subdev_core_ops isp_subdev_v4l2_core_ops = {
-	.ioctl = isp_subdev_ioctl, .s_power = isp_subdev_set_power,
+	.ioctl = isp_subdev_ioctl,
 	.subscribe_event = isp_subdev_subscribe_event,
 	.unsubscribe_event = isp_subdev_unsubscribe_event,
 };
@@ -643,7 +632,7 @@ static int atomisp_link_setup(struct media_entity *entity,
 					      entity);
 	struct atomisp_sub_device *asd = v4l2_get_subdevdata(sd);
 	struct atomisp_device *isp = asd->isp;
-	int i, csi_idx, ret;
+	int i;
 
 	/* ISP's source is immutable */
 	if (local != &asd->pads[ATOMISP_SUBDEV_PAD_SINK]) {
@@ -652,37 +641,23 @@ static int atomisp_link_setup(struct media_entity *entity,
 		return -EINVAL;
 	}
 
-	for (csi_idx = 0; csi_idx < ATOMISP_CAMERA_NR_PORTS; csi_idx++) {
-		if (&isp->csi2_port[csi_idx].pads[CSI2_PAD_SOURCE] == remote)
-			break;
-	}
-
-	if (csi_idx == ATOMISP_CAMERA_NR_PORTS) {
-		v4l2_err(sd, "Error cannot find CSI receiver for remote pad\n");
-		return -EINVAL;
-	}
-
-	/* Ignore disables, input_curr should only be updated on enables */
-	if (!(flags & MEDIA_LNK_FL_ENABLED))
-		return 0;
-
 	for (i = 0; i < isp->input_cnt; i++) {
-		if (isp->inputs[i].camera == isp->sensor_subdevs[csi_idx])
+		if (&isp->inputs[i].csi_port->entity.pads[CSI2_PAD_SOURCE] == remote)
 			break;
 	}
 
 	if (i == isp->input_cnt) {
-		v4l2_err(sd, "Error no sensor for CSI receiver %d\n", csi_idx);
+		v4l2_err(sd, "Error no sensor for selected CSI receiver\n");
 		return -EINVAL;
 	}
 
-	mutex_lock(&isp->mutex);
-	ret = atomisp_pipe_check(&asd->video_out, true);
-	if (ret == 0)
-		asd->input_curr = i;
-	mutex_unlock(&isp->mutex);
+	/* Turn off the sensor on link disable */
+	if (!(flags & MEDIA_LNK_FL_ENABLED)) {
+		atomisp_s_sensor_power(isp, i, 0);
+		return 0;
+	}
 
-	return ret;
+	return atomisp_select_input(isp, i);
 }
 
 static const struct media_entity_operations isp_subdev_media_ops = {
