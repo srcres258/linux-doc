@@ -71,6 +71,12 @@ void bch2_mark_io_failure(struct bch_io_failures *failed,
 	}
 }
 
+static inline u64 dev_latency(struct bch_fs *c, unsigned dev)
+{
+	struct bch_dev *ca = bch2_dev_rcu(c, dev);
+	return ca ? atomic64_read(&ca->cur_latency[READ]) : S64_MAX;
+}
+
 /*
  * returns true if p1 is better than p2:
  */
@@ -79,11 +85,10 @@ static inline bool ptr_better(struct bch_fs *c,
 			      const struct extent_ptr_decoded p2)
 {
 	if (likely(!p1.idx && !p2.idx)) {
-		struct bch_dev *dev1 = bch2_dev_bkey_exists(c, p1.ptr.dev);
-		struct bch_dev *dev2 = bch2_dev_bkey_exists(c, p2.ptr.dev);
-
-		u64 l1 = atomic64_read(&dev1->cur_latency[READ]);
-		u64 l2 = atomic64_read(&dev2->cur_latency[READ]);
+		rcu_read_lock();
+		u64 l1 = dev_latency(c, p1.ptr.dev);
+		u64 l2 = dev_latency(c, p2.ptr.dev);
+		rcu_read_unlock();
 
 		/* Pick at random, biased in favor of the faster device: */
 
