@@ -17,7 +17,7 @@
  * The table to map configuration register values
  * to sense resistor values
  */
-const int micro_ohm_rsense[] = {
+static const int micro_ohm_rsense[] = {
 	200, 250, 300, 330, 400, 470, 500, 600,
 	670, 700, 750, 800, 900, 1000, 1100, 1200,
 	1250, 1300, 1400, 1500, 1600, 1700, 1800, 1900,
@@ -110,7 +110,7 @@ static const struct of_device_id xdp710_of_match[] = {
 };
 
 static const struct i2c_device_id xdp710_id[] = {
-	{"xdp710", 0},
+	{"xdp710"},
 	{ }
 };
 MODULE_DEVICE_TABLE(i2c, xdp710_id);

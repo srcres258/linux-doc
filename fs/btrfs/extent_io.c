@@ -910,6 +910,37 @@ error:
 }
 
 /*
+ * Populate every free slot in a provided array with folios.
+ *
+ * @nr_folios:   number of folios to allocate
+ * @folio_array: the array to fill with folios; any existing non-NULL entries in
+ *		 the array will be skipped
+ * @extra_gfp:	 the extra GFP flags for the allocation
+ *
+ * Return: 0        if all folios were able to be allocated;
+ *         -ENOMEM  otherwise, the partially allocated folios would be freed and
+ *                  the array slots zeroed
+ */
+int btrfs_alloc_folio_array(unsigned int nr_folios, struct folio **folio_array,
+			    gfp_t extra_gfp)
+{
+	for (int i = 0; i < nr_folios; i++) {
+		if (folio_array[i])
+			continue;
+		folio_array[i] = folio_alloc(GFP_NOFS | extra_gfp, 0);
+		if (!folio_array[i])
+			goto error;
+	}
+	return 0;
+error:
+	for (int i = 0; i < nr_folios; i++) {
+		if (folio_array[i])
+			folio_put(folio_array[i]);
+	}
+	return -ENOMEM;
+}
+
+/*
  * Populate every free slot in a provided array with pages.
  *
  * @nr_pages:   number of pages to allocate
@@ -1825,57 +1856,57 @@ clear_bit(EXTENT_BUFFER_UPTODATE, &eb->bflags);
  */
 mapping_set_error(eb->fs_info->btree_inode->i_mapping, -EIO);
 
-/*
- * If writeback for a btree extent that doesn't belong to a log tree
- * failed, increment the counter transaction->eb_write_errors.
- * We do this because while the transaction is running and before it's
- * committing (when we call filemap_fdata[write|wait]_range against
- * the btree inode), we might have
- * btree_inode->i_mapping->a_ops->writepages() called by the VM - if it
- * returns an error or an error happens during writeback, when we're
- * committing the transaction we wouldn't know about it, since the pages
- * can be no longer dirty nor marked anymore for writeback (if a
- * subsequent modification to the extent buffer didn't happen before the
- * transaction commit), which makes filemap_fdata[write|wait]_range not
- * able to find the pages tagged with SetPageError at transaction
- * commit time. So if this happens we must abort the transaction,
- * otherwise we commit a super block with btree roots that point to
- * btree nodes/leafs whose content on disk is invalid - either garbage
- * or the content of some node/leaf from a past generation that got
- * cowed or deleted and is no longer valid.
- *
- * Note: setting AS_EIO/AS_ENOSPC in the btree inode's i_mapping would
- * not be enough - we need to distinguish between log tree extents vs
- * non-log tree extents, and the next filemap_fdatawait_range() call
- * will catch and clear such errors in the mapping - and that call might
- * be from a log sync and not from a transaction commit. Also, checking
- * for the eb flag EXTENT_BUFFER_WRITE_ERR at transaction commit time is
- * not done and would not be reliable - the eb might have been released
- * from memory and reading it back again means that flag would not be
- * set (since it's a runtime flag, not persisted on disk).
- *
- * Using the flags below in the btree inode also makes us achieve the
- * goal of AS_EIO/AS_ENOSPC when writepages() returns success, started
- * writeback for all dirty pages and before filemap_fdatawait_range()
- * is called, the writeback for all dirty pages had already finished
- * with errors - because we were not using AS_EIO/AS_ENOSPC,
- * filemap_fdatawait_range() would return success, as it could not know
- * that writeback errors happened (the pages were no longer tagged for
- * writeback).
- */
-switch (eb->log_index) {
-case -1:
-	set_bit(BTRFS_FS_BTREE_ERR, &fs_info->flags);
-	break;
-case 0:
-	set_bit(BTRFS_FS_LOG1_ERR, &fs_info->flags);
-	break;
-case 1:
-	set_bit(BTRFS_FS_LOG2_ERR, &fs_info->flags);
-	break;
-default:
-	BUG(); /* unexpected, logic error */
-}
+	/*
+	 * If writeback for a btree extent that doesn't belong to a log tree
+	 * failed, increment the counter transaction->eb_write_errors.
+	 * We do this because while the transaction is running and before it's
+	 * committing (when we call filemap_fdata[write|wait]_range against
+	 * the btree inode), we might have
+	 * btree_inode->i_mapping->a_ops->writepages() called by the VM - if it
+	 * returns an error or an error happens during writeback, when we're
+	 * committing the transaction we wouldn't know about it, since the pages
+	 * can be no longer dirty nor marked anymore for writeback (if a
+	 * subsequent modification to the extent buffer didn't happen before the
+	 * transaction commit), which makes filemap_fdata[write|wait]_range not
+	 * able to find the pages which contain errors at transaction
+	 * commit time. So if this happens we must abort the transaction,
+	 * otherwise we commit a super block with btree roots that point to
+	 * btree nodes/leafs whose content on disk is invalid - either garbage
+	 * or the content of some node/leaf from a past generation that got
+	 * cowed or deleted and is no longer valid.
+	 *
+	 * Note: setting AS_EIO/AS_ENOSPC in the btree inode's i_mapping would
+	 * not be enough - we need to distinguish between log tree extents vs
+	 * non-log tree extents, and the next filemap_fdatawait_range() call
+	 * will catch and clear such errors in the mapping - and that call might
+	 * be from a log sync and not from a transaction commit. Also, checking
+	 * for the eb flag EXTENT_BUFFER_WRITE_ERR at transaction commit time is
+	 * not done and would not be reliable - the eb might have been released
+	 * from memory and reading it back again means that flag would not be
+	 * set (since it's a runtime flag, not persisted on disk).
+	 *
+	 * Using the flags below in the btree inode also makes us achieve the
+	 * goal of AS_EIO/AS_ENOSPC when writepages() returns success, started
+	 * writeback for all dirty pages and before filemap_fdatawait_range()
+	 * is called, the writeback for all dirty pages had already finished
+	 * with errors - because we were not using AS_EIO/AS_ENOSPC,
+	 * filemap_fdatawait_range() would return success, as it could not know
+	 * that writeback errors happened (the pages were no longer tagged for
+	 * writeback).
+	 */
+	switch (eb->log_index) {
+	case -1:
+		set_bit(BTRFS_FS_BTREE_ERR, &fs_info->flags);
+		break;
+	case 0:
+		set_bit(BTRFS_FS_LOG1_ERR, &fs_info->flags);
+		break;
+	case 1:
+		set_bit(BTRFS_FS_LOG2_ERR, &fs_info->flags);
+		break;
+	default:
+		BUG(); /* unexpected, logic error */
+	}
 }
 
 /*
@@ -2558,6 +2589,59 @@ bool try_release_extent_mapping(struct page *page, gfp_t mask)
 		if (!em) {
 			write_unlock(&extent_tree->lock);
 			break;
+		}
+		if ((em->flags & EXTENT_FLAG_PINNED) || em->start != start) {
+			write_unlock(&extent_tree->lock);
+			free_extent_map(em);
+			break;
+		}
+		if (test_range_bit_exists(io_tree, em->start,
+					  extent_map_end(em) - 1, EXTENT_LOCKED))
+			goto next;
+		/*
+		 * If it's not in the list of modified extents, used by a fast
+		 * fsync, we can remove it. If it's being logged we can safely
+		 * remove it since fsync took an extra reference on the em.
+		 */
+		if (list_empty(&em->list) || (em->flags & EXTENT_FLAG_LOGGING))
+			goto remove_em;
+		/*
+		 * If it's in the list of modified extents, remove it only if
+		 * its generation is older then the current one, in which case
+		 * we don't need it for a fast fsync. Otherwise don't remove it,
+		 * we could be racing with an ongoing fast fsync that could miss
+		 * the new extent.
+		 */
+		if (em->generation >= cur_gen)
+			goto next;
+remove_em:
+		/*
+		 * We only remove extent maps that are not in the list of
+		 * modified extents or that are in the list but with a
+		 * generation lower then the current generation, so there is no
+		 * need to set the full fsync flag on the inode (it hurts the
+		 * fsync performance for workloads with a data size that exceeds
+		 * or is close to the system's memory).
+		 */
+		remove_extent_mapping(inode, em);
+		/* Once for the inode's extent map tree. */
+		free_extent_map(em);
+next:
+		start = extent_map_end(em);
+		write_unlock(&extent_tree->lock);
+
+		/* Once for us, for the lookup_extent_mapping() reference. */
+		free_extent_map(em);
+
+		if (need_resched()) {
+			/*
+			 * If we need to resched but we can't block just exit
+			 * and leave any remaining extent maps.
+			 */
+			if (!gfpflags_allow_blocking(mask))
+				break;
+
+			cond_resched();
 		}
 		if ((em->flags & EXTENT_FLAG_PINNED) || em->start != start) {
 			write_unlock(&extent_tree->lock);

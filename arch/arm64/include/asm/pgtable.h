@@ -510,8 +510,16 @@ static inline int pmd_trans_huge(pmd_t pmd)
 
 static inline pmd_t pmd_mkinvalid(pmd_t pmd)
 {
-	pmd = set_pmd_bit(pmd, __pgprot(PMD_PRESENT_INVALID));
-	pmd = clear_pmd_bit(pmd, __pgprot(PMD_SECT_VALID));
+	/*
+	 * If not valid then either we are already present-invalid or we are
+	 * not-present (i.e. none or swap entry). We must not convert
+	 * not-present to present-invalid. Unbelievably, the core-mm may call
+	 * pmd_mkinvalid() for a swap entry and all other arches can handle it.
+	 */
+	if (pmd_valid(pmd)) {
+		pmd = set_pmd_bit(pmd, __pgprot(PMD_PRESENT_INVALID));
+		pmd = clear_pmd_bit(pmd, __pgprot(PMD_SECT_VALID));
+	}
 
 	return pmd;
 }

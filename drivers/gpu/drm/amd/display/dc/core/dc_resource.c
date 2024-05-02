@@ -827,6 +827,11 @@ static struct rect calculate_odm_slice_in_timing_active(struct pipe_ctx *pipe_ct
 			stream->timing.h_border_right;
 	int odm_slice_width = h_active / odm_slice_count;
 	struct rect odm_rec;
+	bool is_two_pixels_per_container =
+			pipe_ctx->stream_res.tg->funcs->is_two_pixels_per_container(&stream->timing);
+
+	if ((odm_slice_width % 2) && is_two_pixels_per_container)
+		odm_slice_width++;
 
 	odm_rec.x = odm_slice_width * odm_slice_idx;
 	odm_rec.width = is_last_odm_slice ?
@@ -959,6 +964,9 @@ static struct rect calculate_mpc_slice_in_timing_active(
 	ASSERT(mpc_slice_count == 1 ||
 			stream->view_format != VIEW_3D_FORMAT_SIDE_BY_SIDE ||
 			mpc_rec.width % 2 == 0);
+
+	if (stream->view_format == VIEW_3D_FORMAT_SIDE_BY_SIDE)
+		mpc_rec.x -= (mpc_rec.width * mpc_slice_idx);
 
 	/* extra pixels in the division remainder need to go to pipes after
 	 * the extra pixel index minus one(epimo) defined here as:
@@ -1472,6 +1480,7 @@ void resource_build_test_pattern_params(struct resource_context *res_ctx,
 	int v_active = otg_master->stream->timing.v_addressable +
 		otg_master->stream->timing.v_border_bottom +
 		otg_master->stream->timing.v_border_top;
+	bool is_two_pixels_per_container = otg_master->stream_res.tg->funcs->is_two_pixels_per_container(&otg_master->stream->timing);
 	int i;
 
 	controller_test_pattern = convert_dp_to_controller_test_pattern(
@@ -1485,6 +1494,8 @@ void resource_build_test_pattern_params(struct resource_context *res_ctx,
 	odm_cnt = resource_get_opp_heads_for_otg_master(otg_master, res_ctx, opp_heads);
 
 	odm_slice_width = h_active / odm_cnt;
+	if ((odm_slice_width % 2) && is_two_pixels_per_container)
+		odm_slice_width++;
 	last_odm_slice_width = h_active - odm_slice_width * (odm_cnt - 1);
 
 	for (i = 0; i < odm_cnt; i++) {
@@ -2339,6 +2350,10 @@ void resource_log_pipe_topology_update(struct dc *dc, struct dc_state *state)
 
 		otg_master = resource_get_otg_master_for_stream(
 				&state->res_ctx, state->streams[stream_idx]);
+
+		if (!otg_master)
+			continue;
+
 		resource_log_pipe_for_stream(dc, state, otg_master, stream_idx);
 	}
 	if (state->phantom_stream_count > 0) {

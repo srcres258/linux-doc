@@ -513,8 +513,8 @@ out:
 	final_note(note_buf);
 
 	pr_debug("Updating elfcore header (%llx) with cpu notes\n",
-		 fdh->elfcorehdr_addr);
-	fadump_update_elfcore_header(__va(fdh->elfcorehdr_addr));
+		 fadump_conf->elfcorehdr_addr);
+	fadump_update_elfcore_header((char *)fadump_conf->elfcorehdr_addr);
 	return 0;
 }
 

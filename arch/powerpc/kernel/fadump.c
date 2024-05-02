@@ -565,22 +565,6 @@ int __init fadump_reserve_mem(void)
 		}
 	}
 
-	/*
-	 * Calculate the memory boundary.
-	 * If memory_limit is less than actual memory boundary then reserve
-	 * the memory for fadump beyond the memory_limit and adjust the
-	 * memory_limit accordingly, so that the running kernel can run with
-	 * specified memory_limit.
-	 */
-	if (memory_limit && memory_limit < memblock_end_of_DRAM()) {
-		size = get_fadump_area_size();
-		if ((memory_limit + size) < memblock_end_of_DRAM())
-			memory_limit += size;
-		else
-			memory_limit = memblock_end_of_DRAM();
-		printk(KERN_INFO "Adjusted memory_limit for firmware-assisted"
-				" dump, now %#016llx\n", memory_limit);
-	}
 	if (memory_limit)
 		mem_boundary = memory_limit;
 	else
@@ -989,7 +973,7 @@ static inline unsigned long fadump_relocate(unsigned long paddr)
 	return raddr;
 }
 
-static void populate_elf_pt_load(struct elf_phdr *phdr, u64 start,
+static void __init populate_elf_pt_load(struct elf_phdr *phdr, u64 start,
 			     u64 size, unsigned long long offset)
 {
 	phdr->p_align	= 0;
@@ -1010,30 +994,29 @@ static void __init fadump_populate_elfcorehdr(struct fadump_crash_info_header *f
 	u64 boot_mem_dest_offset;
 	unsigned long long i, ra_start, ra_end, ra_size, mstart, mend;
 
-	bufp = (char *) __va(fdh->elfcorehdr_addr);
+	bufp = (char *) fw_dump.elfcorehdr_addr;
 	fadump_init_elfcore_header(bufp);
 	elf = (struct elfhdr *)bufp;
 	bufp += sizeof(struct elfhdr);
 
 	/*
-	 * setup ELF PT_NOTE, place holder for cpu notes info. The notes info
-	 * will be populated during second kernel boot after crash. Hence
-	 * this PT_NOTE will always be the first elf note.
+	 * Set up ELF PT_NOTE, a placeholder for CPU notes information.
+	 * The notes info will be populated later by platform-specific code.
+	 * Hence, this PT_NOTE will always be the first ELF note.
 	 *
 	 * NOTE: Any new ELF note addition should be placed after this note.
 	 */
 	phdr = (struct elf_phdr *)bufp;
 	bufp += sizeof(struct elf_phdr);
 	phdr->p_type = PT_NOTE;
-	phdr->p_flags = 0;
-	phdr->p_vaddr = 0;
-	phdr->p_align = 0;
-
-	phdr->p_offset = 0;
-	phdr->p_paddr = 0;
-	phdr->p_filesz = 0;
-	phdr->p_memsz = 0;
-
+	phdr->p_flags	= 0;
+	phdr->p_vaddr	= 0;
+	phdr->p_align	= 0;
+	phdr->p_offset	= 0;
+	phdr->p_paddr	= 0;
+	phdr->p_filesz	= 0;
+	phdr->p_memsz	= 0;
+	/* Increment number of program headers. */
 	(elf->e_phnum)++;
 
 	/* setup ELF PT_NOTE for vmcoreinfo */
@@ -1043,25 +1026,22 @@ static void __init fadump_populate_elfcorehdr(struct fadump_crash_info_header *f
 	phdr->p_flags	= 0;
 	phdr->p_vaddr	= 0;
 	phdr->p_align	= 0;
-
 	phdr->p_paddr	= phdr->p_offset = fdh->vmcoreinfo_raddr;
 	phdr->p_memsz	= phdr->p_filesz = fdh->vmcoreinfo_size;
-
 	/* Increment number of program headers. */
 	(elf->e_phnum)++;
 
 	/*
-	 * setup PT_LOAD sections.
-	 * first include boot memory regions and then add rest of the memory
-	 * regions
+	 * Setup PT_LOAD sections. first include boot memory regions
+	 * and then add rest of the memory regions.
 	 */
 	boot_mem_dest_offset = fw_dump.boot_mem_dest_addr;
 	for (i = 0; i < fw_dump.boot_mem_regs_cnt; i++) {
 		phdr = (struct elf_phdr *)bufp;
 		bufp += sizeof(struct elf_phdr);
 		populate_elf_pt_load(phdr, fw_dump.boot_mem_addr[i],
-				 fw_dump.boot_mem_sz[i],
-				 boot_mem_dest_offset);
+				     fw_dump.boot_mem_sz[i],
+				     boot_mem_dest_offset);
 		/* Increment number of program headers. */
 		(elf->e_phnum)++;
 		boot_mem_dest_offset += fw_dump.boot_mem_sz[i];
@@ -1074,10 +1054,7 @@ static void __init fadump_populate_elfcorehdr(struct fadump_crash_info_header *f
 
 	phdr = (struct elf_phdr *)bufp;
 	for_each_mem_range(i, &mstart, &mend) {
-		/*
-		 * Skip the memory regions that already added
-		 * to elfcorehdr.
-		 */
+		/* Boot memory regions already added, skip them now */
 		if (mstart < fw_dump.boot_mem_top) {
 			if (mend > fw_dump.boot_mem_top)
 				mstart = fw_dump.boot_mem_top;
@@ -1085,11 +1062,12 @@ static void __init fadump_populate_elfcorehdr(struct fadump_crash_info_header *f
 				continue;
 		}
 
-		/* Handle memblock regions overlaps with reserved area */
+		/* Handle memblock regions overlaps with fadump reserved area */
 		if ((ra_start < mend) && (ra_end > mstart)) {
 			if ((mstart < ra_start) && (mend > ra_end)) {
 				populate_elf_pt_load(phdr, mstart, ra_start - mstart, mstart);
-				elf->e_phnum++;
+				/* Increment number of program headers. */
+				(elf->e_phnum)++;
 				bufp += sizeof(struct elf_phdr);
 				phdr = (struct elf_phdr *)bufp;
 				populate_elf_pt_load(phdr, ra_end, mend - ra_end, ra_end);
@@ -1099,10 +1077,12 @@ static void __init fadump_populate_elfcorehdr(struct fadump_crash_info_header *f
 				populate_elf_pt_load(phdr, ra_end, mend - ra_end, ra_end);
 			}
 		} else {
+		/* No overlap with fadump reserved memory region */
 			populate_elf_pt_load(phdr, mstart, mend - mstart, mstart);
 		}
 
-		elf->e_phnum++;
+		/* Increment number of program headers. */
+		(elf->e_phnum)++;
 		bufp += sizeof(struct elf_phdr);
 		phdr = (struct elf_phdr *) bufp;
 	}
@@ -1120,21 +1100,25 @@ static unsigned long init_fadump_header(unsigned long addr)
 
 	memset(fdh, 0, sizeof(struct fadump_crash_info_header));
 	fdh->magic_number = FADUMP_CRASH_INFO_MAGIC;
-	/* Elfcorehdr will now be prepared in the second kernel. */
-	fdh->elfcorehdr_addr = 0;
+	fdh->version = FADUMP_HEADER_VERSION;
 	/* We will set the crashing cpu id in crash_fadump() during crash. */
 	fdh->crashing_cpu = FADUMP_CPU_UNKNOWN;
-	fdh->version = FADUMP_VERSION;
 
-	/* Need below vmcoreinfo in second kernel to prepare elfcorehdr. */
+	/*
+	 * The physical address and size of vmcoreinfo are required in the
+	 * second kernel to prepare elfcorehdr.
+	 */
 	fdh->vmcoreinfo_raddr = fadump_relocate(paddr_vmcoreinfo_note());
 	fdh->vmcoreinfo_size = VMCOREINFO_NOTE_SIZE;
 
+
+	fdh->pt_regs_sz = sizeof(struct pt_regs);
 	/*
 	 * When LPAR is terminated by PYHP, ensure all possible CPUs'
 	 * register data is processed while exporting the vmcore.
 	 */
 	fdh->cpu_mask = *cpu_possible_mask;
+	fdh->cpu_mask_sz = sizeof(struct cpumask);
 
 	return addr;
 }
@@ -1357,52 +1341,20 @@ static void fadump_release_memory(u64 begin, u64 end)
 		fadump_release_reserved_area(tstart, end);
 }
 
-/*
- * To determine fadump header version, the following conditions apply
- * - If magic_number is FADMPINF, return 0
- * - If magic_number is FADMPSIG, return the version value.
- * - Otherwise, return -E (header is not valid).
- */
-static u32 get_fadump_crash_header_version(struct fadump_crash_info_header *fdh)
-{
-	if (fdh->magic_number == fadump_str_to_u64("FADMPINF"))
-		return 0;
-	else if (fdh->magic_number == FADUMP_CRASH_INFO_MAGIC)
-		return fdh->version;
-
-	return -EINVAL;
-}
-
 static void fadump_free_elfcorehdr_buf(void)
 {
-	struct fadump_crash_info_header *fdh;
-	unsigned long elfcorehdr_vaddr;
-
-	if (!fw_dump.fadumphdr_addr)
-		return;
-
-	fdh = (struct fadump_crash_info_header *) __va(fw_dump.fadumphdr_addr);
-
-	/*
-	 * For fadump version 1 the memory for elfcorehdr is dynamically
-	 * allocated in second kernel so free it.
-	 */
-	if (get_fadump_crash_header_version(fdh) != 1)
-		return;
-
-	if (fdh->elfcorehdr_addr == 0 || fdh->elfcorehdr_size == 0)
+	if (fw_dump.elfcorehdr_addr == 0 || fw_dump.elfcorehdr_size == 0)
 		return;
 
 	/*
-	 * Reset the global `elfcorehdr_addr` before freeing `elfcorehdr`
-	 * memory so that other kernel modules, like `vmcore`, do not
-	 * access the invalid memory.
+	 * Before freeing the memory of `elfcorehdr`, reset the global
+	 * `elfcorehdr_addr` to prevent modules like `vmcore` from accessing
+	 * invalid memory.
 	 */
-	elfcorehdr_addr = ELFCORE_ADDR_MAX;
-	elfcorehdr_vaddr = (unsigned long) __va(fdh->elfcorehdr_addr);
-	fadump_free_buffer(elfcorehdr_vaddr, fdh->elfcorehdr_size);
-	fdh->elfcorehdr_addr = 0;
-	fdh->elfcorehdr_size = 0;
+	elfcorehdr_addr = ELFCORE_ADDR_ERR;
+	fadump_free_buffer(fw_dump.elfcorehdr_addr, fw_dump.elfcorehdr_size);
+	fw_dump.elfcorehdr_addr = 0;
+	fw_dump.elfcorehdr_size = 0;
 }
 
 static void fadump_invalidate_release_mem(void)
@@ -1418,6 +1370,7 @@ static void fadump_invalidate_release_mem(void)
 	fadump_cleanup();
 	mutex_unlock(&fadump_mutex);
 
+	fadump_free_elfcorehdr_buf();
 	fadump_release_memory(fw_dump.boot_mem_top, memblock_end_of_DRAM());
 	fadump_free_cpu_notes_buf();
 
@@ -1476,9 +1429,9 @@ static ssize_t enabled_show(struct kobject *kobj,
 }
 
 /*
- * /sys/kernel/fadump/hotplug_ready sysfs node only returns 1,
- * which inidcates to usersapce that fadump re-registration is not
- * required on memory hotplug events.
+ * /sys/kernel/fadump/hotplug_ready sysfs node returns 1, which inidcates
+ * to usersapce that fadump re-registration is not required on memory
+ * hotplug events.
  */
 static ssize_t hotplug_ready_show(struct kobject *kobj,
 				      struct kobj_attribute *attr,
@@ -1637,9 +1590,8 @@ static void __init fadump_init_files(void)
 	return;
 }
 
-static int __init fadump_setup_elfcorehdr_buf(struct fadump_crash_info_header *fdh)
+static int __init fadump_setup_elfcorehdr_buf(void)
 {
-	char *bufp;
 	int elf_phdr_cnt;
 	unsigned long elfcorehdr_size;
 
@@ -1651,29 +1603,54 @@ static int __init fadump_setup_elfcorehdr_buf(struct fadump_crash_info_header *f
 	elf_phdr_cnt = 2 + fw_dump.boot_mem_regs_cnt + memblock_num_regions(memory);
 	elfcorehdr_size = sizeof(struct elfhdr) + (elf_phdr_cnt * sizeof(struct elf_phdr));
 	elfcorehdr_size = PAGE_ALIGN(elfcorehdr_size);
-	bufp = (char *)fadump_alloc_buffer(elfcorehdr_size);
-	if (!bufp) {
+
+	fw_dump.elfcorehdr_addr = (u64)fadump_alloc_buffer(elfcorehdr_size);
+	if (!fw_dump.elfcorehdr_addr) {
 		pr_err("Failed to allocate %lu bytes for elfcorehdr\n",
 		       elfcorehdr_size);
 		return -ENOMEM;
 	}
-	fdh->elfcorehdr_addr = virt_to_phys(bufp);
-	fdh->elfcorehdr_size = elfcorehdr_size;
+	fw_dump.elfcorehdr_size = elfcorehdr_size;
 	return 0;
 }
 
 /*
- * Process an active dump in four steps. First, verify the crash info header
- * signature/magic number for integrity and accuracy. Second, if the fadump
- * version is greater than 0, prepare the elfcorehdr; for fadump version 0,
- * it's already created in the first kernel as part of the fadump reserved
- * area. Third, let the platform update CPU notes in elfcorehdr. Finally,
- * set elfcorehdr_addr so that the vmcore module can export the elfcore
- * header through '/proc/vmcore'.
+ * Check if the fadump header of crashed kernel is compatible with fadump kernel.
+ *
+ * It checks the magic number, endianness, and size of non-primitive type
+ * members of fadump header to ensure safe dump collection.
  */
-static void process_fadump(void)
+static bool __init is_fadump_header_compatible(struct fadump_crash_info_header *fdh)
 {
-	int fadump_version;
+	if (fdh->magic_number == FADUMP_CRASH_INFO_MAGIC_OLD) {
+		pr_err("Old magic number, can't process the dump.\n");
+		return false;
+	}
+
+	if (fdh->magic_number != FADUMP_CRASH_INFO_MAGIC) {
+		if (fdh->magic_number == swab64(FADUMP_CRASH_INFO_MAGIC))
+			pr_err("Endianness mismatch between the crashed and fadump kernels.\n");
+		else
+			pr_err("Fadump header is corrupted.\n");
+
+		return false;
+	}
+
+	/*
+	 * Dump collection is not safe if the size of non-primitive type members
+	 * of the fadump header do not match between crashed and fadump kernel.
+	 */
+	if (fdh->pt_regs_sz != sizeof(struct pt_regs) ||
+	    fdh->cpu_mask_sz != sizeof(struct cpumask)) {
+		pr_err("Fadump header size mismatch.\n");
+		return false;
+	}
+
+	return true;
+}
+
+static void __init fadump_process(void)
+{
 	struct fadump_crash_info_header *fdh;
 
 	fdh = (struct fadump_crash_info_header *) __va(fw_dump.fadumphdr_addr);
@@ -1682,42 +1659,27 @@ static void process_fadump(void)
 		goto err_out;
 	}
 
-	fadump_version = get_fadump_crash_header_version(fdh);
-
-	/*
-	 * fadump version zero indicates that fadump crash info header
-	 * is corrupted.
-	 */
-	if (fadump_version < 0) {
-		pr_err("Crash info header is not valid.\n");
+	/* Avoid processing the dump if fadump header isn't compatible */
+	if (!is_fadump_header_compatible(fdh))
 		goto err_out;
-	}
 
-	/*
-	 * If crashed kernel's fadump crash info header version is 1,
-	 * then create elfcorehdr here.
-	 */
-	if (fadump_version >= 1) {
-		if (fadump_setup_elfcorehdr_buf(fdh))
-			goto err_out;
+	/* Allocate buffer for elfcorehdr */
+	if (fadump_setup_elfcorehdr_buf())
+		goto err_out;
 
-		fadump_populate_elfcorehdr(fdh);
-	}
+	fadump_populate_elfcorehdr(fdh);
 
-	/*
-	 * If dump process fails then invalidate the registration
-	 * and release memory before proceeding for re-registration.
-	 */
+	/* Let platform update the CPU notes in elfcorehdr */
 	if (fw_dump.ops->fadump_process(&fw_dump) < 0)
 		goto err_out;
 
 	/*
-	 * elfcore header is now ready to be exported.
+	 * elfcorehdr is now ready to be exported.
 	 *
 	 * set elfcorehdr_addr so that vmcore module will export the
-	 * elfcore header through '/proc/vmcore'.
+	 * elfcorehdr through '/proc/vmcore'.
 	 */
-	elfcorehdr_addr = fdh->elfcorehdr_addr;
+	elfcorehdr_addr = virt_to_phys((void *)fw_dump.elfcorehdr_addr);
 	return;
 
 err_out:
@@ -1743,7 +1705,7 @@ int __init setup_fadump(void)
 	 * saving it to the disk.
 	 */
 	if (fw_dump.dump_active) {
-		process_fadump();
+		fadump_process();
 	}
 	/* Initialize the kernel dump memory structure and register with f/w */
 	else if (fw_dump.reserve_dump_area_size) {

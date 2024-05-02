@@ -55,7 +55,7 @@ struct aux_payload;
 struct set_config_cmd_payload;
 struct dmub_notification;
 
-#define DC_VER "3.2.281"
+#define DC_VER "3.2.283"
 
 #define MAX_SURFACES 3
 #define MAX_PLANES 6
@@ -456,6 +456,7 @@ struct dc_config {
 	bool allow_0_dtb_clk;
 	bool use_assr_psp_message;
 	bool support_edp0_on_dp1;
+	unsigned int enable_fpo_flicker_detection;
 };
 
 enum visual_confirm {
@@ -496,6 +497,12 @@ enum dcc_option {
 	DCC_ENABLE = 0,
 	DCC_DISABLE = 1,
 	DCC_HALF_REQ_DISALBE = 2,
+};
+
+enum in_game_fams_config {
+	INGAME_FAMS_SINGLE_DISP_ENABLE, // enable in-game fams
+	INGAME_FAMS_DISABLE, // disable in-game fams
+	INGAME_FAMS_MULTI_DISP_ENABLE, //enable in-game fams for multi-display
 };
 
 /**
@@ -717,6 +724,7 @@ enum pg_hw_pipe_resources {
 	PG_OPTC,
 	PG_DPSTREAM,
 	PG_HDMISTREAM,
+	PG_PHYSYMCLK,
 	PG_HW_PIPE_RESOURCES_NUM_ELEMENT
 };
 
@@ -950,7 +958,7 @@ struct dc_debug_options {
 	/* Enable dmub aux for legacy ddc */
 	bool enable_dmub_aux_for_legacy_ddc;
 	bool disable_fams;
-	bool disable_fams_gaming;
+	enum in_game_fams_config disable_fams_gaming;
 	/* FEC/PSR1 sequence enable delay in 100us */
 	uint8_t fec_enable_delay_in100us;
 	bool enable_driver_sequence_debug;

@@ -285,7 +285,7 @@ static void __bch2_fs_read_only(struct bch_fs *c)
 	bch_verbose(c, "flushing journal and stopping allocators complete, journal seq %llu",
 		    journal_cur_seq(&c->journal));
 
-	if (test_bit(JOURNAL_REPLAY_DONE, &c->journal.flags) &&
+	if (test_bit(JOURNAL_replay_done, &c->journal.flags) &&
 	    !test_bit(BCH_FS_emergency_ro, &c->flags))
 		set_bit(BCH_FS_clean_shutdown, &c->flags);
 
@@ -467,8 +467,8 @@ static int __bch2_fs_read_write(struct bch_fs *c, bool early)
 	 * overwriting whatever was there previously, and there must always be
 	 * at least one non-flush write in the journal or recovery will fail:
 	 */
-	set_bit(JOURNAL_NEED_FLUSH_WRITE, &c->journal.flags);
-	set_bit(JOURNAL_RUNNING, &c->journal.flags);
+	set_bit(JOURNAL_need_flush_write, &c->journal.flags);
+	set_bit(JOURNAL_running, &c->journal.flags);
 
 	for_each_rw_member(c, ca)
 		bch2_dev_allocator_add(c, ca);
@@ -532,10 +532,8 @@ int bch2_fs_read_write_early(struct bch_fs *c)
 
 static void __bch2_fs_free(struct bch_fs *c)
 {
-	unsigned i;
-
-	for (i = 0; i < BCH_TIME_STAT_NR; i++)
-		time_stats_exit(&c->times[i]);
+	for (unsigned i = 0; i < BCH_TIME_STAT_NR; i++)
+		bch2_time_stats_exit(&c->times[i]);
 
 	bch2_find_btree_nodes_exit(&c->found_btree_nodes);
 	bch2_free_pending_node_rewrites(c);
@@ -1190,6 +1188,7 @@ static void bch2_dev_free(struct bch_dev *ca)
 	if (ca->kobj.state_in_sysfs)
 		kobject_del(&ca->kobj);
 
+	kfree(ca->buckets_nouse);
 	bch2_free_super(&ca->disk_sb);
 	bch2_dev_journal_exit(ca);
 
@@ -1766,9 +1765,28 @@ int bch2_dev_add(struct bch_fs *c, const char *path)
 	if (dynamic_fault("bcachefs:add:no_slot"))
 		goto no_slot;
 
-	for (dev_idx = 0; dev_idx < BCH_SB_MEMBERS_MAX; dev_idx++)
-		if (!bch2_member_exists(c->disk_sb.sb, dev_idx))
-			goto have_slot;
+	if (c->sb.nr_devices < BCH_SB_MEMBERS_MAX) {
+		dev_idx = c->sb.nr_devices;
+		goto have_slot;
+	}
+
+	int best = -1;
+	u64 best_last_mount = 0;
+	for (dev_idx = 0; dev_idx < BCH_SB_MEMBERS_MAX; dev_idx++) {
+		struct bch_member m = bch2_sb_member_get(c->disk_sb.sb, dev_idx);
+		if (bch2_member_alive(&m))
+			continue;
+
+		u64 last_mount = le64_to_cpu(m.last_mount);
+		if (best < 0 || last_mount < best_last_mount) {
+			best = dev_idx;
+			best_last_mount = last_mount;
+		}
+	}
+	if (best >= 0) {
+		dev_idx = best;
+		goto have_slot;
+	}
 no_slot:
 	ret = -BCH_ERR_ENOSPC_sb_members;
 	bch_err_msg(c, ret, "setting up new superblock");

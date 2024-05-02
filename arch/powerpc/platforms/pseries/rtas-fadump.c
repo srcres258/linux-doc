@@ -375,11 +375,8 @@ static int __init rtas_fadump_build_cpu_notes(struct fw_dump *fadump_conf)
 	}
 	final_note(note_buf);
 
-	if (fdh) {
-		pr_debug("Updating elfcore header (%llx) with cpu notes\n",
-			 fdh->elfcorehdr_addr);
-		fadump_update_elfcore_header(__va(fdh->elfcorehdr_addr));
-	}
+	pr_debug("Updating elfcore header (%llx) with cpu notes\n", fadump_conf->elfcorehdr_addr);
+	fadump_update_elfcore_header((char *)fadump_conf->elfcorehdr_addr);
 	return 0;
 
 error_out:
@@ -389,8 +386,8 @@ error_out:
 }
 
 /*
- * Validate and process the dump data stored by firmware before exporting
- * it through '/proc/vmcore'.
+ * Validate and process the dump data stored by the firmware, and update
+ * the CPU notes of elfcorehdr.
  */
 static int __init rtas_fadump_process(struct fw_dump *fadump_conf)
 {

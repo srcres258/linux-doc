@@ -268,10 +268,7 @@ int bch2_alloc_v4_invalid(struct bch_fs *c, struct bkey_s_c k,
 	case BCH_DATA_free:
 	case BCH_DATA_need_gc_gens:
 	case BCH_DATA_need_discard:
-		bkey_fsck_err_on(stripe_sectors ||
-				 a.v->dirty_sectors ||
-				 a.v->cached_sectors ||
-				 a.v->stripe,
+		bkey_fsck_err_on(bch2_bucket_sectors_total(*a.v) || a.v->stripe,
 				 c, err, alloc_key_empty_but_have_data,
 				 "empty data type free but have data %u.%u.%u %u",
 				 stripe_sectors,
@@ -445,22 +442,18 @@ struct bkey_i_alloc_v4 *bch2_alloc_to_v4_mut(struct btree_trans *trans, struct b
 }
 
 struct bkey_i_alloc_v4 *
-bch2_trans_start_alloc_update(struct btree_trans *trans, struct btree_iter *iter,
-			      struct bpos pos)
+bch2_trans_start_alloc_update_noupdate(struct btree_trans *trans, struct btree_iter *iter,
+				       struct bpos pos)
 {
-	struct bkey_s_c k;
-	struct bkey_i_alloc_v4 *a;
-	int ret;
-
-	k = bch2_bkey_get_iter(trans, iter, BTREE_ID_alloc, pos,
-			     BTREE_ITER_with_updates|
-			     BTREE_ITER_cached|
-			     BTREE_ITER_intent);
-	ret = bkey_err(k);
+	struct bkey_s_c k = bch2_bkey_get_iter(trans, iter, BTREE_ID_alloc, pos,
+					       BTREE_ITER_with_updates|
+					       BTREE_ITER_cached|
+					       BTREE_ITER_intent);
+	int ret = bkey_err(k);
 	if (unlikely(ret))
 		return ERR_PTR(ret);
 
-	a = bch2_alloc_to_v4_mut_inlined(trans, k);
+	struct bkey_i_alloc_v4 *a = bch2_alloc_to_v4_mut_inlined(trans, k);
 	ret = PTR_ERR_OR_ZERO(a);
 	if (unlikely(ret))
 		goto err;
@@ -468,6 +461,20 @@ bch2_trans_start_alloc_update(struct btree_trans *trans, struct btree_iter *iter
 err:
 	bch2_trans_iter_exit(trans, iter);
 	return ERR_PTR(ret);
+}
+
+__flatten
+struct bkey_i_alloc_v4 *bch2_trans_start_alloc_update(struct btree_trans *trans, struct bpos pos)
+{
+	struct btree_iter iter;
+	struct bkey_i_alloc_v4 *a = bch2_trans_start_alloc_update_noupdate(trans, &iter, pos);
+	int ret = PTR_ERR_OR_ZERO(a);
+	if (ret)
+		return ERR_PTR(ret);
+
+	ret = bch2_trans_update(trans, &iter, &a->k_i, 0);
+	bch2_trans_iter_exit(trans, &iter);
+	return unlikely(ret) ? ERR_PTR(ret) : a;
 }
 
 static struct bpos alloc_gens_pos(struct bpos pos, unsigned *offset)
@@ -757,9 +764,9 @@ int bch2_trigger_alloc(struct btree_trans *trans,
 	if (flags & BTREE_TRIGGER_transactional) {
 		struct bch_alloc_v4 *new_a = bkey_s_to_alloc_v4(new).v;
 
-		new_a->data_type = alloc_data_type(*new_a, new_a->data_type);
+		alloc_data_type_set(new_a, new_a->data_type);
 
-		if (bch2_bucket_sectors(*new_a) > bch2_bucket_sectors(*old_a)) {
+		if (bch2_bucket_sectors_total(*new_a) > bch2_bucket_sectors_total(*old_a)) {
 			new_a->io_time[READ] = max_t(u64, 1, atomic64_read(&c->io_clock[READ].now));
 			new_a->io_time[WRITE]= max_t(u64, 1, atomic64_read(&c->io_clock[WRITE].now));
 			SET_BCH_ALLOC_V4_NEED_INC_GEN(new_a, true);
@@ -1719,7 +1726,7 @@ static int bch2_discard_one_bucket(struct btree_trans *trans,
 	if (ret)
 		goto out;
 
-	if (a->v.dirty_sectors) {
+	if (bch2_bucket_sectors_total(a->v)) {
 		if (bch2_trans_inconsistent_on(c->curr_recovery_pass > BCH_RECOVERY_PASS_check_alloc_info,
 					       trans, "attempting to discard bucket with dirty data\n%s",
 					       (bch2_bkey_val_to_text(&buf, c, k), buf.buf)))
@@ -1777,7 +1784,7 @@ static int bch2_discard_one_bucket(struct btree_trans *trans,
 	}
 
 	SET_BCH_ALLOC_V4_NEED_DISCARD(&a->v, false);
-	a->v.data_type = alloc_data_type(a->v, a->v.data_type);
+	alloc_data_type_set(&a->v, a->v.data_type);
 write:
 	ret =   bch2_trans_update(trans, &iter, &a->k_i, 0) ?:
 		bch2_trans_commit(trans, NULL, NULL,
@@ -1846,7 +1853,7 @@ static int bch2_clear_bucket_needs_discard(struct btree_trans *trans, struct bpo
 
 	BUG_ON(a->v.dirty_sectors);
 	SET_BCH_ALLOC_V4_NEED_DISCARD(&a->v, false);
-	a->v.data_type = alloc_data_type(a->v, a->v.data_type);
+	alloc_data_type_set(&a->v, a->v.data_type);
 
 	ret = bch2_trans_update(trans, &iter, &a->k_i, 0);
 err:
@@ -1924,7 +1931,6 @@ static int invalidate_one_bucket(struct btree_trans *trans,
 				 s64 *nr_to_invalidate)
 {
 	struct bch_fs *c = trans->c;
-	struct btree_iter alloc_iter = { NULL };
 	struct bkey_i_alloc_v4 *a = NULL;
 	struct printbuf buf = PRINTBUF;
 	struct bpos bucket = u64_to_bucket(lru_k.k->p.offset);
@@ -1942,7 +1948,7 @@ static int invalidate_one_bucket(struct btree_trans *trans,
 	if (bch2_bucket_is_open_safe(c, bucket.inode, bucket.offset))
 		return 0;
 
-	a = bch2_trans_start_alloc_update(trans, &alloc_iter, bucket);
+	a = bch2_trans_start_alloc_update(trans, bucket);
 	ret = PTR_ERR_OR_ZERO(a);
 	if (ret)
 		goto out;
@@ -1968,18 +1974,15 @@ static int invalidate_one_bucket(struct btree_trans *trans,
 	a->v.io_time[READ]	= atomic64_read(&c->io_clock[READ].now);
 	a->v.io_time[WRITE]	= atomic64_read(&c->io_clock[WRITE].now);
 
-	ret =   bch2_trans_update(trans, &alloc_iter, &a->k_i,
-				BTREE_TRIGGER_bucket_invalidate) ?:
-		bch2_trans_commit(trans, NULL, NULL,
-				  BCH_WATERMARK_btree|
-				  BCH_TRANS_COMMIT_no_enospc);
+	ret = bch2_trans_commit(trans, NULL, NULL,
+				BCH_WATERMARK_btree|
+				BCH_TRANS_COMMIT_no_enospc);
 	if (ret)
 		goto out;
 
 	trace_and_count(c, bucket_invalidate, c, bucket.inode, bucket.offset, cached_sectors);
 	--*nr_to_invalidate;
 out:
-	bch2_trans_iter_exit(trans, &alloc_iter);
 	printbuf_exit(&buf);
 	return ret;
 err:
@@ -2192,7 +2195,7 @@ int bch2_bucket_io_time_reset(struct btree_trans *trans, unsigned dev,
 	if (bch2_trans_relock(trans))
 		bch2_trans_begin(trans);
 
-	a = bch2_trans_start_alloc_update(trans, &iter,  POS(dev, bucket_nr));
+	a = bch2_trans_start_alloc_update_noupdate(trans, &iter, POS(dev, bucket_nr));
 	ret = PTR_ERR_OR_ZERO(a);
 	if (ret)
 		return ret;

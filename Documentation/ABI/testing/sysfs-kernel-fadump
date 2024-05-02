@@ -38,15 +38,14 @@ Contact:	linuxppc-dev@lists.ozlabs.org
 Description:	read only
 		Provide information about the amount of memory reserved by
 		FADump to save the crash dump in bytes.
+
 What:		/sys/kernel/fadump/hotplug_ready
-Date:		Sep 2023
+Date:		Apr 2024
 Contact:	linuxppc-dev@lists.ozlabs.org
 Description:	read only
-		The Kdump scripts utilize udev rules to monitor memory add/remove
-		events, ensuring that FADUMP is automatically re-registered when
-		system memory changes occur. This re-registration was necessary
-		to update the elfcorehdr, which describes the system memory to the
-		second kernel. Now If this sysfs node holds a value of 1, it
-		indicates to userspace that FADUMP does not require re-registration
-		since the elfcorehdr is now generated in the second kernel.
+		Kdump udev rule re-registers fadump on memory add/remove events,
+		primarily to update the elfcorehdr. This sysfs indicates the
+		kdump udev rule that fadump re-registration is not required on
+		memory add/remove events because elfcorehdr is now prepared in
+		the second/fadump kernel.
 User:		kexec-tools

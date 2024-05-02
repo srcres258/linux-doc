@@ -53,6 +53,7 @@ struct dc_dmub_srv {
 	void *dm;
 
 	int32_t idle_exit_counter;
+	union dmub_shared_state_ips_driver_signals driver_signals;
 	bool idle_allowed;
 	bool needs_idle_wake;
 };
@@ -109,6 +110,16 @@ bool dc_dmub_srv_is_hw_pwr_up(struct dc_dmub_srv *dc_dmub_srv, bool wait);
 void dc_dmub_srv_apply_idle_power_optimizations(const struct dc *dc, bool allow_idle);
 
 void dc_dmub_srv_set_power_state(struct dc_dmub_srv *dc_dmub_srv, enum dc_acpi_cm_power_state powerState);
+
+/**
+ * @dc_dmub_srv_should_detect() - Checks if link detection is required.
+ *
+ * While in idle power states we may need driver to manually redetect in
+ * the case of a missing hotplug. Should be called from a polling timer.
+ *
+ * Return: true if redetection is required.
+ */
+bool dc_dmub_srv_should_detect(struct dc_dmub_srv *dc_dmub_srv);
 
 /**
  * dc_wake_and_execute_dmub_cmd() - Wrapper for DMUB command execution.
