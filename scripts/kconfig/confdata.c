@@ -793,30 +793,23 @@ int conf_write_defconfig(const char *filename)
 
 	sym_clear_all_valid();
 
-	/* Traverse all menus to find all relevant symbols */
-	menu = rootmenu.list;
-
-	while (menu != NULL)
-	{
+	menu_for_each_entry(menu) {
 		sym = menu->sym;
 		if (sym && !sym_is_choice(sym)) {
 			sym_calc_value(sym);
 			if (!(sym->flags & SYMBOL_WRITE))
-				goto next_menu;
+				continue;
 			sym->flags &= ~SYMBOL_WRITE;
 			/* If we cannot change the symbol - skip */
 			if (!sym_is_changeable(sym))
-				goto next_menu;
+				continue;
 			/* If symbol equals to default value - skip */
 			if (strcmp(sym_get_string_value(sym), sym_get_string_default(sym)) == 0)
-				goto next_menu;
+				continue;
 
 			/*
 			 * If symbol is a choice value and equals to the
 			 * default for a choice - skip.
-			 * But only if value is bool and equal to "y" and
-			 * choice is not "optional".
-			 * (If choice is "optional" then all values can be "n")
 			 */
 			if (sym_is_choice_value(sym)) {
 				struct symbol *cs;
@@ -824,27 +817,13 @@ int conf_write_defconfig(const char *filename)
 
 				cs = prop_get_symbol(sym_get_choice_prop(sym));
 				ds = sym_choice_default(cs);
-				if (!sym_is_optional(cs) && sym == ds) {
+				if (sym == ds) {
 					if ((sym->type == S_BOOLEAN) &&
 					    sym_get_tristate_value(sym) == yes)
-						goto next_menu;
+						continue;
 				}
 			}
 			print_symbol_for_dotconfig(out, sym);
-		}
-next_menu:
-		if (menu->list != NULL) {
-			menu = menu->list;
-		}
-		else if (menu->next != NULL) {
-			menu = menu->next;
-		} else {
-			while ((menu = menu->parent)) {
-				if (menu->next != NULL) {
-					menu = menu->next;
-					break;
-				}
-			}
 		}
 	}
 	fclose(out);
@@ -906,7 +885,7 @@ int conf_write(const char *name)
 				     "# %s\n"
 				     "#\n", str);
 			need_newline = false;
-		} else if (!(sym->flags & SYMBOL_CHOICE) &&
+		} else if (!sym_is_choice(sym) &&
 			   !(sym->flags & SYMBOL_WRITTEN)) {
 			sym_calc_value(sym);
 			if (!(sym->flags & SYMBOL_WRITE))

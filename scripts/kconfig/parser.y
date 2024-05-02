@@ -69,7 +69,6 @@ struct menu *current_menu, *current_entry;
 %token T_MODULES
 %token T_ON
 %token T_OPEN_PAREN
-%token T_OPTIONAL
 %token T_PLUS_EQUAL
 %token T_PROMPT
 %token T_RANGE
@@ -140,7 +139,6 @@ stmt_list_in_choice:
 
 config_entry_start: T_CONFIG nonconst_symbol T_EOL
 {
-	$2->flags |= SYMBOL_OPTIONAL;
 	menu_add_entry($2);
 	printd(DEBUG_PARSE, "%s:%d:config %s\n", cur_filename, cur_lineno, $2->name);
 };
@@ -152,7 +150,6 @@ config_stmt: config_entry_start config_option_list
 
 menuconfig_entry_start: T_MENUCONFIG nonconst_symbol T_EOL
 {
-	$2->flags |= SYMBOL_OPTIONAL;
 	menu_add_entry($2);
 	printd(DEBUG_PARSE, "%s:%d:menuconfig %s\n", cur_filename, cur_lineno, $2->name);
 };
@@ -224,7 +221,7 @@ config_option: T_MODULES T_EOL
 
 choice: T_CHOICE T_EOL
 {
-	struct symbol *sym = sym_lookup(NULL, SYMBOL_CHOICE);
+	struct symbol *sym = sym_lookup(NULL, 0);
 	sym->flags |= SYMBOL_NO_WRITE;
 	menu_add_entry(sym);
 	menu_add_expr(P_CHOICE, NULL, NULL);
@@ -270,12 +267,6 @@ choice_option: logic_type prompt_stmt_opt T_EOL
 {
 	menu_set_type($1);
 	printd(DEBUG_PARSE, "%s:%d:type(%u)\n", cur_filename, cur_lineno, $1);
-};
-
-choice_option: T_OPTIONAL T_EOL
-{
-	current_entry->sym->flags |= SYMBOL_OPTIONAL;
-	printd(DEBUG_PARSE, "%s:%d:optional\n", cur_filename, cur_lineno);
 };
 
 choice_option: T_DEFAULT nonconst_symbol if_expr T_EOL
@@ -517,20 +508,9 @@ void conf_parse(const char *name)
 
 	menu_finalize();
 
-	menu = &rootmenu;
-	while (menu) {
+	menu_for_each_entry(menu) {
 		if (menu->sym && sym_check_deps(menu->sym))
 			yynerrs++;
-
-		if (menu->list) {
-			menu = menu->list;
-			continue;
-		}
-
-		while (!menu->next && menu->parent)
-			menu = menu->parent;
-
-		menu = menu->next;
 	}
 
 	if (yynerrs)
