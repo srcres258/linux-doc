@@ -2679,7 +2679,7 @@ static ssize_t hotkey_bios_enabled_show(struct device *dev,
 			   struct device_attribute *attr,
 			   char *buf)
 {
-	return sprintf(buf, "0\n");
+	return sysfs_emit(buf, "0\n");
 }
 
 static DEVICE_ATTR_RO(hotkey_bios_enabled);
@@ -9789,7 +9789,7 @@ static ssize_t tpacpi_battery_show(int what,
 		battery = BAT_PRIMARY;
 	if (tpacpi_battery_get(what, battery, &ret))
 		return -ENODEV;
-	return sprintf(buf, "%d\n", ret);
+	return sysfs_emit(buf, "%d\n", ret);
 }
 
 static ssize_t charge_control_start_threshold_show(struct device *device,
@@ -11190,23 +11190,8 @@ static void tpacpi_driver_event(const unsigned int hkey_event)
 		else
 			dytc_control_amt(!dytc_amt_active);
 	}
-	if (hkey_event == TP_HKEY_EV_PROFILE_TOGGLE) {
-		switch (dytc_current_profile) {
-		case PLATFORM_PROFILE_LOW_POWER:
-			dytc_profile_set(NULL, PLATFORM_PROFILE_BALANCED);
-			break;
-		case PLATFORM_PROFILE_BALANCED:
-			dytc_profile_set(NULL, PLATFORM_PROFILE_PERFORMANCE);
-			break;
-		case PLATFORM_PROFILE_PERFORMANCE:
-			dytc_profile_set(NULL, PLATFORM_PROFILE_LOW_POWER);
-			break;
-		default:
-			pr_warn("Profile HKEY unexpected profile %d", dytc_current_profile);
-		}
-		/* Notify user space the profile changed */
-		platform_profile_notify();
-	}
+	if (hkey_event == TP_HKEY_EV_PROFILE_TOGGLE)
+		platform_profile_cycle();
 }
 
 static void hotkey_driver_event(const unsigned int scancode)
