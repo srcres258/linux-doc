@@ -435,6 +435,14 @@ void thermal_debug_cdev_state_update(const struct thermal_cooling_device *cdev,
 	}
 
 	cdev_dbg->current_state = new_state;
+
+	/*
+	 * Create a record for the new state if it is not there, so its
+	 * duration will be printed by cdev_dt_seq_show() as expected if it
+	 * runs before the next state transition.
+	 */
+	thermal_debugfs_cdev_record_get(thermal_dbg, cdev_dbg->durations, new_state);
+
 	transition = (old_state << 16) | new_state;
 
 	/*
@@ -460,8 +468,9 @@ void thermal_debug_cdev_state_update(const struct thermal_cooling_device *cdev,
  * Allocates a cooling device object for debug, initializes the
  * statistics and create the entries in sysfs.
  * @cdev: a pointer to a cooling device
+ * @state: current state of the cooling device
  */
-void thermal_debug_cdev_add(struct thermal_cooling_device *cdev)
+void thermal_debug_cdev_add(struct thermal_cooling_device *cdev, int state)
 {
 	struct thermal_debugfs *thermal_dbg;
 	struct cdev_debugfs *cdev_dbg;
@@ -478,8 +487,15 @@ void thermal_debug_cdev_add(struct thermal_cooling_device *cdev)
 		INIT_LIST_HEAD(&cdev_dbg->durations[i]);
 	}
 
-	cdev_dbg->current_state = 0;
+	cdev_dbg->current_state = state;
 	cdev_dbg->timestamp = ktime_get();
+
+	/*
+	 * Create a record for the initial cooling device state, so its
+	 * duration will be printed by cdev_dt_seq_show() as expected if it
+	 * runs before the first state transition.
+	 */
+	thermal_debugfs_cdev_record_get(thermal_dbg, cdev_dbg->durations, state);
 
 	debugfs_create_file("trans_table", 0400, thermal_dbg->d_top,
 			    thermal_dbg, &tt_fops);
@@ -540,6 +556,7 @@ static struct tz_episode *thermal_debugfs_tz_event_alloc(struct thermal_zone_dev
 
 	INIT_LIST_HEAD(&tze->node);
 	tze->timestamp = now;
+	tze->duration = KTIME_MIN;
 
 	for (i = 0; i < tz->num_trips; i++) {
 		tze->trip_stats[i].min = INT_MAX;
@@ -675,6 +692,9 @@ void thermal_debug_tz_trip_down(struct thermal_zone_device *tz,
 	tze->trip_stats[trip_id].duration =
 		ktime_add(delta, tze->trip_stats[trip_id].duration);
 
+	/* Mark the end of mitigation for this trip point. */
+	tze->trip_stats[trip_id].timestamp = KTIME_MAX;
+
 	/*
 	 * This event closes the mitigation as we are crossing the
 	 * last trip point the way down.
@@ -750,15 +770,25 @@ static int tze_seq_show(struct seq_file *s, void *v)
 	struct thermal_trip_desc *td;
 	struct tz_episode *tze;
 	const char *type;
+	u64 duration_ms;
 	int trip_id;
+	char c;
 
 	tze = list_entry((struct list_head *)v, struct tz_episode, node);
 
-	seq_printf(s, ",-Mitigation at %lluus, duration=%llums\n",
-		   ktime_to_us(tze->timestamp),
-		   ktime_to_ms(tze->duration));
+	if (tze->duration == KTIME_MIN) {
+		/* Mitigation in progress. */
+		duration_ms = ktime_to_ms(ktime_sub(ktime_get(), tze->timestamp));
+		c = '>';
+	} else {
+		duration_ms = ktime_to_ms(tze->duration);
+		c = '=';
+	}
 
-	seq_printf(s, "| trip |     type | temp(°mC) | hyst(°mC) |  duration  |  avg(°mC) |  min(°mC) |  max(°mC) |\n");
+	seq_printf(s, ",-Mitigation at %lluus, duration%c%llums\n",
+		   ktime_to_us(tze->timestamp), c, duration_ms);
+
+	seq_printf(s, "| trip |     type | temp(°mC) | hyst(°mC) |  duration   |  avg(°mC) |  min(°mC) |  max(°mC) |\n");
 
 	for_each_trip_desc(tz, td) {
 		const struct thermal_trip *trip = &td->trip;
@@ -790,12 +820,25 @@ static int tze_seq_show(struct seq_file *s, void *v)
 		else
 			type = "hot";
 
-		seq_printf(s, "| %*d | %*s | %*d | %*d | %*lld | %*d | %*d | %*d |\n",
+		if (trip_stats->timestamp != KTIME_MAX) {
+			/* Mitigation in progress. */
+			ktime_t delta = ktime_sub(ktime_get(),
+						  trip_stats->timestamp);
+
+			delta = ktime_add(delta, trip_stats->duration);
+			duration_ms = ktime_to_ms(delta);
+			c = '>';
+		} else {
+			duration_ms = ktime_to_ms(trip_stats->duration);
+			c = ' ';
+		}
+
+		seq_printf(s, "| %*d | %*s | %*d | %*d | %c%*lld | %*d | %*d | %*d |\n",
 			   4 , trip_id,
 			   8, type,
 			   9, trip->temperature,
 			   9, trip->hysteresis,
-			   10, ktime_to_ms(trip_stats->duration),
+			   c, 10, duration_ms,
 			   9, trip_stats->avg,
 			   9, trip_stats->min,
 			   9, trip_stats->max);
