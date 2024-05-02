@@ -74,6 +74,10 @@
 #include "dcn321/dcn321_resource.h"
 #include "dcn35/dcn35_resource.h"
 #include "dcn351/dcn351_resource.h"
+#include "dcn401/dcn401_resource.h"
+#if defined(CONFIG_DRM_AMD_DC_FP)
+#include "dc_spl_translate.h"
+#endif
 
 #define VISUAL_CONFIRM_BASE_DEFAULT 3
 #define VISUAL_CONFIRM_BASE_MIN 1
@@ -199,6 +203,10 @@ enum dce_version resource_parse_asic_id(struct hw_asic_id asic_id)
 		if (ASICREV_IS_GC_11_0_4(asic_id.hw_internal_rev))
 			dc_version = DCN_VERSION_3_51;
 		break;
+	case AMDGPU_FAMILY_GC_12_0_0:
+		if (ASICREV_IS_DCN401(asic_id.hw_internal_rev))
+			dc_version = DCN_VERSION_4_01;
+		break;
 	default:
 		dc_version = DCE_VERSION_UNKNOWN;
 		break;
@@ -308,6 +316,9 @@ struct resource_pool *dc_create_resource_pool(struct dc  *dc,
 		break;
 	case DCN_VERSION_3_51:
 		res_pool = dcn351_create_resource_pool(init_data, dc);
+		break;
+	case DCN_VERSION_4_01:
+		res_pool = dcn401_create_resource_pool(init_data, dc);
 		break;
 #endif /* CONFIG_DRM_AMD_DC_FP */
 	default:
@@ -816,6 +827,11 @@ static struct rect calculate_odm_slice_in_timing_active(struct pipe_ctx *pipe_ct
 			stream->timing.h_border_right;
 	int odm_slice_width = h_active / odm_slice_count;
 	struct rect odm_rec;
+	bool is_two_pixels_per_container =
+			pipe_ctx->stream_res.tg->funcs->is_two_pixels_per_container(&stream->timing);
+
+	if ((odm_slice_width % 2) && is_two_pixels_per_container)
+		odm_slice_width++;
 
 	odm_rec.x = odm_slice_width * odm_slice_idx;
 	odm_rec.width = is_last_odm_slice ?
@@ -938,6 +954,9 @@ static struct rect calculate_mpc_slice_in_timing_active(
 	ASSERT(mpc_slice_count == 1 ||
 			stream->view_format != VIEW_3D_FORMAT_SIDE_BY_SIDE ||
 			mpc_rec.width % 2 == 0);
+
+	if (stream->view_format == VIEW_3D_FORMAT_SIDE_BY_SIDE)
+		mpc_rec.x -= (mpc_rec.width * mpc_slice_idx);
 
 	/* extra pixels in the division remainder need to go to pipes after
 	 * the extra pixel index minus one(epimo) defined here as:
@@ -1450,6 +1469,7 @@ void resource_build_test_pattern_params(struct resource_context *res_ctx,
 	int v_active = otg_master->stream->timing.v_addressable +
 		otg_master->stream->timing.v_border_bottom +
 		otg_master->stream->timing.v_border_top;
+	bool is_two_pixels_per_container = otg_master->stream_res.tg->funcs->is_two_pixels_per_container(&otg_master->stream->timing);
 	int i;
 
 	controller_test_pattern = convert_dp_to_controller_test_pattern(
@@ -1463,6 +1483,8 @@ void resource_build_test_pattern_params(struct resource_context *res_ctx,
 	odm_cnt = resource_get_opp_heads_for_otg_master(otg_master, res_ctx, opp_heads);
 
 	odm_slice_width = h_active / odm_cnt;
+	if ((odm_slice_width % 2) && is_two_pixels_per_container)
+		odm_slice_width++;
 	last_odm_slice_width = h_active - odm_slice_width * (odm_cnt - 1);
 
 	for (i = 0; i < odm_cnt; i++) {
@@ -1513,6 +1535,31 @@ bool resource_build_scaling_params(struct pipe_ctx *pipe_ctx)
 	pipe_ctx->plane_res.scl_data.v_active = odm_slice_rec.height;
 	pipe_ctx->plane_res.scl_data.format = convert_pixel_format_to_dalsurface(
 			pipe_ctx->plane_state->format);
+
+	if (pipe_ctx->stream->ctx->dc->config.use_spl)	{
+#if defined(CONFIG_DRM_AMD_DC_FP)
+		struct spl_in *spl_in = &pipe_ctx->plane_res.spl_in;
+		struct spl_out *spl_out = &pipe_ctx->plane_res.spl_out;
+
+		if (plane_state->ctx->dce_version > DCE_VERSION_MAX)
+			pipe_ctx->plane_res.scl_data.lb_params.depth = LB_PIXEL_DEPTH_36BPP;
+		else
+			pipe_ctx->plane_res.scl_data.lb_params.depth = LB_PIXEL_DEPTH_30BPP;
+
+		pipe_ctx->plane_res.scl_data.lb_params.alpha_en = plane_state->per_pixel_alpha;
+		spl_out->scl_data.h_active = pipe_ctx->plane_res.scl_data.h_active;
+		spl_out->scl_data.v_active = pipe_ctx->plane_res.scl_data.v_active;
+
+		// Convert pipe_ctx to respective input params for SPL
+		translate_SPL_in_params_from_pipe_ctx(pipe_ctx, spl_in);
+		// Set SPL output parameters to dscl_prog_data to be used for hw registers
+		spl_out->dscl_prog_data = resource_get_dscl_prog_data(pipe_ctx);
+		// Calculate scaler parameters from SPL
+		res = spl_calculate_scaler_params(spl_in, spl_out);
+		// Convert respective out params from SPL to scaler data
+		translate_SPL_out_params_to_pipe_ctx(pipe_ctx, spl_out);
+#endif
+	} else {
 
 	/* depends on h_active */
 	calculate_recout(pipe_ctx);
@@ -1593,8 +1640,7 @@ bool resource_build_scaling_params(struct pipe_ctx *pipe_ctx)
 		pipe_ctx->plane_res.scl_data.viewport.height = MIN_VIEWPORT_SIZE;
 	if (pipe_ctx->plane_res.scl_data.viewport.width < MIN_VIEWPORT_SIZE)
 		pipe_ctx->plane_res.scl_data.viewport.width = MIN_VIEWPORT_SIZE;
-
-
+	}
 	DC_LOG_SCALER("%s pipe %d:\nViewport: height:%d width:%d x:%d y:%d  Recout: height:%d width:%d x:%d y:%d  HACTIVE:%d VACTIVE:%d\n"
 			"src_rect: height:%d width:%d x:%d y:%d  dst_rect: height:%d width:%d x:%d y:%d  clip_rect: height:%d width:%d x:%d y:%d\n",
 			__func__,
@@ -2267,6 +2313,10 @@ void resource_log_pipe_topology_update(struct dc *dc, struct dc_state *state)
 
 		otg_master = resource_get_otg_master_for_stream(
 				&state->res_ctx, state->streams[stream_idx]);
+
+		if (!otg_master)
+			continue;
+
 		resource_log_pipe_for_stream(dc, state, otg_master, stream_idx);
 	}
 	if (state->phantom_stream_count > 0) {
@@ -5091,6 +5141,11 @@ bool check_subvp_sw_cursor_fallback_req(const struct dc *dc, struct dc_stream_st
 		return true;
 
 	return false;
+}
+
+struct dscl_prog_data *resource_get_dscl_prog_data(struct pipe_ctx *pipe_ctx)
+{
+	return &pipe_ctx->plane_res.scl_data.dscl_prog_data;
 }
 
 void resource_init_common_dml2_callbacks(struct dc *dc, struct dml2_configuration_options *dml2_options)

@@ -41,6 +41,15 @@
 #define DC_LOGGER \
 	dccg->ctx->logger
 
+static void dccg35_trigger_dio_fifo_resync(struct dccg *dccg)
+{
+	struct dcn_dccg *dccg_dcn = TO_DCN_DCCG(dccg);
+	uint32_t dispclk_rdivider_value = 0;
+
+	REG_GET(DENTIST_DISPCLK_CNTL, DENTIST_DISPCLK_RDIVIDER, &dispclk_rdivider_value);
+	REG_UPDATE(DENTIST_DISPCLK_CNTL, DENTIST_DISPCLK_WDIVIDER, dispclk_rdivider_value);
+}
+
 static void dcn35_set_dppclk_enable(struct dccg *dccg,
 				 uint32_t dpp_inst, uint32_t enable)
 {
@@ -451,32 +460,22 @@ static void dccg35_set_physymclk_root_clock_gating(
 	case 0:
 		REG_UPDATE(DCCG_GATE_DISABLE_CNTL2,
 				PHYASYMCLK_ROOT_GATE_DISABLE, enable ? 1 : 0);
-//		REG_UPDATE(DCCG_GATE_DISABLE_CNTL4,
-//				PHYA_REFCLK_ROOT_GATE_DISABLE, enable ? 1 : 0);
 		break;
 	case 1:
 		REG_UPDATE(DCCG_GATE_DISABLE_CNTL2,
 				PHYBSYMCLK_ROOT_GATE_DISABLE, enable ? 1 : 0);
-//		REG_UPDATE(DCCG_GATE_DISABLE_CNTL4,
-//				PHYB_REFCLK_ROOT_GATE_DISABLE, enable ? 1 : 0);
 		break;
 	case 2:
 		REG_UPDATE(DCCG_GATE_DISABLE_CNTL2,
 				PHYCSYMCLK_ROOT_GATE_DISABLE, enable ? 1 : 0);
-//		REG_UPDATE(DCCG_GATE_DISABLE_CNTL4,
-//				PHYC_REFCLK_ROOT_GATE_DISABLE, enable ? 1 : 0);
 		break;
 	case 3:
 		REG_UPDATE(DCCG_GATE_DISABLE_CNTL2,
 				PHYDSYMCLK_ROOT_GATE_DISABLE, enable ? 1 : 0);
-//		REG_UPDATE(DCCG_GATE_DISABLE_CNTL4,
-//				PHYD_REFCLK_ROOT_GATE_DISABLE, enable ? 1 : 0);
 		break;
 	case 4:
 		REG_UPDATE(DCCG_GATE_DISABLE_CNTL2,
 				PHYESYMCLK_ROOT_GATE_DISABLE, enable ? 1 : 0);
-//		REG_UPDATE(DCCG_GATE_DISABLE_CNTL4,
-//				PHYE_REFCLK_ROOT_GATE_DISABLE, enable ? 1 : 0);
 		break;
 	default:
 		BREAK_TO_DEBUGGER();
@@ -499,16 +498,10 @@ static void dccg35_set_physymclk(
 			REG_UPDATE_2(PHYASYMCLK_CLOCK_CNTL,
 					PHYASYMCLK_EN, 1,
 					PHYASYMCLK_SRC_SEL, clk_src);
-//			if (dccg->ctx->dc->debug.root_clock_optimization.bits.physymclk)
-//				REG_UPDATE(DCCG_GATE_DISABLE_CNTL4,
-//						PHYA_REFCLK_ROOT_GATE_DISABLE, 0);
 		} else {
 			REG_UPDATE_2(PHYASYMCLK_CLOCK_CNTL,
 					PHYASYMCLK_EN, 0,
 					PHYASYMCLK_SRC_SEL, 0);
-//			if (dccg->ctx->dc->debug.root_clock_optimization.bits.physymclk)
-//				REG_UPDATE(DCCG_GATE_DISABLE_CNTL4,
-//						PHYA_REFCLK_ROOT_GATE_DISABLE, 1);
 		}
 		break;
 	case 1:
@@ -516,16 +509,10 @@ static void dccg35_set_physymclk(
 			REG_UPDATE_2(PHYBSYMCLK_CLOCK_CNTL,
 					PHYBSYMCLK_EN, 1,
 					PHYBSYMCLK_SRC_SEL, clk_src);
-//			if (dccg->ctx->dc->debug.root_clock_optimization.bits.physymclk)
-//				REG_UPDATE(DCCG_GATE_DISABLE_CNTL4,
-//						PHYB_REFCLK_ROOT_GATE_DISABLE, 0);
 		} else {
 			REG_UPDATE_2(PHYBSYMCLK_CLOCK_CNTL,
 					PHYBSYMCLK_EN, 0,
 					PHYBSYMCLK_SRC_SEL, 0);
-//			if (dccg->ctx->dc->debug.root_clock_optimization.bits.physymclk)
-//				REG_UPDATE(DCCG_GATE_DISABLE_CNTL4,
-//						PHYB_REFCLK_ROOT_GATE_DISABLE, 1);
 		}
 		break;
 	case 2:
@@ -533,16 +520,10 @@ static void dccg35_set_physymclk(
 			REG_UPDATE_2(PHYCSYMCLK_CLOCK_CNTL,
 					PHYCSYMCLK_EN, 1,
 					PHYCSYMCLK_SRC_SEL, clk_src);
-//			if (dccg->ctx->dc->debug.root_clock_optimization.bits.physymclk)
-//				REG_UPDATE(DCCG_GATE_DISABLE_CNTL4,
-//						PHYC_REFCLK_ROOT_GATE_DISABLE, 0);
 		} else {
 			REG_UPDATE_2(PHYCSYMCLK_CLOCK_CNTL,
 					PHYCSYMCLK_EN, 0,
 					PHYCSYMCLK_SRC_SEL, 0);
-//			if (dccg->ctx->dc->debug.root_clock_optimization.bits.physymclk)
-//				REG_UPDATE(DCCG_GATE_DISABLE_CNTL4,
-//						PHYC_REFCLK_ROOT_GATE_DISABLE, 1);
 		}
 		break;
 	case 3:
@@ -550,16 +531,10 @@ static void dccg35_set_physymclk(
 			REG_UPDATE_2(PHYDSYMCLK_CLOCK_CNTL,
 					PHYDSYMCLK_EN, 1,
 					PHYDSYMCLK_SRC_SEL, clk_src);
-//			if (dccg->ctx->dc->debug.root_clock_optimization.bits.physymclk)
-//				REG_UPDATE(DCCG_GATE_DISABLE_CNTL4,
-//						PHYD_REFCLK_ROOT_GATE_DISABLE, 0);
 		} else {
 			REG_UPDATE_2(PHYDSYMCLK_CLOCK_CNTL,
 					PHYDSYMCLK_EN, 0,
 					PHYDSYMCLK_SRC_SEL, 0);
-//			if (dccg->ctx->dc->debug.root_clock_optimization.bits.physymclk)
-//				REG_UPDATE(DCCG_GATE_DISABLE_CNTL4,
-//						PHYD_REFCLK_ROOT_GATE_DISABLE, 1);
 		}
 		break;
 	case 4:
@@ -567,16 +542,10 @@ static void dccg35_set_physymclk(
 			REG_UPDATE_2(PHYESYMCLK_CLOCK_CNTL,
 					PHYESYMCLK_EN, 1,
 					PHYESYMCLK_SRC_SEL, clk_src);
-//			if (dccg->ctx->dc->debug.root_clock_optimization.bits.physymclk)
-//				REG_UPDATE(DCCG_GATE_DISABLE_CNTL4,
-//						PHYE_REFCLK_ROOT_GATE_DISABLE, 0);
 		} else {
 			REG_UPDATE_2(PHYESYMCLK_CLOCK_CNTL,
 					PHYESYMCLK_EN, 0,
 					PHYESYMCLK_SRC_SEL, 0);
-//			if (dccg->ctx->dc->debug.root_clock_optimization.bits.physymclk)
-//				REG_UPDATE(DCCG_GATE_DISABLE_CNTL4,
-//						PHYE_REFCLK_ROOT_GATE_DISABLE, 1);
 		}
 		break;
 	default:
@@ -713,11 +682,6 @@ void dccg35_init(struct dccg *dccg)
 						otg_inst);
 			dccg35_set_dpstreamclk_root_clock_gating(dccg, otg_inst, false);
 		}
-
-	if (dccg->ctx->dc->debug.root_clock_optimization.bits.physymclk)
-		for (otg_inst = 0; otg_inst < 5; otg_inst++)
-			dccg35_set_physymclk_root_clock_gating(dccg, otg_inst,
-					false);
 
 	if (dccg->ctx->dc->debug.root_clock_optimization.bits.dpp)
 		for (otg_inst = 0; otg_inst < 4; otg_inst++)
@@ -1054,6 +1018,7 @@ static const struct dccg_funcs dccg35_funcs = {
 	.disable_dsc = dccg35_disable_dscclk,
 	.enable_dsc = dccg35_enable_dscclk,
 	.set_pixel_rate_div = dccg35_set_pixel_rate_div,
+	.trigger_dio_fifo_resync = dccg35_trigger_dio_fifo_resync,
 	.set_valid_pixel_rate = dccg35_set_valid_pixel_rate,
 	.enable_symclk_se = dccg35_enable_symclk_se,
 	.disable_symclk_se = dccg35_disable_symclk_se,
