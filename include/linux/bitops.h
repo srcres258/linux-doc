@@ -257,9 +257,7 @@ static inline unsigned long __ffs64(u64 word)
  */
 static inline unsigned long fns(unsigned long word, unsigned int n)
 {
-	unsigned int i;
-
-	for (i = 0; word && i < n; i++)
+	while (word && n--)
 		word &= word - 1;
 
 	return word ? __ffs(word) : BITS_PER_LONG;
