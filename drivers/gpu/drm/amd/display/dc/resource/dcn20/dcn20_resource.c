@@ -1251,7 +1251,7 @@ static void get_pixel_clock_parameters(
 
 	if (opp_cnt == 4)
 		pixel_clk_params->requested_pix_clk_100hz /= 4;
-	else if (optc2_is_two_pixels_per_containter(&stream->timing) || opp_cnt == 2)
+	else if (pipe_ctx->stream_res.tg->funcs->is_two_pixels_per_container(&stream->timing) || opp_cnt == 2)
 		pixel_clk_params->requested_pix_clk_100hz /= 2;
 	else if (hws->funcs.is_dp_dig_pixel_rate_div_policy) {
 		if (hws->funcs.is_dp_dig_pixel_rate_div_policy(pipe_ctx))
@@ -2340,7 +2340,6 @@ static struct _vcs_dpi_soc_bounding_box_st *get_asic_rev_soc_bb(
 static struct _vcs_dpi_ip_params_st *get_asic_rev_ip_params(
 	uint32_t hw_internal_rev)
 {
-	/* NV14 */
 	if (ASICREV_IS_NAVI14_M(hw_internal_rev))
 		return &dcn2_0_nv14_ip;
 
@@ -2453,6 +2452,7 @@ static bool dcn20_resource_construct(
 	dc->caps.post_blend_color_processing = true;
 	dc->caps.force_dp_tps4_for_cp2520 = true;
 	dc->caps.extended_aux_timeout_support = true;
+	dc->caps.dmcub_support = true;
 
 	/* Color pipeline capabilities */
 	dc->caps.color.dpp.dcn_arch = 1;
