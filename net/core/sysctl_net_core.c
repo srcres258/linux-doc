@@ -24,6 +24,7 @@
 #include <net/busy_poll.h>
 #include <net/pkt_sched.h>
 #include <net/hotdata.h>
+#include <net/proto_memory.h>
 #include <net/rps.h>
 
 #include "dev.h"
@@ -415,7 +416,7 @@ static struct ctl_table net_core_table[] = {
 	},
 	{
 		.procname	= "mem_pcpu_rsv",
-		.data		= &sysctl_mem_pcpu_rsv,
+		.data		= &net_hotdata.sysctl_mem_pcpu_rsv,
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
 		.proc_handler	= proc_dointvec_minmax,
@@ -595,7 +596,7 @@ static struct ctl_table net_core_table[] = {
 	},
 	{
 		.procname	= "max_skb_frags",
-		.data		= &sysctl_max_skb_frags,
+		.data		= &net_hotdata.sysctl_max_skb_frags,
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
 		.proc_handler	= proc_dointvec_minmax,
@@ -654,7 +655,7 @@ static struct ctl_table net_core_table[] = {
 	},
 	{
 		.procname	= "skb_defer_max",
-		.data		= &sysctl_skb_defer_max,
+		.data		= &net_hotdata.sysctl_skb_defer_max,
 		.maxlen		= sizeof(unsigned int),
 		.mode		= 0644,
 		.proc_handler	= proc_dointvec_minmax,
@@ -743,7 +744,7 @@ err_dup:
 
 static __net_exit void sysctl_core_net_exit(struct net *net)
 {
-	struct ctl_table *tbl;
+	const struct ctl_table *tbl;
 
 	tbl = net->core.sysctl_hdr->ctl_table_arg;
 	unregister_net_sysctl_table(net->core.sysctl_hdr);
