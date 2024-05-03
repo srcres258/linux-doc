@@ -61,8 +61,8 @@ static int vhost_task_fn(void *data)
 		set_bit(VHOST_TASK_FLAGS_KILLED, &vtsk->flags);
 		vtsk->handle_sigkill(vtsk->data);
 	}
-	complete(&vtsk->exited);
 	mutex_unlock(&vtsk->exit_mutex);
+	complete(&vtsk->exited);
 
 	do_exit(0);
 }

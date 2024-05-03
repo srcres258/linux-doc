@@ -1031,6 +1031,7 @@ bool dml2_map_dc_pipes(struct dml2_context *ctx, struct dc_state *state, const s
 
 	unsigned int stream_disp_cfg_index;
 	unsigned int plane_disp_cfg_index;
+	unsigned int disp_cfg_index_max;
 
 	unsigned int plane_id;
 	unsigned int stream_id;
@@ -1057,9 +1058,11 @@ bool dml2_map_dc_pipes(struct dml2_context *ctx, struct dc_state *state, const s
 
 		ODMMode = (const unsigned int *)odm_mode_array;
 		DPPPerSurface = (const unsigned int *)dpp_per_surface_array;
+		disp_cfg_index_max = __DML2_WRAPPER_MAX_STREAMS_PLANES__;
 	} else {
 		ODMMode = (unsigned int *)disp_cfg->hw.ODMMode;
 		DPPPerSurface = disp_cfg->hw.DPPPerSurface;
+		disp_cfg_index_max = __DML_NUM_PLANES__;
 	}
 
 	for (stream_index = 0; stream_index < state->stream_count; stream_index++) {
@@ -1067,6 +1070,8 @@ bool dml2_map_dc_pipes(struct dml2_context *ctx, struct dc_state *state, const s
 
 		stream_id = state->streams[stream_index]->stream_id;
 		stream_disp_cfg_index = find_disp_cfg_idx_by_stream_id(mapping, stream_id);
+		if (stream_disp_cfg_index >= disp_cfg_index_max)
+			continue;
 
 		if (ODMMode[stream_disp_cfg_index] == dml_odm_mode_bypass) {
 			scratch.odm_info.odm_factor = 1;
@@ -1110,7 +1115,7 @@ bool dml2_map_dc_pipes(struct dml2_context *ctx, struct dc_state *state, const s
 
 				// Setup mpc_info for this plane
 				scratch.mpc_info.prev_odm_pipe = NULL;
-				if (scratch.odm_info.odm_factor == 1) {
+				if (scratch.odm_info.odm_factor == 1 && plane_disp_cfg_index < disp_cfg_index_max) {
 					// If ODM combine is not inuse, then the number of pipes
 					// per plane is determined by MPC combine factor
 					scratch.mpc_info.mpc_factor = DPPPerSurface[plane_disp_cfg_index];

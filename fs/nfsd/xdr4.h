@@ -692,8 +692,10 @@ struct nfsd4_copy {
 #define NFSD4_COPY_F_INTRA		(1)
 #define NFSD4_COPY_F_SYNCHRONOUS	(2)
 #define NFSD4_COPY_F_COMMITTED		(3)
+#define NFSD4_COPY_F_COMPLETED		(4)
 
 	/* response */
+	__be32			nfserr;
 	struct nfsd42_write_res	cp_res;
 	struct knfsd_fh		fh;
 
@@ -753,7 +755,8 @@ struct nfsd4_offload_status {
 
 	/* response */
 	u64		count;
-	u32		status;
+	__be32		status;
+	bool		completed;
 };
 
 struct nfsd4_copy_notify {

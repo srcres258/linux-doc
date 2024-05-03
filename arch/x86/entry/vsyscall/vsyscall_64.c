@@ -115,7 +115,6 @@ static bool write_ok_or_segv(unsigned long ptr, size_t size)
 bool emulate_vsyscall(unsigned long error_code,
 		      struct pt_regs *regs, unsigned long address)
 {
-	struct task_struct *tsk;
 	unsigned long caller;
 	int vsyscall_nr, syscall_nr, tmp;
 	long ret;
@@ -165,8 +164,6 @@ bool emulate_vsyscall(unsigned long error_code,
 				  "vsyscall with bad stack (exploit attempt?)");
 		goto sigsegv;
 	}
-
-	tsk = current;
 
 	/*
 	 * Check for access_ok violations and find the syscall nr.

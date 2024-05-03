@@ -171,13 +171,11 @@ dtb- += k3-am625-beagleplay-csi2-ov5640.dtb \
 	k3-am642-evm-icssg1-dualemac.dtb \
 	k3-am642-tqma64xxl-mbax4xxl-sdcard.dtb \
 	k3-am642-tqma64xxl-mbax4xxl-wlan.dtb \
-	k3-am68-sk-base-board-csi2-dual-imx219-dtbs \
-	k3-am69-sk-csi2-dual-imx219-dtbs \
+	k3-am68-sk-base-board-csi2-dual-imx219.dtb \
+	k3-am69-sk-csi2-dual-imx219.dtb \
 	k3-j721e-evm-pcie0-ep.dtb \
-	k3-j721e-sk-csi2-dual-imx219-dtbs \
-	k3-j721s2-evm-pcie1-ep.dtb \
-	k3-j784s4-evm-quad-port-eth-exp1.dtb \
-	k3-j784s4-evm-usxgmii-exp1-exp2.dtb
+	k3-j721e-sk-csi2-dual-imx219.dtb \
+	k3-j721s2-evm-pcie1-ep.dtb
 
 # Enable support for device-tree overlays
 DTC_FLAGS_k3-am625-beagleplay += -@

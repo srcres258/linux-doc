@@ -167,7 +167,9 @@ amdgpu-y += \
 	imu_v11_0.o \
 	gfx_v11_0.o \
 	gfx_v11_0_3.o \
-	imu_v11_0_3.o
+	imu_v11_0_3.o \
+	gfx_v12_0.o \
+	imu_v12_0.o
 
 # add async DMA block
 amdgpu-y += \
@@ -186,7 +188,8 @@ amdgpu-y += \
 amdgpu-y += \
 	amdgpu_mes.o \
 	mes_v10_1.o \
-	mes_v11_0.o
+	mes_v11_0.o \
+	mes_v12_0.o
 
 # add UVD block
 amdgpu-y += \
@@ -278,7 +281,8 @@ amdgpu-y += \
 	amdgpu_amdkfd_gc_9_4_3.o \
 	amdgpu_amdkfd_gfx_v10.o \
 	amdgpu_amdkfd_gfx_v10_3.o \
-	amdgpu_amdkfd_gfx_v11.o
+	amdgpu_amdkfd_gfx_v11.o \
+	amdgpu_amdkfd_gfx_v12.o
 
 ifneq ($(CONFIG_DRM_AMDGPU_CIK),)
 amdgpu-y += amdgpu_amdkfd_gfx_v7.o

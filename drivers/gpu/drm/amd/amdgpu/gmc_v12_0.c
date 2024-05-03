@@ -497,6 +497,10 @@ static void gmc_v12_0_get_vm_pte(struct amdgpu_device *adev,
 				 uint64_t *flags)
 {
 	struct amdgpu_bo *bo = mapping->bo_va->base.bo;
+	struct amdgpu_device *bo_adev = amdgpu_ttm_adev(bo->tbo.bdev);
+	bool coherent = bo->flags & AMDGPU_GEM_CREATE_COHERENT;
+	bool is_system = bo->tbo.resource->mem_type == TTM_PL_SYSTEM;
+
 
 	*flags &= ~AMDGPU_PTE_EXECUTABLE;
 	*flags |= mapping->flags & AMDGPU_PTE_EXECUTABLE;
@@ -515,6 +519,11 @@ static void gmc_v12_0_get_vm_pte(struct amdgpu_device *adev,
 			       AMDGPU_GEM_CREATE_UNCACHED))
 		*flags = (*flags & ~AMDGPU_PTE_MTYPE_GFX12_MASK) |
 			 AMDGPU_PTE_MTYPE_GFX12(MTYPE_UC);
+
+	/* WA for HW bug */
+	if ((bo && is_system) || ((bo_adev != adev) && coherent))
+		*flags |= AMDGPU_PTE_MTYPE_GFX12(MTYPE_NC);
+
 }
 
 static unsigned gmc_v12_0_get_vbios_fb_size(struct amdgpu_device *adev)
@@ -754,7 +763,7 @@ static int gmc_v12_0_sw_init(void *handle)
 	 */
 	adev->gmc.mc_mask = 0xffffffffffffULL; /* 48 bit MC */
 
-	r = dma_set_mask_and_coherent(adev->dev, DMA_BIT_MASK(48));
+	r = dma_set_mask_and_coherent(adev->dev, DMA_BIT_MASK(44));
 	if (r) {
 		printk(KERN_WARNING "amdgpu: No suitable DMA available.\n");
 		return r;

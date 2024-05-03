@@ -404,8 +404,7 @@ void bch2_submit_wbio_replicas(struct bch_write_bio *wbio, struct bch_fs *c,
 		struct bch_dev *ca = bch2_dev_bkey_exists(c, ptr->dev);
 
 		if (to_entry(ptr + 1) < ptrs.end) {
-			n = to_wbio(bio_alloc_clone(NULL, &wbio->bio,
-						GFP_NOFS, &ca->replica_set));
+			n = to_wbio(bio_alloc_clone(NULL, &wbio->bio, GFP_NOFS, &c->replica_set));
 
 			n->bio.bi_end_io	= wbio->bio.bi_end_io;
 			n->bio.bi_private	= wbio->bio.bi_private;
@@ -1093,12 +1092,17 @@ static bool bch2_extent_is_writeable(struct bch_write_op *op,
 		return false;
 
 	e = bkey_s_c_to_extent(k);
+
+	rcu_read_lock();
 	extent_for_each_ptr_decode(e, p, entry) {
-		if (crc_is_encoded(p.crc) || p.has_ec)
+		if (crc_is_encoded(p.crc) || p.has_ec) {
+			rcu_read_unlock();
 			return false;
+		}
 
 		replicas += bch2_extent_ptr_durability(c, &p);
 	}
+	rcu_read_unlock();
 
 	return replicas >= op->opts.data_replicas;
 }
@@ -1110,10 +1114,12 @@ static inline void bch2_nocow_write_unlock(struct bch_write_op *op)
 	for_each_keylist_key(&op->insert_keys, k) {
 		struct bkey_ptrs_c ptrs = bch2_bkey_ptrs_c(bkey_i_to_s_c(k));
 
-		bkey_for_each_ptr(ptrs, ptr)
+		bkey_for_each_ptr(ptrs, ptr) {
+			struct bch_dev *ca = bch2_dev_bkey_exists(c, ptr->dev);
 			bch2_bucket_nocow_unlock(&c->nocow_locks,
-						 PTR_BUCKET_POS(c, ptr),
+						 PTR_BUCKET_POS(ca, ptr),
 						 BUCKET_NOCOW_LOCK_UPDATE);
+		}
 	}
 }
 
@@ -1263,12 +1269,13 @@ retry:
 		/* Get iorefs before dropping btree locks: */
 		struct bkey_ptrs_c ptrs = bch2_bkey_ptrs_c(k);
 		bkey_for_each_ptr(ptrs, ptr) {
-			struct bpos b = PTR_BUCKET_POS(c, ptr);
+			struct bch_dev *ca = bch2_dev_bkey_exists(c, ptr->dev);
+			struct bpos b = PTR_BUCKET_POS(ca, ptr);
 			struct nocow_lock_bucket *l =
 				bucket_nocow_lock(&c->nocow_locks, bucket_to_u64(b));
 			prefetch(l);
 
-			if (unlikely(!bch2_dev_get_ioref(bch2_dev_bkey_exists(c, ptr->dev), WRITE)))
+			if (unlikely(!bch2_dev_get_ioref(ca, WRITE)))
 				goto err_get_ioref;
 
 			/* XXX allocating memory with btree locks held - rare */
@@ -1289,7 +1296,7 @@ retry:
 			bch2_cut_back(POS(op->pos.inode, op->pos.offset + bio_sectors(bio)), op->insert_keys.top);
 
 		darray_for_each(buckets, i) {
-			struct bch_dev *ca = bch2_dev_bkey_exists(c, i->b.inode);
+			struct bch_dev *ca = bch2_dev_have_ref(c, i->b.inode);
 
 			__bch2_bucket_nocow_lock(&c->nocow_locks, i->l,
 						 bucket_to_u64(i->b),
@@ -1366,7 +1373,7 @@ err:
 	return;
 err_get_ioref:
 	darray_for_each(buckets, i)
-		percpu_ref_put(&bch2_dev_bkey_exists(c, i->b.inode)->io_ref);
+		percpu_ref_put(&bch2_dev_have_ref(c, i->b.inode)->io_ref);
 
 	/* Fall back to COW path: */
 	goto out;
@@ -1651,13 +1658,14 @@ void bch2_write_op_to_text(struct printbuf *out, struct bch_write_op *op)
 void bch2_fs_io_write_exit(struct bch_fs *c)
 {
 	mempool_exit(&c->bio_bounce_pages);
+	bioset_exit(&c->replica_set);
 	bioset_exit(&c->bio_write);
 }
 
 int bch2_fs_io_write_init(struct bch_fs *c)
 {
-	if (bioset_init(&c->bio_write, 1, offsetof(struct bch_write_bio, bio),
-			BIOSET_NEED_BVECS))
+	if (bioset_init(&c->bio_write,   1, offsetof(struct bch_write_bio, bio), BIOSET_NEED_BVECS) ||
+	    bioset_init(&c->replica_set, 4, offsetof(struct bch_write_bio, bio), 0))
 		return -BCH_ERR_ENOMEM_bio_write_init;
 
 	if (mempool_init_page_pool(&c->bio_bounce_pages,

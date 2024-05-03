@@ -178,7 +178,7 @@
 	status = "okay";
 
 	vrm@60 {
-		compatible = "renesas,isl69269", "isl69269";
+		compatible = "isil,isl69269";
 		reg = <0x60>;
 	};
 };

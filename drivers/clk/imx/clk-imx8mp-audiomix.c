@@ -346,11 +346,9 @@ err_clk_register:
 	return ret;
 }
 
-static int clk_imx8mp_audiomix_remove(struct platform_device *pdev)
+static void clk_imx8mp_audiomix_remove(struct platform_device *pdev)
 {
 	pm_runtime_disable(&pdev->dev);
-
-	return 0;
 }
 
 static int clk_imx8mp_audiomix_runtime_suspend(struct device *dev)
@@ -368,8 +366,8 @@ static int clk_imx8mp_audiomix_runtime_resume(struct device *dev)
 }
 
 static const struct dev_pm_ops clk_imx8mp_audiomix_pm_ops = {
-	SET_RUNTIME_PM_OPS(clk_imx8mp_audiomix_runtime_suspend,
-			   clk_imx8mp_audiomix_runtime_resume, NULL)
+	RUNTIME_PM_OPS(clk_imx8mp_audiomix_runtime_suspend,
+		       clk_imx8mp_audiomix_runtime_resume, NULL)
 	SET_NOIRQ_SYSTEM_SLEEP_PM_OPS(pm_runtime_force_suspend,
 				      pm_runtime_force_resume)
 };
@@ -382,11 +380,11 @@ MODULE_DEVICE_TABLE(of, clk_imx8mp_audiomix_of_match);
 
 static struct platform_driver clk_imx8mp_audiomix_driver = {
 	.probe	= clk_imx8mp_audiomix_probe,
-	.remove = clk_imx8mp_audiomix_remove,
+	.remove_new = clk_imx8mp_audiomix_remove,
 	.driver = {
 		.name = "imx8mp-audio-blk-ctrl",
 		.of_match_table = clk_imx8mp_audiomix_of_match,
-		.pm = &clk_imx8mp_audiomix_pm_ops,
+		.pm = pm_ptr(&clk_imx8mp_audiomix_pm_ops),
 	},
 };
 

@@ -35,11 +35,6 @@ static inline u64 sector_to_bucket_and_offset(const struct bch_dev *ca, sector_t
 	return div_u64_rem(s, ca->mi.bucket_size, offset);
 }
 
-static inline bool bucket_valid(const struct bch_dev *ca, u64 b)
-{
-	return b - ca->mi.first_bucket < ca->mi.nbuckets_minus_first;
-}
-
 #define for_each_bucket(_b, _buckets)				\
 	for (_b = (_buckets)->b + (_buckets)->first_bucket;	\
 	     _b < (_buckets)->b + (_buckets)->nbuckets; _b++)
@@ -125,20 +120,16 @@ static inline size_t PTR_BUCKET_NR(const struct bch_dev *ca,
 	return sector_to_bucket(ca, ptr->offset);
 }
 
-static inline struct bpos PTR_BUCKET_POS(const struct bch_fs *c,
-				   const struct bch_extent_ptr *ptr)
+static inline struct bpos PTR_BUCKET_POS(const struct bch_dev *ca,
+					 const struct bch_extent_ptr *ptr)
 {
-	struct bch_dev *ca = bch2_dev_bkey_exists(c, ptr->dev);
-
 	return POS(ptr->dev, PTR_BUCKET_NR(ca, ptr));
 }
 
-static inline struct bpos PTR_BUCKET_POS_OFFSET(const struct bch_fs *c,
+static inline struct bpos PTR_BUCKET_POS_OFFSET(const struct bch_dev *ca,
 						const struct bch_extent_ptr *ptr,
 						u32 *bucket_offset)
 {
-	struct bch_dev *ca = bch2_dev_bkey_exists(c, ptr->dev);
-
 	return POS(ptr->dev, sector_to_bucket_and_offset(ca, ptr->offset, bucket_offset));
 }
 
@@ -179,17 +170,19 @@ static inline int gen_after(u8 a, u8 b)
 	return r > 0 ? r : 0;
 }
 
+static inline u8 dev_ptr_stale_rcu(struct bch_dev *ca, const struct bch_extent_ptr *ptr)
+{
+	return gen_after(*bucket_gen(ca, PTR_BUCKET_NR(ca, ptr)), ptr->gen);
+}
+
 /**
- * ptr_stale() - check if a pointer points into a bucket that has been
+ * dev_ptr_stale() - check if a pointer points into a bucket that has been
  * invalidated.
  */
-static inline u8 ptr_stale(struct bch_dev *ca,
-			   const struct bch_extent_ptr *ptr)
+static inline u8 dev_ptr_stale(struct bch_dev *ca, const struct bch_extent_ptr *ptr)
 {
-	u8 ret;
-
 	rcu_read_lock();
-	ret = gen_after(*bucket_gen(ca, PTR_BUCKET_NR(ca, ptr)), ptr->gen);
+	u8 ret = dev_ptr_stale_rcu(ca, ptr);
 	rcu_read_unlock();
 
 	return ret;
@@ -335,8 +328,8 @@ int bch2_replicas_deltas_realloc(struct btree_trans *, unsigned);
 
 void bch2_fs_usage_initialize(struct bch_fs *);
 
-int bch2_bucket_ref_update(struct btree_trans *, struct bkey_s_c,
-			   const struct bch_extent_ptr *,
+int bch2_bucket_ref_update(struct btree_trans *, struct bch_dev *,
+			   struct bkey_s_c, const struct bch_extent_ptr *,
 			   s64, enum bch_data_type, u8, u8, u32 *);
 
 int bch2_check_fix_ptrs(struct btree_trans *,

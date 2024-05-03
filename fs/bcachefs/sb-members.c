@@ -3,10 +3,21 @@
 #include "bcachefs.h"
 #include "btree_cache.h"
 #include "disk_groups.h"
+#include "error.h"
 #include "opts.h"
 #include "replicas.h"
 #include "sb-members.h"
 #include "super-io.h"
+
+void bch2_dev_missing(struct bch_fs *c, unsigned dev)
+{
+	bch2_fs_inconsistent(c, "pointer to nonexistent device %u", dev);
+}
+
+void bch2_dev_bucket_missing(struct bch_fs *c, struct bpos bucket)
+{
+	bch2_fs_inconsistent(c, "pointer to nonexistent bucket %llu:%llu", bucket.inode, bucket.offset);
+}
 
 #define x(t, n, ...) [n] = #t,
 static const char * const bch2_iops_measurements[] = {
@@ -397,11 +408,20 @@ void bch2_dev_errors_reset(struct bch_dev *ca)
 
 bool bch2_dev_btree_bitmap_marked(struct bch_fs *c, struct bkey_s_c k)
 {
-	bkey_for_each_ptr(bch2_bkey_ptrs_c(k), ptr)
-		if (!bch2_dev_btree_bitmap_marked_sectors(bch2_dev_bkey_exists(c, ptr->dev),
-							  ptr->offset, btree_sectors(c)))
-			return false;
-	return true;
+	bool ret = true;
+	rcu_read_lock();
+	bkey_for_each_ptr(bch2_bkey_ptrs_c(k), ptr) {
+		struct bch_dev *ca = bch2_dev_rcu(c, ptr->dev);
+		if (!ca)
+			continue;
+
+		if (!bch2_dev_btree_bitmap_marked_sectors(ca, ptr->offset, btree_sectors(c))) {
+			ret = false;
+			break;
+		}
+	}
+	rcu_read_unlock();
+	return ret;
 }
 
 static void __bch2_dev_btree_bitmap_mark(struct bch_sb_field_members_v2 *mi, unsigned dev,
@@ -439,6 +459,10 @@ void bch2_dev_btree_bitmap_mark(struct bch_fs *c, struct bkey_s_c k)
 	lockdep_assert_held(&c->sb_lock);
 
 	struct bch_sb_field_members_v2 *mi = bch2_sb_field_get(c->disk_sb.sb, members_v2);
-	bkey_for_each_ptr(bch2_bkey_ptrs_c(k), ptr)
+	bkey_for_each_ptr(bch2_bkey_ptrs_c(k), ptr) {
+		if (!bch2_member_exists(c->disk_sb.sb, ptr->dev))
+			continue;
+
 		__bch2_dev_btree_bitmap_mark(mi, ptr->dev, ptr->offset, btree_sectors(c));
+	}
 }

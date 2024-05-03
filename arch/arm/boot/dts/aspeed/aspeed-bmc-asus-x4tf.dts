@@ -10,7 +10,7 @@
 
 / {
 	model = "ASUS-X4TF";
-	compatible = "asus,x4tf", "aspeed,ast2600";
+	compatible = "asus,x4tf-bmc", "aspeed,ast2600";
 
 	aliases {
 		serial4 = &uart5;
@@ -122,9 +122,9 @@
 	flash@0 {
 		status = "okay";
 		m25p,fast-read;
-		label = "bmc-spi";
+		label = "bmc";
 		spi-max-frequency = <50000000>;
-#include "openbmc-flash-layout-128.dtsi"
+#include "openbmc-flash-layout-64.dtsi"
 	};
 };
 
@@ -135,19 +135,8 @@
 
 	flash@0 {
 		status = "okay";
-		label = "bios-spi";
+		label = "bios";
 		spi-max-frequency = <50000000>;
-
-		partitions {
-			compatible = "fixed-partitions";
-			#address-cells = <1>;
-			#size-cells = <1>;
-
-			biosfullimg@0 {
-				reg = <0x0 0x2000000>; //32768 *1024 = 32 MB
-				label = "biosfullimg";
-			};
-		};
 	};
 };
 

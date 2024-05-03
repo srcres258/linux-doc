@@ -164,12 +164,13 @@ void bch2_stripe_to_text(struct printbuf *out, struct bch_fs *c,
 /* Triggers: */
 
 static int __mark_stripe_bucket(struct btree_trans *trans,
+				struct bch_dev *ca,
 				struct bkey_s_c_stripe s,
 				unsigned ptr_idx, bool deleting,
 				struct bpos bucket,
-				struct bch_alloc_v4 *a)
+				struct bch_alloc_v4 *a,
+				enum btree_iter_update_trigger_flags flags)
 {
-	struct bch_fs *c = trans->c;
 	const struct bch_extent_ptr *ptr = s.v->ptrs + ptr_idx;
 	unsigned nr_data = s.v->nr_blocks - s.v->nr_redundant;
 	bool parity = ptr_idx >= nr_data;
@@ -178,6 +179,7 @@ static int __mark_stripe_bucket(struct btree_trans *trans,
 	struct printbuf buf = PRINTBUF;
 	int ret = 0;
 
+	struct bch_fs *c = trans->c;
 	if (deleting)
 		sectors = -sectors;
 
@@ -239,7 +241,7 @@ static int __mark_stripe_bucket(struct btree_trans *trans,
 	}
 
 	if (sectors) {
-		ret = bch2_bucket_ref_update(trans, s.s_c, ptr, sectors, data_type,
+		ret = bch2_bucket_ref_update(trans, ca, s.s_c, ptr, sectors, data_type,
 					     a->gen, a->data_type, &a->dirty_sectors);
 		if (ret)
 			goto err;
@@ -266,34 +268,40 @@ static int mark_stripe_bucket(struct btree_trans *trans,
 {
 	struct bch_fs *c = trans->c;
 	const struct bch_extent_ptr *ptr = s.v->ptrs + ptr_idx;
-	struct bpos bucket = PTR_BUCKET_POS(c, ptr);
+	int ret = 0;
+
+	struct bch_dev *ca = bch2_dev_tryget(c, ptr->dev);
+	if (unlikely(!ca)) {
+		if (!(flags & BTREE_TRIGGER_overwrite))
+			ret = -EIO;
+		goto err;
+	}
+
+	struct bpos bucket = PTR_BUCKET_POS(ca, ptr);
 
 	if (flags & BTREE_TRIGGER_transactional) {
 		struct bkey_i_alloc_v4 *a =
 			bch2_trans_start_alloc_update(trans, bucket);
-		return PTR_ERR_OR_ZERO(a) ?:
-			__mark_stripe_bucket(trans, s, ptr_idx, deleting, bucket, &a->v);
+		ret = PTR_ERR_OR_ZERO(a) ?:
+			__mark_stripe_bucket(trans, ca, s, ptr_idx, deleting, bucket, &a->v, flags);
 	}
 
 	if (flags & BTREE_TRIGGER_gc) {
-		struct bch_dev *ca = bch2_dev_bkey_exists(c, ptr->dev);
-
 		percpu_down_read(&c->mark_lock);
 		struct bucket *g = gc_bucket(ca, bucket.offset);
 		bucket_lock(g);
 		struct bch_alloc_v4 old = bucket_m_to_alloc(*g), new = old;
-		int ret = __mark_stripe_bucket(trans, s, ptr_idx, deleting, bucket, &new);
+		ret = __mark_stripe_bucket(trans, ca, s, ptr_idx, deleting, bucket, &new, flags);
 		if (!ret) {
 			alloc_to_bucket(g, new);
 			bch2_dev_usage_update(c, ca, &old, &new, 0, true);
 		}
 		bucket_unlock(g);
 		percpu_up_read(&c->mark_lock);
-		return ret;
 	}
-
-	BUG();
-	return 0;
+err:
+	bch2_dev_put(ca);
+	return ret;
 }
 
 static int mark_stripe_buckets(struct btree_trans *trans,
@@ -625,19 +633,21 @@ static void ec_validate_checksums(struct bch_fs *c, struct ec_stripe_buf *buf)
 			struct bch_csum got = ec_block_checksum(buf, i, offset);
 
 			if (bch2_crc_cmp(want, got)) {
-				struct printbuf err = PRINTBUF;
-				struct bch_dev *ca = bch2_dev_bkey_exists(c, v->ptrs[i].dev);
+				struct bch_dev *ca = bch2_dev_tryget(c, v->ptrs[i].dev);
+				if (ca) {
+					struct printbuf err = PRINTBUF;
 
-				prt_str(&err, "stripe ");
-				bch2_csum_err_msg(&err, v->csum_type, want, got);
-				prt_printf(&err, "  for %ps at %u of\n  ", (void *) _RET_IP_, i);
-				bch2_bkey_val_to_text(&err, c, bkey_i_to_s_c(&buf->key));
-				bch_err_ratelimited(ca, "%s", err.buf);
-				printbuf_exit(&err);
+					prt_str(&err, "stripe ");
+					bch2_csum_err_msg(&err, v->csum_type, want, got);
+					prt_printf(&err, "  for %ps at %u of\n  ", (void *) _RET_IP_, i);
+					bch2_bkey_val_to_text(&err, c, bkey_i_to_s_c(&buf->key));
+					bch_err_ratelimited(ca, "%s", err.buf);
+					printbuf_exit(&err);
+
+					bch2_io_error(ca, BCH_MEMBER_ERROR_checksum);
+				}
 
 				clear_bit(i, buf->valid);
-
-				bch2_io_error(ca, BCH_MEMBER_ERROR_checksum);
 				break;
 			}
 
@@ -704,7 +714,7 @@ static void ec_block_endio(struct bio *bio)
 			       bch2_blk_status_to_str(bio->bi_status)))
 		clear_bit(ec_bio->idx, ec_bio->buf->valid);
 
-	if (ptr_stale(ca, ptr)) {
+	if (dev_ptr_stale(ca, ptr)) {
 		bch_err_ratelimited(ca->fs,
 				    "error %s stripe: stale pointer after io",
 				    bio_data_dir(bio) == READ ? "reading from" : "writing to");
@@ -728,7 +738,7 @@ static void ec_block_io(struct bch_fs *c, struct ec_stripe_buf *buf,
 		: BCH_DATA_parity;
 	int rw = op_is_write(opf);
 
-	if (ptr_stale(ca, ptr)) {
+	if (dev_ptr_stale(ca, ptr)) {
 		bch_err_ratelimited(c,
 				    "error %s stripe: stale pointer",
 				    rw == READ ? "reading from" : "writing to");
@@ -1216,6 +1226,7 @@ err:
 }
 
 static int ec_stripe_update_extent(struct btree_trans *trans,
+				   struct bch_dev *ca,
 				   struct bpos bucket, u8 gen,
 				   struct ec_stripe_buf *s,
 				   struct bpos *bp_pos)
@@ -1231,7 +1242,7 @@ static int ec_stripe_update_extent(struct btree_trans *trans,
 	struct bkey_i *n;
 	int ret, dev, block;
 
-	ret = bch2_get_next_backpointer(trans, bucket, gen,
+	ret = bch2_get_next_backpointer(trans, ca, bucket, gen,
 				bp_pos, &bp, BTREE_ITER_cached);
 	if (ret)
 		return ret;
@@ -1315,17 +1326,21 @@ static int ec_stripe_update_bucket(struct btree_trans *trans, struct ec_stripe_b
 {
 	struct bch_fs *c = trans->c;
 	struct bch_stripe *v = &bkey_i_to_stripe(&s->key)->v;
-	struct bch_extent_ptr bucket = v->ptrs[block];
-	struct bpos bucket_pos = PTR_BUCKET_POS(c, &bucket);
+	struct bch_extent_ptr ptr = v->ptrs[block];
 	struct bpos bp_pos = POS_MIN;
 	int ret = 0;
+
+	struct bch_dev *ca = bch2_dev_tryget(c, ptr.dev);
+	if (!ca)
+		return -EIO;
+
+	struct bpos bucket_pos = PTR_BUCKET_POS(ca, &ptr);
 
 	while (1) {
 		ret = commit_do(trans, NULL, NULL,
 				BCH_TRANS_COMMIT_no_check_rw|
 				BCH_TRANS_COMMIT_no_enospc,
-			ec_stripe_update_extent(trans, bucket_pos, bucket.gen,
-						s, &bp_pos));
+			ec_stripe_update_extent(trans, ca, bucket_pos, ptr.gen, s, &bp_pos));
 		if (ret)
 			break;
 		if (bkey_eq(bp_pos, POS_MAX))
@@ -1334,6 +1349,7 @@ static int ec_stripe_update_bucket(struct btree_trans *trans, struct ec_stripe_b
 		bp_pos = bpos_nosnap_successor(bp_pos);
 	}
 
+	bch2_dev_put(ca);
 	return ret;
 }
 
@@ -1562,16 +1578,13 @@ void bch2_ec_bucket_cancel(struct bch_fs *c, struct open_bucket *ob)
 void *bch2_writepoint_ec_buf(struct bch_fs *c, struct write_point *wp)
 {
 	struct open_bucket *ob = ec_open_bucket(c, &wp->ptrs);
-	struct bch_dev *ca;
-	unsigned offset;
-
 	if (!ob)
 		return NULL;
 
 	BUG_ON(!ob->ec->new_stripe.data[ob->ec_idx]);
 
-	ca	= bch2_dev_bkey_exists(c, ob->dev);
-	offset	= ca->mi.bucket_size - ob->sectors_free;
+	struct bch_dev *ca	= ob_dev(c, ob);
+	unsigned offset		= ca->mi.bucket_size - ob->sectors_free;
 
 	return ob->ec->new_stripe.data[ob->ec_idx] + (offset << 9);
 }

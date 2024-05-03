@@ -163,6 +163,18 @@ static inline bool bch2_dev_exists(const struct bch_fs *c, unsigned dev)
 	return dev < c->sb.nr_devices && c->devs[dev];
 }
 
+static inline bool bucket_valid(const struct bch_dev *ca, u64 b)
+{
+	return b - ca->mi.first_bucket < ca->mi.nbuckets_minus_first;
+}
+
+static inline struct bch_dev *bch2_dev_have_ref(const struct bch_fs *c, unsigned dev)
+{
+	EBUG_ON(!bch2_dev_exists(c, dev));
+
+	return rcu_dereference_check(c->devs[dev], 1);
+}
+
 /*
  * If a key exists that references a device, the device won't be going away and
  * we can omit rcu_read_lock():
@@ -183,11 +195,66 @@ static inline struct bch_dev *bch2_dev_locked(struct bch_fs *c, unsigned dev)
 					 lockdep_is_held(&c->state_lock));
 }
 
-static inline struct bch_dev *bch2_dev_safe(struct bch_fs *c, unsigned dev)
+static inline struct bch_dev *bch2_dev_rcu(struct bch_fs *c, unsigned dev)
 {
 	return c && dev < c->sb.nr_devices
 		? rcu_dereference(c->devs[dev])
 		: NULL;
+}
+
+static inline void bch2_dev_put(struct bch_dev *ca)
+{
+	if (ca)
+		percpu_ref_put(&ca->ref);
+}
+
+static inline struct bch_dev *bch2_dev_tryget_noerror(struct bch_fs *c, unsigned dev)
+{
+	rcu_read_lock();
+	struct bch_dev *ca = bch2_dev_rcu(c, dev);
+	if (ca && !percpu_ref_tryget(&ca->ref))
+		ca = NULL;
+	rcu_read_unlock();
+	return ca;
+}
+
+void bch2_dev_missing(struct bch_fs *, unsigned);
+
+static inline struct bch_dev *bch2_dev_tryget(struct bch_fs *c, unsigned dev)
+{
+	struct bch_dev *ca = bch2_dev_tryget_noerror(c, dev);
+	if (!ca)
+		bch2_dev_missing(c, dev);
+	return ca;
+}
+
+static inline struct bch_dev *bch2_dev_bucket_tryget_noerror(struct bch_fs *c, struct bpos bucket)
+{
+	struct bch_dev *ca = bch2_dev_tryget_noerror(c, bucket.inode);
+	if (ca && !bucket_valid(ca, bucket.offset)) {
+		percpu_ref_put(&ca->ref);
+		ca = NULL;
+	}
+	return ca;
+}
+
+void bch2_dev_bucket_missing(struct bch_fs *, struct bpos);
+
+static inline struct bch_dev *bch2_dev_bucket_tryget(struct bch_fs *c, struct bpos bucket)
+{
+	struct bch_dev *ca = bch2_dev_bucket_tryget_noerror(c, bucket);
+	if (!ca)
+		bch2_dev_bucket_missing(c, bucket);
+	return ca;
+}
+
+static inline struct bch_dev *bch2_dev_iterate(struct bch_fs *c, struct bch_dev *ca, unsigned dev_idx)
+{
+	if (ca && ca->dev_idx == dev_idx)
+		return ca;
+	if (ca)
+		percpu_ref_put(&ca->ref);
+	return bch2_dev_tryget(c, dev_idx);
 }
 
 /* XXX kill, move to struct bch_fs */

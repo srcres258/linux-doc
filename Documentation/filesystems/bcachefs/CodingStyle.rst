@@ -1,5 +1,8 @@
 .. SPDX-License-Identifier: GPL-2.0
 
+bcachefs coding style
+=====================
+
 Good development is like gardening, and codebases are our gardens. Tend to them
 every day; look for little things that are out of place or in need of tidying.
 A little weeding here and there goes a long way; don't wait until things have

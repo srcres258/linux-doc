@@ -688,6 +688,10 @@ int bch2_evacuate_bucket(struct moving_context *ctxt,
 	struct bpos bp_pos = POS_MIN;
 	int ret = 0;
 
+	struct bch_dev *ca = bch2_dev_tryget(c, bucket.inode);
+	if (!ca)
+		return 0;
+
 	trace_bucket_evacuate(c, &bucket);
 
 	bch2_bkey_buf_init(&sk);
@@ -709,7 +713,7 @@ int bch2_evacuate_bucket(struct moving_context *ctxt,
 
 	a = bch2_alloc_to_v4(k, &a_convert);
 	dirty_sectors = bch2_bucket_sectors_dirty(*a);
-	bucket_size = bch2_dev_bkey_exists(c, bucket.inode)->mi.bucket_size;
+	bucket_size = ca->mi.bucket_size;
 	fragmentation = a->fragmentation_lru;
 
 	ret = bch2_btree_write_buffer_tryflush(trans);
@@ -723,7 +727,7 @@ int bch2_evacuate_bucket(struct moving_context *ctxt,
 
 		bch2_trans_begin(trans);
 
-		ret = bch2_get_next_backpointer(trans, bucket, gen,
+		ret = bch2_get_next_backpointer(trans, ca, bucket, gen,
 						&bp_pos, &bp,
 						BTREE_ITER_cached);
 		if (bch2_err_matches(ret, BCH_ERR_transaction_restart))
@@ -821,6 +825,7 @@ next:
 
 	trace_evacuate_bucket(c, &bucket, dirty_sectors, bucket_size, fragmentation, ret);
 err:
+	bch2_dev_put(ca);
 	bch2_bkey_buf_exit(&sk, c);
 	return ret;
 }
@@ -1035,6 +1040,7 @@ static bool drop_extra_replicas_pred(struct bch_fs *c, void *arg,
 	struct extent_ptr_decoded p;
 	unsigned i = 0;
 
+	rcu_read_lock();
 	bkey_for_each_ptr_decode(k.k, bch2_bkey_ptrs_c(k), p, entry) {
 		unsigned d = bch2_extent_ptr_durability(c, &p);
 
@@ -1045,6 +1051,7 @@ static bool drop_extra_replicas_pred(struct bch_fs *c, void *arg,
 
 		i++;
 	}
+	rcu_read_unlock();
 
 	return data_opts->kill_ptrs != 0;
 }
