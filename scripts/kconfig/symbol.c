@@ -466,10 +466,9 @@ void sym_calc_value(struct symbol *sym)
 			if (sym->flags & SYMBOL_CHANGED)
 				sym_set_changed(choice_sym);
 		}
-	}
 
-	if (sym->flags & SYMBOL_NO_WRITE)
 		sym->flags &= ~SYMBOL_WRITE;
+	}
 
 	if (sym->flags & SYMBOL_NEED_SET_CHOICE_VALUES)
 		set_all_choice_values(sym);
@@ -827,7 +826,7 @@ struct symbol *sym_lookup(const char *name, int flags)
 			if (symbol->name &&
 			    !strcmp(symbol->name, name) &&
 			    (flags ? symbol->flags & flags
-				   : !(symbol->flags & (SYMBOL_CONST|SYMBOL_CHOICE))))
+				   : !(symbol->flags & SYMBOL_CONST)))
 				return symbol;
 		}
 		new_name = xstrdup(name);
