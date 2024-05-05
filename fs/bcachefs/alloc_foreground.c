@@ -100,7 +100,7 @@ static void bch2_open_bucket_hash_remove(struct bch_fs *c, struct open_bucket *o
 
 void __bch2_open_bucket_put(struct bch_fs *c, struct open_bucket *ob)
 {
-	struct bch_dev *ca = bch_dev_bkey_exists(c, ob->dev);
+	struct bch_dev *ca = ob_dev(c, ob);
 
 	if (ob->ec) {
 		ec_stripe_new_put(c, ob->ec, STRIPE_REF_io);
@@ -300,7 +300,7 @@ static struct open_bucket *try_alloc_bucket(struct btree_trans *trans, struct bc
 
 	k = bch2_bkey_get_iter(trans, &iter,
 			       BTREE_ID_alloc, POS(ca->dev_idx, b),
-			       BTREE_ITER_CACHED);
+			       BTREE_ITER_cached);
 	ret = bkey_err(k);
 	if (ret) {
 		ob = ERR_PTR(ret);
@@ -342,9 +342,9 @@ static struct open_bucket *try_alloc_bucket(struct btree_trans *trans, struct bc
 		struct bch_backpointer bp;
 		struct bpos bp_pos = POS_MIN;
 
-		ret = bch2_get_next_backpointer(trans, POS(ca->dev_idx, b), -1,
+		ret = bch2_get_next_backpointer(trans, ca, POS(ca->dev_idx, b), -1,
 						&bp_pos, &bp,
-						BTREE_ITER_NOPRESERVE);
+						BTREE_ITER_nopreserve);
 		if (ret) {
 			ob = ERR_PTR(ret);
 			goto err;
@@ -363,10 +363,10 @@ static struct open_bucket *try_alloc_bucket(struct btree_trans *trans, struct bc
 
 	ob = __try_alloc_bucket(c, ca, b, watermark, a, s, cl);
 	if (!ob)
-		set_btree_iter_dontneed(&iter);
+		bch2_set_btree_iter_dontneed(&iter);
 err:
 	if (iter.path)
-		set_btree_iter_dontneed(&iter);
+		bch2_set_btree_iter_dontneed(&iter);
 	bch2_trans_iter_exit(trans, &iter);
 	printbuf_exit(&buf);
 	return ob;
@@ -404,7 +404,7 @@ bch2_bucket_alloc_early(struct btree_trans *trans,
 	 */
 again:
 	for_each_btree_key_norestart(trans, iter, BTREE_ID_alloc, POS(ca->dev_idx, alloc_cursor),
-			   BTREE_ITER_SLOTS, k, ret) {
+			   BTREE_ITER_slots, k, ret) {
 		struct bch_alloc_v4 a_convert;
 		const struct bch_alloc_v4 *a;
 
@@ -420,7 +420,7 @@ again:
 			continue;
 
 		/* now check the cached key to serialize concurrent allocs of the bucket */
-		ck = bch2_bkey_get_iter(trans, &citer, BTREE_ID_alloc, k.k->p, BTREE_ITER_CACHED);
+		ck = bch2_bkey_get_iter(trans, &citer, BTREE_ID_alloc, k.k->p, BTREE_ITER_cached);
 		ret = bkey_err(ck);
 		if (ret)
 			break;
@@ -433,7 +433,7 @@ again:
 
 		ob = __try_alloc_bucket(trans->c, ca, k.k->p.offset, watermark, a, s, cl);
 next:
-		set_btree_iter_dontneed(&citer);
+		bch2_set_btree_iter_dontneed(&citer);
 		bch2_trans_iter_exit(trans, &citer);
 		if (ob)
 			break;
@@ -488,7 +488,7 @@ again:
 			ob = try_alloc_bucket(trans, ca, watermark,
 					      alloc_cursor, s, k, cl);
 			if (ob) {
-				set_btree_iter_dontneed(&iter);
+				bch2_set_btree_iter_dontneed(&iter);
 				break;
 			}
 		}
@@ -516,6 +516,7 @@ again:
  * @trans:	transaction object
  * @ca:		device to allocate from
  * @watermark:	how important is this allocation?
+ * @data_type:	BCH_DATA_journal, btree, user...
  * @cl:		if not NULL, closure to be used to wait if buckets not available
  * @usage:	for secondarily also returning the current device usage
  *
@@ -524,6 +525,7 @@ again:
 static struct open_bucket *bch2_bucket_alloc_trans(struct btree_trans *trans,
 				      struct bch_dev *ca,
 				      enum bch_watermark watermark,
+				      enum bch_data_type data_type,
 				      struct closure *cl,
 				      struct bch_dev_usage *usage)
 {
@@ -541,7 +543,7 @@ again:
 		bch2_do_discards(c);
 
 	if (usage->d[BCH_DATA_need_gc_gens].buckets > avail)
-		bch2_do_gc_gens(c);
+		bch2_gc_gens_async(c);
 
 	if (should_invalidate_buckets(ca, *usage))
 		bch2_do_invalidates(c);
@@ -578,6 +580,9 @@ err:
 		ob = ERR_PTR(-BCH_ERR_no_buckets_found);
 
 	if (!IS_ERR(ob))
+		ob->data_type = data_type;
+
+	if (!IS_ERR(ob))
 		trace_and_count(c, bucket_alloc, ca,
 				bch2_watermarks[watermark],
 				ob->bucket,
@@ -605,6 +610,7 @@ err:
 
 struct open_bucket *bch2_bucket_alloc(struct bch_fs *c, struct bch_dev *ca,
 				      enum bch_watermark watermark,
+				      enum bch_data_type data_type,
 				      struct closure *cl)
 {
 	struct bch_dev_usage usage;
@@ -612,7 +618,7 @@ struct open_bucket *bch2_bucket_alloc(struct bch_fs *c, struct bch_dev *ca,
 
 	bch2_trans_do(c, NULL, NULL, 0,
 		      PTR_ERR_OR_ZERO(ob = bch2_bucket_alloc_trans(trans, ca, watermark,
-							cl, &usage)));
+							data_type, cl, &usage)));
 	return ob;
 }
 
@@ -678,8 +684,7 @@ static int add_new_bucket(struct bch_fs *c,
 			   unsigned flags,
 			   struct open_bucket *ob)
 {
-	unsigned durability =
-		bch_dev_bkey_exists(c, ob->dev)->mi.durability;
+	unsigned durability = ob_dev(c, ob)->mi.durability;
 
 	BUG_ON(*nr_effective >= nr_replicas);
 
@@ -711,37 +716,28 @@ int bch2_bucket_alloc_set_trans(struct btree_trans *trans,
 	struct bch_fs *c = trans->c;
 	struct dev_alloc_list devs_sorted =
 		bch2_dev_alloc_list(c, stripe, devs_may_alloc);
-	unsigned dev;
-	struct bch_dev *ca;
 	int ret = -BCH_ERR_insufficient_devices;
-	unsigned i;
 
 	BUG_ON(*nr_effective >= nr_replicas);
 
-	for (i = 0; i < devs_sorted.nr; i++) {
+	for (unsigned i = 0; i < devs_sorted.nr; i++) {
 		struct bch_dev_usage usage;
 		struct open_bucket *ob;
 
-		dev = devs_sorted.devs[i];
-
-		rcu_read_lock();
-		ca = rcu_dereference(c->devs[dev]);
-		if (ca)
-			percpu_ref_get(&ca->ref);
-		rcu_read_unlock();
-
+		unsigned dev = devs_sorted.devs[i];
+		struct bch_dev *ca = bch2_dev_tryget_noerror(c, dev);
 		if (!ca)
 			continue;
 
 		if (!ca->mi.durability && *have_cache) {
-			percpu_ref_put(&ca->ref);
+			bch2_dev_put(ca);
 			continue;
 		}
 
-		ob = bch2_bucket_alloc_trans(trans, ca, watermark, cl, &usage);
+		ob = bch2_bucket_alloc_trans(trans, ca, watermark, data_type, cl, &usage);
 		if (!IS_ERR(ob))
 			bch2_dev_stripe_increment_inlined(ca, stripe, &usage);
-		percpu_ref_put(&ca->ref);
+		bch2_dev_put(ca);
 
 		if (IS_ERR(ob)) {
 			ret = PTR_ERR(ob);
@@ -749,8 +745,6 @@ int bch2_bucket_alloc_set_trans(struct btree_trans *trans,
 				break;
 			continue;
 		}
-
-		ob->data_type = data_type;
 
 		if (add_new_bucket(c, ptrs, devs_may_alloc,
 				   nr_replicas, nr_effective,
@@ -836,7 +830,7 @@ static bool want_bucket(struct bch_fs *c,
 			bool *have_cache, bool ec,
 			struct open_bucket *ob)
 {
-	struct bch_dev *ca = bch_dev_bkey_exists(c, ob->dev);
+	struct bch_dev *ca = ob_dev(c, ob);
 
 	if (!test_bit(ob->dev, devs_may_alloc->d))
 		return false;
@@ -906,7 +900,7 @@ static int bucket_alloc_set_partial(struct bch_fs *c,
 		struct open_bucket *ob = c->open_buckets + c->open_buckets_partial[i];
 
 		if (want_bucket(c, wp, devs_may_alloc, have_cache, ec, ob)) {
-			struct bch_dev *ca = bch_dev_bkey_exists(c, ob->dev);
+			struct bch_dev *ca = ob_dev(c, ob);
 			struct bch_dev_usage usage;
 			u64 avail;
 
@@ -1291,7 +1285,7 @@ deallocate_extra_replicas(struct bch_fs *c,
 	unsigned i;
 
 	open_bucket_for_each(c, ptrs, ob, i) {
-		unsigned d = bch_dev_bkey_exists(c, ob->dev)->mi.durability;
+		unsigned d = ob_dev(c, ob)->mi.durability;
 
 		if (d && d <= extra_replicas) {
 			extra_replicas -= d;
@@ -1341,6 +1335,10 @@ retry:
 	have_cache	= false;
 
 	*wp_ret = wp = writepoint_find(trans, write_point.v);
+
+	ret = bch2_trans_relock(trans);
+	if (ret)
+		goto err;
 
 	/* metadata may not allocate on cache devices: */
 	if (wp->data_type != BCH_DATA_user)
@@ -1444,7 +1442,7 @@ err:
 
 struct bch_extent_ptr bch2_ob_ptr(struct bch_fs *c, struct open_bucket *ob)
 {
-	struct bch_dev *ca = bch_dev_bkey_exists(c, ob->dev);
+	struct bch_dev *ca = ob_dev(c, ob);
 
 	return (struct bch_extent_ptr) {
 		.type	= 1 << BCH_EXTENT_ENTRY_ptr,
@@ -1520,7 +1518,7 @@ void bch2_fs_allocator_foreground_init(struct bch_fs *c)
 
 static void bch2_open_bucket_to_text(struct printbuf *out, struct bch_fs *c, struct open_bucket *ob)
 {
-	struct bch_dev *ca = bch_dev_bkey_exists(c, ob->dev);
+	struct bch_dev *ca = ob_dev(c, ob);
 	unsigned data_type = ob->data_type;
 	barrier(); /* READ_ONCE() doesn't work on bitfields */
 
@@ -1621,4 +1619,44 @@ void bch2_write_points_to_text(struct printbuf *out, struct bch_fs *c)
 
 	prt_str(out, "Btree write point\n");
 	bch2_write_point_to_text(out, c, &c->btree_write_point);
+}
+
+void bch2_fs_alloc_debug_to_text(struct printbuf *out, struct bch_fs *c)
+{
+	unsigned nr[BCH_DATA_NR];
+
+	memset(nr, 0, sizeof(nr));
+
+	for (unsigned i = 0; i < ARRAY_SIZE(c->open_buckets); i++)
+		nr[c->open_buckets[i].data_type]++;
+
+	printbuf_tabstop_push(out, 24);
+	prt_printf(out, "hidden\t%llu\n",		bch2_fs_usage_read_one(c, &c->usage_base->b.hidden));
+	prt_printf(out, "btree\t%llu\n",		bch2_fs_usage_read_one(c, &c->usage_base->b.btree));
+	prt_printf(out, "data\t%llu\n",			bch2_fs_usage_read_one(c, &c->usage_base->b.data));
+	prt_printf(out, "cached\t%llu\n",		bch2_fs_usage_read_one(c, &c->usage_base->b.cached));
+	prt_printf(out, "reserved\t%llu\n",		bch2_fs_usage_read_one(c, &c->usage_base->b.reserved));
+	prt_printf(out, "online_reserved\t%llu\n",	percpu_u64_get(c->online_reserved));
+	prt_printf(out, "nr_inodes\t%llu\n",		bch2_fs_usage_read_one(c, &c->usage_base->b.nr_inodes));
+
+	prt_newline(out);
+	prt_printf(out, "freelist_wait\t%s\n",			c->freelist_wait.list.first ? "waiting" : "empty");
+	prt_printf(out, "open buckets allocated\t%i\n",		OPEN_BUCKETS_COUNT - c->open_buckets_nr_free);
+	prt_printf(out, "open buckets total\t%u\n",		OPEN_BUCKETS_COUNT);
+	prt_printf(out, "open_buckets_wait\t%s\n",		c->open_buckets_wait.list.first ? "waiting" : "empty");
+	prt_printf(out, "open_buckets_btree\t%u\n",		nr[BCH_DATA_btree]);
+	prt_printf(out, "open_buckets_user\t%u\n",		nr[BCH_DATA_user]);
+	prt_printf(out, "btree reserve cache\t%u\n",		c->btree_reserve_cache_nr);
+}
+
+void bch2_print_allocator_stuck(struct bch_fs *c)
+{
+	struct printbuf buf = PRINTBUF;
+
+	prt_printf(&buf, "Allocator stuck? Waited for 10 seconds\n");
+	bch2_fs_alloc_debug_to_text(&buf, c);
+	bch2_journal_debug_to_text(&buf, &c->journal);
+
+	bch2_print_string_as_lines(KERN_ERR, buf.buf);
+	printbuf_exit(&buf);
 }
