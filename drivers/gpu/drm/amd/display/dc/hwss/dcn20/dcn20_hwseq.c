@@ -204,7 +204,7 @@ static int find_free_gsl_group(const struct dc *dc)
  * gsl_0 <=> pipe_ctx->stream_res.gsl_group == 1
  * Using a magic value like -1 would require tracking all inits/resets
  */
- void dcn20_setup_gsl_group_as_lock(
+void dcn20_setup_gsl_group_as_lock(
 		const struct dc *dc,
 		struct pipe_ctx *pipe_ctx,
 		bool enable)
@@ -758,9 +758,9 @@ void dcn20_disable_pixel_data(struct dc *dc, struct pipe_ctx *pipe_ctx, bool bla
 }
 
 static int calc_mpc_flow_ctrl_cnt(const struct dc_stream_state *stream,
-		int opp_cnt)
+		int opp_cnt, bool is_two_pixels_per_container)
 {
-	bool hblank_halved = optc2_is_two_pixels_per_containter(&stream->timing);
+	bool hblank_halved = is_two_pixels_per_container;
 	int flow_ctrl_cnt;
 
 	if (opp_cnt >= 2)
@@ -827,7 +827,9 @@ enum dc_status dcn20_enable_stream_timing(
 	int i;
 	struct mpc_dwb_flow_control flow_control;
 	struct mpc *mpc = dc->res_pool->mpc;
-	bool rate_control_2x_pclk = (interlace || optc2_is_two_pixels_per_containter(&stream->timing));
+	bool is_two_pixels_per_container =
+			pipe_ctx->stream_res.tg->funcs->is_two_pixels_per_container(&stream->timing);
+	bool rate_control_2x_pclk = (interlace || is_two_pixels_per_container);
 	unsigned int k1_div = PIXEL_RATE_DIV_NA;
 	unsigned int k2_div = PIXEL_RATE_DIV_NA;
 
@@ -913,7 +915,8 @@ enum dc_status dcn20_enable_stream_timing(
 	rate_control_2x_pclk = rate_control_2x_pclk || opp_cnt > 1;
 	flow_control.flow_ctrl_mode = 0;
 	flow_control.flow_ctrl_cnt0 = 0x80;
-	flow_control.flow_ctrl_cnt1 = calc_mpc_flow_ctrl_cnt(stream, opp_cnt);
+	flow_control.flow_ctrl_cnt1 = calc_mpc_flow_ctrl_cnt(stream, opp_cnt,
+			is_two_pixels_per_container);
 	if (mpc->funcs->set_out_rate_control) {
 		for (i = 0; i < opp_cnt; ++i) {
 			mpc->funcs->set_out_rate_control(
@@ -1204,6 +1207,8 @@ void dcn20_blank_pixel_data(
 	int h_active = stream->timing.h_addressable + stream->timing.h_border_left + stream->timing.h_border_right;
 	int v_active = stream->timing.v_addressable + stream->timing.v_border_bottom + stream->timing.v_border_top;
 	int odm_slice_width, last_odm_slice_width, offset = 0;
+	bool is_two_pixels_per_container =
+			pipe_ctx->stream_res.tg->funcs->is_two_pixels_per_container(&stream->timing);
 
 	if (stream->link->test_pattern_enabled)
 		return;
@@ -1214,6 +1219,8 @@ void dcn20_blank_pixel_data(
 	for (odm_pipe = pipe_ctx->next_odm_pipe; odm_pipe; odm_pipe = odm_pipe->next_odm_pipe)
 		odm_cnt++;
 	odm_slice_width = h_active / odm_cnt;
+	if ((odm_slice_width % 2) && is_two_pixels_per_container)
+		odm_slice_width++;
 	last_odm_slice_width = h_active - odm_slice_width * (odm_cnt - 1);
 
 	if (blank) {
@@ -1709,6 +1716,11 @@ static void dcn20_update_dchubp_dpp(
 				plane_state->color_space,
 				NULL);
 
+		if (dpp->funcs->set_cursor_matrix) {
+			dpp->funcs->set_cursor_matrix(dpp,
+				plane_state->color_space,
+				plane_state->cursor_csc_color_matrix);
+		}
 		if (dpp->funcs->dpp_program_bias_and_scale) {
 			//TODO :for CNVC set scale and bias registers if necessary
 			build_prescale_params(&bns_params, plane_state);
@@ -1754,8 +1766,8 @@ static void dcn20_update_dchubp_dpp(
 	if ((pipe_ctx->update_flags.bits.enable || pipe_ctx->update_flags.bits.opp_changed ||
 			pipe_ctx->update_flags.bits.scaler || viewport_changed == true) &&
 			pipe_ctx->stream->cursor_attributes.address.quad_part != 0) {
-		dc->hwss.set_cursor_position(pipe_ctx);
 		dc->hwss.set_cursor_attribute(pipe_ctx);
+		dc->hwss.set_cursor_position(pipe_ctx);
 
 		if (dc->hwss.set_cursor_sdr_white_level)
 			dc->hwss.set_cursor_sdr_white_level(pipe_ctx);
@@ -1908,6 +1920,10 @@ static void dcn20_program_pipe(
 		if (dc->res_pool->hubbub->funcs->program_det_size)
 			dc->res_pool->hubbub->funcs->program_det_size(
 				dc->res_pool->hubbub, pipe_ctx->plane_res.hubp->inst, pipe_ctx->det_buffer_size_kb);
+
+		if (dc->res_pool->hubbub->funcs->program_det_segments)
+			dc->res_pool->hubbub->funcs->program_det_segments(
+				dc->res_pool->hubbub, pipe_ctx->plane_res.hubp->inst, pipe_ctx->hubp_regs.det_size);
 	}
 
 	if (pipe_ctx->update_flags.raw || pipe_ctx->plane_state->update_flags.raw || pipe_ctx->stream->update_flags.raw)
@@ -1917,6 +1933,11 @@ static void dcn20_program_pipe(
 			|| pipe_ctx->plane_state->update_flags.bits.hdr_mult)
 		hws->funcs.set_hdr_multiplier(pipe_ctx);
 
+	if (hws->funcs.populate_mcm_luts) {
+		hws->funcs.populate_mcm_luts(dc, pipe_ctx, pipe_ctx->plane_state->mcm_luts,
+				pipe_ctx->plane_state->lut_bank_a);
+		pipe_ctx->plane_state->lut_bank_a = !pipe_ctx->plane_state->lut_bank_a;
+	}
 	if (pipe_ctx->update_flags.bits.enable ||
 	    pipe_ctx->plane_state->update_flags.bits.in_transfer_func_change ||
 	    pipe_ctx->plane_state->update_flags.bits.gamma_change ||
@@ -2073,6 +2094,8 @@ void dcn20_program_front_end_for_ctx(
 					(context->res_ctx.pipe_ctx[i].plane_state && dc_state_get_pipe_subvp_type(context, &context->res_ctx.pipe_ctx[i]) == SUBVP_PHANTOM))) {
 				if (hubbub->funcs->program_det_size)
 					hubbub->funcs->program_det_size(hubbub, dc->current_state->res_ctx.pipe_ctx[i].plane_res.hubp->inst, 0);
+				if (dc->res_pool->hubbub->funcs->program_det_segments)
+					dc->res_pool->hubbub->funcs->program_det_segments(hubbub, dc->current_state->res_ctx.pipe_ctx[i].plane_res.hubp->inst, 0);
 			}
 			hws->funcs.plane_atomic_disconnect(dc, dc->current_state, &dc->current_state->res_ctx.pipe_ctx[i]);
 			DC_LOG_DC("Reset mpcc for pipe %d\n", dc->current_state->res_ctx.pipe_ctx[i].pipe_idx);
@@ -2620,6 +2643,8 @@ void dcn20_unblank_stream(struct pipe_ctx *pipe_ctx,
 	struct dc_link *link = stream->link;
 	struct dce_hwseq *hws = link->dc->hwseq;
 	struct pipe_ctx *odm_pipe;
+	bool is_two_pixels_per_container =
+			pipe_ctx->stream_res.tg->funcs->is_two_pixels_per_container(&stream->timing);
 
 	params.opp_cnt = 1;
 	for (odm_pipe = pipe_ctx->next_odm_pipe; odm_pipe; odm_pipe = odm_pipe->next_odm_pipe) {
@@ -2636,7 +2661,7 @@ void dcn20_unblank_stream(struct pipe_ctx *pipe_ctx,
 				pipe_ctx->stream_res.hpo_dp_stream_enc,
 				pipe_ctx->stream_res.tg->inst);
 	} else if (dc_is_dp_signal(pipe_ctx->stream->signal)) {
-		if (optc2_is_two_pixels_per_containter(&stream->timing) || params.opp_cnt > 1)
+		if (is_two_pixels_per_container || params.opp_cnt > 1)
 			params.timing.pix_clk_100hz /= 2;
 		pipe_ctx->stream_res.stream_enc->funcs->dp_set_odm_combine(
 				pipe_ctx->stream_res.stream_enc, params.opp_cnt > 1);
