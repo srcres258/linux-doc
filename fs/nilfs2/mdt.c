@@ -152,7 +152,7 @@ nilfs_mdt_submit_block(struct inode *inode, unsigned long blkoff, blk_opf_t opf,
 	ret = 0;
 
 	trace_nilfs2_mdt_submit_block(inode, inode->i_ino, blkoff,
-				      opf & REQ_OP_MASK);
+				      (__force int)(opf & REQ_OP_MASK));
  out:
 	get_bh(bh);
 	*out_bh = bh;

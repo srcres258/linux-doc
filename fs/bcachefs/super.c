@@ -657,6 +657,7 @@ void bch2_fs_free(struct bch_fs *c)
 		struct bch_dev *ca = rcu_dereference_protected(c->devs[i], true);
 
 		if (ca) {
+			EBUG_ON(atomic_long_read(&ca->ref) != 1);
 			bch2_free_super(&ca->disk_sb);
 			bch2_dev_free(ca);
 		}
@@ -711,7 +712,7 @@ static int bch2_fs_online(struct bch_fs *c)
 		ret = bch2_dev_sysfs_online(c, ca);
 		if (ret) {
 			bch_err(c, "error creating sysfs objects");
-			percpu_ref_put(&ca->ref);
+			bch2_dev_put(ca);
 			goto err;
 		}
 	}
@@ -1200,7 +1201,9 @@ static void bch2_dev_free(struct bch_dev *ca)
 	bch2_time_stats_quantiles_exit(&ca->io_latency[READ]);
 
 	percpu_ref_exit(&ca->io_ref);
+#ifndef CONFIG_BCACHEFS_DEBUG
 	percpu_ref_exit(&ca->ref);
+#endif
 	kobject_put(&ca->kobj);
 }
 
@@ -1227,12 +1230,14 @@ static void __bch2_dev_offline(struct bch_fs *c, struct bch_dev *ca)
 	bch2_dev_journal_exit(ca);
 }
 
+#ifndef CONFIG_BCACHEFS_DEBUG
 static void bch2_dev_ref_complete(struct percpu_ref *ref)
 {
 	struct bch_dev *ca = container_of(ref, struct bch_dev, ref);
 
 	complete(&ca->ref_completion);
 }
+#endif
 
 static void bch2_dev_io_ref_complete(struct percpu_ref *ref)
 {
@@ -1301,9 +1306,14 @@ static struct bch_dev *__bch2_dev_alloc(struct bch_fs *c,
 	ca->nr_btree_reserve = DIV_ROUND_UP(BTREE_NODE_RESERVE,
 			     ca->mi.bucket_size / btree_sectors(c));
 
-	if (percpu_ref_init(&ca->ref, bch2_dev_ref_complete,
-			    0, GFP_KERNEL) ||
-	    percpu_ref_init(&ca->io_ref, bch2_dev_io_ref_complete,
+#ifndef CONFIG_BCACHEFS_DEBUG
+	if (percpu_ref_init(&ca->ref, bch2_dev_ref_complete, 0, GFP_KERNEL))
+		goto err;
+#else
+	atomic_long_set(&ca->ref, 1);
+#endif
+
+	if (percpu_ref_init(&ca->io_ref, bch2_dev_io_ref_complete,
 			    PERCPU_REF_INIT_DEAD, GFP_KERNEL) ||
 	    !(ca->sb_read_scratch = (void *) __get_free_page(GFP_KERNEL)) ||
 	    bch2_dev_buckets_alloc(c, ca) ||
@@ -1611,7 +1621,7 @@ int bch2_dev_remove(struct bch_fs *c, struct bch_dev *ca, int flags)
 	 * We consume a reference to ca->ref, regardless of whether we succeed
 	 * or fail:
 	 */
-	percpu_ref_put(&ca->ref);
+	bch2_dev_put(ca);
 
 	if (!bch2_dev_state_allowed(c, ca, BCH_MEMBER_STATE_failed, flags)) {
 		bch_err(ca, "Cannot remove without losing data");
@@ -1663,7 +1673,12 @@ int bch2_dev_remove(struct bch_fs *c, struct bch_dev *ca, int flags)
 	rcu_assign_pointer(c->devs[ca->dev_idx], NULL);
 	mutex_unlock(&c->sb_lock);
 
+#ifndef CONFIG_BCACHEFS_DEBUG
 	percpu_ref_kill(&ca->ref);
+#else
+	ca->dying = true;
+	bch2_dev_put(ca);
+#endif
 	wait_for_completion(&ca->ref_completion);
 
 	bch2_dev_free(ca);
@@ -1963,6 +1978,13 @@ int bch2_dev_resize(struct bch_fs *c, struct bch_dev *ca, u64 nbuckets)
 		goto err;
 	}
 
+	if (nbuckets > BCH_MEMBER_NBUCKETS_MAX) {
+		bch_err(ca, "New device size too big (%llu greater than max %u)",
+			nbuckets, BCH_MEMBER_NBUCKETS_MAX);
+		ret = -BCH_ERR_device_size_too_big;
+		goto err;
+	}
+
 	if (bch2_dev_is_online(ca) &&
 	    get_capacity(ca->disk_sb.bdev->bd_disk) <
 	    ca->mi.bucket_size * nbuckets) {
@@ -2008,13 +2030,9 @@ err:
 /* return with ref on ca->ref: */
 struct bch_dev *bch2_dev_lookup(struct bch_fs *c, const char *name)
 {
-	rcu_read_lock();
-	for_each_member_device_rcu(c, ca, NULL)
-		if (!strcmp(name, ca->name)) {
-			rcu_read_unlock();
+	for_each_member_device(c, ca)
+		if (!strcmp(name, ca->name))
 			return ca;
-		}
-	rcu_read_unlock();
 	return ERR_PTR(-BCH_ERR_ENOENT_dev_not_found);
 }
 

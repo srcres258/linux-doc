@@ -6,6 +6,7 @@
  *
  *  Copyright (C) 2017 Sudip Mukherjee, All Rights Reserved.
  */
+#include <linux/bitfield.h>
 #include <linux/bits.h>
 #include <linux/delay.h>
 #include <linux/device.h>
@@ -20,7 +21,6 @@
 #include <linux/property.h>
 #include <linux/string.h>
 #include <linux/types.h>
-#include <linux/bitfield.h>
 
 #include <linux/serial_8250.h>
 #include <linux/serial_core.h>
@@ -237,14 +237,12 @@ struct exar8250_platform {
  * struct exar8250_board - board information
  * @num_ports: number of serial ports
  * @reg_shift: describes UART register mapping in PCI memory
- * @board_init: quirk run once at ->probe() stage before setting up ports
  * @setup: quirk run at ->probe() stage for each port
  * @exit: quirk run at ->remove() stage
  */
 struct exar8250_board {
 	unsigned int num_ports;
 	unsigned int reg_shift;
-	int     (*board_init)(struct exar8250 *priv, struct pci_dev *pcidev);
 	int	(*setup)(struct exar8250 *priv, struct pci_dev *pcidev,
 			 struct uart_8250_port *port, int idx);
 	void	(*exit)(struct pci_dev *pcidev);
@@ -282,7 +280,7 @@ static inline void exar_ee_deselect(struct exar8250 *priv)
 	exar_write_reg(priv, UART_EXAR_REGB, 0x00);
 }
 
-static inline void exar_ee_write_bit(struct exar8250 *priv, int bit)
+static inline void exar_ee_write_bit(struct exar8250 *priv, u8 bit)
 {
 	u8 value = UART_EXAR_REGB_EECS;
 
@@ -326,6 +324,7 @@ static inline u8 exar_ee_read_bit(struct exar8250 *priv)
  * @ee_addr: Offset of EEPROM to read word from
  *
  * Read a single 16bit word from an Exar UART's EEPROM.
+ * The type of the EEPROM is AT93C46D.
  *
  * Return: EEPROM word
  */
@@ -342,13 +341,13 @@ static u16 exar_ee_read(struct exar8250 *priv, u8 ee_addr)
 	exar_ee_write_bit(priv, 0);
 
 	// Send address to read from
-	for (i = 1 << (UART_EXAR_REGB_EE_ADDR_SIZE - 1); i; i >>= 1)
-		exar_ee_write_bit(priv, (ee_addr & i));
+	for (i = UART_EXAR_REGB_EE_ADDR_SIZE - 1; i >= 0; i--)
+		exar_ee_write_bit(priv, ee_addr & BIT(i));
 
-	// Read data 1 bit at a time
-	for (i = 0; i <= UART_EXAR_REGB_EE_DATA_SIZE; i++) {
-		data <<= 1;
-		data |= exar_ee_read_bit(priv);
+	// Read data 1 bit at a time starting with a dummy bit
+	for (i = UART_EXAR_REGB_EE_DATA_SIZE; i >= 0; i--) {
+		if (exar_ee_read_bit(priv))
+			data |= BIT(i);
 	}
 
 	exar_ee_deselect(priv);
@@ -609,28 +608,32 @@ pci_fastcom335_setup(struct exar8250 *priv, struct pci_dev *pcidev,
 	writeb(32, p + UART_EXAR_TXTRG);
 	writeb(32, p + UART_EXAR_RXTRG);
 
+	/* Skip the initial (per device) setup */
+	if (idx)
+		return 0;
+
 	/*
 	 * Setup Multipurpose Input/Output pins.
 	 */
-	if (idx == 0) {
-		switch (pcidev->device) {
-		case PCI_DEVICE_ID_COMMTECH_4222PCI335:
-		case PCI_DEVICE_ID_COMMTECH_4224PCI335:
-			writeb(0x78, p + UART_EXAR_MPIOLVL_7_0);
-			writeb(0x00, p + UART_EXAR_MPIOINV_7_0);
-			writeb(0x00, p + UART_EXAR_MPIOSEL_7_0);
-			break;
-		case PCI_DEVICE_ID_COMMTECH_2324PCI335:
-		case PCI_DEVICE_ID_COMMTECH_2328PCI335:
-			writeb(0x00, p + UART_EXAR_MPIOLVL_7_0);
-			writeb(0xc0, p + UART_EXAR_MPIOINV_7_0);
-			writeb(0xc0, p + UART_EXAR_MPIOSEL_7_0);
-			break;
-		}
-		writeb(0x00, p + UART_EXAR_MPIOINT_7_0);
-		writeb(0x00, p + UART_EXAR_MPIO3T_7_0);
-		writeb(0x00, p + UART_EXAR_MPIOOD_7_0);
+	switch (pcidev->device) {
+	case PCI_DEVICE_ID_COMMTECH_4222PCI335:
+	case PCI_DEVICE_ID_COMMTECH_4224PCI335:
+		writeb(0x78, p + UART_EXAR_MPIOLVL_7_0);
+		writeb(0x00, p + UART_EXAR_MPIOINV_7_0);
+		writeb(0x00, p + UART_EXAR_MPIOSEL_7_0);
+		break;
+	case PCI_DEVICE_ID_COMMTECH_2324PCI335:
+	case PCI_DEVICE_ID_COMMTECH_2328PCI335:
+		writeb(0x00, p + UART_EXAR_MPIOLVL_7_0);
+		writeb(0xc0, p + UART_EXAR_MPIOINV_7_0);
+		writeb(0xc0, p + UART_EXAR_MPIOSEL_7_0);
+		break;
+	default:
+		break;
 	}
+	writeb(0x00, p + UART_EXAR_MPIOINT_7_0);
+	writeb(0x00, p + UART_EXAR_MPIO3T_7_0);
+	writeb(0x00, p + UART_EXAR_MPIOOD_7_0);
 
 	return 0;
 }
@@ -641,7 +644,7 @@ pci_fastcom335_setup(struct exar8250 *priv, struct pci_dev *pcidev,
  * @port_num: Port number to set tristate off
  *
  * Most RS485 capable cards have a power on tristate jumper/switch that ensures
- * the RS422/RS485 transciever does not drive a multi-drop RS485 bus when it is
+ * the RS422/RS485 transceiver does not drive a multi-drop RS485 bus when it is
  * not the master. When this jumper is installed the user must set the RS485
  * mode to Full or Half duplex to disable tristate prior to using the port.
  *
@@ -666,7 +669,7 @@ static int cti_tristate_disable(struct exar8250 *priv, unsigned int port_num)
  * @priv: Device's private structure
  *
  * Some older CTI cards require MPIO_0 to be set low to enable the
- * interupts from the UART to the PLX PCI->PCIe bridge.
+ * interrupts from the UART to the PLX PCI->PCIe bridge.
  *
  * Return: 0 on success, negative error code on failure
  */
@@ -695,7 +698,6 @@ static int cti_read_osc_freq(struct exar8250 *priv, u8 eeprom_offset)
 {
 	u16 lower_word;
 	u16 upper_word;
-	int osc_freq;
 
 	lower_word = exar_ee_read(priv, eeprom_offset);
 	// Check if EEPROM word was blank
@@ -706,15 +708,14 @@ static int cti_read_osc_freq(struct exar8250 *priv, u8 eeprom_offset)
 	if (upper_word == 0xFFFF)
 		return -EIO;
 
-	osc_freq = FIELD_PREP(CTI_EE_MASK_OSC_FREQ_LOWER, lower_word) |
-		FIELD_PREP(CTI_EE_MASK_OSC_FREQ_UPPER, upper_word);
-
-	return osc_freq;
+	return FIELD_PREP(CTI_EE_MASK_OSC_FREQ_LOWER, lower_word) |
+	       FIELD_PREP(CTI_EE_MASK_OSC_FREQ_UPPER, upper_word);
 }
 
 /**
  * cti_get_port_type_xr17c15x_xr17v25x() - Get port type of xr17c15x/xr17v25x
  * @priv: Device's private structure
+ * @pcidev: Pointer to the PCI device for this port
  * @port_num: Port to get type of
  *
  * CTI xr17c15x and xr17v25x based cards port types are based on PCI IDs.
@@ -725,8 +726,6 @@ static enum cti_port_type cti_get_port_type_xr17c15x_xr17v25x(struct exar8250 *p
 							struct pci_dev *pcidev,
 							unsigned int port_num)
 {
-	enum cti_port_type port_type;
-
 	switch (pcidev->subsystem_device) {
 	// RS232 only cards
 	case PCI_SUBDEVICE_ID_CONNECT_TECH_PCI_UART_2_232:
@@ -736,24 +735,17 @@ static enum cti_port_type cti_get_port_type_xr17c15x_xr17v25x(struct exar8250 *p
 	case PCI_SUBDEVICE_ID_CONNECT_TECH_PCI_UART_8_SP_232_NS:
 	case PCI_SUBDEVICE_ID_CONNECT_TECH_PCI_UART_8_XPRS_LP_232:
 	case PCI_SUBDEVICE_ID_CONNECT_TECH_PCI_UART_8_XPRS_LP_232_NS:
-		port_type = CTI_PORT_TYPE_RS232;
-		break;
+		return CTI_PORT_TYPE_RS232;
 	// 1x RS232, 1x RS422/RS485
 	case PCI_SUBDEVICE_ID_CONNECT_TECH_PCI_UART_1_1:
-		port_type = (port_num == 0) ?
-			CTI_PORT_TYPE_RS232 : CTI_PORT_TYPE_RS422_485;
-		break;
+		return (port_num == 0) ? CTI_PORT_TYPE_RS232 : CTI_PORT_TYPE_RS422_485;
 	// 2x RS232, 2x RS422/RS485
 	case PCI_SUBDEVICE_ID_CONNECT_TECH_PCI_UART_2_2:
-		port_type = (port_num < 2) ?
-			CTI_PORT_TYPE_RS232 : CTI_PORT_TYPE_RS422_485;
-		break;
+		return (port_num < 2) ? CTI_PORT_TYPE_RS232 : CTI_PORT_TYPE_RS422_485;
 	// 4x RS232, 4x RS422/RS485
 	case PCI_SUBDEVICE_ID_CONNECT_TECH_PCI_UART_4_4:
 	case PCI_SUBDEVICE_ID_CONNECT_TECH_PCI_UART_4_4_SP:
-		port_type = (port_num < 4) ?
-			CTI_PORT_TYPE_RS232 : CTI_PORT_TYPE_RS422_485;
-		break;
+		return (port_num < 4) ? CTI_PORT_TYPE_RS232 : CTI_PORT_TYPE_RS422_485;
 	// RS232/RS422/RS485 HW (jumper) selectable
 	case PCI_SUBDEVICE_ID_CONNECT_TECH_PCI_UART_2:
 	case PCI_SUBDEVICE_ID_CONNECT_TECH_PCI_UART_4:
@@ -776,37 +768,30 @@ static enum cti_port_type cti_get_port_type_xr17c15x_xr17v25x(struct exar8250 *p
 	case PCI_SUBDEVICE_ID_CONNECT_TECH_PCI_UART_4_XP_OPTO:
 	case PCI_SUBDEVICE_ID_CONNECT_TECH_PCI_UART_4_4_XPRS_OPTO:
 	case PCI_SUBDEVICE_ID_CONNECT_TECH_PCI_UART_8_XPRS_LP:
-		port_type = CTI_PORT_TYPE_RS232_422_485_HW;
-		break;
+		return CTI_PORT_TYPE_RS232_422_485_HW;
 	// RS422/RS485 HW (jumper) selectable
 	case PCI_SUBDEVICE_ID_CONNECT_TECH_PCI_UART_2_485:
 	case PCI_SUBDEVICE_ID_CONNECT_TECH_PCI_UART_4_485:
 	case PCI_SUBDEVICE_ID_CONNECT_TECH_PCI_UART_8_485:
 	case PCI_SUBDEVICE_ID_CONNECT_TECH_PCI_UART_8_SP_485:
 	case PCI_SUBDEVICE_ID_CONNECT_TECH_PCI_UART_8_XPRS_LP_485:
-		port_type = CTI_PORT_TYPE_RS422_485;
-		break;
+		return CTI_PORT_TYPE_RS422_485;
 	// 6x RS232, 2x RS422/RS485
 	case PCI_SUBDEVICE_ID_CONNECT_TECH_PCI_UART_6_2_SP:
-		port_type = (port_num < 6) ?
-			CTI_PORT_TYPE_RS232 : CTI_PORT_TYPE_RS422_485;
-		break;
+		return (port_num < 6) ? CTI_PORT_TYPE_RS232 : CTI_PORT_TYPE_RS422_485;
 	// 2x RS232, 6x RS422/RS485
 	case PCI_SUBDEVICE_ID_CONNECT_TECH_PCI_UART_2_6_SP:
-		port_type = (port_num < 2) ?
-			CTI_PORT_TYPE_RS232 : CTI_PORT_TYPE_RS422_485;
-		break;
+		return (port_num < 2) ? CTI_PORT_TYPE_RS232 : CTI_PORT_TYPE_RS422_485;
 	default:
 		dev_err(&pcidev->dev, "unknown/unsupported device\n");
-		port_type = CTI_PORT_TYPE_NONE;
+		return CTI_PORT_TYPE_NONE;
 	}
-
-	return port_type;
 }
 
 /**
  * cti_get_port_type_fpga() - Get the port type of a CTI FPGA card
  * @priv: Device's private structure
+ * @pcidev: Pointer to the PCI device for this port
  * @port_num: Port to get type of
  *
  * FPGA based cards port types are based on PCI IDs.
@@ -817,25 +802,21 @@ static enum cti_port_type cti_get_port_type_fpga(struct exar8250 *priv,
 						struct pci_dev *pcidev,
 						unsigned int port_num)
 {
-	enum cti_port_type port_type;
-
 	switch (pcidev->device) {
 	case PCI_DEVICE_ID_CONNECT_TECH_PCI_XR79X_12_XIG00X:
 	case PCI_DEVICE_ID_CONNECT_TECH_PCI_XR79X_12_XIG01X:
 	case PCI_DEVICE_ID_CONNECT_TECH_PCI_XR79X_16:
-		port_type = CTI_PORT_TYPE_RS232_422_485_HW;
-		break;
+		return CTI_PORT_TYPE_RS232_422_485_HW;
 	default:
 		dev_err(&pcidev->dev, "unknown/unsupported device\n");
 		return CTI_PORT_TYPE_NONE;
 	}
-
-	return port_type;
 }
 
 /**
  * cti_get_port_type_xr17v35x() - Read port type from the EEPROM
  * @priv: Device's private structure
+ * @pcidev: Pointer to the PCI device for this port
  * @port_num: port offset
  *
  * CTI XR17V35X based cards have the port types stored in the EEPROM.
@@ -855,21 +836,19 @@ static enum cti_port_type cti_get_port_type_xr17v35x(struct exar8250 *priv,
 	port_flags = exar_ee_read(priv, offset);
 
 	port_type = FIELD_GET(CTI_EE_MASK_PORT_FLAGS_TYPE, port_flags);
-	if (!CTI_PORT_TYPE_VALID(port_type)) {
-		/*
-		 * If the port type is missing the card assume it is a
-		 * RS232/RS422/RS485 card to be safe.
-		 *
-		 * There is one known board (BEG013) that only has
-		 * 3 of 4 port types written to the EEPROM so this
-		 * acts as a work around.
-		 */
-		dev_warn(&pcidev->dev,
-			"failed to get port %d type from EEPROM\n", port_num);
-		port_type = CTI_PORT_TYPE_RS232_422_485_HW;
-	}
+	if (CTI_PORT_TYPE_VALID(port_type))
+		return port_type;
 
-	return port_type;
+	/*
+	 * If the port type is missing the card assume it is a
+	 * RS232/RS422/RS485 card to be safe.
+	 *
+	 * There is one known board (BEG013) that only has 3 of 4 port types
+	 * written to the EEPROM so this acts as a work around.
+	 */
+	dev_warn(&pcidev->dev, "failed to get port %d type from EEPROM\n", port_num);
+
+	return CTI_PORT_TYPE_RS232_422_485_HW;
 }
 
 static int cti_rs485_config_mpio_tristate(struct uart_port *port,
@@ -887,6 +866,19 @@ static int cti_rs485_config_mpio_tristate(struct uart_port *port,
 	return cti_tristate_disable(priv, port->port_id);
 }
 
+static void cti_board_init_osc_freq(struct exar8250 *priv, struct pci_dev *pcidev, u8 eeprom_offset)
+{
+	int osc_freq;
+
+	osc_freq = cti_read_osc_freq(priv, eeprom_offset);
+	if (osc_freq <= 0) {
+		dev_warn(&pcidev->dev, "failed to read OSC freq from EEPROM, using default\n");
+		osc_freq = CTI_DEFAULT_PCI_OSC_FREQ;
+	}
+
+	priv->osc_freq = osc_freq;
+}
+
 static int cti_port_setup_common(struct exar8250 *priv,
 				struct pci_dev *pcidev,
 				int idx, unsigned int offset,
@@ -894,22 +886,40 @@ static int cti_port_setup_common(struct exar8250 *priv,
 {
 	int ret;
 
-	if (priv->osc_freq == 0)
-		return -EINVAL;
-
 	port->port.port_id = idx;
 	port->port.uartclk = priv->osc_freq;
 
 	ret = serial8250_pci_setup_port(pcidev, port, 0, offset, 0);
-	if (ret) {
-		dev_err(&pcidev->dev,
-			"failed to setup pci for port %d err: %d\n", idx, ret);
+	if (ret)
 		return ret;
-	}
 
 	port->port.private_data = (void *)priv;
 	port->port.pm = exar_pm;
 	port->port.shutdown = exar_shutdown;
+
+	return 0;
+}
+
+static int cti_board_init_fpga(struct exar8250 *priv, struct pci_dev *pcidev)
+{
+	int ret;
+	u16 cfg_val;
+
+	// FPGA OSC is fixed to the 33MHz PCI clock
+	priv->osc_freq = CTI_DEFAULT_FPGA_OSC_FREQ;
+
+	// Enable external interrupts in special cfg space register
+	ret = pci_read_config_word(pcidev, CTI_FPGA_CFG_INT_EN_REG, &cfg_val);
+	if (ret)
+		return pcibios_err_to_errno(ret);
+
+	cfg_val |= CTI_FPGA_CFG_INT_EN_EXT_BIT;
+	ret = pci_write_config_word(pcidev, CTI_FPGA_CFG_INT_EN_REG, cfg_val);
+	if (ret)
+		return pcibios_err_to_errno(ret);
+
+	// RS485 gate needs to be enabled; otherwise RTS/CTS will not work
+	exar_write_reg(priv, CTI_FPGA_RS485_IO_REG, 0x01);
 
 	return 0;
 }
@@ -921,10 +931,17 @@ static int cti_port_setup_fpga(struct exar8250 *priv,
 {
 	enum cti_port_type port_type;
 	unsigned int offset;
+	int ret;
+
+	if (idx == 0) {
+		ret = cti_board_init_fpga(priv, pcidev);
+		if (ret)
+			return ret;
+	}
 
 	port_type = cti_get_port_type_fpga(priv, pcidev, idx);
 
-	// FPGA shares port offests with XR17C15X
+	// FPGA shares port offsets with XR17C15X
 	offset = idx * UART_EXAR_XR17C15X_PORT_OFFSET;
 	port->port.type = PORT_XR17D15X;
 
@@ -940,6 +957,12 @@ static int cti_port_setup_fpga(struct exar8250 *priv,
 	return cti_port_setup_common(priv, pcidev, idx, offset, port);
 }
 
+static void cti_board_init_xr17v35x(struct exar8250 *priv, struct pci_dev *pcidev)
+{
+	// XR17V35X uses the PCIe clock rather than an oscillator
+	priv->osc_freq = CTI_DEFAULT_PCIE_OSC_FREQ;
+}
+
 static int cti_port_setup_xr17v35x(struct exar8250 *priv,
 				struct pci_dev *pcidev,
 				struct uart_8250_port *port,
@@ -948,6 +971,9 @@ static int cti_port_setup_xr17v35x(struct exar8250 *priv,
 	enum cti_port_type port_type;
 	unsigned int offset;
 	int ret;
+
+	if (idx == 0)
+		cti_board_init_xr17v35x(priv, pcidev);
 
 	port_type = cti_get_port_type_xr17v35x(priv, pcidev, idx);
 
@@ -986,6 +1012,22 @@ static int cti_port_setup_xr17v35x(struct exar8250 *priv,
 	return 0;
 }
 
+static void cti_board_init_xr17v25x(struct exar8250 *priv, struct pci_dev *pcidev)
+{
+	cti_board_init_osc_freq(priv, pcidev, CTI_EE_OFF_XR17V25X_OSC_FREQ);
+
+	/* enable interrupts on cards that need the "PLX fix" */
+	switch (pcidev->subsystem_device) {
+	case PCI_SUBDEVICE_ID_CONNECT_TECH_PCI_UART_8_XPRS:
+	case PCI_SUBDEVICE_ID_CONNECT_TECH_PCI_UART_16_XPRS_A:
+	case PCI_SUBDEVICE_ID_CONNECT_TECH_PCI_UART_16_XPRS_B:
+		cti_plx_int_enable(priv);
+		break;
+	default:
+		break;
+	}
+}
+
 static int cti_port_setup_xr17v25x(struct exar8250 *priv,
 				struct pci_dev *pcidev,
 				struct uart_8250_port *port,
@@ -994,6 +1036,9 @@ static int cti_port_setup_xr17v25x(struct exar8250 *priv,
 	enum cti_port_type port_type;
 	unsigned int offset;
 	int ret;
+
+	if (idx == 0)
+		cti_board_init_xr17v25x(priv, pcidev);
 
 	port_type = cti_get_port_type_xr17c15x_xr17v25x(priv, pcidev, idx);
 
@@ -1042,6 +1087,25 @@ static int cti_port_setup_xr17v25x(struct exar8250 *priv,
 	return 0;
 }
 
+static void cti_board_init_xr17c15x(struct exar8250 *priv, struct pci_dev *pcidev)
+{
+	cti_board_init_osc_freq(priv, pcidev, CTI_EE_OFF_XR17C15X_OSC_FREQ);
+
+	/* enable interrupts on cards that need the "PLX fix" */
+	switch (pcidev->subsystem_device) {
+	case PCI_SUBDEVICE_ID_CONNECT_TECH_PCI_UART_2_XPRS:
+	case PCI_SUBDEVICE_ID_CONNECT_TECH_PCI_UART_4_XPRS_A:
+	case PCI_SUBDEVICE_ID_CONNECT_TECH_PCI_UART_4_XPRS_B:
+	case PCI_SUBDEVICE_ID_CONNECT_TECH_PCI_UART_2_XPRS_OPTO:
+	case PCI_SUBDEVICE_ID_CONNECT_TECH_PCI_UART_4_XPRS_OPTO_A:
+	case PCI_SUBDEVICE_ID_CONNECT_TECH_PCI_UART_4_XPRS_OPTO_B:
+		cti_plx_int_enable(priv);
+		break;
+	default:
+		break;
+	}
+}
+
 static int cti_port_setup_xr17c15x(struct exar8250 *priv,
 				struct pci_dev *pcidev,
 				struct uart_8250_port *port,
@@ -1049,6 +1113,9 @@ static int cti_port_setup_xr17c15x(struct exar8250 *priv,
 {
 	enum cti_port_type port_type;
 	unsigned int offset;
+
+	if (idx == 0)
+		cti_board_init_xr17c15x(priv, pcidev);
 
 	port_type = cti_get_port_type_xr17c15x_xr17v25x(priv, pcidev, idx);
 
@@ -1083,98 +1150,6 @@ static int cti_port_setup_xr17c15x(struct exar8250 *priv,
 	return cti_port_setup_common(priv, pcidev, idx, offset, port);
 }
 
-static int cti_board_init_xr17v35x(struct exar8250 *priv,
-				struct pci_dev *pcidev)
-{
-	// XR17V35X uses the PCIe clock rather than an oscillator
-	priv->osc_freq = CTI_DEFAULT_PCIE_OSC_FREQ;
-
-	return 0;
-}
-
-static int cti_board_init_xr17v25x(struct exar8250 *priv,
-				struct pci_dev *pcidev)
-{
-	int osc_freq;
-
-	osc_freq = cti_read_osc_freq(priv, CTI_EE_OFF_XR17V25X_OSC_FREQ);
-	if (osc_freq < 0) {
-		dev_warn(&pcidev->dev,
-			"failed to read osc freq from EEPROM, using default\n");
-		osc_freq = CTI_DEFAULT_PCI_OSC_FREQ;
-	}
-
-	priv->osc_freq = osc_freq;
-
-	/* enable interupts on cards that need the "PLX fix" */
-	switch (pcidev->subsystem_device) {
-	case PCI_SUBDEVICE_ID_CONNECT_TECH_PCI_UART_8_XPRS:
-	case PCI_SUBDEVICE_ID_CONNECT_TECH_PCI_UART_16_XPRS_A:
-	case PCI_SUBDEVICE_ID_CONNECT_TECH_PCI_UART_16_XPRS_B:
-		cti_plx_int_enable(priv);
-		break;
-	default:
-		break;
-	}
-
-	return 0;
-}
-
-static int cti_board_init_xr17c15x(struct exar8250 *priv,
-				struct pci_dev *pcidev)
-{
-	int osc_freq;
-
-	osc_freq = cti_read_osc_freq(priv, CTI_EE_OFF_XR17C15X_OSC_FREQ);
-	if (osc_freq <= 0) {
-		dev_warn(&pcidev->dev,
-			"failed to read osc freq from EEPROM, using default\n");
-		osc_freq = CTI_DEFAULT_PCI_OSC_FREQ;
-	}
-
-	priv->osc_freq = osc_freq;
-
-	/* enable interrupts on cards that need the "PLX fix" */
-	switch (pcidev->subsystem_device) {
-	case PCI_SUBDEVICE_ID_CONNECT_TECH_PCI_UART_2_XPRS:
-	case PCI_SUBDEVICE_ID_CONNECT_TECH_PCI_UART_4_XPRS_A:
-	case PCI_SUBDEVICE_ID_CONNECT_TECH_PCI_UART_4_XPRS_B:
-	case PCI_SUBDEVICE_ID_CONNECT_TECH_PCI_UART_2_XPRS_OPTO:
-	case PCI_SUBDEVICE_ID_CONNECT_TECH_PCI_UART_4_XPRS_OPTO_A:
-	case PCI_SUBDEVICE_ID_CONNECT_TECH_PCI_UART_4_XPRS_OPTO_B:
-		cti_plx_int_enable(priv);
-		break;
-	default:
-		break;
-	}
-
-	return 0;
-}
-
-static int cti_board_init_fpga(struct exar8250 *priv, struct pci_dev *pcidev)
-{
-	int ret;
-	u16 cfg_val;
-
-	// FPGA OSC is fixed to the 33MHz PCI clock
-	priv->osc_freq = CTI_DEFAULT_FPGA_OSC_FREQ;
-
-	// Enable external interrupts in special cfg space register
-	ret = pci_read_config_word(pcidev, CTI_FPGA_CFG_INT_EN_REG, &cfg_val);
-	if (ret)
-		return ret;
-
-	cfg_val |= CTI_FPGA_CFG_INT_EN_EXT_BIT;
-	ret = pci_write_config_word(pcidev, CTI_FPGA_CFG_INT_EN_REG, cfg_val);
-	if (ret)
-		return ret;
-
-	// RS485 gate needs to be enabled; otherwise RTS/CTS will not work
-	exar_write_reg(priv, CTI_FPGA_RS485_IO_REG, 0x01);
-
-	return 0;
-}
-
 static int
 pci_xr17c154_setup(struct exar8250 *priv, struct pci_dev *pcidev,
 		   struct uart_8250_port *port, int idx)
@@ -1193,11 +1168,10 @@ static void setup_gpio(struct pci_dev *pcidev, u8 __iomem *p)
 	 * devices will export them as GPIOs, so we pre-configure them safely
 	 * as inputs.
 	 */
-
 	u8 dir = 0x00;
 
 	if  ((pcidev->vendor == PCI_VENDOR_ID_EXAR) &&
-		(pcidev->subsystem_vendor != PCI_VENDOR_ID_SEALEVEL)) {
+	     (pcidev->subsystem_vendor != PCI_VENDOR_ID_SEALEVEL)) {
 		// Configure GPIO as inputs for Commtech adapters
 		dir = 0xff;
 	} else {
@@ -1287,27 +1261,28 @@ static int sealevel_rs485_config(struct uart_port *port, struct ktermios *termio
 	if (ret)
 		return ret;
 
-	if (rs485->flags & SER_RS485_ENABLED) {
-		old_lcr = readb(p + UART_LCR);
+	if (!(rs485->flags & SER_RS485_ENABLED))
+		return 0;
 
-		/* Set EFR[4]=1 to enable enhanced feature registers */
-		efr = readb(p + UART_XR_EFR);
-		efr |= UART_EFR_ECB;
-		writeb(efr, p + UART_XR_EFR);
+	old_lcr = readb(p + UART_LCR);
 
-		/* Set MCR to use DTR as Auto-RS485 Enable signal */
-		writeb(UART_MCR_OUT1, p + UART_MCR);
+	/* Set EFR[4]=1 to enable enhanced feature registers */
+	efr = readb(p + UART_XR_EFR);
+	efr |= UART_EFR_ECB;
+	writeb(efr, p + UART_XR_EFR);
 
-		/* Set LCR[7]=1 to enable access to DLD register */
-		writeb(old_lcr | UART_LCR_DLAB, p + UART_LCR);
+	/* Set MCR to use DTR as Auto-RS485 Enable signal */
+	writeb(UART_MCR_OUT1, p + UART_MCR);
 
-		/* Set DLD[7]=1 for inverted RS485 Enable logic */
-		dld = readb(p + UART_EXAR_DLD);
-		dld |= UART_EXAR_DLD_485_POLARITY;
-		writeb(dld, p + UART_EXAR_DLD);
+	/* Set LCR[7]=1 to enable access to DLD register */
+	writeb(old_lcr | UART_LCR_DLAB, p + UART_LCR);
 
-		writeb(old_lcr, p + UART_LCR);
-	}
+	/* Set DLD[7]=1 for inverted RS485 Enable logic */
+	dld = readb(p + UART_EXAR_DLD);
+	dld |= UART_EXAR_DLD_485_POLARITY;
+	writeb(dld, p + UART_EXAR_DLD);
+
+	writeb(old_lcr, p + UART_LCR);
 
 	return 0;
 }
@@ -1496,35 +1471,33 @@ static irqreturn_t exar_misc_handler(int irq, void *data)
 	return IRQ_HANDLED;
 }
 
-static unsigned int exar_get_nr_ports(struct exar8250_board *board,
-					struct pci_dev *pcidev)
+static unsigned int exar_get_nr_ports(struct exar8250_board *board, struct pci_dev *pcidev)
 {
-	unsigned int nr_ports = 0;
+	if (pcidev->vendor == PCI_VENDOR_ID_ACCESSIO)
+		return BIT(((pcidev->device & 0x38) >> 3) - 1);
 
-	if (pcidev->vendor == PCI_VENDOR_ID_ACCESSIO) {
-		nr_ports = BIT(((pcidev->device & 0x38) >> 3) - 1);
-	} else if (board->num_ports > 0) {
-		// Check if board struct overrides number of ports
-		nr_ports = board->num_ports;
-	} else if (pcidev->vendor == PCI_VENDOR_ID_EXAR) {
-		// Exar encodes # ports in last nibble of PCI Device ID ex. 0358
-		nr_ports = pcidev->device & 0x0f;
-	} else  if (pcidev->vendor == PCI_VENDOR_ID_CONNECT_TECH) {
-		// Handle CTI FPGA cards
+	// Check if board struct overrides number of ports
+	if (board->num_ports > 0)
+		return board->num_ports;
+
+	// Exar encodes # ports in last nibble of PCI Device ID ex. 0358
+	if (pcidev->vendor == PCI_VENDOR_ID_EXAR)
+		return pcidev->device & 0x0f;
+
+	// Handle CTI FPGA cards
+	if (pcidev->vendor == PCI_VENDOR_ID_CONNECT_TECH) {
 		switch (pcidev->device) {
 		case PCI_DEVICE_ID_CONNECT_TECH_PCI_XR79X_12_XIG00X:
 		case PCI_DEVICE_ID_CONNECT_TECH_PCI_XR79X_12_XIG01X:
-			nr_ports = 12;
-			break;
+			return 12;
 		case PCI_DEVICE_ID_CONNECT_TECH_PCI_XR79X_16:
-			nr_ports = 16;
-			break;
+			return 16;
 		default:
-			break;
+			return 0;
 		}
 	}
 
-	return nr_ports;
+	return 0;
 }
 
 static int
@@ -1547,11 +1520,8 @@ exar_pci_probe(struct pci_dev *pcidev, const struct pci_device_id *ent)
 	maxnr = pci_resource_len(pcidev, bar) >> (board->reg_shift + 3);
 
 	nr_ports = exar_get_nr_ports(board, pcidev);
-	if (nr_ports == 0) {
-		dev_err_probe(&pcidev->dev, -ENODEV,
-				"failed to get number of ports\n");
-		return -ENODEV;
-	}
+	if (nr_ports == 0)
+		return dev_err_probe(&pcidev->dev, -ENODEV, "failed to get number of ports\n");
 
 	priv = devm_kzalloc(&pcidev->dev, struct_size(priv, line, nr_ports), GFP_KERNEL);
 	if (!priv)
@@ -1581,19 +1551,10 @@ exar_pci_probe(struct pci_dev *pcidev, const struct pci_device_id *ent)
 	if (rc)
 		return rc;
 
-	if (board->board_init) {
-		rc = board->board_init(priv, pcidev);
-		if (rc) {
-			dev_err_probe(&pcidev->dev, rc,
-					"failed to init serial board\n");
-			return rc;
-		}
-	}
-
 	for (i = 0; i < nr_ports && i < maxnr; i++) {
 		rc = board->setup(priv, pcidev, &uart, i);
 		if (rc) {
-			dev_err(&pcidev->dev, "Failed to setup port %u\n", i);
+			dev_err_probe(&pcidev->dev, rc, "Failed to setup port %u\n", i);
 			break;
 		}
 
@@ -1602,10 +1563,9 @@ exar_pci_probe(struct pci_dev *pcidev, const struct pci_device_id *ent)
 
 		priv->line[i] = serial8250_register_8250_port(&uart);
 		if (priv->line[i] < 0) {
-			dev_err(&pcidev->dev,
-				"Couldn't register serial port %lx, irq %d, type %d, error %d\n",
-				uart.port.iobase, uart.port.irq,
-				uart.port.iotype, priv->line[i]);
+			dev_err_probe(&pcidev->dev, priv->line[i],
+				"Couldn't register serial port %lx, type %d, irq %d\n",
+				uart.port.iobase, uart.port.iotype, uart.port.irq);
 			break;
 		}
 	}
@@ -1671,22 +1631,18 @@ static const struct exar8250_board pbn_fastcom335_8 = {
 };
 
 static const struct exar8250_board pbn_cti_xr17c15x = {
-	.board_init	= cti_board_init_xr17c15x,
 	.setup		= cti_port_setup_xr17c15x,
 };
 
 static const struct exar8250_board pbn_cti_xr17v25x = {
-	.board_init	= cti_board_init_xr17v25x,
 	.setup		= cti_port_setup_xr17v25x,
 };
 
 static const struct exar8250_board pbn_cti_xr17v35x = {
-	.board_init	= cti_board_init_xr17v35x,
 	.setup		= cti_port_setup_xr17v35x,
 };
 
 static const struct exar8250_board pbn_cti_fpga = {
-	.board_init	= cti_board_init_fpga,
 	.setup		= cti_port_setup_fpga,
 };
 
@@ -1734,22 +1690,11 @@ static const struct exar8250_board pbn_exar_XR17V8358 = {
 	.exit		= pci_xr17v35x_exit,
 };
 
-// For Connect Tech cards with Exar vendor/device PCI IDs
 #define CTI_EXAR_DEVICE(devid, bd) {                    \
 	PCI_DEVICE_SUB(                                 \
 		PCI_VENDOR_ID_EXAR,                     \
 		PCI_DEVICE_ID_EXAR_##devid,             \
 		PCI_SUBVENDOR_ID_CONNECT_TECH,          \
-		PCI_ANY_ID), 0, 0,                      \
-		(kernel_ulong_t)&bd                     \
-	}
-
-// For Connect Tech cards with Connect Tech vendor/device PCI IDs (FPGA based)
-#define CTI_PCI_DEVICE(devid, bd) {                     \
-	PCI_DEVICE_SUB(                                 \
-		PCI_VENDOR_ID_CONNECT_TECH,             \
-		PCI_DEVICE_ID_CONNECT_TECH_PCI_##devid, \
-		PCI_ANY_ID,                             \
 		PCI_ANY_ID), 0, 0,                      \
 		(kernel_ulong_t)&bd                     \
 	}
@@ -1760,7 +1705,7 @@ static const struct exar8250_board pbn_exar_XR17V8358 = {
 	PCI_DEVICE_SUB(					\
 		PCI_VENDOR_ID_EXAR,			\
 		PCI_DEVICE_ID_EXAR_##devid,		\
-		PCI_VENDOR_ID_IBM,			\
+		PCI_SUBVENDOR_ID_IBM,			\
 		PCI_SUBDEVICE_ID_IBM_##sdevid), 0, 0,	\
 		(kernel_ulong_t)&bd			\
 	}
@@ -1783,6 +1728,7 @@ static const struct pci_device_id exar_pci_tbl[] = {
 	EXAR_DEVICE(ACCESSIO, COM_4SM, pbn_exar_XR17C15x),
 	EXAR_DEVICE(ACCESSIO, COM_8SM, pbn_exar_XR17C15x),
 
+	/* Connect Tech cards with Exar vendor/device PCI IDs */
 	CTI_EXAR_DEVICE(XR17C152,       pbn_cti_xr17c15x),
 	CTI_EXAR_DEVICE(XR17C154,       pbn_cti_xr17c15x),
 	CTI_EXAR_DEVICE(XR17C158,       pbn_cti_xr17c15x),
@@ -1795,9 +1741,10 @@ static const struct pci_device_id exar_pci_tbl[] = {
 	CTI_EXAR_DEVICE(XR17V354,       pbn_cti_xr17v35x),
 	CTI_EXAR_DEVICE(XR17V358,       pbn_cti_xr17v35x),
 
-	CTI_PCI_DEVICE(XR79X_12_XIG00X, pbn_cti_fpga),
-	CTI_PCI_DEVICE(XR79X_12_XIG01X, pbn_cti_fpga),
-	CTI_PCI_DEVICE(XR79X_16,        pbn_cti_fpga),
+	/* Connect Tech cards with Connect Tech vendor/device PCI IDs (FPGA based) */
+	EXAR_DEVICE(CONNECT_TECH, PCI_XR79X_12_XIG00X, pbn_cti_fpga),
+	EXAR_DEVICE(CONNECT_TECH, PCI_XR79X_12_XIG01X, pbn_cti_fpga),
+	EXAR_DEVICE(CONNECT_TECH, PCI_XR79X_16,        pbn_cti_fpga),
 
 	IBM_DEVICE(XR17C152, SATURN_SERIAL_ONE_PORT, pbn_exar_ibm_saturn),
 

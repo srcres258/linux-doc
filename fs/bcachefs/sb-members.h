@@ -105,14 +105,41 @@ static inline struct bch_dev *__bch2_next_dev(struct bch_fs *c, struct bch_dev *
 	for (struct bch_dev *_ca = NULL;				\
 	     (_ca = __bch2_next_dev((_c), _ca, (_mask)));)
 
-static inline struct bch_dev *bch2_get_next_dev(struct bch_fs *c, struct bch_dev *ca)
+static inline void bch2_dev_get(struct bch_dev *ca)
+{
+#ifdef CONFIG_BCACHEFS_DEBUG
+	BUG_ON(atomic_long_inc_return(&ca->ref) <= 1L);
+#else
+	percpu_ref_get(&ca->ref);
+#endif
+}
+
+static inline void __bch2_dev_put(struct bch_dev *ca)
+{
+#ifdef CONFIG_BCACHEFS_DEBUG
+	long r = atomic_long_dec_return(&ca->ref);
+	if (r < (long) !ca->dying)
+		panic("bch_dev->ref underflow, last put: %pS\n", (void *) ca->last_put);
+	ca->last_put = _THIS_IP_;
+	if (!r)
+		complete(&ca->ref_completion);
+#else
+	percpu_ref_put(&ca->ref);
+#endif
+}
+
+static inline void bch2_dev_put(struct bch_dev *ca)
 {
 	if (ca)
-		percpu_ref_put(&ca->ref);
+		__bch2_dev_put(ca);
+}
 
+static inline struct bch_dev *bch2_get_next_dev(struct bch_fs *c, struct bch_dev *ca)
+{
 	rcu_read_lock();
+	bch2_dev_put(ca);
 	if ((ca = __bch2_next_dev(c, ca, NULL)))
-		percpu_ref_get(&ca->ref);
+		bch2_dev_get(ca);
 	rcu_read_unlock();
 
 	return ca;
@@ -132,10 +159,10 @@ static inline struct bch_dev *bch2_get_next_online_dev(struct bch_fs *c,
 						       struct bch_dev *ca,
 						       unsigned state_mask)
 {
+	rcu_read_lock();
 	if (ca)
 		percpu_ref_put(&ca->io_ref);
 
-	rcu_read_lock();
 	while ((ca = __bch2_next_dev(c, ca, NULL)) &&
 	       (!((1 << ca->mi.state) & state_mask) ||
 		!percpu_ref_tryget(&ca->io_ref)))
@@ -202,18 +229,12 @@ static inline struct bch_dev *bch2_dev_rcu(struct bch_fs *c, unsigned dev)
 		: NULL;
 }
 
-static inline void bch2_dev_put(struct bch_dev *ca)
-{
-	if (ca)
-		percpu_ref_put(&ca->ref);
-}
-
 static inline struct bch_dev *bch2_dev_tryget_noerror(struct bch_fs *c, unsigned dev)
 {
 	rcu_read_lock();
 	struct bch_dev *ca = bch2_dev_rcu(c, dev);
-	if (ca && !percpu_ref_tryget(&ca->ref))
-		ca = NULL;
+	if (ca)
+		bch2_dev_get(ca);
 	rcu_read_unlock();
 	return ca;
 }
@@ -232,7 +253,7 @@ static inline struct bch_dev *bch2_dev_bucket_tryget_noerror(struct bch_fs *c, s
 {
 	struct bch_dev *ca = bch2_dev_tryget_noerror(c, bucket.inode);
 	if (ca && !bucket_valid(ca, bucket.offset)) {
-		percpu_ref_put(&ca->ref);
+		bch2_dev_put(ca);
 		ca = NULL;
 	}
 	return ca;
@@ -248,12 +269,19 @@ static inline struct bch_dev *bch2_dev_bucket_tryget(struct bch_fs *c, struct bp
 	return ca;
 }
 
+static inline struct bch_dev *bch2_dev_iterate_noerror(struct bch_fs *c, struct bch_dev *ca, unsigned dev_idx)
+{
+	if (ca && ca->dev_idx == dev_idx)
+		return ca;
+	bch2_dev_put(ca);
+	return bch2_dev_tryget_noerror(c, dev_idx);
+}
+
 static inline struct bch_dev *bch2_dev_iterate(struct bch_fs *c, struct bch_dev *ca, unsigned dev_idx)
 {
 	if (ca && ca->dev_idx == dev_idx)
 		return ca;
-	if (ca)
-		percpu_ref_put(&ca->ref);
+	bch2_dev_put(ca);
 	return bch2_dev_tryget(c, dev_idx);
 }
 

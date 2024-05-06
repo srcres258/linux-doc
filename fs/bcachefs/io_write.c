@@ -199,9 +199,6 @@ static inline int bch2_extent_update_i_size_sectors(struct btree_trans *trans,
 						    u64 new_i_size,
 						    s64 i_sectors_delta)
 {
-	struct btree_iter iter;
-	struct bkey_i *k;
-	struct bkey_i_inode_v3 *inode;
 	/*
 	 * Crazy performance optimization:
 	 * Every extent update needs to also update the inode: the inode trigger
@@ -214,25 +211,36 @@ static inline int bch2_extent_update_i_size_sectors(struct btree_trans *trans,
 	 * lost, but that's fine.
 	 */
 	unsigned inode_update_flags = BTREE_UPDATE_nojournal;
-	int ret;
 
-	k = bch2_bkey_get_mut_noupdate(trans, &iter, BTREE_ID_inodes,
+	struct btree_iter iter;
+	struct bkey_s_c k = bch2_bkey_get_iter(trans, &iter, BTREE_ID_inodes,
 			      SPOS(0,
 				   extent_iter->pos.inode,
 				   extent_iter->snapshot),
 			      BTREE_ITER_cached);
-	ret = PTR_ERR_OR_ZERO(k);
+	int ret = bkey_err(k);
 	if (unlikely(ret))
 		return ret;
 
-	if (unlikely(k->k.type != KEY_TYPE_inode_v3)) {
-		k = bch2_inode_to_v3(trans, k);
-		ret = PTR_ERR_OR_ZERO(k);
+	/*
+	 * varint_decode_fast(), in the inode .invalid method, reads up to 7
+	 * bytes past the end of the buffer:
+	 */
+	struct bkey_i *k_mut = bch2_trans_kmalloc_nomemzero(trans, bkey_bytes(k.k) + 8);
+	ret = PTR_ERR_OR_ZERO(k_mut);
+	if (unlikely(ret))
+		goto err;
+
+	bkey_reassemble(k_mut, k);
+
+	if (unlikely(k_mut->k.type != KEY_TYPE_inode_v3)) {
+		k_mut = bch2_inode_to_v3(trans, k_mut);
+		ret = PTR_ERR_OR_ZERO(k_mut);
 		if (unlikely(ret))
 			goto err;
 	}
 
-	inode = bkey_i_to_inode_v3(k);
+	struct bkey_i_inode_v3 *inode = bkey_i_to_inode_v3(k_mut);
 
 	if (!(le64_to_cpu(inode->v.bi_flags) & BCH_INODE_i_size_dirty) &&
 	    new_i_size > le64_to_cpu(inode->v.bi_size)) {
@@ -426,6 +434,8 @@ void bch2_submit_wbio_replicas(struct bch_write_bio *wbio, struct bch_fs *c,
 		n->nocow		= nocow;
 		n->submit_time		= local_clock();
 		n->inode_offset		= bkey_start_offset(&k->k);
+		if (nocow)
+			n->nocow_bucket	= PTR_BUCKET_NR(ca, ptr);
 		n->bio.bi_iter.bi_sector = ptr->offset;
 
 		if (likely(n->have_ioref)) {
@@ -472,7 +482,6 @@ static void bch2_write_done(struct closure *cl)
 static noinline int bch2_write_drop_io_error_ptrs(struct bch_write_op *op)
 {
 	struct keylist *keys = &op->insert_keys;
-	struct bch_extent_ptr *ptr;
 	struct bkey_i *src, *dst = keys->keys, *n;
 
 	for (src = keys->keys; src != keys->top; src = n) {
@@ -652,8 +661,12 @@ static void bch2_write_endio(struct bio *bio)
 		op->flags |= BCH_WRITE_IO_ERROR;
 	}
 
-	if (wbio->nocow)
+	if (wbio->nocow) {
+		bch2_bucket_nocow_unlock(&c->nocow_locks,
+					 POS(ca->dev_idx, wbio->nocow_bucket),
+					 BUCKET_NOCOW_LOCK_UPDATE);
 		set_bit(wbio->dev, op->devs_need_flush->d);
+	}
 
 	if (wbio->have_ioref) {
 		bch2_latency_acct(ca, wbio->submit_time, WRITE);
@@ -1107,22 +1120,6 @@ static bool bch2_extent_is_writeable(struct bch_write_op *op,
 	return replicas >= op->opts.data_replicas;
 }
 
-static inline void bch2_nocow_write_unlock(struct bch_write_op *op)
-{
-	struct bch_fs *c = op->c;
-
-	for_each_keylist_key(&op->insert_keys, k) {
-		struct bkey_ptrs_c ptrs = bch2_bkey_ptrs_c(bkey_i_to_s_c(k));
-
-		bkey_for_each_ptr(ptrs, ptr) {
-			struct bch_dev *ca = bch2_dev_bkey_exists(c, ptr->dev);
-			bch2_bucket_nocow_unlock(&c->nocow_locks,
-						 PTR_BUCKET_POS(ca, ptr),
-						 BUCKET_NOCOW_LOCK_UPDATE);
-		}
-	}
-}
-
 static int bch2_nocow_write_convert_one_unwritten(struct btree_trans *trans,
 						  struct btree_iter *iter,
 						  struct bkey_i *orig,
@@ -1193,8 +1190,6 @@ static void bch2_nocow_write_convert_unwritten(struct bch_write_op *op)
 
 static void __bch2_nocow_write_done(struct bch_write_op *op)
 {
-	bch2_nocow_write_unlock(op);
-
 	if (unlikely(op->flags & BCH_WRITE_IO_ERROR)) {
 		op->error = -EIO;
 	} else if (unlikely(op->flags & BCH_WRITE_CONVERT_UNWRITTEN))
@@ -1494,7 +1489,11 @@ err:
 	if ((op->flags & BCH_WRITE_SYNC) ||
 	    (!(op->flags & BCH_WRITE_DONE) &&
 	     !(op->flags & BCH_WRITE_IN_WORKER))) {
-		closure_sync(&op->cl);
+		if (closure_sync_timeout(&op->cl, HZ * 10)) {
+			bch2_print_allocator_stuck(c);
+			closure_sync(&op->cl);
+		}
+
 		__bch2_write_index(op);
 
 		if (!(op->flags & BCH_WRITE_DONE))
@@ -1515,6 +1514,8 @@ static void bch2_write_data_inline(struct bch_write_op *op, unsigned data_len)
 	struct bkey_i_inline_data *id;
 	unsigned sectors;
 	int ret;
+
+	memset(&op->failed, 0, sizeof(op->failed));
 
 	op->flags |= BCH_WRITE_WROTE_DATA_INLINE;
 	op->flags |= BCH_WRITE_DONE;

@@ -346,7 +346,6 @@ void bch2_alloc_to_text(struct printbuf *out, struct bch_fs *c, struct bkey_s_c 
 	prt_printf(out, "need_discard      %llu\n",	BCH_ALLOC_V4_NEED_DISCARD(a));
 	prt_printf(out, "need_inc_gen      %llu\n",	BCH_ALLOC_V4_NEED_INC_GEN(a));
 	prt_printf(out, "dirty_sectors     %u\n",	a->dirty_sectors);
-	prt_printf(out, "stripe_sectors     %u\n",	a->stripe_sectors);
 	prt_printf(out, "cached_sectors    %u\n",	a->cached_sectors);
 	prt_printf(out, "stripe            %u\n",	a->stripe);
 	prt_printf(out, "stripe_redundancy %u\n",	a->stripe_redundancy);
@@ -973,35 +972,34 @@ static struct bkey_s_c bch2_get_key_or_hole(struct btree_iter *iter, struct bpos
 	}
 }
 
-static bool next_bucket(struct bch_fs *c, struct bpos *bucket)
+static bool next_bucket(struct bch_fs *c, struct bch_dev **ca, struct bpos *bucket)
 {
-	struct bch_dev *ca;
+	if (*ca) {
+		if (bucket->offset < (*ca)->mi.first_bucket)
+			bucket->offset = (*ca)->mi.first_bucket;
 
-	if (bch2_dev_bucket_exists(c, *bucket))
-		return true;
-
-	if (bch2_dev_exists(c, bucket->inode)) {
-		ca = bch2_dev_bkey_exists(c, bucket->inode);
-
-		if (bucket->offset < ca->mi.first_bucket) {
-			bucket->offset = ca->mi.first_bucket;
+		if (bucket->offset < (*ca)->mi.nbuckets)
 			return true;
-		}
 
+		bch2_dev_put(*ca);
+		*ca = NULL;
 		bucket->inode++;
 		bucket->offset = 0;
 	}
 
 	rcu_read_lock();
-	ca = __bch2_next_dev_idx(c, bucket->inode, NULL);
-	if (ca)
-		*bucket = POS(ca->dev_idx, ca->mi.first_bucket);
+	*ca = __bch2_next_dev_idx(c, bucket->inode, NULL);
+	if (*ca) {
+		*bucket = POS((*ca)->dev_idx, (*ca)->mi.first_bucket);
+		bch2_dev_get(*ca);
+	}
 	rcu_read_unlock();
 
-	return ca != NULL;
+	return *ca != NULL;
 }
 
-static struct bkey_s_c bch2_get_key_or_real_bucket_hole(struct btree_iter *iter, struct bkey *hole)
+static struct bkey_s_c bch2_get_key_or_real_bucket_hole(struct btree_iter *iter,
+					struct bch_dev **ca, struct bkey *hole)
 {
 	struct bch_fs *c = iter->trans->c;
 	struct bkey_s_c k;
@@ -1010,22 +1008,21 @@ again:
 	if (bkey_err(k))
 		return k;
 
-	if (!k.k->type) {
-		struct bpos bucket = bkey_start_pos(k.k);
+	*ca = bch2_dev_iterate_noerror(c, *ca, k.k->p.inode);
 
-		if (!bch2_dev_bucket_exists(c, bucket)) {
-			if (!next_bucket(c, &bucket))
+	if (!k.k->type) {
+		struct bpos hole_start = bkey_start_pos(k.k);
+
+		if (!*ca || !bucket_valid(*ca, hole_start.offset)) {
+			if (!next_bucket(c, ca, &hole_start))
 				return bkey_s_c_null;
 
-			bch2_btree_iter_set_pos(iter, bucket);
+			bch2_btree_iter_set_pos(iter, hole_start);
 			goto again;
 		}
 
-		if (!bch2_dev_bucket_exists(c, k.k->p)) {
-			struct bch_dev *ca = bch2_dev_bkey_exists(c, bucket.inode);
-
-			bch2_key_resize(hole, ca->mi.nbuckets - bucket.offset);
-		}
+		if (k.k->p.offset > (*ca)->mi.nbuckets)
+			bch2_key_resize(hole, (*ca)->mi.nbuckets - hole_start.offset);
 	}
 
 	return k;
@@ -1167,17 +1164,16 @@ fsck_err:
 
 static noinline_for_stack
 int bch2_check_alloc_hole_freespace(struct btree_trans *trans,
+				    struct bch_dev *ca,
 				    struct bpos start,
 				    struct bpos *end,
 				    struct btree_iter *freespace_iter)
 {
 	struct bch_fs *c = trans->c;
-	struct bch_dev *ca;
 	struct bkey_s_c k;
 	struct printbuf buf = PRINTBUF;
 	int ret;
 
-	ca = bch2_dev_bkey_exists(c, start.inode);
 	if (!ca->mi.freespace_initialized)
 		return 0;
 
@@ -1355,30 +1351,25 @@ int bch2_check_bucket_gens_key(struct btree_trans *trans,
 {
 	struct bch_fs *c = trans->c;
 	struct bkey_i_bucket_gens g;
-	struct bch_dev *ca;
 	u64 start = bucket_gens_pos_to_alloc(k.k->p, 0).offset;
 	u64 end = bucket_gens_pos_to_alloc(bpos_nosnap_successor(k.k->p), 0).offset;
 	u64 b;
-	bool need_update = false, dev_exists;
+	bool need_update = false;
 	struct printbuf buf = PRINTBUF;
 	int ret = 0;
 
 	BUG_ON(k.k->type != KEY_TYPE_bucket_gens);
 	bkey_reassemble(&g.k_i, k);
 
-	/* if no bch_dev, skip out whether we repair or not */
-	dev_exists = bch2_dev_exists(c, k.k->p.inode);
-	if (!dev_exists) {
-		if (fsck_err_on(!dev_exists, c,
-				bucket_gens_to_invalid_dev,
-				"bucket_gens key for invalid device:\n  %s",
-				(bch2_bkey_val_to_text(&buf, c, k), buf.buf))) {
+	struct bch_dev *ca = bch2_dev_tryget_noerror(c, k.k->p.inode);
+	if (!ca) {
+		if (fsck_err(c, bucket_gens_to_invalid_dev,
+			     "bucket_gens key for invalid device:\n  %s",
+			     (bch2_bkey_val_to_text(&buf, c, k), buf.buf)))
 			ret = bch2_btree_delete_at(trans, iter, 0);
-		}
 		goto out;
 	}
 
-	ca = bch2_dev_bkey_exists(c, k.k->p.inode);
 	if (fsck_err_on(end <= ca->mi.first_bucket ||
 			start >= ca->mi.nbuckets, c,
 			bucket_gens_to_invalid_buckets,
@@ -1416,6 +1407,7 @@ int bch2_check_bucket_gens_key(struct btree_trans *trans,
 	}
 out:
 fsck_err:
+	bch2_dev_put(ca);
 	printbuf_exit(&buf);
 	return ret;
 }
@@ -1424,6 +1416,7 @@ int bch2_check_alloc_info(struct bch_fs *c)
 {
 	struct btree_trans *trans = bch2_trans_get(c);
 	struct btree_iter iter, discard_iter, freespace_iter, bucket_gens_iter;
+	struct bch_dev *ca = NULL;
 	struct bkey hole;
 	struct bkey_s_c k;
 	int ret = 0;
@@ -1442,7 +1435,7 @@ int bch2_check_alloc_info(struct bch_fs *c)
 
 		bch2_trans_begin(trans);
 
-		k = bch2_get_key_or_real_bucket_hole(&iter, &hole);
+		k = bch2_get_key_or_real_bucket_hole(&iter, &ca, &hole);
 		ret = bkey_err(k);
 		if (ret)
 			goto bkey_err;
@@ -1463,7 +1456,7 @@ int bch2_check_alloc_info(struct bch_fs *c)
 		} else {
 			next = k.k->p;
 
-			ret = bch2_check_alloc_hole_freespace(trans,
+			ret = bch2_check_alloc_hole_freespace(trans, ca,
 						    bkey_start_pos(k.k),
 						    &next,
 						    &freespace_iter) ?:
@@ -1491,6 +1484,8 @@ bkey_err:
 	bch2_trans_iter_exit(trans, &freespace_iter);
 	bch2_trans_iter_exit(trans, &discard_iter);
 	bch2_trans_iter_exit(trans, &iter);
+	bch2_dev_put(ca);
+	ca = NULL;
 
 	if (ret < 0)
 		goto err;
@@ -1674,10 +1669,9 @@ static void discard_buckets_next_dev(struct bch_fs *c, struct discard_buckets_st
 	    bch2_dev_usage_read(s->ca).d[BCH_DATA_free].buckets)
 		bch2_journal_flush_async(&c->journal, NULL);
 
-	if (s->ca)
-		percpu_ref_put(&s->ca->ref);
+	bch2_dev_put(s->ca);
 	if (ca)
-		percpu_ref_get(&ca->ref);
+		bch2_dev_get(ca);
 	s->ca = ca;
 	s->need_journal_commit_this_dev = 0;
 }
@@ -1921,9 +1915,12 @@ static void bch2_do_discards_fast_work(struct work_struct *work)
 
 static void bch2_discard_one_bucket_fast(struct bch_fs *c, struct bpos bucket)
 {
-	struct bch_dev *ca = bch2_dev_bkey_exists(c, bucket.inode);
+	rcu_read_lock();
+	struct bch_dev *ca = bch2_dev_rcu(c, bucket.inode);
+	bool dead = !ca || percpu_ref_is_dying(&ca->io_ref);
+	rcu_read_unlock();
 
-	if (!percpu_ref_is_dying(&ca->io_ref) &&
+	if (!dead &&
 	    !discard_in_flight_add(c, bucket) &&
 	    bch2_write_ref_tryget(c, BCH_WRITE_REF_discard_fast) &&
 	    !queue_work(c->write_ref_wq, &c->discard_fast_work))
@@ -2033,7 +2030,7 @@ static void bch2_do_invalidates_work(struct work_struct *work)
 			invalidate_one_bucket(trans, &iter, k, &nr_to_invalidate));
 
 		if (ret < 0) {
-			percpu_ref_put(&ca->ref);
+			bch2_dev_put(ca);
 			break;
 		}
 	}
@@ -2170,7 +2167,7 @@ int bch2_fs_freespace_init(struct bch_fs *c)
 
 		ret = bch2_dev_freespace_init(c, ca, 0, ca->mi.nbuckets);
 		if (ret) {
-			percpu_ref_put(&ca->ref);
+			bch2_dev_put(ca);
 			bch_err_fn(c, ret);
 			return ret;
 		}

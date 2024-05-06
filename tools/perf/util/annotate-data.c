@@ -28,6 +28,8 @@
 /* register number of the stack pointer */
 #define X86_REG_SP 7
 
+static void delete_var_types(struct die_var_type *var_types);
+
 enum type_state_kind {
 	TSR_KIND_INVALID = 0,
 	TSR_KIND_TYPE,
@@ -557,8 +559,8 @@ static bool global_var__add(struct data_loc_info *dloc, u64 addr,
 	if (gvar == NULL)
 		return false;
 
-	gvar->name = strdup(name);
-	if (gvar->name == NULL) {
+	gvar->name = name ? strdup(name) : NULL;
+	if (name && gvar->name == NULL) {
 		free(gvar);
 		return false;
 	}
@@ -612,6 +614,53 @@ static bool get_global_var_info(struct data_loc_info *dloc, u64 addr,
 	return true;
 }
 
+static void global_var__collect(struct data_loc_info *dloc)
+{
+	Dwarf *dwarf = dloc->di->dbg;
+	Dwarf_Off off, next_off;
+	Dwarf_Die cu_die, type_die;
+	size_t header_size;
+
+	/* Iterate all CU and collect global variables that have no location in a register. */
+	off = 0;
+	while (dwarf_nextcu(dwarf, off, &next_off, &header_size,
+			    NULL, NULL, NULL) == 0) {
+		struct die_var_type *var_types = NULL;
+		struct die_var_type *pos;
+
+		if (dwarf_offdie(dwarf, off + header_size, &cu_die) == NULL) {
+			off = next_off;
+			continue;
+		}
+
+		die_collect_global_vars(&cu_die, &var_types);
+
+		for (pos = var_types; pos; pos = pos->next) {
+			const char *var_name = NULL;
+			int var_offset = 0;
+
+			if (pos->reg != -1)
+				continue;
+
+			if (!dwarf_offdie(dwarf, pos->die_off, &type_die))
+				continue;
+
+			if (!get_global_var_info(dloc, pos->addr, &var_name,
+						 &var_offset))
+				continue;
+
+			if (var_offset != 0)
+				continue;
+
+			global_var__add(dloc, pos->addr, var_name, &type_die);
+		}
+
+		delete_var_types(var_types);
+
+		off = next_off;
+	}
+}
+
 static bool get_global_var_type(Dwarf_Die *cu_die, struct data_loc_info *dloc,
 				u64 ip, u64 var_addr, int *var_offset,
 				Dwarf_Die *type_die)
@@ -620,7 +669,11 @@ static bool get_global_var_type(Dwarf_Die *cu_die, struct data_loc_info *dloc,
 	int offset;
 	const char *var_name = NULL;
 	struct global_var_entry *gvar;
+	struct dso *dso = map__dso(dloc->ms->map);
 	Dwarf_Die var_die;
+
+	if (RB_EMPTY_ROOT(&dso->global_vars))
+		global_var__collect(dloc);
 
 	gvar = global_var__find(dloc, var_addr);
 	if (gvar) {
@@ -978,22 +1031,37 @@ retry:
 		else if (has_reg_type(state, sreg) &&
 			 state->regs[sreg].kind == TSR_KIND_PERCPU_BASE) {
 			u64 ip = dloc->ms->sym->start + dl->al.offset;
+			u64 var_addr = src->offset;
 			int offset;
+
+			if (src->multi_regs) {
+				int reg2 = (sreg == src->reg1) ? src->reg2 : src->reg1;
+
+				if (has_reg_type(state, reg2) && state->regs[reg2].ok &&
+				    state->regs[reg2].kind == TSR_KIND_CONST)
+					var_addr += state->regs[reg2].imm_value;
+			}
 
 			/*
 			 * In kernel, %gs points to a per-cpu region for the
 			 * current CPU.  Access with a constant offset should
 			 * be treated as a global variable access.
 			 */
-			if (get_global_var_type(cu_die, dloc, ip, src->offset,
+			if (get_global_var_type(cu_die, dloc, ip, var_addr,
 						&offset, &type_die) &&
 			    die_get_member_type(&type_die, offset, &type_die)) {
 				tsr->type = type_die;
 				tsr->kind = TSR_KIND_TYPE;
 				tsr->ok = true;
 
-				pr_debug_dtp("mov [%x] percpu %#x(reg%d) -> reg%d",
-					     insn_offset, src->offset, sreg, dst->reg1);
+				if (src->multi_regs) {
+					pr_debug_dtp("mov [%x] percpu %#x(reg%d,reg%d) -> reg%d",
+						     insn_offset, src->offset, src->reg1,
+						     src->reg2, dst->reg1);
+				} else {
+					pr_debug_dtp("mov [%x] percpu %#x(reg%d) -> reg%d",
+						     insn_offset, src->offset, sreg, dst->reg1);
+				}
 				pr_debug_type_name(&tsr->type, tsr->kind);
 			} else {
 				tsr->ok = false;
@@ -1190,11 +1258,12 @@ static void setup_stack_canary(struct data_loc_info *dloc)
  * are similar to global variables and no additional info is needed.
  */
 static int check_matching_type(struct type_state *state,
-			       struct data_loc_info *dloc, int reg,
+			       struct data_loc_info *dloc,
 			       Dwarf_Die *cu_die, Dwarf_Die *type_die)
 {
 	Dwarf_Word size;
 	u32 insn_offset = dloc->ip - dloc->ms->sym->start;
+	int reg = dloc->op->reg1;
 
 	pr_debug_dtp("chk [%x] reg%d offset=%#x ok=%d kind=%d",
 		     insn_offset, reg, dloc->op->offset,
@@ -1203,14 +1272,19 @@ static int check_matching_type(struct type_state *state,
 	if (state->regs[reg].ok && state->regs[reg].kind == TSR_KIND_TYPE) {
 		int tag = dwarf_tag(&state->regs[reg].type);
 
-		pr_debug_dtp("\n");
-
 		/*
 		 * Normal registers should hold a pointer (or array) to
 		 * dereference a memory location.
 		 */
-		if (tag != DW_TAG_pointer_type && tag != DW_TAG_array_type)
+		if (tag != DW_TAG_pointer_type && tag != DW_TAG_array_type) {
+			if (dloc->op->offset < 0 && reg != state->stack_reg)
+				goto check_kernel;
+
+			pr_debug_dtp("\n");
 			return -1;
+		}
+
+		pr_debug_dtp("\n");
 
 		/* Remove the pointer and get the target type */
 		if (die_get_real_type(&state->regs[reg].type, type_die) == NULL)
@@ -1239,6 +1313,9 @@ static int check_matching_type(struct type_state *state,
 			setup_stack_canary(dloc);
 			return -1;
 		}
+
+		if (stack->kind != TSR_KIND_TYPE)
+			return 0;
 
 		*type_die = stack->type;
 		/* Update the type offset from the start of slot */
@@ -1269,6 +1346,9 @@ static int check_matching_type(struct type_state *state,
 			return -1;
 		}
 
+		if (stack->kind != TSR_KIND_TYPE)
+			return 0;
+
 		*type_die = stack->type;
 		/* Update the type offset from the start of slot */
 		dloc->type_offset -= fboff + stack->offset;
@@ -1281,6 +1361,17 @@ static int check_matching_type(struct type_state *state,
 		int var_offset;
 
 		pr_debug_dtp(" percpu var\n");
+
+		if (dloc->op->multi_regs) {
+			int reg2 = dloc->op->reg2;
+
+			if (dloc->op->reg2 == reg)
+				reg2 = dloc->op->reg1;
+
+			if (has_reg_type(state, reg2) && state->regs[reg2].ok &&
+			    state->regs[reg2].kind == TSR_KIND_CONST)
+				var_addr += state->regs[reg2].imm_value;
+		}
 
 		if (get_global_var_type(cu_die, dloc, dloc->ip, var_addr,
 					&var_offset, type_die)) {
@@ -1323,12 +1414,14 @@ static int check_matching_type(struct type_state *state,
 		return -1;
 	}
 
-	if (map__dso(dloc->ms->map)->kernel && arch__is(dloc->arch, "x86")) {
+check_kernel:
+	if (map__dso(dloc->ms->map)->kernel) {
 		u64 addr;
 		int offset;
 
 		/* Direct this-cpu access like "%gs:0x34740" */
-		if (dloc->op->segment == INSN_SEG_X86_GS && dloc->op->imm) {
+		if (dloc->op->segment == INSN_SEG_X86_GS && dloc->op->imm &&
+		    arch__is(dloc->arch, "x86")) {
 			pr_debug_dtp(" this-cpu var\n");
 
 			addr = dloc->op->offset;
@@ -1341,17 +1434,13 @@ static int check_matching_type(struct type_state *state,
 			return -1;
 		}
 
-		/* Access to per-cpu base like "-0x7dcf0500(,%rdx,8)" */
+		/* Access to global variable like "-0x7dcf0500(,%rdx,8)" */
 		if (dloc->op->offset < 0 && reg != state->stack_reg) {
-			const char *var_name = NULL;
-
 			addr = (s64) dloc->op->offset;
 
-			if (get_global_var_info(dloc, addr, &var_name, &offset) &&
-			    !strcmp(var_name, "__per_cpu_offset") && offset == 0 &&
-			    get_global_var_type(cu_die, dloc, dloc->ip, addr,
+			if (get_global_var_type(cu_die, dloc, dloc->ip, addr,
 						&offset, type_die)) {
-				pr_debug_dtp(" percpu base\n");
+				pr_debug_dtp(" global var\n");
 
 				dloc->type_offset = offset;
 				return 1;
@@ -1366,7 +1455,7 @@ static int check_matching_type(struct type_state *state,
 }
 
 /* Iterate instructions in basic blocks and update type table */
-static int find_data_type_insn(struct data_loc_info *dloc, int reg,
+static int find_data_type_insn(struct data_loc_info *dloc,
 			       struct list_head *basic_blocks,
 			       struct die_var_type *var_types,
 			       Dwarf_Die *cu_die, Dwarf_Die *type_die)
@@ -1399,7 +1488,7 @@ static int find_data_type_insn(struct data_loc_info *dloc, int reg,
 			update_var_state(&state, dloc, addr, dl->al.offset, var_types);
 
 			if (this_ip == dloc->ip) {
-				ret = check_matching_type(&state, dloc, reg,
+				ret = check_matching_type(&state, dloc,
 							  cu_die, type_die);
 				goto out;
 			}
@@ -1420,7 +1509,7 @@ out:
  * Construct a list of basic blocks for each scope with variables and try to find
  * the data type by updating a type state table through instructions.
  */
-static int find_data_type_block(struct data_loc_info *dloc, int reg,
+static int find_data_type_block(struct data_loc_info *dloc,
 				Dwarf_Die *cu_die, Dwarf_Die *scopes,
 				int nr_scopes, Dwarf_Die *type_die)
 {
@@ -1468,11 +1557,19 @@ again:
 		fixup_var_address(var_types, start);
 
 		/* Find from start of this scope to the target instruction */
-		found = find_data_type_insn(dloc, reg, &basic_blocks, var_types,
+		found = find_data_type_insn(dloc, &basic_blocks, var_types,
 					    cu_die, type_die);
 		if (found > 0) {
-			pr_debug_dtp("found by insn track: %#x(reg%d) type-offset=%#x\n",
-				     dloc->op->offset, reg, dloc->type_offset);
+			char buf[64];
+
+			if (dloc->op->multi_regs)
+				snprintf(buf, sizeof(buf), "reg%d, reg%d",
+					 dloc->op->reg1, dloc->op->reg2);
+			else
+				snprintf(buf, sizeof(buf), "reg%d", dloc->op->reg1);
+
+			pr_debug_dtp("found by insn track: %#x(%s) type-offset=%#x\n",
+				     dloc->op->offset, buf, dloc->type_offset);
 			pr_debug_type_name(type_die, TSR_KIND_TYPE);
 			ret = 0;
 			break;
@@ -1626,18 +1723,18 @@ retry:
 		goto out;
 	}
 
+	if (loc->multi_regs && reg == loc->reg1 && loc->reg1 != loc->reg2) {
+		reg = loc->reg2;
+		goto retry;
+	}
+
 	if (reg != DWARF_REG_PC) {
-		ret = find_data_type_block(dloc, reg, &cu_die, scopes,
+		ret = find_data_type_block(dloc, &cu_die, scopes,
 					   nr_scopes, type_die);
 		if (ret == 0) {
 			ann_data_stat.insn_track++;
 			goto out;
 		}
-	}
-
-	if (loc->multi_regs && reg == loc->reg1 && loc->reg1 != loc->reg2) {
-		reg = loc->reg2;
-		goto retry;
 	}
 
 	if (ret < 0) {

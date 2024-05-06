@@ -62,7 +62,7 @@ int bch2_backpointer_invalid(struct bch_fs *c, struct bkey_s_c k,
 	}
 
 	struct bpos bucket = bp_pos_to_bucket(ca, bp.k->p);
-	struct bpos bp_pos = bucket_pos_to_bp(ca, bucket, bp.v->bucket_offset);
+	struct bpos bp_pos = bucket_pos_to_bp_noerror(ca, bucket, bp.v->bucket_offset);
 	rcu_read_unlock();
 	int ret = 0;
 

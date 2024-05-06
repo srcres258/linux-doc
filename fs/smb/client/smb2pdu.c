@@ -4515,7 +4515,6 @@ smb2_readv_callback(struct mid_q_entry *mid)
 		if (server->sign && !mid->decrypted) {
 			int rc;
 
-			iov_iter_revert(&rqst.rq_iter, rdata->got_bytes);
 			iov_iter_truncate(&rqst.rq_iter, rdata->got_bytes);
 			rc = smb2_verify_signature(&rqst, server);
 			if (rc)
@@ -4579,7 +4578,7 @@ smb2_readv_callback(struct mid_q_entry *mid)
 	}
 	if (rdata->result == 0 || rdata->result == -EAGAIN)
 		iov_iter_advance(&rdata->subreq.io_iter, rdata->got_bytes);
-	rdata->have_credits = false;
+	rdata->credits.value = 0;
 	netfs_subreq_terminated(&rdata->subreq,
 				(rdata->result == 0 || rdata->result == -EAGAIN) ?
 				rdata->got_bytes : rdata->result, true);
@@ -4818,7 +4817,7 @@ smb2_writev_callback(struct mid_q_entry *mid)
 #endif
 	if (result) {
 		cifs_stats_fail_inc(tcon, SMB2_WRITE_HE);
-		trace_smb3_write_err(0 /* no xid */,
+		trace_smb3_write_err(wdata->xid,
 				     wdata->req->cfile->fid.persistent_fid,
 				     tcon->tid, tcon->ses->Suid, wdata->subreq.start,
 				     wdata->subreq.len, wdata->result);
@@ -4831,13 +4830,14 @@ smb2_writev_callback(struct mid_q_entry *mid)
 				      tcon->tid, tcon->ses->Suid,
 				      wdata->subreq.start, wdata->subreq.len);
 
+	wdata->credits.value = 0;
 	cifs_write_subrequest_terminated(wdata, result ?: written, true);
 	release_mid(mid);
 	add_credits(server, &credits, 0);
 }
 
 /* smb2_async_writev - send an async write, and set up mid to handle result */
-int
+void
 smb2_async_writev(struct cifs_io_subrequest *wdata)
 {
 	int rc = -EACCES, flags = 0;
@@ -4847,7 +4847,7 @@ smb2_async_writev(struct cifs_io_subrequest *wdata)
 	struct TCP_Server_Info *server = wdata->server;
 	struct kvec iov[1];
 	struct smb_rqst rqst = { };
-	unsigned int total_len;
+	unsigned int total_len, xid = wdata->xid;
 	struct cifs_io_parms _io_parms;
 	struct cifs_io_parms *io_parms = NULL;
 	int credit_request;
@@ -4891,7 +4891,7 @@ smb2_async_writev(struct cifs_io_subrequest *wdata)
 				offsetof(struct smb2_write_req, Buffer));
 	req->RemainingBytes = 0;
 
-	trace_smb3_write_enter(0 /* xid */,
+	trace_smb3_write_enter(wdata->xid,
 			       io_parms->persistent_fid,
 			       io_parms->tcon->tid,
 			       io_parms->tcon->ses->Suid,
@@ -4974,9 +4974,9 @@ smb2_async_writev(struct cifs_io_subrequest *wdata)
 
 	rc = cifs_call_async(server, &rqst, NULL, smb2_writev_callback, NULL,
 			     wdata, flags, &wdata->credits);
-
+	/* Can't touch wdata if rc == 0 */
 	if (rc) {
-		trace_smb3_write_err(0 /* no xid */,
+		trace_smb3_write_err(xid,
 				     io_parms->persistent_fid,
 				     io_parms->tcon->tid,
 				     io_parms->tcon->ses->Suid,
@@ -4989,9 +4989,10 @@ smb2_async_writev(struct cifs_io_subrequest *wdata)
 async_writev_out:
 	cifs_small_buf_release(req);
 out:
-	if (rc)
+	if (rc) {
+		add_credits_and_wake_if(wdata->server, &wdata->credits, 0);
 		cifs_write_subrequest_terminated(wdata, rc, true);
-	return rc;
+	}
 }
 
 /*

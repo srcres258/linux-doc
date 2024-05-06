@@ -134,7 +134,7 @@ static void afs_issue_write_worker(struct work_struct *work)
 	op->file[0].dv_delta	= 1;
 	op->file[0].modification = true;
 	op->store.pos		= pos;
-	op->store.size		= len,
+	op->store.size		= len;
 	op->flags		|= AFS_OPERATION_UNINTR;
 	op->ops			= &afs_store_data_operation;
 

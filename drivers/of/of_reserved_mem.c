@@ -440,6 +440,8 @@ void __init fdt_init_reserved_mem(void)
 		int err = 0;
 		bool nomap;
 
+		nomap = of_get_flat_dt_prop(node, "no-map", NULL) != NULL;
+
 		if (rmem->size == 0)
 			err = __reserved_mem_alloc_size(node, rmem->name,
 						 &rmem->base, &rmem->size);

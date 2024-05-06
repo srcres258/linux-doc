@@ -151,6 +151,8 @@ static inline void __memcpy_aligned_dn (unsigned long d, unsigned long s,
 	DO_REST_ALIGNED_DN(d,s,n);
 }
 
+#undef memcpy
+
 void * memcpy(void * dest, const void *src, size_t n)
 {
 	if (!(((unsigned long) dest ^ (unsigned long) src) & 7)) {

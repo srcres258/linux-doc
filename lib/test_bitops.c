@@ -52,8 +52,8 @@ static unsigned long order_comb_long[][2] = {
 
 static int __init test_fns(void)
 {
+	static volatile __always_used unsigned long tmp __initdata;
 	static unsigned long buf[10000] __initdata;
-	static volatile __used unsigned long tmp __initdata;
 	unsigned int i, n;
 	ktime_t time;
 

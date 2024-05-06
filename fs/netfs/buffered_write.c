@@ -392,8 +392,6 @@ ssize_t netfs_perform_write(struct kiocb *iocb, struct iov_iter *iter,
 			folio_mark_dirty(folio);
 			folio_unlock(folio);
 		} else {
-			if (pos > wreq->i_size)
-				wreq->i_size = pos;
 			netfs_advance_writethrough(wreq, &wbc, folio, copied,
 						   offset + copied == flen,
 						   &writethrough);
@@ -411,7 +409,7 @@ out:
 		ctx->ops->post_modify(inode);
 
 	if (unlikely(wreq)) {
-		ret2 = netfs_end_writethrough(wreq, iocb);
+		ret2 = netfs_end_writethrough(wreq, &wbc, writethrough);
 		wbc_detach_inode(&wbc);
 		if (ret2 == -EIOCBQUEUED)
 			return ret2;
@@ -526,6 +524,7 @@ vm_fault_t netfs_page_mkwrite(struct vm_fault *vmf, struct netfs_group *netfs_gr
 	struct folio *folio = page_folio(vmf->page);
 	struct file *file = vmf->vma->vm_file;
 	struct inode *inode = file_inode(file);
+	struct netfs_inode *ictx = netfs_inode(inode);
 	vm_fault_t ret = VM_FAULT_RETRY;
 	int err;
 
@@ -572,6 +571,8 @@ vm_fault_t netfs_page_mkwrite(struct vm_fault *vmf, struct netfs_group *netfs_gr
 		trace_netfs_folio(folio, netfs_folio_trace_mkwrite);
 	netfs_set_group(folio, netfs_group);
 	file_update_time(file);
+	if (ictx->ops->post_modify)
+		ictx->ops->post_modify(inode);
 	ret = VM_FAULT_LOCKED;
 out:
 	sb_end_pagefault(inode->i_sb);

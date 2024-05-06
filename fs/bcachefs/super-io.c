@@ -232,7 +232,7 @@ struct bch_sb_field *bch2_sb_field_resize_id(struct bch_sb_handle *sb,
 			struct bch_sb_handle *dev_sb = &ca->disk_sb;
 
 			if (bch2_sb_realloc(dev_sb, le32_to_cpu(dev_sb->sb->u64s) + d)) {
-				percpu_ref_put(&ca->ref);
+				percpu_ref_put(&ca->io_ref);
 				return NULL;
 			}
 		}
@@ -1009,25 +1009,34 @@ int bch2_write_super(struct bch_fs *c)
 			continue;
 
 		if (le64_to_cpu(ca->sb_read_scratch->seq) < ca->disk_sb.seq) {
-			bch2_fs_fatal_error(c,
+			struct printbuf buf = PRINTBUF;
+			prt_char(&buf, ' ');
+			prt_bdevname(&buf, ca->disk_sb.bdev);
+			prt_printf(&buf,
 				": Superblock write was silently dropped! (seq %llu expected %llu)",
 				le64_to_cpu(ca->sb_read_scratch->seq),
 				ca->disk_sb.seq);
-			percpu_ref_put(&ca->io_ref);
+			bch2_fs_fatal_error(c, "%s", buf.buf);
+			printbuf_exit(&buf);
 			ret = -BCH_ERR_erofs_sb_err;
-			goto out;
 		}
 
 		if (le64_to_cpu(ca->sb_read_scratch->seq) > ca->disk_sb.seq) {
-			bch2_fs_fatal_error(c,
+			struct printbuf buf = PRINTBUF;
+			prt_char(&buf, ' ');
+			prt_bdevname(&buf, ca->disk_sb.bdev);
+			prt_printf(&buf,
 				": Superblock modified by another process (seq %llu expected %llu)",
 				le64_to_cpu(ca->sb_read_scratch->seq),
 				ca->disk_sb.seq);
-			percpu_ref_put(&ca->io_ref);
+			bch2_fs_fatal_error(c, "%s", buf.buf);
+			printbuf_exit(&buf);
 			ret = -BCH_ERR_erofs_sb_err;
-			goto out;
 		}
 	}
+
+	if (ret)
+		goto out;
 
 	do {
 		wrote = false;

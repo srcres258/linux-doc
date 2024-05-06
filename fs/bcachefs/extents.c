@@ -85,10 +85,8 @@ static inline bool ptr_better(struct bch_fs *c,
 			      const struct extent_ptr_decoded p2)
 {
 	if (likely(!p1.idx && !p2.idx)) {
-		rcu_read_lock();
 		u64 l1 = dev_latency(c, p1.ptr.dev);
 		u64 l2 = dev_latency(c, p2.ptr.dev);
-		rcu_read_unlock();
 
 		/* Pick at random, biased in favor of the faster device: */
 
@@ -114,21 +112,21 @@ int bch2_bkey_pick_read_device(struct bch_fs *c, struct bkey_s_c k,
 	const union bch_extent_entry *entry;
 	struct extent_ptr_decoded p;
 	struct bch_dev_io_failures *f;
-	struct bch_dev *ca;
 	int ret = 0;
 
 	if (k.k->type == KEY_TYPE_error)
 		return -EIO;
 
+	rcu_read_lock();
 	bkey_for_each_ptr_decode(k.k, ptrs, p, entry) {
 		/*
 		 * Unwritten extent: no need to actually read, treat it as a
 		 * hole and return 0s:
 		 */
-		if (p.ptr.unwritten)
-			return 0;
-
-		ca = bch2_dev_bkey_exists(c, p.ptr.dev);
+		if (p.ptr.unwritten) {
+			ret = 0;
+			break;
+		}
 
 		/*
 		 * If there are any dirty pointers it's an error if we can't
@@ -137,7 +135,9 @@ int bch2_bkey_pick_read_device(struct bch_fs *c, struct bkey_s_c k,
 		if (!ret && !p.ptr.cached)
 			ret = -EIO;
 
-		if (p.ptr.cached && dev_ptr_stale(ca, &p.ptr))
+		struct bch_dev *ca = bch2_dev_rcu(c, p.ptr.dev);
+
+		if (p.ptr.cached && (!ca || dev_ptr_stale(ca, &p.ptr)))
 			continue;
 
 		f = failed ? dev_io_failures(failed, p.ptr.dev) : NULL;
@@ -146,12 +146,13 @@ int bch2_bkey_pick_read_device(struct bch_fs *c, struct bkey_s_c k,
 				? f->idx
 				: f->idx + 1;
 
-		if (!p.idx &&
-		    !bch2_dev_is_readable(ca))
+		if (!p.idx && !ca)
 			p.idx++;
 
-		if (bch2_force_reconstruct_read &&
-		    !p.idx && p.has_ec)
+		if (!p.idx && p.has_ec && bch2_force_reconstruct_read)
+			p.idx++;
+
+		if (!p.idx && !bch2_dev_is_readable(ca))
 			p.idx++;
 
 		if (p.idx >= (unsigned) p.has_ec + 1)
@@ -163,6 +164,7 @@ int bch2_bkey_pick_read_device(struct bch_fs *c, struct bkey_s_c k,
 		*pick = p;
 		ret = 1;
 	}
+	rcu_read_unlock();
 
 	return ret;
 }
@@ -850,8 +852,6 @@ union bch_extent_entry *bch2_bkey_drop_ptr(struct bkey_s k,
 
 void bch2_bkey_drop_device(struct bkey_s k, unsigned dev)
 {
-	struct bch_extent_ptr *ptr;
-
 	bch2_bkey_drop_ptrs(k, ptr, ptr->dev == dev);
 }
 
@@ -993,7 +993,6 @@ void bch2_extent_ptr_set_cached(struct bkey_s k, struct bch_extent_ptr *ptr)
  */
 bool bch2_extent_normalize(struct bch_fs *c, struct bkey_s k)
 {
-	struct bch_extent_ptr *ptr;
 	struct bch_dev *ca;
 
 	rcu_read_lock();

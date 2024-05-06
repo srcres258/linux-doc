@@ -203,7 +203,7 @@ static __always_inline __s64 sign_extend64(__u64 value, int index)
 	return (__s64)(value << shift) >> shift;
 }
 
-static inline unsigned fls_long(unsigned long l)
+static inline unsigned int fls_long(unsigned long l)
 {
 	if (sizeof(l) == 4)
 		return fls(l);
@@ -239,7 +239,7 @@ static inline int get_count_order_long(unsigned long l)
  * The result is not defined if no bits are set, so check that @word
  * is non-zero before calling this.
  */
-static inline unsigned long __ffs64(u64 word)
+static inline unsigned int __ffs64(u64 word)
 {
 #if BITS_PER_LONG == 32
 	if (((u32)word) == 0UL)
@@ -250,17 +250,49 @@ static inline unsigned long __ffs64(u64 word)
 	return __ffs((unsigned long)word);
 }
 
-/**
- * fns - find N'th set bit in a word
- * @word: The word to search
- * @n: Bit to find
- */
-static inline unsigned long fns(unsigned long word, unsigned int n)
+static inline unsigned long fns8(u8 word, unsigned int n)
 {
 	while (word && n--)
 		word &= word - 1;
 
-	return word ? __ffs(word) : BITS_PER_LONG;
+	return word ? __ffs(word) : 64;
+}
+
+static inline unsigned long fns16(u16 word, unsigned int n)
+{
+	unsigned int w = hweight8((u8)word);
+
+	return n < w ? fns8((u8)word, n) : 8 + fns8((u8)(word >> 8), n - w);
+}
+
+static inline unsigned long fns32(u32 word, unsigned int n)
+{
+	unsigned int w = hweight16((u16)word);
+
+	return n < w ? fns16((u16)word, n) : 16 + fns16((u16)(word >> 16), n - w);
+}
+
+static inline unsigned long fns64(u64 word, unsigned int n)
+{
+	unsigned int w = hweight32((u32)word);
+
+	return n < w ? fns32((u32)word, n) : 32 + fns32((u32)(word >> 32), n - w);
+}
+
+/**
+ * fns - find N'th set bit in a word
+ * @word: The word to search
+ * @n: Bit to find, counting from 0
+ *
+ * Returns N'th set bit. If no such bit found, returns >= BITS_PER_LONG
+ */
+static inline unsigned int fns(unsigned long word, unsigned int n)
+{
+#if BITS_PER_LONG == 64
+	return fns64(word, n);
+#else
+	return fns32(word, n);
+#endif
 }
 
 /**

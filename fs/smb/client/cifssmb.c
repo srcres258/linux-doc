@@ -1308,6 +1308,7 @@ cifs_readv_callback(struct mid_q_entry *mid)
 
 	if (rdata->result == 0 || rdata->result == -EAGAIN)
 		iov_iter_advance(&rdata->subreq.io_iter, rdata->got_bytes);
+	rdata->credits.value = 0;
 	netfs_subreq_terminated(&rdata->subreq,
 				(rdata->result == 0 || rdata->result == -EAGAIN) ?
 				rdata->got_bytes : rdata->result,
@@ -1656,13 +1657,14 @@ cifs_writev_callback(struct mid_q_entry *mid)
 		break;
 	}
 
+	wdata->credits.value = 0;
 	cifs_write_subrequest_terminated(wdata, result, true);
 	release_mid(mid);
 	add_credits(tcon->ses->server, &credits, 0);
 }
 
 /* cifs_async_writev - send an async write, and set up mid to handle result */
-int
+void
 cifs_async_writev(struct cifs_io_subrequest *wdata)
 {
 	int rc = -EACCES;
@@ -1733,16 +1735,17 @@ cifs_async_writev(struct cifs_io_subrequest *wdata)
 
 	rc = cifs_call_async(tcon->ses->server, &rqst, NULL,
 			     cifs_writev_callback, NULL, wdata, 0, NULL);
-
+	/* Can't touch wdata if rc == 0 */
 	if (rc == 0)
 		cifs_stats_inc(&tcon->stats.cifs_stats.num_writes);
 
 async_writev_out:
 	cifs_small_buf_release(smb);
 out:
-	if (rc)
+	if (rc) {
+		add_credits_and_wake_if(wdata->server, &wdata->credits, 0);
 		cifs_write_subrequest_terminated(wdata, rc, false);
-	return rc;
+	}
 }
 
 int

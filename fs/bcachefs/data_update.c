@@ -364,7 +364,7 @@ void bch2_data_update_exit(struct data_update *update)
 		if (c->opts.nocow_enabled)
 			bch2_bucket_nocow_unlock(&c->nocow_locks,
 						 PTR_BUCKET_POS(ca, ptr), 0);
-		percpu_ref_put(&ca->ref);
+		bch2_dev_put(ca);
 	}
 
 	bch2_bkey_buf_exit(&update->k, c);
@@ -471,7 +471,6 @@ int bch2_extent_drop_ptrs(struct btree_trans *trans,
 
 	while (data_opts.kill_ptrs) {
 		unsigned i = 0, drop = __fls(data_opts.kill_ptrs);
-		struct bch_extent_ptr *ptr;
 
 		bch2_bkey_drop_ptrs(bkey_i_to_s(n), ptr, i++ == drop);
 		data_opts.kill_ptrs ^= 1U << drop;
@@ -545,8 +544,16 @@ int bch2_data_update_init(struct btree_trans *trans,
 	m->op.compression_opt	= background_compression(io_opts);
 	m->op.watermark		= m->data_opts.btree_insert_flags & BCH_WATERMARK_MASK;
 
-	bkey_for_each_ptr(ptrs, ptr)
-		percpu_ref_get(&bch2_dev_bkey_exists(c, ptr->dev)->ref);
+	bkey_for_each_ptr(ptrs, ptr) {
+		if (!bch2_dev_tryget(c, ptr->dev)) {
+			bkey_for_each_ptr(ptrs, ptr2) {
+				if (ptr2 == ptr)
+					break;
+				bch2_dev_put(bch2_dev_have_ref(c, ptr2->dev));
+			}
+			return -BCH_ERR_data_update_done;
+		}
+	}
 
 	unsigned durability_have = 0, durability_removing = 0;
 
@@ -661,7 +668,7 @@ err:
 		struct bpos bucket = PTR_BUCKET_POS(ca, &p.ptr);
 		if ((1U << i) & ptrs_locked)
 			bch2_bucket_nocow_unlock(&c->nocow_locks, bucket, 0);
-		percpu_ref_put(&ca->ref);
+		bch2_dev_put(ca);
 		i++;
 	}
 

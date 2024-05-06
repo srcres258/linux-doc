@@ -365,9 +365,9 @@ static void afs_zap_data(struct afs_vnode *vnode)
 	 * written back in a regular file and completely discard the pages in a
 	 * directory or symlink */
 	if (S_ISREG(vnode->netfs.inode.i_mode))
-		filemap_invalidate_inode(&vnode->netfs.inode, true);
+		filemap_invalidate_inode(&vnode->netfs.inode, true, 0, LLONG_MAX);
 	else
-		filemap_invalidate_inode(&vnode->netfs.inode, false);
+		filemap_invalidate_inode(&vnode->netfs.inode, false, 0, LLONG_MAX);
 }
 
 /*

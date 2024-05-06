@@ -37,8 +37,7 @@ void bch2_backpointer_swab(struct bkey_s);
  * Convert from pos in backpointer btree to pos of corresponding bucket in alloc
  * btree:
  */
-static inline struct bpos bp_pos_to_bucket(const struct bch_dev *ca,
-					   struct bpos bp_pos)
+static inline struct bpos bp_pos_to_bucket(const struct bch_dev *ca, struct bpos bp_pos)
 {
 	u64 bucket_sector = bp_pos.offset >> MAX_EXTENT_COMPRESS_RATIO_SHIFT;
 
@@ -61,6 +60,15 @@ static inline bool bp_pos_to_bucket_nodev(struct bch_fs *c, struct bpos bp_pos, 
 					c, "backpointer for missing device %llu", bp_pos.inode);
 }
 
+static inline struct bpos bucket_pos_to_bp_noerror(const struct bch_dev *ca,
+						   struct bpos bucket,
+						   u64 bucket_offset)
+{
+	return POS(bucket.inode,
+		   (bucket_to_sector(ca, bucket.offset) <<
+		    MAX_EXTENT_COMPRESS_RATIO_SHIFT) + bucket_offset);
+}
+
 /*
  * Convert from pos in alloc btree + bucket offset to pos in backpointer btree:
  */
@@ -68,10 +76,7 @@ static inline struct bpos bucket_pos_to_bp(const struct bch_dev *ca,
 					   struct bpos bucket,
 					   u64 bucket_offset)
 {
-	struct bpos ret = POS(bucket.inode,
-			      (bucket_to_sector(ca, bucket.offset) <<
-			       MAX_EXTENT_COMPRESS_RATIO_SHIFT) + bucket_offset);
-
+	struct bpos ret = bucket_pos_to_bp_noerror(ca, bucket, bucket_offset);
 	EBUG_ON(!bkey_eq(bucket, bp_pos_to_bucket(ca, ret)));
 	return ret;
 }

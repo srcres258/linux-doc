@@ -315,13 +315,19 @@ static int netfs_write_folio(struct netfs_io_request *wreq,
 	struct netfs_group *fgroup; /* TODO: Use this with ceph */
 	struct netfs_folio *finfo;
 	size_t fsize = folio_size(folio), flen = fsize, foff = 0;
-	loff_t fpos = folio_pos(folio);
+	loff_t fpos = folio_pos(folio), i_size;
 	bool to_eof = false, streamw = false;
 	bool debug = false;
 
 	_enter("");
 
-	if (fpos >= wreq->i_size) {
+	/* netfs_perform_write() may shift i_size around the page or from out
+	 * of the page to beyond it, but cannot move i_size into or through the
+	 * page since we have it locked.
+	 */
+	i_size = i_size_read(wreq->inode);
+
+	if (fpos >= i_size) {
 		/* mmap beyond eof. */
 		_debug("beyond eof");
 		folio_start_writeback(folio);
@@ -331,6 +337,9 @@ static int netfs_write_folio(struct netfs_io_request *wreq,
 		wreq->nr_group_rel = 0;
 		return 0;
 	}
+
+	if (fpos + fsize > wreq->i_size)
+		wreq->i_size = i_size;
 
 	fgroup = netfs_folio_group(folio);
 	finfo = netfs_folio_info(folio);
@@ -342,14 +351,14 @@ static int netfs_write_folio(struct netfs_io_request *wreq,
 
 	if (wreq->origin == NETFS_WRITETHROUGH) {
 		to_eof = false;
-		if (flen > wreq->i_size - fpos)
-			flen = wreq->i_size - fpos;
-	} else if (flen > wreq->i_size - fpos) {
-		flen = wreq->i_size - fpos;
+		if (flen > i_size - fpos)
+			flen = i_size - fpos;
+	} else if (flen > i_size - fpos) {
+		flen = i_size - fpos;
 		if (!streamw)
 			folio_zero_segment(folio, flen, fsize);
 		to_eof = true;
-	} else if (flen == wreq->i_size - fpos) {
+	} else if (flen == i_size - fpos) {
 		to_eof = true;
 	}
 	flen -= foff;

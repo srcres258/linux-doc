@@ -4651,11 +4651,8 @@ xfs_bmapi_convert_one_delalloc(
 	xfs_ilock(ip, XFS_ILOCK_EXCL);
 	xfs_trans_ijoin(tp, ip, 0);
 
-	error = xfs_iext_count_may_overflow(ip, whichfork,
+	error = xfs_iext_count_extend(tp, ip, whichfork,
 			XFS_IEXT_ADD_NOSPLIT_CNT);
-	if (error == -EFBIG)
-		error = xfs_iext_count_upgrade(tp, ip,
-				XFS_IEXT_ADD_NOSPLIT_CNT);
 	if (error)
 		goto out_trans_cancel;
 
@@ -4928,7 +4925,7 @@ xfs_bmap_split_indlen(
 	*indlen2 = len2;
 }
 
-int
+void
 xfs_bmap_del_extent_delay(
 	struct xfs_inode	*ip,
 	int			whichfork,
@@ -4944,7 +4941,6 @@ xfs_bmap_del_extent_delay(
 	xfs_filblks_t		got_indlen, new_indlen, stolen = 0;
 	uint32_t		state = xfs_bmap_fork_to_state(whichfork);
 	uint64_t		fdblocks;
-	int			error = 0;
 	bool			isrt;
 
 	XFS_STATS_INC(mp, xs_del_exlist);
@@ -4964,9 +4960,7 @@ xfs_bmap_del_extent_delay(
 	 * sb counters as we might have to borrow some blocks for the
 	 * indirect block accounting.
 	 */
-	error = xfs_quota_unreserve_blkres(ip, del->br_blockcount);
-	if (error)
-		return error;
+	xfs_quota_unreserve_blkres(ip, del->br_blockcount);
 	ip->i_delayed_blks -= del->br_blockcount;
 
 	if (got->br_startoff == del->br_startoff)
@@ -5064,7 +5058,6 @@ xfs_bmap_del_extent_delay(
 
 	xfs_add_fdblocks(mp, fdblocks);
 	xfs_mod_delalloc(ip, -(int64_t)del->br_blockcount, -da_diff);
-	return error;
 }
 
 void
@@ -5622,17 +5615,15 @@ __xfs_bunmapi(
 
 delete:
 		if (wasdel) {
-			error = xfs_bmap_del_extent_delay(ip, whichfork, &icur,
-					&got, &del);
+			xfs_bmap_del_extent_delay(ip, whichfork, &icur, &got, &del);
 		} else {
 			error = xfs_bmap_del_extent_real(ip, tp, &icur, cur,
 					&del, &tmp_logflags, whichfork,
 					flags);
 			logflags |= tmp_logflags;
+			if (error)
+				goto error0;
 		}
-
-		if (error)
-			goto error0;
 
 		end = del.br_startoff - 1;
 nodelete:

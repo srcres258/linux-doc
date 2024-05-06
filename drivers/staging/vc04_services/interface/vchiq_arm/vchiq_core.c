@@ -43,7 +43,7 @@
 	(((type) << TYPE_SHIFT) | ((srcport) << 12) | ((dstport) << 0))
 #define VCHIQ_MSG_TYPE(msgid)          ((unsigned int)(msgid) >> TYPE_SHIFT)
 #define VCHIQ_MSG_SRCPORT(msgid) \
-	(unsigned short)(((unsigned int)(msgid) >> 12) & 0xfff)
+	((unsigned short)(((unsigned int)(msgid) >> 12) & 0xfff))
 #define VCHIQ_MSG_DSTPORT(msgid) \
 	((unsigned short)(msgid) & 0xfff)
 
@@ -227,6 +227,7 @@ struct vchiq_service *handle_to_service(struct vchiq_instance *instance, unsigne
 
 	return rcu_dereference(instance->state->services[idx]);
 }
+
 struct vchiq_service *
 find_service_by_handle(struct vchiq_instance *instance, unsigned int handle)
 {
@@ -697,7 +698,8 @@ reserve_space(struct vchiq_state *state, size_t space, int is_blocking)
 
 		if (tx_pos == (state->slot_queue_available * VCHIQ_SLOT_SIZE)) {
 			complete(&state->slot_available_event);
-			pr_warn("%s: invalid tx_pos: %d\n", __func__, tx_pos);
+			dev_warn(state->dev, "%s: invalid tx_pos: %d\n",
+				 __func__, tx_pos);
 			return NULL;
 		}
 
@@ -1189,7 +1191,6 @@ queue_message_sync(struct vchiq_state *state, struct vchiq_service *service,
 	header->size = size;
 	header->msgid = msgid;
 
-
 	svc_fourcc = service ? service->base.fourcc
 			     : VCHIQ_MAKE_FOURCC('?', '?', '?', '?');
 
@@ -1615,7 +1616,6 @@ parse_message(struct vchiq_state *state, struct vchiq_header *header)
 		break;
 	}
 
-
 	svc_fourcc = service ? service->base.fourcc
 			     : VCHIQ_MAKE_FOURCC('?', '?', '?', '?');
 
@@ -1732,10 +1732,9 @@ parse_message(struct vchiq_state *state, struct vchiq_header *header)
 				break;
 			}
 			if (queue->process != queue->remote_insert) {
-				pr_err("%s: p %x != ri %x\n",
-				       __func__,
-				       queue->process,
-				       queue->remote_insert);
+				dev_err(state->dev, "%s: p %x != ri %x\n",
+					__func__, queue->process,
+					queue->remote_insert);
 				mutex_unlock(&service->bulk_mutex);
 				goto bail_not_ready;
 			}
@@ -2178,6 +2177,7 @@ vchiq_init_state(struct vchiq_state *state, struct vchiq_slot_zero *slot_zero, s
 
 	for (i = 0; i < VCHIQ_MAX_SERVICES; i++) {
 		struct vchiq_service_quota *quota = &state->service_quotas[i];
+
 		init_completion(&quota->quota_event);
 	}
 
