@@ -3509,7 +3509,7 @@ char *find_sysfs_path_by_id(struct sysfs_path *sp, int id)
 		sp = sp->next;
 	}
 	if (debug)
-		warn("%s: id%d not found", __func__, id);
+		warnx("%s: id%d not found", __func__, id);
 	return NULL;
 }
 
@@ -3721,12 +3721,14 @@ int get_counters(struct thread_data *t, struct core_data *c, struct pkg_data *p)
 		p->sam_act_mhz = gfx_info[SAM_ACTMHz].val;
 
 	for (i = 0, mp = sys.pp; mp; i++, mp = mp->next) {
-		char *path;
+		char *path = NULL;
 
-		path = find_sysfs_path_by_id(mp->sp, p->package_id);
-		if (path == NULL) {
-			warn("%s: package_id %d not found\n", __func__, p->package_id);
-			return -10;
+		if (mp->msr_num == 0) {
+			path = find_sysfs_path_by_id(mp->sp, p->package_id);
+			if (path == NULL) {
+				warn("%s: package_id %d not found", __func__, p->package_id);
+				return -10;
+			}
 		}
 		if (get_mp(cpu, mp, &p->counter[i], path))
 			return -10;

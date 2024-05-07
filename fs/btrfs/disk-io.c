@@ -3841,7 +3841,7 @@ static int write_dev_supers(struct btrfs_device *device,
  * @max_mirrors same for write and wait phases.
  *
  * Return -1 if primary super block write failed or when there were no super block
- * copies written.  * Otherwise 0.
+ * copies written. Otherwise 0.
  */
 static int wait_dev_supers(struct btrfs_device *device, int max_mirrors)
 {

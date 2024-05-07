@@ -272,7 +272,7 @@ static inline int kvm_set_cpuid(struct kvm_vcpu *vcpu, u64 val)
 	cpuid = kvm_read_sw_gcsr(csr, LOONGARCH_CSR_CPUID);
 
 	spin_lock(&vcpu->kvm->arch.phyid_map_lock);
-	if (map->phys_map[cpuid].enabled) {
+	if ((cpuid < KVM_MAX_PHYID) && map->phys_map[cpuid].enabled) {
 		/* Discard duplicated CPUID set operation */
 		if (cpuid == val) {
 			spin_unlock(&vcpu->kvm->arch.phyid_map_lock);
@@ -281,14 +281,10 @@ static inline int kvm_set_cpuid(struct kvm_vcpu *vcpu, u64 val)
 
 		/*
 		 * CPUID is already set before
-		 * Forbid changing different CPUID at runtime
-		 * But CPUID 0 is the initial value for vcpu, so allow
-		 * changing from 0 to others
+		 * Forbid changing to a different CPUID at runtime
 		 */
-		if (cpuid) {
-			spin_unlock(&vcpu->kvm->arch.phyid_map_lock);
-			return -EINVAL;
-		}
+		spin_unlock(&vcpu->kvm->arch.phyid_map_lock);
+		return -EINVAL;
 	}
 
 	if (map->phys_map[val].enabled) {
@@ -330,7 +326,7 @@ static inline void kvm_drop_cpuid(struct kvm_vcpu *vcpu)
 	if (map->phys_map[cpuid].enabled) {
 		map->phys_map[cpuid].vcpu = NULL;
 		map->phys_map[cpuid].enabled = false;
-		kvm_write_sw_gcsr(csr, LOONGARCH_CSR_CPUID, 0);
+		kvm_write_sw_gcsr(csr, LOONGARCH_CSR_CPUID, KVM_MAX_PHYID);
 	}
 	spin_unlock(&vcpu->kvm->arch.phyid_map_lock);
 }
@@ -1029,6 +1025,7 @@ int kvm_arch_vcpu_create(struct kvm_vcpu *vcpu)
 
 	/* Set cpuid */
 	kvm_write_sw_gcsr(csr, LOONGARCH_CSR_TMID, vcpu->vcpu_id);
+	kvm_write_sw_gcsr(csr, LOONGARCH_CSR_CPUID, KVM_MAX_PHYID);
 
 	/* Start with no pending virtual guest interrupts */
 	csr->csrs[LOONGARCH_CSR_GINTC] = 0;

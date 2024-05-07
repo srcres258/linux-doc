@@ -20,6 +20,10 @@ ev5_flush_tlb_current(struct mm_struct *mm)
 	__load_new_mm_context(mm);
 }
 
+/* Flush just one page in the current TLB set.  We need to be very
+   careful about the icache here, there is no way to invalidate a
+   specific icache page.  */
+
 __EXTERN_INLINE void
 ev5_flush_tlb_current_page(struct mm_struct * mm,
 			   struct vm_area_struct *vma,

@@ -454,6 +454,8 @@
 #define SSP_SET_SFRM_CONSUMER	BIT(24)
 #define SSP_SET_CBP_CFP		(SSP_SET_SCLK_CONSUMER | SSP_SET_SFRM_CONSUMER)
 
+#define HDA_EXT_ADDR		0
+#define HDA_EXT_CODEC(x) ((x) & BIT(HDA_EXT_ADDR))
 #define HDA_IDISP_ADDR		2
 #define HDA_IDISP_CODEC(x) ((x) & BIT(HDA_IDISP_ADDR))
 
@@ -617,6 +619,8 @@ void hda_ipc_dump(struct snd_sof_dev *sdev);
 void hda_ipc_irq_dump(struct snd_sof_dev *sdev);
 void hda_dsp_d0i3_work(struct work_struct *work);
 int hda_dsp_disable_interrupts(struct snd_sof_dev *sdev);
+bool hda_check_ipc_irq(struct snd_sof_dev *sdev);
+u32 hda_get_interface_mask(struct snd_sof_dev *sdev);
 
 /*
  * DSP PCM Operations.
@@ -698,6 +702,8 @@ irqreturn_t hda_dsp_ipc_irq_thread(int irq, void *context);
 int hda_dsp_ipc_cmd_done(struct snd_sof_dev *sdev, int dir);
 
 void hda_dsp_get_state(struct snd_sof_dev *sdev, const char *level);
+void hda_dsp_dump_ext_rom_status(struct snd_sof_dev *sdev, const char *level,
+				 u32 flags);
 
 /*
  * DSP Code loader.
@@ -806,10 +812,12 @@ int hda_dsp_trace_trigger(struct snd_sof_dev *sdev, int cmd);
 
 int hda_sdw_check_lcount_common(struct snd_sof_dev *sdev);
 int hda_sdw_check_lcount_ext(struct snd_sof_dev *sdev);
+int hda_sdw_check_lcount(struct snd_sof_dev *sdev);
 int hda_sdw_startup(struct snd_sof_dev *sdev);
 void hda_common_enable_sdw_irq(struct snd_sof_dev *sdev, bool enable);
 void hda_sdw_int_enable(struct snd_sof_dev *sdev, bool enable);
 bool hda_sdw_check_wakeen_irq_common(struct snd_sof_dev *sdev);
+void hda_sdw_process_wakeen_common(struct snd_sof_dev *sdev);
 void hda_sdw_process_wakeen(struct snd_sof_dev *sdev);
 bool hda_common_check_sdw_irq(struct snd_sof_dev *sdev);
 
@@ -821,6 +829,11 @@ static inline int hda_sdw_check_lcount_common(struct snd_sof_dev *sdev)
 }
 
 static inline int hda_sdw_check_lcount_ext(struct snd_sof_dev *sdev)
+{
+	return 0;
+}
+
+static inline int hda_sdw_check_lcount(struct snd_sof_dev *sdev)
 {
 	return 0;
 }
@@ -841,6 +854,10 @@ static inline void hda_sdw_int_enable(struct snd_sof_dev *sdev, bool enable)
 static inline bool hda_sdw_check_wakeen_irq_common(struct snd_sof_dev *sdev)
 {
 	return false;
+}
+
+static inline void hda_sdw_process_wakeen_common(struct snd_sof_dev *sdev)
+{
 }
 
 static inline void hda_sdw_process_wakeen(struct snd_sof_dev *sdev)

@@ -20,7 +20,7 @@ DEFINE_STATIC_CALL(pv_steal_clock, native_steal_clock);
 #ifdef CONFIG_SMP
 static void pv_send_ipi_single(int cpu, unsigned int action)
 {
-	unsigned int min, old;
+	int min, old;
 	irq_cpustat_t *info = &per_cpu(irq_stat, cpu);
 
 	old = atomic_fetch_or(BIT(action), &info->message);
@@ -35,7 +35,7 @@ static void pv_send_ipi_single(int cpu, unsigned int action)
 
 static void pv_send_ipi_mask(const struct cpumask *mask, unsigned int action)
 {
-	unsigned int cpu, i, min = 0, max = 0, old;
+	int i, cpu, min = 0, max = 0, old;
 	__uint128_t bitmap = 0;
 	irq_cpustat_t *info;
 
@@ -79,7 +79,7 @@ static void pv_send_ipi_mask(const struct cpumask *mask, unsigned int action)
 
 static irqreturn_t pv_ipi_interrupt(int irq, void *dev)
 {
-	long action;
+	u32 action;
 	irq_cpustat_t *info;
 
 	/* Clear SWI interrupt */
