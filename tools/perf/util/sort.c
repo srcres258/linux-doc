@@ -239,11 +239,11 @@ static int64_t _sort__dso_cmp(struct map *map_l, struct map *map_r)
 		return cmp_null(dso_r, dso_l);
 
 	if (verbose > 0) {
-		dso_name_l = dso_l->long_name;
-		dso_name_r = dso_r->long_name;
+		dso_name_l = dso__long_name(dso_l);
+		dso_name_r = dso__long_name(dso_r);
 	} else {
-		dso_name_l = dso_l->short_name;
-		dso_name_r = dso_r->short_name;
+		dso_name_l = dso__short_name(dso_l);
+		dso_name_r = dso__short_name(dso_r);
 	}
 
 	return strcmp(dso_name_l, dso_name_r);
@@ -262,7 +262,7 @@ static int _hist_entry__dso_snprintf(struct map *map, char *bf,
 	const char *dso_name = "[unknown]";
 
 	if (dso)
-		dso_name = verbose > 0 ? dso->long_name : dso->short_name;
+		dso_name = verbose > 0 ? dso__long_name(dso) : dso__short_name(dso);
 
 	return repsep_snprintf(bf, size, "%-*.*s", width, width, dso_name);
 }
@@ -364,7 +364,7 @@ static int _hist_entry__sym_snprintf(struct map_symbol *ms,
 		char o = dso ? dso__symtab_origin(dso) : '!';
 		u64 rip = ip;
 
-		if (dso && dso->kernel && dso->adjust_symbols)
+		if (dso && dso__kernel(dso) && dso__adjust_symbols(dso))
 			rip = map__unmap_ip(map, ip);
 
 		ret += repsep_snprintf(bf, size, "%-#*llx %c ",
@@ -1586,8 +1586,8 @@ sort__dcacheline_cmp(struct hist_entry *left, struct hist_entry *right)
 	 */
 
 	if ((left->cpumode != PERF_RECORD_MISC_KERNEL) &&
-	    (!(map__flags(l_map) & MAP_SHARED)) && !l_dso->id.maj && !l_dso->id.min &&
-	    !l_dso->id.ino && !l_dso->id.ino_generation) {
+	    (!(map__flags(l_map) & MAP_SHARED)) && !dso__id(l_dso)->maj && !dso__id(l_dso)->min &&
+	     !dso__id(l_dso)->ino && !dso__id(l_dso)->ino_generation) {
 		/* userspace anonymous */
 
 		if (thread__pid(left->thread) > thread__pid(right->thread))
@@ -1626,7 +1626,8 @@ static int hist_entry__dcacheline_snprintf(struct hist_entry *he, char *bf,
 		if ((he->cpumode != PERF_RECORD_MISC_KERNEL) &&
 		     map && !(map__prot(map) & PROT_EXEC) &&
 		     (map__flags(map) & MAP_SHARED) &&
-		    (dso->id.maj || dso->id.min || dso->id.ino || dso->id.ino_generation))
+		     (dso__id(dso)->maj || dso__id(dso)->min || dso__id(dso)->ino ||
+		      dso__id(dso)->ino_generation))
 			level = 's';
 		else if (!map)
 			level = 'X';
@@ -2441,6 +2442,13 @@ static struct hpp_dimension hpp_sort_dimensions[] = {
 	DIM(PERF_HPP__OVERHEAD_ACC, "overhead_children"),
 	DIM(PERF_HPP__SAMPLES, "sample"),
 	DIM(PERF_HPP__PERIOD, "period"),
+	DIM(PERF_HPP__WEIGHT1, "weight1"),
+	DIM(PERF_HPP__WEIGHT2, "weight2"),
+	DIM(PERF_HPP__WEIGHT3, "weight3"),
+	/* aliases for weight_struct */
+	DIM(PERF_HPP__WEIGHT2, "ins_lat"),
+	DIM(PERF_HPP__WEIGHT3, "retire_lat"),
+	DIM(PERF_HPP__WEIGHT3, "p_stage_cyc"),
 };
 
 #undef DIM
@@ -3743,9 +3751,21 @@ void sort__setup_elide(FILE *output)
 	}
 }
 
-int output_field_add(struct perf_hpp_list *list, char *tok)
+int output_field_add(struct perf_hpp_list *list, const char *tok)
 {
 	unsigned int i;
+
+	for (i = 0; i < ARRAY_SIZE(hpp_sort_dimensions); i++) {
+		struct hpp_dimension *hd = &hpp_sort_dimensions[i];
+
+		if (strncasecmp(tok, hd->name, strlen(tok)))
+			continue;
+
+		if (!strcasecmp(tok, "weight"))
+			ui__warning("--fields weight shows the average value unlike in the --sort key.\n");
+
+		return __hpp_dimension__add_output(list, hd);
+	}
 
 	for (i = 0; i < ARRAY_SIZE(common_sort_dimensions); i++) {
 		struct sort_dimension *sd = &common_sort_dimensions[i];
@@ -3754,15 +3774,6 @@ int output_field_add(struct perf_hpp_list *list, char *tok)
 			continue;
 
 		return __sort_dimension__add_output(list, sd);
-	}
-
-	for (i = 0; i < ARRAY_SIZE(hpp_sort_dimensions); i++) {
-		struct hpp_dimension *hd = &hpp_sort_dimensions[i];
-
-		if (strncasecmp(tok, hd->name, strlen(tok)))
-			continue;
-
-		return __hpp_dimension__add_output(list, hd);
 	}
 
 	for (i = 0; i < ARRAY_SIZE(bstack_sort_dimensions); i++) {
