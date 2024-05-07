@@ -158,23 +158,49 @@ vclkdev_alloc(struct clk_hw *hw, const char *con_id, const char *dev_fmt,
 	va_list ap)
 {
 	struct clk_lookup_alloc *cla;
+	struct va_format fmt;
+	const char *failure;
+	va_list ap_copy;
+	size_t max_size;
+	ssize_t res;
 
 	cla = kzalloc(sizeof(*cla), GFP_KERNEL);
 	if (!cla)
 		return NULL;
 
+	va_copy(ap_copy, ap);
+
 	cla->cl.clk_hw = hw;
 	if (con_id) {
-		strscpy(cla->con_id, con_id, sizeof(cla->con_id));
+		res = strscpy(cla->con_id, con_id, sizeof(cla->con_id));
+		if (res < 0) {
+			max_size = sizeof(cla->con_id);
+			failure = "connection";
+			goto fail;
+		}
 		cla->cl.con_id = cla->con_id;
 	}
 
 	if (dev_fmt) {
-		vscnprintf(cla->dev_id, sizeof(cla->dev_id), dev_fmt, ap);
+		res = vsnprintf(cla->dev_id, sizeof(cla->dev_id), dev_fmt, ap);
+		if (res >= sizeof(cla->dev_id)) {
+			max_size = sizeof(cla->dev_id);
+			failure = "device";
+			goto fail;
+		}
 		cla->cl.dev_id = cla->dev_id;
 	}
 
 	return &cla->cl;
+
+fail:
+	fmt.fmt = dev_fmt;
+	fmt.va = &ap_copy;
+	pr_err("%pV:%s: %s ID is greater than %zu\n",
+	       &fmt, con_id, failure, max_size);
+	va_end(ap_copy);
+	kfree(cla);
+	return NULL;
 }
 
 static struct clk_lookup *
