@@ -517,19 +517,14 @@ void add_to_kill_ksm(struct task_struct *tsk, struct page *p,
  * Also when FAIL is set do a force kill because something went
  * wrong earlier.
  */
-static void kill_procs(struct list_head *to_kill, int forcekill, bool fail,
+static void kill_procs(struct list_head *to_kill, int forcekill,
 		unsigned long pfn, int flags)
 {
 	struct to_kill *tk, *next;
 
 	list_for_each_entry_safe(tk, next, to_kill, nd) {
 		if (forcekill) {
-			/*
-			 * In case something went wrong with munmapping
-			 * make sure the process doesn't catch the
-			 * signal and then access the memory. Just kill it.
-			 */
-			if (fail || tk->addr == -EFAULT) {
+			if (tk->addr == -EFAULT) {
 				pr_err("%#lx: forcibly killing %s:%d because of failure to unmap corrupted page\n",
 				       pfn, tk->tsk->comm, tk->tsk->pid);
 				do_send_sig_info(SIGKILL, SEND_SIG_PRIV,
@@ -1660,7 +1655,7 @@ static bool hwpoison_user_mappings(struct folio *folio, struct page *p,
 	 */
 	forcekill = folio_test_dirty(folio) || (flags & MF_MUST_KILL) ||
 		    !unmap_success;
-	kill_procs(&tokill, forcekill, !unmap_success, pfn, flags);
+	kill_procs(&tokill, forcekill, pfn, flags);
 
 	return unmap_success;
 }
@@ -1724,7 +1719,7 @@ static void unmap_and_kill(struct list_head *to_kill, unsigned long pfn,
 		unmap_mapping_range(mapping, start, size, 0);
 	}
 
-	kill_procs(to_kill, flags & MF_MUST_KILL, false, pfn, flags);
+	kill_procs(to_kill, flags & MF_MUST_KILL, pfn, flags);
 }
 
 /*
@@ -2167,6 +2162,36 @@ out:
 	return rc;
 }
 
+/*
+ * The calling condition is as such: thp split failed, page might have
+ * been GUP longterm pinned, not much can be done for recovery.
+ * But a SIGBUS should be delivered with vaddr provided so that the user
+ * application has a chance to recover. Also, application processes'
+ * election for MCE early killed will be honored.
+ */
+static int kill_procs_now(struct page *p, unsigned long pfn, int flags,
+			struct folio *folio)
+{
+	LIST_HEAD(tokill);
+	int res = -EHWPOISON;
+
+	/* deal with user pages only */
+	if (PageReserved(p) || PageSlab(p) || PageTable(p) || PageOffline(p))
+		res = -EBUSY;
+	if (!(folio_test_lru(folio) || PageHuge(p)))
+		res = -EBUSY;
+
+	if (res == -EHWPOISON) {
+		collect_procs(folio, p, &tokill, flags & MF_ACTION_REQUIRED);
+		kill_procs(&tokill, true, pfn, flags);
+	}
+
+	if (flags & MF_COUNT_INCREASED)
+		put_page(p);
+
+	return res;
+}
+
 /**
  * memory_failure - Handle memory failure of a page.
  * @pfn: Page Number of the corrupted page
@@ -2296,6 +2321,11 @@ try_again:
 		 */
 		folio_set_has_hwpoisoned(folio);
 		if (try_to_split_thp_page(p) < 0) {
+			if (flags & MF_ACTION_REQUIRED) {
+				pr_err("%#lx: thp split failed\n", pfn);
+				res = kill_procs_now(p, pfn, flags, folio);
+				goto unlock_mutex;
+			}
 			res = action_result(pfn, MF_MSG_UNSPLIT_THP, MF_IGNORED);
 			goto unlock_mutex;
 		}
