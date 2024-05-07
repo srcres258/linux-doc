@@ -345,17 +345,28 @@ void bio_chain(struct bio *bio, struct bio *parent)
 }
 EXPORT_SYMBOL(bio_chain);
 
+/**
+ * bio_chain_and_submit - submit a bio after chaining it to another one
+ * @prev: bio to chain and submit
+ * @new: bio to chain to
+ *
+ * If @prev is non-NULL, chain it to @new and submit it.
+ *
+ * Return: @new.
+ */
+struct bio *bio_chain_and_submit(struct bio *prev, struct bio *new)
+{
+	if (prev) {
+		bio_chain(prev, new);
+		submit_bio(prev);
+	}
+	return new;
+}
+
 struct bio *blk_next_bio(struct bio *bio, struct block_device *bdev,
 		unsigned int nr_pages, blk_opf_t opf, gfp_t gfp)
 {
-	struct bio *new = bio_alloc(bdev, nr_pages, opf, gfp);
-
-	if (bio) {
-		bio_chain(bio, new);
-		submit_bio(bio);
-	}
-
-	return new;
+	return bio_chain_and_submit(bio, bio_alloc(bdev, nr_pages, opf, gfp));
 }
 EXPORT_SYMBOL_GPL(blk_next_bio);
 
@@ -1383,6 +1394,26 @@ int submit_bio_wait(struct bio *bio)
 	return blk_status_to_errno(bio->bi_status);
 }
 EXPORT_SYMBOL(submit_bio_wait);
+
+static void bio_wait_end_io(struct bio *bio)
+{
+	complete(bio->bi_private);
+	bio_put(bio);
+}
+
+/*
+ * bio_await_chain - ends @bio and waits for every chained bio to complete
+ */
+void bio_await_chain(struct bio *bio)
+{
+	DECLARE_COMPLETION_ONSTACK_MAP(done,
+			bio->bi_bdev->bd_disk->lockdep_map);
+
+	bio->bi_private = &done;
+	bio->bi_end_io = bio_wait_end_io;
+	bio_endio(bio);
+	blk_wait_io(&done);
+}
 
 void __bio_advance(struct bio *bio, unsigned bytes)
 {
