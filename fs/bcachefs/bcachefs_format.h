@@ -589,7 +589,20 @@ struct bch_member {
 	__le64			errors_reset_time;
 	__le64			seq;
 	__le64			btree_allocated_bitmap;
+	/*
+	 * On recovery from a clean shutdown we don't normally read the journal,
+	 * but we still want to resume writing from where we left off so we
+	 * don't overwrite more than is necessary, for list journal debugging:
+	 */
+	__le32			last_journal_bucket;
+	__le32			last_journal_bucket_offset;
 };
+
+/*
+ * This limit comes from the bucket_gens array - it's a single allocation, and
+ * kernel allocation are limited to INT_MAX
+ */
+#define BCH_MEMBER_NBUCKETS_MAX	(INT_MAX - 64)
 
 #define BCH_MEMBER_V1_BYTES	56
 
@@ -896,6 +909,8 @@ unsigned bcachefs_metadata_required_upgrade_below = bcachefs_metadata_version_re
 
 #define BCH_SB_SECTOR			8
 #define BCH_SB_MEMBERS_MAX		64 /* XXX kill */
+
+#define BCH_SB_LAYOUT_SIZE_BITS_MAX	16 /* 32 MB */
 
 struct bch_sb_layout {
 	__uuid_t		magic;	/* bcachefs superblock UUID */
