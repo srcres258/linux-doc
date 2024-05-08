@@ -836,11 +836,18 @@ inline functions to avoid the issue of unused variables:
 	{
 	}
 
-For historical reasons, many files still use the cast to (void) to evaluate
-parameters, but this method is not recommended:
+Due to historical practices, many files still employ the "cast to (void)"
+approach to evaluate parameters. However, this method is not advisable.
+Inline functions address the issue of "expression with side effects
+evaluated more than once", circumvent unused-variable problems, and
+are generally better documented than macros for some reason.
 
 .. code-block:: c
 
+	/*
+	 * Avoid doing this whenever possible and instead opt for static
+	 * inline functions
+	 */
 	#define macrofun(foo) do { (void) (foo); } while (0)
 
 Things to avoid when using macros:

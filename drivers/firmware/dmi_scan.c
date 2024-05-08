@@ -42,6 +42,7 @@ static struct dmi_memdev_info {
 	u8 type;		/* DDR2, DDR3, DDR4 etc */
 } *dmi_memdev;
 static int dmi_memdev_nr;
+static int dmi_memdev_populated_nr;
 
 static const char * __init dmi_string_nosave(const struct dmi_header *dm, u8 s)
 {
@@ -459,6 +460,9 @@ static void __init save_mem_devices(const struct dmi_header *dm, void *v)
 	else
 		bytes = (u64)get_unaligned((u32 *)&d[0x1C]) << 20;
 
+	if (bytes)
+		dmi_memdev_populated_nr++;
+
 	dmi_memdev[nr].size = bytes;
 	nr++;
 }
@@ -827,6 +831,8 @@ void __init dmi_setup(void)
 		return;
 
 	dmi_memdev_walk();
+	pr_info("DMI: Memory slots populated: %d/%d\n",
+		dmi_memdev_populated_nr, dmi_memdev_nr);
 	dump_stack_set_arch_desc("%s", dmi_ids_string);
 }
 

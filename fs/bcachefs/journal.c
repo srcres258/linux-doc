@@ -696,6 +696,12 @@ recheck_need_open:
 
 		spin_unlock(&j->lock);
 
+		/*
+		 * We're called from bch2_journal_flush_seq() -> wait_event();
+		 * but this might block. We won't usually block, so we won't
+		 * livelock:
+		 */
+		sched_annotate_sleep();
 		ret = bch2_journal_res_get(j, &res, jset_u64s(0), 0);
 		if (ret)
 			return ret;
@@ -860,6 +866,8 @@ static struct journal_buf *__bch2_next_write_buffer_flush_journal_buf(struct jou
 {
 	struct journal_buf *ret = NULL;
 
+	/* We're inside wait_event(), but using mutex_lock(: */
+	sched_annotate_sleep();
 	mutex_lock(&j->buf_lock);
 	spin_lock(&j->lock);
 	max_seq = min(max_seq, journal_cur_seq(j));
@@ -1408,7 +1416,7 @@ void __bch2_journal_debug_to_text(struct printbuf *out, struct journal *j)
 	u64 nr_writes = j->nr_flush_writes + j->nr_noflush_writes;
 
 	if (!out->nr_tabstops)
-		printbuf_tabstop_push(out, 24);
+		printbuf_tabstop_push(out, 28);
 	out->atomic++;
 
 	rcu_read_lock();

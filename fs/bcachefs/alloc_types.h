@@ -9,7 +9,12 @@
 #include "fifo.h"
 
 struct bucket_alloc_state {
-	bool	mi_btree_bitmap_only;
+	enum {
+		BTREE_BITMAP_NO,
+		BTREE_BITMAP_YES,
+		BTREE_BITMAP_ANY,
+	}	btree_bitmap;
+
 	u64	buckets_seen;
 	u64	skipped_open;
 	u64	skipped_need_journal_commit;

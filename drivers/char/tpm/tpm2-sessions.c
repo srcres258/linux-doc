@@ -963,7 +963,10 @@ EXPORT_SYMBOL(tpm2_start_auth_session);
  * @hierarchy:	The hierarchy the primary was created for
  * @name:	pointer to be filled in with the primary key name
  *
- * @returns: 0 on success or a positive TPM or negative standard error
+ * Return:
+ * * 0		- OK
+ * * -errno	- A system error
+ * * TPM_RC	- A TPM error
  */
 static int tpm2_parse_create_primary(struct tpm_chip *chip, struct tpm_buf *buf,
 				     u32 *handle, u32 hierarchy, u8 *name)
@@ -1137,7 +1140,10 @@ static int tpm2_parse_create_primary(struct tpm_chip *chip, struct tpm_buf *buf,
  * elliptic curve (the only current one all TPM2s are required to
  * have) a sha256 name hash and no policy.
  *
- * @returns: 0 on success or positive TPM or negative error.
+ * Return:
+ * * 0		- OK
+ * * -errno	- A system error
+ * * TPM_RC	- A TPM error
  */
 static int tpm2_create_primary(struct tpm_chip *chip, u32 hierarchy,
 			       u32 *handle, u8 *name)

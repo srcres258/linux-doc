@@ -86,6 +86,7 @@ EXPORT_SYMBOL_GPL(tpm_buf_destroy);
 
 /**
  * tpm_buf_length() - Return the number of bytes consumed by the data
+ * @buf:	A &tpm_buf
  *
  * Return: The number of bytes consumed by the buffer
  */
