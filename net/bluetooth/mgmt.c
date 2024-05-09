@@ -443,8 +443,7 @@ static int read_index_list(struct sock *sk, struct hci_dev *hdev, void *data,
 
 	count = 0;
 	list_for_each_entry(d, &hci_dev_list, list) {
-		if (d->dev_type == HCI_PRIMARY &&
-		    !hci_dev_test_flag(d, HCI_UNCONFIGURED))
+		if (!hci_dev_test_flag(d, HCI_UNCONFIGURED))
 			count++;
 	}
 
@@ -468,8 +467,7 @@ static int read_index_list(struct sock *sk, struct hci_dev *hdev, void *data,
 		if (test_bit(HCI_QUIRK_RAW_DEVICE, &d->quirks))
 			continue;
 
-		if (d->dev_type == HCI_PRIMARY &&
-		    !hci_dev_test_flag(d, HCI_UNCONFIGURED)) {
+		if (!hci_dev_test_flag(d, HCI_UNCONFIGURED)) {
 			rp->index[count++] = cpu_to_le16(d->id);
 			bt_dev_dbg(hdev, "Added hci%u", d->id);
 		}
@@ -503,8 +501,7 @@ static int read_unconf_index_list(struct sock *sk, struct hci_dev *hdev,
 
 	count = 0;
 	list_for_each_entry(d, &hci_dev_list, list) {
-		if (d->dev_type == HCI_PRIMARY &&
-		    hci_dev_test_flag(d, HCI_UNCONFIGURED))
+		if (hci_dev_test_flag(d, HCI_UNCONFIGURED))
 			count++;
 	}
 
@@ -528,8 +525,7 @@ static int read_unconf_index_list(struct sock *sk, struct hci_dev *hdev,
 		if (test_bit(HCI_QUIRK_RAW_DEVICE, &d->quirks))
 			continue;
 
-		if (d->dev_type == HCI_PRIMARY &&
-		    hci_dev_test_flag(d, HCI_UNCONFIGURED)) {
+		if (hci_dev_test_flag(d, HCI_UNCONFIGURED)) {
 			rp->index[count++] = cpu_to_le16(d->id);
 			bt_dev_dbg(hdev, "Added hci%u", d->id);
 		}
@@ -561,10 +557,8 @@ static int read_ext_index_list(struct sock *sk, struct hci_dev *hdev,
 	read_lock(&hci_dev_list_lock);
 
 	count = 0;
-	list_for_each_entry(d, &hci_dev_list, list) {
-		if (d->dev_type == HCI_PRIMARY || d->dev_type == HCI_AMP)
-			count++;
-	}
+	list_for_each_entry(d, &hci_dev_list, list)
+		count++;
 
 	rp = kmalloc(struct_size(rp, entry, count), GFP_ATOMIC);
 	if (!rp) {
@@ -585,16 +579,10 @@ static int read_ext_index_list(struct sock *sk, struct hci_dev *hdev,
 		if (test_bit(HCI_QUIRK_RAW_DEVICE, &d->quirks))
 			continue;
 
-		if (d->dev_type == HCI_PRIMARY) {
-			if (hci_dev_test_flag(d, HCI_UNCONFIGURED))
-				rp->entry[count].type = 0x01;
-			else
-				rp->entry[count].type = 0x00;
-		} else if (d->dev_type == HCI_AMP) {
-			rp->entry[count].type = 0x02;
-		} else {
-			continue;
-		}
+		if (hci_dev_test_flag(d, HCI_UNCONFIGURED))
+			rp->entry[count].type = 0x01;
+		else
+			rp->entry[count].type = 0x00;
 
 		rp->entry[count].bus = d->bus;
 		rp->entry[count++].index = cpu_to_le16(d->id);
@@ -4349,6 +4337,12 @@ static const u8 mgmt_mesh_uuid[16] = {
 	0x8d, 0x4d, 0x03, 0x7a, 0xd7, 0x63, 0xe4, 0x2c,
 };
 
+/* 69518c4c-b69f-4679-8bc1-c021b47b5733 */
+static const u8 poll_errqueue_uuid[16] = {
+	0x33, 0x57, 0x7b, 0xb4, 0x21, 0xc0, 0xc1, 0x8b,
+	0x79, 0x46, 0x9f, 0xb6, 0x4c, 0x8c, 0x51, 0x69,
+};
+
 static int read_exp_features_info(struct sock *sk, struct hci_dev *hdev,
 				  void *data, u16 data_len)
 {
@@ -4360,8 +4354,8 @@ static int read_exp_features_info(struct sock *sk, struct hci_dev *hdev,
 
 	bt_dev_dbg(hdev, "sock %p", sk);
 
-	/* Enough space for 7 features */
-	len = sizeof(*rp) + (sizeof(rp->features[0]) * 7);
+	/* Enough space for 8 features */
+	len = sizeof(*rp) + (sizeof(rp->features[0]) * 8);
 	rp = kzalloc(len, GFP_KERNEL);
 	if (!rp)
 		return -ENOMEM;
@@ -4435,6 +4429,13 @@ static int read_exp_features_info(struct sock *sk, struct hci_dev *hdev,
 			flags = 0;
 
 		memcpy(rp->features[idx].uuid, mgmt_mesh_uuid, 16);
+		rp->features[idx].flags = cpu_to_le32(flags);
+		idx++;
+	}
+
+	if (!hdev) {
+		flags = bt_poll_errqueue_enabled() ? BIT(0) : 0;
+		memcpy(rp->features[idx].uuid, poll_errqueue_uuid, 16);
 		rp->features[idx].flags = cpu_to_le32(flags);
 		idx++;
 	}
@@ -4936,6 +4937,53 @@ static int set_iso_socket_func(struct sock *sk, struct hci_dev *hdev,
 }
 #endif
 
+static int set_poll_errqueue_func(struct sock *sk, struct hci_dev *hdev,
+				  struct mgmt_cp_set_exp_feature *cp,
+				  u16 data_len)
+{
+	struct mgmt_rp_set_exp_feature rp;
+	bool val, changed = false;
+	int err;
+
+	/* Command requires to use the non-controller index */
+	if (hdev)
+		return mgmt_cmd_status(sk, hdev->id,
+				       MGMT_OP_SET_EXP_FEATURE,
+				       MGMT_STATUS_INVALID_INDEX);
+
+	/* Parameters are limited to a single octet */
+	if (data_len != MGMT_SET_EXP_FEATURE_SIZE + 1)
+		return mgmt_cmd_status(sk, MGMT_INDEX_NONE,
+				       MGMT_OP_SET_EXP_FEATURE,
+				       MGMT_STATUS_INVALID_PARAMS);
+
+	/* Only boolean on/off is supported */
+	if (cp->param[0] != 0x00 && cp->param[0] != 0x01)
+		return mgmt_cmd_status(sk, MGMT_INDEX_NONE,
+				       MGMT_OP_SET_EXP_FEATURE,
+				       MGMT_STATUS_INVALID_PARAMS);
+
+	val = cp->param[0] ? true : false;
+
+	err = bt_poll_errqueue_set_enabled(val);
+	if (!err)
+		changed = true;
+
+	memcpy(rp.uuid, poll_errqueue_uuid, 16);
+	rp.flags = cpu_to_le32(val ? BIT(0) : 0);
+
+	hci_sock_set_flag(sk, HCI_MGMT_EXP_FEATURE_EVENTS);
+
+	err = mgmt_cmd_complete(sk, MGMT_INDEX_NONE,
+				MGMT_OP_SET_EXP_FEATURE, 0,
+				&rp, sizeof(rp));
+
+	if (changed)
+		exp_feature_changed(hdev, poll_errqueue_uuid, val, sk);
+
+	return err;
+}
+
 static const struct mgmt_exp_feature {
 	const u8 *uuid;
 	int (*set_func)(struct sock *sk, struct hci_dev *hdev,
@@ -4953,6 +5001,7 @@ static const struct mgmt_exp_feature {
 #ifdef CONFIG_BT_LE
 	EXP_FEAT(iso_socket_uuid, set_iso_socket_func),
 #endif
+	EXP_FEAT(poll_errqueue_uuid, set_poll_errqueue_func),
 
 	/* end with a null feature */
 	EXP_FEAT(NULL, NULL)
@@ -9331,23 +9380,14 @@ void mgmt_index_added(struct hci_dev *hdev)
 	if (test_bit(HCI_QUIRK_RAW_DEVICE, &hdev->quirks))
 		return;
 
-	switch (hdev->dev_type) {
-	case HCI_PRIMARY:
-		if (hci_dev_test_flag(hdev, HCI_UNCONFIGURED)) {
-			mgmt_index_event(MGMT_EV_UNCONF_INDEX_ADDED, hdev,
-					 NULL, 0, HCI_MGMT_UNCONF_INDEX_EVENTS);
-			ev.type = 0x01;
-		} else {
-			mgmt_index_event(MGMT_EV_INDEX_ADDED, hdev, NULL, 0,
-					 HCI_MGMT_INDEX_EVENTS);
-			ev.type = 0x00;
-		}
-		break;
-	case HCI_AMP:
-		ev.type = 0x02;
-		break;
-	default:
-		return;
+	if (hci_dev_test_flag(hdev, HCI_UNCONFIGURED)) {
+		mgmt_index_event(MGMT_EV_UNCONF_INDEX_ADDED, hdev, NULL, 0,
+				 HCI_MGMT_UNCONF_INDEX_EVENTS);
+		ev.type = 0x01;
+	} else {
+		mgmt_index_event(MGMT_EV_INDEX_ADDED, hdev, NULL, 0,
+				 HCI_MGMT_INDEX_EVENTS);
+		ev.type = 0x00;
 	}
 
 	ev.bus = hdev->bus;
@@ -9364,25 +9404,16 @@ void mgmt_index_removed(struct hci_dev *hdev)
 	if (test_bit(HCI_QUIRK_RAW_DEVICE, &hdev->quirks))
 		return;
 
-	switch (hdev->dev_type) {
-	case HCI_PRIMARY:
-		mgmt_pending_foreach(0, hdev, cmd_complete_rsp, &status);
+	mgmt_pending_foreach(0, hdev, cmd_complete_rsp, &status);
 
-		if (hci_dev_test_flag(hdev, HCI_UNCONFIGURED)) {
-			mgmt_index_event(MGMT_EV_UNCONF_INDEX_REMOVED, hdev,
-					 NULL, 0, HCI_MGMT_UNCONF_INDEX_EVENTS);
-			ev.type = 0x01;
-		} else {
-			mgmt_index_event(MGMT_EV_INDEX_REMOVED, hdev, NULL, 0,
-					 HCI_MGMT_INDEX_EVENTS);
-			ev.type = 0x00;
-		}
-		break;
-	case HCI_AMP:
-		ev.type = 0x02;
-		break;
-	default:
-		return;
+	if (hci_dev_test_flag(hdev, HCI_UNCONFIGURED)) {
+		mgmt_index_event(MGMT_EV_UNCONF_INDEX_REMOVED, hdev, NULL, 0,
+				 HCI_MGMT_UNCONF_INDEX_EVENTS);
+		ev.type = 0x01;
+	} else {
+		mgmt_index_event(MGMT_EV_INDEX_REMOVED, hdev, NULL, 0,
+				 HCI_MGMT_INDEX_EVENTS);
+		ev.type = 0x00;
 	}
 
 	ev.bus = hdev->bus;
