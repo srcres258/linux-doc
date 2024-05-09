@@ -64,8 +64,6 @@ static int core_uses_pid;
 static unsigned int core_pipe_limit;
 static char core_pattern[CORENAME_MAX_SIZE] = "core";
 static int core_name_size = CORENAME_MAX_SIZE;
-static const unsigned int core_file_note_size_min = CORE_FILE_NOTE_SIZE_DEFAULT;
-static const unsigned int core_file_note_size_max = CORE_FILE_NOTE_SIZE_MAX;
 unsigned int core_file_note_size_limit = CORE_FILE_NOTE_SIZE_DEFAULT;
 
 struct core_name {
@@ -1002,6 +1000,9 @@ static int proc_dostring_coredump(const struct ctl_table *table, int write,
 		validate_coredump_safety();
 	return error;
 }
+
+static const unsigned int core_file_note_size_min = CORE_FILE_NOTE_SIZE_DEFAULT;
+static const unsigned int core_file_note_size_max = CORE_FILE_NOTE_SIZE_MAX;
 
 static struct ctl_table coredump_sysctls[] = {
 	{

@@ -257,7 +257,7 @@ out:
  * 4. Move the memory allocated in step 1 back in from zswap.
  * 5. Set zswap.max to half the amount that was recorded in step 3.
  * 6. Attempt to reclaim memory equal to the amount that was allocated,
-      this will either trigger writeback if its enabled, or reclamation
+      this will either trigger writeback if it's enabled, or reclamation
       will fail if writeback is disabled as there isn't enough zswap space.
  */
 static int attempt_writeback(const char *cgroup, void *arg)
@@ -265,10 +265,10 @@ static int attempt_writeback(const char *cgroup, void *arg)
 	long pagesize = sysconf(_SC_PAGESIZE);
 	char *test_group = arg;
 	size_t memsize = MB(4);
+	char buf[pagesize];
 	long zswap_usage;
 	bool wb_enabled;
 	int ret = -1;
-	char memval;
 	char *mem;
 
 	wb_enabled = cg_read_long(test_group, "memory.zswap.writeback");
@@ -281,16 +281,14 @@ static int attempt_writeback(const char *cgroup, void *arg)
 	 * half empty, this will result in data that is still compressible
 	 * and ends up in zswap, with material zswap usage.
 	 */
-	for (int i = 0; i < memsize; i += pagesize) {
-		memval = 1;
-		for (int j = i; j < i + pagesize/2; j++) {
-			/* Overflow of memval is ok, will check with same values later */
-			mem[j] = memval++;
-		}
-	}
+	for (int i = 0; i < pagesize; i++)
+		buf[i] = i < pagesize/2 ? (char) i : 0;
+
+	for (int i = 0; i < memsize; i += pagesize)
+		memcpy(&mem[i], buf, pagesize);
 
 	/* Try and reclaim allocated memory */
-	if (cg_write(test_group, "memory.reclaim", "4M")) {
+	if (cg_write_numeric(test_group, "memory.reclaim", memsize)) {
 		ksft_print_msg("Failed to reclaim all of the requested memory\n");
 		goto out;
 	}
@@ -299,12 +297,9 @@ static int attempt_writeback(const char *cgroup, void *arg)
 
 	/* zswpin */
 	for (int i = 0; i < memsize; i += pagesize) {
-		memval = 1;
-		for (int j = i; j < i + pagesize/2; j++) {
-			if (mem[j] != memval++) {
-				ksft_print_msg("invalid memory\n");
-				goto out;
-			}
+		if (memcmp(&mem[i], buf, pagesize)) {
+			ksft_print_msg("invalid memory\n");
+			goto out;
 		}
 	}
 
@@ -317,13 +312,9 @@ static int attempt_writeback(const char *cgroup, void *arg)
 	 * If writeback is disabled, memory reclaim will fail as zswap is limited and
 	 * it can't writeback to swap.
 	 */
-	ret = cg_write(test_group, "memory.reclaim", "4M");
-	if (!wb_enabled) {
-		if (ret == -EAGAIN)
-			ret = 0;
-		else
-			ret = -1;
-	}
+	ret = cg_write_numeric(test_group, "memory.reclaim", memsize);
+	if (!wb_enabled)
+		ret = (ret == -EAGAIN) ? 0 : -1;
 
 out:
 	free(mem);
@@ -347,7 +338,7 @@ static int test_zswap_writeback(const char *root, bool wb)
 
 	zswpwb_before = get_cg_wb_count(test_group);
 	if (zswpwb_before != 0) {
-		ksft_print_msg("failed to get zswpwb_before\n");
+		ksft_print_msg("zswpwb_before = %ld instead of 0\n", zswpwb_before);
 		goto out;
 	}
 
@@ -356,11 +347,12 @@ static int test_zswap_writeback(const char *root, bool wb)
 
 	/* Verify that zswap writeback occurred only if writeback was enabled */
 	zswpwb_after = get_cg_wb_count(test_group);
-	if (wb && zswpwb_after <= zswpwb_before) {
-		ksft_print_msg("zswpwb_after <= zswpwb_before\n");
+	if (zswpwb_after < 0)
 		goto out;
-	} else if (!wb && zswpwb_after) {
-		ksft_print_msg("zswpwb_after != zswpwb_before\n");
+
+	if (wb != !!zswpwb_after) {
+		ksft_print_msg("zswpwb_after is %ld while wb is %s",
+				zswpwb_after, wb ? "enabled" : "disabled");
 		goto out;
 	}
 

@@ -158,7 +158,7 @@ vclkdev_alloc(struct clk_hw *hw, const char *con_id, const char *dev_fmt,
 	va_list ap)
 {
 	struct clk_lookup_alloc *cla;
-	struct va_format fmt;
+	struct va_format vaf;
 	const char *failure;
 	va_list ap_copy;
 	size_t max_size;
@@ -191,13 +191,18 @@ vclkdev_alloc(struct clk_hw *hw, const char *con_id, const char *dev_fmt,
 		cla->cl.dev_id = cla->dev_id;
 	}
 
+	va_end(ap_copy);
+
 	return &cla->cl;
 
 fail:
-	fmt.fmt = dev_fmt;
-	fmt.va = &ap_copy;
+	if (dev_fmt)
+		vaf.fmt = dev_fmt;
+	else
+		vaf.fmt = "null-device";
+	vaf.va = &ap_copy;
 	pr_err("%pV:%s: %s ID is greater than %zu\n",
-	       &fmt, con_id, failure, max_size);
+	       &vaf, con_id, failure, max_size);
 	va_end(ap_copy);
 	kfree(cla);
 	return NULL;

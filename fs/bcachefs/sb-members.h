@@ -29,19 +29,6 @@ static inline bool bch2_dev_is_readable(struct bch_dev *ca)
 		ca->mi.state != BCH_MEMBER_STATE_failed;
 }
 
-static inline bool bch2_dev_get_ioref(struct bch_dev *ca, int rw)
-{
-	if (!percpu_ref_tryget(&ca->io_ref))
-		return false;
-
-	if (ca->mi.state == BCH_MEMBER_STATE_rw ||
-	    (ca->mi.state == BCH_MEMBER_STATE_ro && rw == READ))
-		return true;
-
-	percpu_ref_put(&ca->io_ref);
-	return false;
-}
-
 static inline unsigned dev_mask_nr(const struct bch_devs_mask *devs)
 {
 	return bitmap_weight(devs->d, BCH_SB_MEMBERS_MAX);
@@ -202,17 +189,6 @@ static inline struct bch_dev *bch2_dev_have_ref(const struct bch_fs *c, unsigned
 	return rcu_dereference_check(c->devs[dev], 1);
 }
 
-/*
- * If a key exists that references a device, the device won't be going away and
- * we can omit rcu_read_lock():
- */
-static inline struct bch_dev *bch2_dev_bkey_exists(const struct bch_fs *c, unsigned dev)
-{
-	EBUG_ON(!bch2_dev_exists(c, dev));
-
-	return rcu_dereference_check(c->devs[dev], 1);
-}
-
 static inline struct bch_dev *bch2_dev_locked(struct bch_fs *c, unsigned dev)
 {
 	EBUG_ON(!bch2_dev_exists(c, dev));
@@ -283,6 +259,24 @@ static inline struct bch_dev *bch2_dev_iterate(struct bch_fs *c, struct bch_dev 
 		return ca;
 	bch2_dev_put(ca);
 	return bch2_dev_tryget(c, dev_idx);
+}
+
+static inline struct bch_dev *bch2_dev_get_ioref(struct bch_fs *c, unsigned dev, int rw)
+{
+	rcu_read_lock();
+	struct bch_dev *ca = bch2_dev_rcu(c, dev);
+	if (ca && !percpu_ref_tryget(&ca->io_ref))
+		ca = NULL;
+	rcu_read_unlock();
+
+	if (ca &&
+	    (ca->mi.state == BCH_MEMBER_STATE_rw ||
+	    (ca->mi.state == BCH_MEMBER_STATE_ro && rw == READ)))
+		return ca;
+
+	if (ca)
+		percpu_ref_put(&ca->io_ref);
+	return NULL;
 }
 
 /* XXX kill, move to struct bch_fs */

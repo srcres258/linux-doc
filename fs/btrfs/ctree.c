@@ -1551,7 +1551,12 @@ read_block_for_search(struct btrfs_root *root, struct btrfs_path *p,
 		if (ret) {
 			free_extent_buffer(tmp);
 			btrfs_release_path(p);
-			return ret;
+			return -EIO;
+		}
+		if (btrfs_check_eb_owner(tmp, btrfs_root_id(root))) {
+			free_extent_buffer(tmp);
+			btrfs_release_path(p);
+			return -EUCLEAN;
 		}
 
 		if (unlock_up)

@@ -109,7 +109,7 @@ struct __guc_ads_blob {
 	struct guc_engine_usage engine_usage;
 	struct guc_um_init_params um_init_params;
 	/* From here on, location is dynamic! Refer to above diagram. */
-	struct guc_mmio_reg regset[0];
+	struct guc_mmio_reg regset[];
 } __packed;
 
 #define ads_blob_read(ads_, field_) \
@@ -267,7 +267,6 @@ static u32 engine_enable_mask(struct xe_gt *gt, enum xe_engine_class class)
 
 static size_t calculate_golden_lrc_size(struct xe_guc_ads *ads)
 {
-	struct xe_device *xe = ads_to_xe(ads);
 	struct xe_gt *gt = ads_to_gt(ads);
 	size_t total_size = 0, alloc_size, real_size;
 	int class;
@@ -276,7 +275,7 @@ static size_t calculate_golden_lrc_size(struct xe_guc_ads *ads)
 		if (!engine_enable_mask(gt, class))
 			continue;
 
-		real_size = xe_lrc_size(xe, class);
+		real_size = xe_gt_lrc_size(gt, class);
 		alloc_size = PAGE_ALIGN(real_size);
 		total_size += alloc_size;
 	}
@@ -774,7 +773,7 @@ static void guc_populate_golden_lrc(struct xe_guc_ads *ads)
 
 		xe_gt_assert(gt, gt->default_lrc[class]);
 
-		real_size = xe_lrc_size(xe, class);
+		real_size = xe_gt_lrc_size(gt, class);
 		alloc_size = PAGE_ALIGN(real_size);
 		total_size += alloc_size;
 

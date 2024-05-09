@@ -690,7 +690,6 @@ static int journal_entry_dev_usage_validate(struct bch_fs *c,
 		container_of(entry, struct jset_entry_dev_usage, entry);
 	unsigned bytes = jset_u64s(le16_to_cpu(entry->u64s)) * sizeof(u64);
 	unsigned expected = sizeof(*u);
-	unsigned dev;
 	int ret = 0;
 
 	if (journal_entry_err_on(bytes < expected,
@@ -698,16 +697,6 @@ static int journal_entry_dev_usage_validate(struct bch_fs *c,
 				 journal_entry_dev_usage_bad_size,
 				 "bad size (%u < %u)",
 				 bytes, expected)) {
-		journal_entry_null_range(entry, vstruct_next(entry));
-		return ret;
-	}
-
-	dev = le32_to_cpu(u->dev);
-
-	if (journal_entry_err_on(!bch2_dev_exists(c, dev),
-				 c, version, jset, entry,
-				 journal_entry_dev_usage_bad_dev,
-				 "bad dev")) {
 		journal_entry_null_range(entry, vstruct_next(entry));
 		return ret;
 	}
@@ -1722,10 +1711,8 @@ static CLOSURE_CALLBACK(journal_write_submit)
 	unsigned sectors = vstruct_sectors(w->data, c->block_bits);
 
 	extent_for_each_ptr(bkey_i_to_s_extent(&w->key), ptr) {
-		struct bch_dev *ca = bch2_dev_bkey_exists(c, ptr->dev);
-		struct journal_device *ja = &ca->journal;
-
-		if (!percpu_ref_tryget(&ca->io_ref)) {
+		struct bch_dev *ca = bch2_dev_get_ioref(c, ptr->dev, WRITE);
+		if (!ca) {
 			/* XXX: fix this */
 			bch_err(c, "missing device for journal write\n");
 			continue;
@@ -1734,6 +1721,7 @@ static CLOSURE_CALLBACK(journal_write_submit)
 		this_cpu_add(ca->io_done->sectors[WRITE][BCH_DATA_journal],
 			     sectors);
 
+		struct journal_device *ja = &ca->journal;
 		struct bio *bio = &ja->bio[w->idx]->bio;
 		bio_reset(bio, ca->disk_sb.bdev, REQ_OP_WRITE|REQ_SYNC|REQ_META);
 		bio->bi_iter.bi_sector	= ptr->offset;

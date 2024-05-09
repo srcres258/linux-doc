@@ -94,6 +94,12 @@ static inline unsigned bch2_bucket_sectors_total(struct bch_alloc_v4 a)
 
 static inline unsigned bch2_bucket_sectors_total(struct bch_alloc_v4 a)
 {
+	return !data_type_is_empty(bucket) &&
+		bucket_data_type(bucket) != bucket_data_type(ptr);
+}
+
+static inline unsigned bch2_bucket_sectors_total(struct bch_alloc_v4 a)
+{
 	return a.stripe_sectors + a.dirty_sectors + a.cached_sectors;
 }
 

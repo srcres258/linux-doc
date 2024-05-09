@@ -5691,11 +5691,6 @@ static bool alloc_mem_cgroup_per_node_info(struct mem_cgroup *memcg, int node)
 	if (!pn->lruvec_stats)
 		goto fail;
 
-	pn->lruvec_stats = kzalloc_node(sizeof(struct lruvec_stats),
-					GFP_KERNEL_ACCOUNT, node);
-	if (!pn->lruvec_stats)
-		goto fail;
-
 	pn->lruvec_stats_percpu = alloc_percpu_gfp(struct lruvec_stats_percpu,
 						   GFP_KERNEL_ACCOUNT);
 	if (!pn->lruvec_stats_percpu)

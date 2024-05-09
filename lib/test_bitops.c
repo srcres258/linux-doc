@@ -5,9 +5,11 @@
 
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
 
+#include <linux/cleanup.h>
 #include <linux/init.h>
 #include <linux/module.h>
 #include <linux/printk.h>
+#include <linux/slab.h>
 
 /* a tiny module only meant to test
  *
@@ -53,11 +55,15 @@ static unsigned long order_comb_long[][2] = {
 static int __init test_fns(void)
 {
 	static volatile __always_used unsigned long tmp __initdata;
-	static unsigned long buf[10000] __initdata;
+	unsigned long *buf __free(kfree) = NULL;
 	unsigned int i, n;
 	ktime_t time;
 
-	get_random_bytes(buf, sizeof(buf));
+	buf = kmalloc_array(10000, sizeof(unsigned long), GFP_KERNEL);
+	if (!buf)
+		return -ENOMEM;
+
+	get_random_bytes(buf, 10000 * sizeof(unsigned long));
 	time = ktime_get();
 
 	for (n = 0; n < BITS_PER_LONG; n++)

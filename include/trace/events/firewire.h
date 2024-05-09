@@ -106,7 +106,7 @@ DECLARE_EVENT_CLASS(async_inbound_template,
 		__field(u8, generation)
 		__field(u8, scode)
 		__field(u8, status)
-		__field(u8, timestamp)
+		__field(u16, timestamp)
 		__array(u32, header, ASYNC_HEADER_QUADLET_COUNT)
 		__dynamic_array(u32, data, data_count)
 	),
@@ -221,7 +221,7 @@ TRACE_EVENT(async_phy_outbound_initiate,
 		__entry->second_quadlet = second_quadlet
 	),
 	TP_printk(
-		"packet=0x%016llx generation=%u first_quadlet=0x%08x second_quadlet=0x%08x",
+		"packet=0x%llx generation=%u first_quadlet=0x%08x second_quadlet=0x%08x",
 		__entry->packet,
 		__entry->generation,
 		__entry->first_quadlet,
@@ -245,7 +245,7 @@ TRACE_EVENT(async_phy_outbound_complete,
 		__entry->timestamp = timestamp;
 	),
 	TP_printk(
-		"packet=0x%016llx generation=%u status=%u timestamp=0x%04x",
+		"packet=0x%llx generation=%u status=%u timestamp=0x%04x",
 		__entry->packet,
 		__entry->generation,
 		__entry->status,
@@ -273,7 +273,7 @@ TRACE_EVENT(async_phy_inbound,
 		__entry->second_quadlet = second_quadlet
 	),
 	TP_printk(
-		"packet=0x%016llx generation=%u status=%u timestamp=0x%04x first_quadlet=0x%08x second_quadlet=0x%08x",
+		"packet=0x%llx generation=%u status=%u timestamp=0x%04x first_quadlet=0x%08x second_quadlet=0x%08x",
 		__entry->packet,
 		__entry->generation,
 		__entry->status,

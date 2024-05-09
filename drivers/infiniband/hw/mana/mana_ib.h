@@ -56,6 +56,7 @@ struct mana_ib_dev {
 	struct gdma_dev *gdma_dev;
 	mana_handle_t adapter_handle;
 	struct gdma_queue *fatal_err_eq;
+	struct gdma_queue **eqs;
 	struct mana_ib_adapter_caps adapter_caps;
 };
 
@@ -91,6 +92,7 @@ struct mana_ib_cq {
 	struct mana_ib_queue queue;
 	int cqe;
 	u32 comp_vector;
+	mana_handle_t  cq_handle;
 };
 
 struct mana_ib_qp {
@@ -118,6 +120,8 @@ enum mana_ib_command_code {
 	MANA_IB_DESTROY_ADAPTER = 0x30003,
 	MANA_IB_CONFIG_IP_ADDR	= 0x30004,
 	MANA_IB_CONFIG_MAC_ADDR	= 0x30005,
+	MANA_IB_CREATE_CQ       = 0x30008,
+	MANA_IB_DESTROY_CQ      = 0x30009,
 };
 
 struct mana_ib_query_adapter_caps_req {
@@ -201,6 +205,31 @@ struct mana_rnic_config_mac_addr_resp {
 	struct gdma_resp_hdr hdr;
 }; /* HW Data */
 
+struct mana_rnic_create_cq_req {
+	struct gdma_req_hdr hdr;
+	mana_handle_t adapter;
+	u64 gdma_region;
+	u32 eq_id;
+	u32 doorbell_page;
+}; /* HW Data */
+
+struct mana_rnic_create_cq_resp {
+	struct gdma_resp_hdr hdr;
+	mana_handle_t cq_handle;
+	u32 cq_id;
+	u32 reserved;
+}; /* HW Data */
+
+struct mana_rnic_destroy_cq_req {
+	struct gdma_req_hdr hdr;
+	mana_handle_t adapter;
+	mana_handle_t cq_handle;
+}; /* HW Data */
+
+struct mana_rnic_destroy_cq_resp {
+	struct gdma_resp_hdr hdr;
+}; /* HW Data */
+
 static inline struct gdma_context *mdev_to_gc(struct mana_ib_dev *mdev)
 {
 	return mdev->gdma_dev->gdma_context;
@@ -226,6 +255,7 @@ static inline void copy_in_reverse(u8 *dst, const u8 *src, u32 size)
 }
 
 int mana_ib_install_cq_cb(struct mana_ib_dev *mdev, struct mana_ib_cq *cq);
+void mana_ib_remove_cq_cb(struct mana_ib_dev *mdev, struct mana_ib_cq *cq);
 
 int mana_ib_create_zero_offset_dma_region(struct mana_ib_dev *dev, struct ib_umem *umem,
 					  mana_handle_t *gdma_region);
@@ -320,4 +350,8 @@ int mana_ib_gd_add_gid(const struct ib_gid_attr *attr, void **context);
 int mana_ib_gd_del_gid(const struct ib_gid_attr *attr, void **context);
 
 int mana_ib_gd_config_mac(struct mana_ib_dev *mdev, enum mana_ib_addr_op op, u8 *mac);
+
+int mana_ib_gd_create_cq(struct mana_ib_dev *mdev, struct mana_ib_cq *cq, u32 doorbell);
+
+int mana_ib_gd_destroy_cq(struct mana_ib_dev *mdev, struct mana_ib_cq *cq);
 #endif
