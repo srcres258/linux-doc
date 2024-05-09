@@ -16,7 +16,6 @@ select:
         const: renesas,tpu
   required:
     - compatible
-    - '#pwm-cells'
 
 properties:
   compatible:
