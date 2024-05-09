@@ -958,8 +958,7 @@ static void kfd_update_system_properties(void)
 	dev = list_last_entry(&topology_device_list,
 			struct kfd_topology_device, list);
 	if (dev) {
-		sys_props.platform_id =
-			(*((uint64_t *)dev->oem_id)) & CRAT_OEMID_64BIT_MASK;
+		sys_props.platform_id = dev->oem_id64;
 		sys_props.platform_oem = *((uint64_t *)dev->oem_table_id);
 		sys_props.platform_rev = dev->oem_revision;
 	}
@@ -1635,7 +1634,8 @@ static int fill_in_l2_l3_pcache(struct kfd_cache_properties **props_ext,
 		pcache->cache_level = pcache_info[cache_type].cache_level;
 		pcache->cacheline_size = pcache_info[cache_type].cache_line_size;
 
-		if (KFD_GC_VERSION(knode) == IP_VERSION(9, 4, 3))
+		if (KFD_GC_VERSION(knode) == IP_VERSION(9, 4, 3) ||
+		    KFD_GC_VERSION(knode) == IP_VERSION(9, 4, 4))
 			mode = adev->gmc.gmc_funcs->query_mem_partition_mode(adev);
 		else
 			mode = UNKNOWN_MEMORY_PARTITION_MODE;
@@ -1908,7 +1908,8 @@ static void kfd_topology_set_capabilities(struct kfd_topology_device *dev)
 		dev->node_props.debug_prop |= HSA_DBG_DISPATCH_INFO_ALWAYS_VALID;
 
 	if (KFD_GC_VERSION(dev->gpu) < IP_VERSION(10, 0, 0)) {
-		if (KFD_GC_VERSION(dev->gpu) == IP_VERSION(9, 4, 3))
+		if (KFD_GC_VERSION(dev->gpu) == IP_VERSION(9, 4, 3) ||
+		    KFD_GC_VERSION(dev->gpu) == IP_VERSION(9, 4, 4))
 			dev->node_props.debug_prop |=
 				HSA_DBG_WATCH_ADDR_MASK_LO_BIT_GFX9_4_3 |
 				HSA_DBG_WATCH_ADDR_MASK_HI_BIT_GFX9_4_3;
@@ -1927,6 +1928,10 @@ static void kfd_topology_set_capabilities(struct kfd_topology_device *dev)
 		if (KFD_GC_VERSION(dev->gpu) >= IP_VERSION(11, 0, 0))
 			dev->node_props.capability |=
 				HSA_CAP_TRAP_DEBUG_PRECISE_MEMORY_OPERATIONS_SUPPORTED;
+
+		if (KFD_GC_VERSION(dev->gpu) >= IP_VERSION(12, 0, 0))
+			dev->node_props.capability |=
+				HSA_CAP_TRAP_DEBUG_PRECISE_ALU_OPERATIONS_SUPPORTED;
 	}
 
 	kfd_topology_set_dbg_firmware_support(dev);
@@ -1997,9 +2002,8 @@ int kfd_topology_add_device(struct kfd_node *gpu)
 			HSA_CAP_ASIC_REVISION_MASK);
 
 	dev->node_props.location_id = pci_dev_id(gpu->adev->pdev);
-	/* On multi-partition nodes, node id = location_id[31:28] */
-	if (gpu->kfd->num_nodes > 1)
-		dev->node_props.location_id |= (dev->gpu->node_id << 28);
+	if (KFD_GC_VERSION(dev->gpu->kfd) == IP_VERSION(9, 4, 3))
+		dev->node_props.location_id |= dev->gpu->node_id;
 
 	dev->node_props.domain = pci_domain_nr(gpu->adev->pdev->bus);
 	dev->node_props.max_engine_clk_fcompute =
