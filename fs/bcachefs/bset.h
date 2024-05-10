@@ -208,6 +208,9 @@ static inline size_t btree_aux_data_u64s(const struct btree *b)
 #define for_each_bset(_b, _t)						\
 	for (struct bset_tree *_t = (_b)->set; _t < (_b)->set + (_b)->nsets; _t++)
 
+#define for_each_bset_c(_b, _t)						\
+	for (const struct bset_tree *_t = (_b)->set; _t < (_b)->set + (_b)->nsets; _t++)
+
 #define bset_tree_for_each_key(_b, _t, _k)				\
 	for (_k = btree_bkey_first(_b, _t);				\
 	     _k != btree_bkey_last(_b, _t);				\

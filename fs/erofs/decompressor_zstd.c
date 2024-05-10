@@ -87,7 +87,7 @@ int z_erofs_load_zstd_config(struct super_block *sb,
 	}
 
 	if (zstd->windowlog > ilog2(Z_EROFS_ZSTD_MAX_DICT_SIZE) - 10) {
-		erofs_err(sb, "unsupported zstd dictionary size %u", dict_size);
+		erofs_err(sb, "unsupported zstd window log %u", zstd->windowlog);
 		return -EINVAL;
 	}
 	dict_size = 1U << (zstd->windowlog + 10);

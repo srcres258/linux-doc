@@ -1543,7 +1543,7 @@ struct bkey_s_c bch2_btree_node_iter_peek_unpack(struct btree_node_iter *iter,
 
 void bch2_btree_keys_stats(struct btree *b, struct bset_stats *stats)
 {
-	for_each_bset(b, t) {
+	for_each_bset_c(b, t) {
 		enum bset_aux_tree_type type = bset_aux_tree_type(t);
 		size_t j;
 

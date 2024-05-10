@@ -197,15 +197,16 @@ downgrade_entry_next_c(const struct bch_sb_field_downgrade_entry *e)
 	     _i = downgrade_entry_next_c(_i))
 
 static int bch2_sb_downgrade_validate(struct bch_sb *sb, struct bch_sb_field *f,
-				      struct printbuf *err)
+				      enum bch_validate_flags flags, struct printbuf *err)
 {
 	struct bch_sb_field_downgrade *e = field_to_type(f, downgrade);
 
 	for (const struct bch_sb_field_downgrade_entry *i = e->entries;
 	     (void *) i	< vstruct_end(&e->field);
 	     i = downgrade_entry_next_c(i)) {
-		if ((void *) &i->errors[0] > vstruct_end(&e->field) ||
-		    (void *) downgrade_entry_next_c(i) > vstruct_end(&e->field)) {
+		if (flags & BCH_VALIDATE_write &&
+		    ((void *) &i->errors[0] > vstruct_end(&e->field) ||
+		     (void *) downgrade_entry_next_c(i) > vstruct_end(&e->field))) {
 			prt_printf(err, "downgrade entry overruns end of superblock section)");
 			return -BCH_ERR_invalid_sb_downgrade;
 		}
