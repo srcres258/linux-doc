@@ -121,6 +121,7 @@
 	KVM_ARCH_REQ_FLAGS(31, KVM_REQUEST_WAIT | KVM_REQUEST_NO_WAKEUP)
 #define KVM_REQ_HV_TLB_FLUSH \
 	KVM_ARCH_REQ_FLAGS(32, KVM_REQUEST_WAIT | KVM_REQUEST_NO_WAKEUP)
+#define KVM_REQ_UPDATE_PROTECTED_GUEST_STATE	KVM_ARCH_REQ(34)
 
 #define CR0_RESERVED_BITS                                               \
 	(~(unsigned long)(X86_CR0_PE | X86_CR0_MP | X86_CR0_EM | X86_CR0_TS \
@@ -254,28 +255,31 @@ enum x86_intercept_stage;
 	KVM_GUESTDBG_INJECT_DB | \
 	KVM_GUESTDBG_BLOCKIRQ)
 
+#define PFERR_PRESENT_MASK	BIT(0)
+#define PFERR_WRITE_MASK	BIT(1)
+#define PFERR_USER_MASK		BIT(2)
+#define PFERR_RSVD_MASK		BIT(3)
+#define PFERR_FETCH_MASK	BIT(4)
+#define PFERR_PK_MASK		BIT(5)
+#define PFERR_SGX_MASK		BIT(15)
+#define PFERR_GUEST_RMP_MASK	BIT_ULL(31)
+#define PFERR_GUEST_FINAL_MASK	BIT_ULL(32)
+#define PFERR_GUEST_PAGE_MASK	BIT_ULL(33)
+#define PFERR_GUEST_ENC_MASK	BIT_ULL(34)
+#define PFERR_GUEST_SIZEM_MASK	BIT_ULL(35)
+#define PFERR_GUEST_VMPL_MASK	BIT_ULL(36)
 
-#define PFERR_PRESENT_BIT 0
-#define PFERR_WRITE_BIT 1
-#define PFERR_USER_BIT 2
-#define PFERR_RSVD_BIT 3
-#define PFERR_FETCH_BIT 4
-#define PFERR_PK_BIT 5
-#define PFERR_SGX_BIT 15
-#define PFERR_GUEST_FINAL_BIT 32
-#define PFERR_GUEST_PAGE_BIT 33
-#define PFERR_IMPLICIT_ACCESS_BIT 48
-
-#define PFERR_PRESENT_MASK	BIT(PFERR_PRESENT_BIT)
-#define PFERR_WRITE_MASK	BIT(PFERR_WRITE_BIT)
-#define PFERR_USER_MASK		BIT(PFERR_USER_BIT)
-#define PFERR_RSVD_MASK		BIT(PFERR_RSVD_BIT)
-#define PFERR_FETCH_MASK	BIT(PFERR_FETCH_BIT)
-#define PFERR_PK_MASK		BIT(PFERR_PK_BIT)
-#define PFERR_SGX_MASK		BIT(PFERR_SGX_BIT)
-#define PFERR_GUEST_FINAL_MASK	BIT_ULL(PFERR_GUEST_FINAL_BIT)
-#define PFERR_GUEST_PAGE_MASK	BIT_ULL(PFERR_GUEST_PAGE_BIT)
-#define PFERR_IMPLICIT_ACCESS	BIT_ULL(PFERR_IMPLICIT_ACCESS_BIT)
+/*
+ * IMPLICIT_ACCESS is a KVM-defined flag used to correctly perform SMAP checks
+ * when emulating instructions that triggers implicit access.
+ */
+#define PFERR_IMPLICIT_ACCESS	BIT_ULL(48)
+/*
+ * PRIVATE_ACCESS is a KVM-defined flag us to indicate that a fault occurred
+ * when the guest was accessing private memory.
+ */
+#define PFERR_PRIVATE_ACCESS   BIT_ULL(49)
+#define PFERR_SYNTHETIC_MASK   (PFERR_IMPLICIT_ACCESS | PFERR_PRIVATE_ACCESS)
 
 #define PFERR_NESTED_GUEST_PAGE (PFERR_GUEST_PAGE_MASK |	\
 				 PFERR_WRITE_MASK |		\
@@ -1311,6 +1315,8 @@ struct kvm_arch {
 	 */
 	spinlock_t mmu_unsync_pages_lock;
 
+	u64 shadow_mmio_value;
+
 	struct iommu_domain *iommu_domain;
 	bool iommu_noncoherent;
 #define __KVM_HAVE_ARCH_NONCOHERENT_DMA
@@ -1807,6 +1813,9 @@ struct kvm_x86_ops {
 
 	gva_t (*get_untagged_addr)(struct kvm_vcpu *vcpu, gva_t gva, unsigned int flags);
 	void *(*alloc_apic_backing_page)(struct kvm_vcpu *vcpu);
+	int (*gmem_prepare)(struct kvm *kvm, kvm_pfn_t pfn, gfn_t gfn, int max_order);
+	void (*gmem_invalidate)(kvm_pfn_t start, kvm_pfn_t end);
+	int (*private_max_mapping_level)(struct kvm *kvm, kvm_pfn_t pfn);
 };
 
 struct kvm_x86_nested_ops {
@@ -1844,6 +1853,7 @@ struct kvm_arch_async_pf {
 	gfn_t gfn;
 	unsigned long cr3;
 	bool direct_map;
+	u64 error_code;
 };
 
 extern u32 __read_mostly kvm_nr_uret_msrs;
@@ -1933,6 +1943,7 @@ void kvm_mmu_slot_leaf_clear_dirty(struct kvm *kvm,
 				   const struct kvm_memory_slot *memslot);
 void kvm_mmu_invalidate_mmio_sptes(struct kvm *kvm, u64 gen);
 void kvm_mmu_change_mmu_pages(struct kvm *kvm, unsigned long kvm_nr_mmu_pages);
+void kvm_zap_gfn_range(struct kvm *kvm, gfn_t gfn_start, gfn_t gfn_end);
 
 int load_pdptrs(struct kvm_vcpu *vcpu, unsigned long cr3);
 

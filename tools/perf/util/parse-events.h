@@ -32,14 +32,14 @@ int parse_events_option_new_evlist(const struct option *opt, const char *str, in
 __attribute__((nonnull(1, 2, 4)))
 int __parse_events(struct evlist *evlist, const char *str, const char *pmu_filter,
 		   struct parse_events_error *error, struct perf_pmu *fake_pmu,
-		   bool warn_if_reordered);
+		   bool warn_if_reordered, bool fake_tp);
 
 __attribute__((nonnull(1, 2, 3)))
 static inline int parse_events(struct evlist *evlist, const char *str,
 			       struct parse_events_error *err)
 {
 	return __parse_events(evlist, str, /*pmu_filter=*/NULL, err, /*fake_pmu=*/NULL,
-			      /*warn_if_reordered=*/true);
+			      /*warn_if_reordered=*/true, /*fake_tp=*/false);
 }
 
 int parse_event(struct evlist *evlist, const char *str);
@@ -152,6 +152,8 @@ struct parse_events_state {
 	int			   stoken;
 	/* Special fake PMU marker for testing. */
 	struct perf_pmu		  *fake_pmu;
+	/* Skip actual tracepoint processing for testing. */
+	bool			   fake_tp;
 	/* If non-null, when wildcard matching only match the given PMU. */
 	const char		  *pmu_filter;
 	/* Should PE_LEGACY_NAME tokens be generated for config terms? */
@@ -208,7 +210,8 @@ int parse_events__modifier_event(struct parse_events_state *parse_state, void *l
 int parse_events__modifier_group(struct parse_events_state *parse_state, void *loc,
 				 struct list_head *list, struct parse_events_modifier mod);
 int parse_events__set_default_name(struct list_head *list, char *name);
-int parse_events_add_tracepoint(struct list_head *list, int *idx,
+int parse_events_add_tracepoint(struct parse_events_state *parse_state,
+				struct list_head *list,
 				const char *sys, const char *event,
 				struct parse_events_error *error,
 				struct parse_events_terms *head_config, void *loc);

@@ -471,6 +471,7 @@ static inline pid_t clone3_vfork(void)
 		} \
 		__test_check_assert(_metadata); \
 	} \
+	static struct __test_metadata *_##fixture_name##_##test_name##_object; \
 	static void __attribute__((constructor)) \
 			_register_##fixture_name##_##test_name(void) \
 	{ \
@@ -481,6 +482,7 @@ static inline pid_t clone3_vfork(void)
 		object->fixture = &_##fixture_name##_fixture_object; \
 		object->termsig = signal; \
 		object->timeout = tmout; \
+		_##fixture_name##_##test_name##_object = object; \
 		__register_test(object); \
 	} \
 	static void fixture_name##_##test_name( \
@@ -889,11 +891,12 @@ struct __test_xfail {
 	{ \
 		.fixture = &_##fixture_name##_fixture_object, \
 		.variant = &_##fixture_name##_##variant_name##_object, \
-		.test = &_##fixture_name##_##test_name##_object, \
 	}; \
 	static void __attribute__((constructor)) \
 		_register_##fixture_name##_##variant_name##_##test_name##_xfail(void) \
 	{ \
+		_##fixture_name##_##variant_name##_##test_name##_xfail.test = \
+			_##fixture_name##_##test_name##_object; \
 		__register_xfail(&_##fixture_name##_##variant_name##_##test_name##_xfail); \
 	}
 

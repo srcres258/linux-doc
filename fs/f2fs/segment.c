@@ -771,8 +771,10 @@ static void __locate_dirty_segment(struct f2fs_sb_info *sbi, unsigned int segno,
 			block_t valid_blocks =
 				get_valid_blocks(sbi, segno, true);
 
-			f2fs_bug_on(sbi, unlikely(!valid_blocks ||
-					valid_blocks == CAP_BLKS_PER_SEC(sbi)));
+			f2fs_bug_on(sbi,
+				(!is_sbi_flag_set(sbi, SBI_CP_DISABLED) &&
+				!valid_blocks) ||
+				valid_blocks == CAP_BLKS_PER_SEC(sbi));
 
 			if (!IS_CURSEC(sbi, secno))
 				set_bit(secno, dirty_i->dirty_secmap);
@@ -1109,9 +1111,8 @@ static void __remove_discard_cmd(struct f2fs_sb_info *sbi,
 		dc->error = 0;
 
 	if (dc->error)
-		printk_ratelimited(
-			"%sF2FS-fs (%s): Issue discard(%u, %u, %u) failed, ret: %d",
-			KERN_INFO, sbi->sb->s_id,
+		f2fs_info_ratelimited(sbi,
+			"Issue discard(%u, %u, %u) failed, ret: %d",
 			dc->di.lstart, dc->di.start, dc->di.len, dc->error);
 	__detach_discard_cmd(dcc, dc);
 }
@@ -2645,7 +2646,7 @@ static void write_current_sum_page(struct f2fs_sb_info *sbi,
 }
 
 static int is_next_segment_free(struct f2fs_sb_info *sbi,
-				struct curseg_info *curseg, int type)
+				struct curseg_info *curseg)
 {
 	unsigned int segno = curseg->segno + 1;
 	struct free_segmap_info *free_i = FREE_I(sbi);
@@ -3073,8 +3074,7 @@ static bool need_new_seg(struct f2fs_sb_info *sbi, int type)
 	if (!is_set_ckpt_flags(sbi, CP_CRC_RECOVERY_FLAG) &&
 	    curseg->seg_type == CURSEG_WARM_NODE)
 		return true;
-	if (curseg->alloc_type == LFS &&
-	    is_next_segment_free(sbi, curseg, type) &&
+	if (curseg->alloc_type == LFS && is_next_segment_free(sbi, curseg) &&
 	    likely(!is_sbi_flag_set(sbi, SBI_CP_DISABLED)))
 		return true;
 	if (!f2fs_need_SSR(sbi) || !get_ssr_segment(sbi, type, SSR, 0))
@@ -3352,8 +3352,14 @@ out:
 	return err;
 }
 
-int f2fs_rw_hint_to_seg_type(enum rw_hint hint)
+int f2fs_rw_hint_to_seg_type(struct f2fs_sb_info *sbi, enum rw_hint hint)
 {
+	if (F2FS_OPTION(sbi).active_logs == 2)
+		return CURSEG_HOT_DATA;
+	else if (F2FS_OPTION(sbi).active_logs == 4)
+		return CURSEG_COLD_DATA;
+
+	/* active_log == 6 */
 	switch (hint) {
 	case WRITE_LIFE_SHORT:
 		return CURSEG_HOT_DATA;
@@ -3493,7 +3499,8 @@ static int __get_segment_type_6(struct f2fs_io_info *fio)
 				is_inode_flag_set(inode, FI_HOT_DATA) ||
 				f2fs_is_cow_file(inode))
 			return CURSEG_HOT_DATA;
-		return f2fs_rw_hint_to_seg_type(inode->i_write_hint);
+		return f2fs_rw_hint_to_seg_type(F2FS_I_SB(inode),
+						inode->i_write_hint);
 	} else {
 		if (IS_DNODE(fio->page))
 			return is_cold_node(fio->page) ? CURSEG_WARM_NODE :

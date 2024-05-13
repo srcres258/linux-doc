@@ -10,6 +10,7 @@
  *  - A test for KVM's handling of PSCI SYSTEM_SUSPEND and the associated
  *    KVM_SYSTEM_EVENT_SUSPEND UAPI.
  */
+
 #include <linux/kernel.h>
 #include <linux/psci.h>
 #include <asm/cputype.h>

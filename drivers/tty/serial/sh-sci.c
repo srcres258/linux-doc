@@ -1257,6 +1257,7 @@ static int sci_dma_rx_find_active(struct sci_port *s)
 	return -1;
 }
 
+/* Must only be called with uart_port_lock taken */
 static void sci_dma_rx_chan_invalidate(struct sci_port *s)
 {
 	unsigned int i;
@@ -1270,9 +1271,14 @@ static void sci_dma_rx_chan_invalidate(struct sci_port *s)
 static void sci_dma_rx_release(struct sci_port *s)
 {
 	struct dma_chan *chan = s->chan_rx_saved;
+	struct uart_port *port = &s->port;
+	unsigned long flags;
 
+	uart_port_lock_irqsave(port, &flags);
 	s->chan_rx_saved = NULL;
 	sci_dma_rx_chan_invalidate(s);
+	uart_port_unlock_irqrestore(port, flags);
+
 	dmaengine_terminate_sync(chan);
 	dma_free_coherent(chan->device->dev, s->buf_len_rx * 2, s->rx_buf[0],
 			  sg_dma_address(&s->sg_rx[0]));
@@ -1318,13 +1324,13 @@ static void sci_dma_rx_complete(void *arg)
 	dev_dbg(port->dev, "%s(%d) active cookie %d\n", __func__, port->line,
 		s->active_rx);
 
+	hrtimer_cancel(&s->rx_timer);
+
 	uart_port_lock_irqsave(port, &flags);
 
 	active = sci_dma_rx_find_active(s);
 	if (active >= 0)
 		count = sci_dma_rx_push(s, s->rx_buf[active], s->buf_len_rx);
-
-	start_hrtimer_us(&s->rx_timer, s->rx_timeout);
 
 	if (count)
 		tty_flip_buffer_push(&port->state->port);
@@ -1348,17 +1354,18 @@ static void sci_dma_rx_complete(void *arg)
 	uart_port_unlock_irqrestore(port, flags);
 	dev_dbg(port->dev, "%s: cookie %d #%d, new active cookie %d\n",
 		__func__, s->cookie_rx[active], active, s->active_rx);
+
+	start_hrtimer_us(&s->rx_timer, s->rx_timeout);
+
 	return;
 
 fail:
-	uart_port_unlock_irqrestore(port, flags);
-	dev_warn(port->dev, "Failed submitting Rx DMA descriptor\n");
 	/* Switch to PIO */
-	uart_port_lock_irqsave(port, &flags);
 	dmaengine_terminate_async(chan);
 	sci_dma_rx_chan_invalidate(s);
 	sci_dma_rx_reenable_irq(s);
 	uart_port_unlock_irqrestore(port, flags);
+	dev_warn(port->dev, "Failed submitting Rx DMA descriptor\n");
 }
 
 static void sci_dma_tx_release(struct sci_port *s)
