@@ -1246,6 +1246,9 @@ config LOCK_MM_AND_FIND_VMA
 config IOMMU_MM_DATA
 	bool
 
+config EXECMEM
+	bool
+
 source "mm/damon/Kconfig"
 
 endmenu
