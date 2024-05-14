@@ -66,7 +66,6 @@ struct x509_certificate *x509_cert_parse(const void *data, size_t datalen)
 	long ret;
 
 	cert = kzalloc(sizeof(struct x509_certificate), GFP_KERNEL);
-	assume(!IS_ERR(cert)); /* Avoid gratuitous IS_ERR() check on return */
 	if (!cert)
 		return ERR_PTR(-ENOMEM);
 	cert->pub = kzalloc(sizeof(struct public_key), GFP_KERNEL);

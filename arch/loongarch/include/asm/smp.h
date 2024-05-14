@@ -6,6 +6,8 @@
 #ifndef __ASM_SMP_H
 #define __ASM_SMP_H
 
+#ifdef CONFIG_SMP
+
 #include <linux/atomic.h>
 #include <linux/bitops.h>
 #include <linux/linkage.h>
@@ -67,9 +69,11 @@ extern int __cpu_logical_map[NR_CPUS];
 #define ACTION_BOOT_CPU	0
 #define ACTION_RESCHEDULE	1
 #define ACTION_CALL_FUNCTION	2
+#define ACTION_IRQ_WORK		3
 #define SMP_BOOT_CPU		BIT(ACTION_BOOT_CPU)
 #define SMP_RESCHEDULE		BIT(ACTION_RESCHEDULE)
 #define SMP_CALL_FUNCTION	BIT(ACTION_CALL_FUNCTION)
+#define SMP_IRQ_WORK		BIT(ACTION_IRQ_WORK)
 
 struct secondary_data {
 	unsigned long stack;
@@ -108,5 +112,9 @@ static inline void __cpu_die(unsigned int cpu)
 	loongson_cpu_die(cpu);
 }
 #endif
+
+#else /* !CONFIG_SMP */
+#define cpu_logical_map(cpu)	0
+#endif /* CONFIG_SMP */
 
 #endif /* __ASM_SMP_H */

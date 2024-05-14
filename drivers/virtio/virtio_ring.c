@@ -2782,7 +2782,7 @@ EXPORT_SYMBOL_GPL(virtqueue_resize);
  *
  * Returns zero or a negative error.
  * 0: success.
- * -EINVAL: the vq is in use.
+ * -EINVAL: too late to enable premapped mode, the vq already contains buffers.
  */
 int virtqueue_set_dma_premapped(struct virtqueue *_vq)
 {

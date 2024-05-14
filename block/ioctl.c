@@ -96,8 +96,7 @@ static int blk_ioctl_discard(struct block_device *bdev, blk_mode_t mode,
 		unsigned long arg)
 {
 	unsigned int bs_mask = bdev_logical_block_size(bdev) - 1;
-	uint64_t range[2];
-	uint64_t start, len, end;
+	uint64_t range[2], start, len, end;
 	struct bio *prev = NULL, *bio;
 	sector_t sector, nr_sects;
 	struct blk_plug plug;

@@ -511,13 +511,8 @@ struct xe_device {
 	/* To shut up runtime pm macros.. */
 	struct xe_runtime_pm {} runtime_pm;
 
-	/* For pcode */
-	struct mutex sb_lock;
-
 	/* only to allow build, not used functionally */
 	u32 irq_mask;
-
-	u32 enabled_irq_mask;
 
 	struct intel_uncore {
 		spinlock_t lock;
