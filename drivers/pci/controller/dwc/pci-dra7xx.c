@@ -113,9 +113,9 @@ static inline void dra7xx_pcie_writel(struct dra7xx_pcie *pcie, u32 offset,
 	writel(value, pcie->base + offset);
 }
 
-static u64 dra7xx_pcie_cpu_addr_fixup(struct dw_pcie *pci, u64 pci_addr)
+static u64 dra7xx_pcie_cpu_addr_fixup(struct dw_pcie *pci, u64 cpu_addr)
 {
-	return pci_addr & DRA7XX_CPU_TO_BUS_ADDR;
+	return cpu_addr & DRA7XX_CPU_TO_BUS_ADDR;
 }
 
 static int dra7xx_pcie_link_up(struct dw_pcie *pci)
@@ -466,6 +466,15 @@ static int dra7xx_add_pcie_ep(struct dra7xx_pcie *dra7xx,
 		dev_err(dev, "failed to initialize endpoint\n");
 		return ret;
 	}
+
+	ret = dw_pcie_ep_init_registers(ep);
+	if (ret) {
+		dev_err(dev, "Failed to initialize DWC endpoint registers\n");
+		dw_pcie_ep_deinit(ep);
+		return ret;
+	}
+
+	dw_pcie_ep_init_notify(ep);
 
 	return 0;
 }
