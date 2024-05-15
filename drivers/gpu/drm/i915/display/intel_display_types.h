@@ -305,7 +305,7 @@ enum drrs_type {
 };
 
 struct intel_vbt_panel_data {
-	struct drm_display_mode *lfp_lvds_vbt_mode; /* if any */
+	struct drm_display_mode *lfp_vbt_mode; /* if any */
 	struct drm_display_mode *sdvo_lvds_vbt_mode; /* if any */
 
 	/* Feature bits */
@@ -401,7 +401,12 @@ struct intel_panel {
 			} vesa;
 			struct {
 				bool sdr_uses_aux;
-			} intel;
+				bool supports_2084_decode;
+				bool supports_2020_gamut;
+				bool supports_segmented_backlight;
+				bool supports_sdp_colorimetry;
+				bool supports_tone_mapping;
+			} intel_cap;
 		} edp;
 
 		struct backlight_device *device;
@@ -1521,7 +1526,7 @@ struct intel_plane {
 	enum i9xx_plane_id i9xx_plane;
 	enum plane_id id;
 	enum pipe pipe;
-	bool need_async_flip_disable_wa;
+	bool need_async_flip_toggle_wa;
 	u32 frontbuffer_bit;
 
 	struct {
