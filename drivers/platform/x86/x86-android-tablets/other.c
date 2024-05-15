@@ -11,7 +11,9 @@
 #include <linux/acpi.h>
 #include <linux/gpio/machine.h>
 #include <linux/input.h>
+#include <linux/leds.h>
 #include <linux/platform_device.h>
+#include <linux/pwm.h>
 
 #include <dt-bindings/leds/common.h>
 
@@ -183,7 +185,7 @@ static const struct x86_i2c_client_info chuwi_hi8_i2c_clients[] __initconst = {
 	},
 };
 
-static int __init chuwi_hi8_init(void)
+static int __init chuwi_hi8_init(struct device *dev)
 {
 	/*
 	 * Avoid the acpi_unregister_gsi() call in x86_acpi_irq_helper_get()
@@ -244,7 +246,7 @@ const struct x86_dev_info cyberbook_t116_info __initconst = {
 #define CZC_EC_EXTRA_PORT	0x68
 #define CZC_EC_ANDROID_KEYS	0x63
 
-static int __init czc_p10t_init(void)
+static int __init czc_p10t_init(struct device *dev)
 {
 	/*
 	 * The device boots up in "Windows 7" mode, when the home button sends a
@@ -609,8 +611,8 @@ static const struct software_node ktd2026_node = {
 static const struct property_entry ktd2026_rgb_led_props[] = {
 	PROPERTY_ENTRY_U32("reg", 0),
 	PROPERTY_ENTRY_U32("color", LED_COLOR_ID_RGB),
-	PROPERTY_ENTRY_STRING("function", "indicator"),
-	PROPERTY_ENTRY_STRING("linux,default-trigger", "bq27520-0-charging"),
+	PROPERTY_ENTRY_STRING("label", "mipad2:rgb:indicator"),
+	PROPERTY_ENTRY_STRING("linux,default-trigger", "bq27520-0-charging-orange-full-green"),
 	{ }
 };
 
@@ -656,14 +658,59 @@ static const struct software_node ktd2026_red_led_node = {
 static const struct software_node *ktd2026_node_group[] = {
 	&ktd2026_node,
 	&ktd2026_rgb_led_node,
+	&ktd2026_red_led_node,
 	&ktd2026_green_led_node,
 	&ktd2026_blue_led_node,
-	&ktd2026_red_led_node,
 	NULL
 };
 
-static int __init xiaomi_mipad2_init(void)
+/*
+ * For the LEDs which backlight the menu / home / back capacitive buttons on
+ * the bottom bezel. These are attached to a TPS61158 LED controller which
+ * is controlled by the "pwm_soc_lpss_2" PWM output.
+ */
+#define XIAOMI_MIPAD2_LED_PERIOD_NS		19200
+#define XIAOMI_MIPAD2_LED_DEFAULT_DUTY		 6000 /* From Android kernel */
+
+static struct pwm_device *xiaomi_mipad2_led_pwm;
+
+static int xiaomi_mipad2_brightness_set(struct led_classdev *led_cdev,
+					enum led_brightness val)
 {
+	struct pwm_state state = {
+		.period = XIAOMI_MIPAD2_LED_PERIOD_NS,
+		.duty_cycle = val,
+		/* Always set PWM enabled to avoid the pin floating */
+		.enabled = true,
+	};
+
+	return pwm_apply_might_sleep(xiaomi_mipad2_led_pwm, &state);
+}
+
+static int __init xiaomi_mipad2_init(struct device *dev)
+{
+	struct led_classdev *led_cdev;
+	int ret;
+
+	xiaomi_mipad2_led_pwm = devm_pwm_get(dev, "pwm_soc_lpss_2");
+	if (IS_ERR(xiaomi_mipad2_led_pwm))
+		return dev_err_probe(dev, PTR_ERR(xiaomi_mipad2_led_pwm), "getting pwm\n");
+
+	led_cdev = devm_kzalloc(dev, sizeof(*led_cdev), GFP_KERNEL);
+	if (!led_cdev)
+		return -ENOMEM;
+
+	led_cdev->name = "mipad2:white:touch-buttons-backlight";
+	led_cdev->max_brightness = XIAOMI_MIPAD2_LED_PERIOD_NS;
+	/* "input-events" trigger uses blink_brightness */
+	led_cdev->blink_brightness = XIAOMI_MIPAD2_LED_DEFAULT_DUTY;
+	led_cdev->default_trigger = "input-events";
+	led_cdev->brightness_set_blocking = xiaomi_mipad2_brightness_set;
+
+	ret = devm_led_classdev_register(dev, led_cdev);
+	if (ret)
+		return dev_err_probe(dev, ret, "registering LED\n");
+
 	return software_node_register_node_group(ktd2026_node_group);
 }
 

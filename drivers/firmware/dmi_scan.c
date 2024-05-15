@@ -42,7 +42,7 @@ static struct dmi_memdev_info {
 	u8 type;		/* DDR2, DDR3, DDR4 etc */
 } *dmi_memdev;
 static int dmi_memdev_nr;
-static int dmi_memdev_populated_nr;
+static int dmi_memdev_populated_nr __initdata;
 
 static const char * __init dmi_string_nosave(const struct dmi_header *dm, u8 s)
 {

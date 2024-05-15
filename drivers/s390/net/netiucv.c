@@ -1701,19 +1701,14 @@ static void netiucv_free_dev(struct device *dev)
 static int netiucv_register_device(struct net_device *ndev)
 {
 	struct netiucv_priv *priv = netdev_priv(ndev);
-	struct device *dev = kzalloc(sizeof(struct device), GFP_KERNEL);
+	struct device *dev;
 	int ret;
 
 	IUCV_DBF_TEXT(trace, 3, __func__);
 
-	if (dev) {
-		dev_set_name(dev, "net%s", ndev->name);
-		dev->bus = &iucv_bus;
-		dev->parent = iucv_root;
-		dev->groups = netiucv_attr_groups;
-		dev->release = netiucv_free_dev;
-		dev->driver = &netiucv_driver;
-	} else
+	dev = iucv_alloc_device(netiucv_attr_groups, &netiucv_driver, NULL,
+				"net%s", ndev->name);
+	if (!dev)
 		return -ENOMEM;
 
 	ret = device_register(dev);
