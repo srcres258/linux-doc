@@ -14,6 +14,7 @@
 #include "intel_atomic.h"
 #include "intel_atomic_plane.h"
 #include "intel_cursor.h"
+#include "intel_cursor_regs.h"
 #include "intel_de.h"
 #include "intel_display.h"
 #include "intel_display_types.h"
@@ -23,6 +24,7 @@
 #include "intel_psr.h"
 #include "intel_psr_regs.h"
 #include "intel_vblank.h"
+#include "skl_universal_plane.h"
 #include "skl_watermark.h"
 
 #include "gem/i915_gem_object.h"
@@ -523,7 +525,7 @@ static void wa_16021440873(struct intel_plane *plane,
 
 	intel_de_write_fw(dev_priv, PLANE_SEL_FETCH_CTL(pipe, plane->id), ctl);
 
-	intel_de_write(dev_priv, PIPE_SRCSZ_ERLY_TPT(pipe),
+	intel_de_write(dev_priv, PIPE_SRCSZ_ERLY_TPT(dev_priv, pipe),
 		       PIPESRC_HEIGHT(et_y_position));
 }
 
@@ -553,6 +555,37 @@ static void i9xx_cursor_update_sel_fetch_arm(struct intel_plane *plane,
 		else
 			i9xx_cursor_disable_sel_fetch_arm(plane, crtc_state);
 	}
+}
+
+static void skl_write_cursor_wm(struct intel_plane *plane,
+				const struct intel_crtc_state *crtc_state)
+{
+	struct drm_i915_private *i915 = to_i915(plane->base.dev);
+	enum plane_id plane_id = plane->id;
+	enum pipe pipe = plane->pipe;
+	const struct skl_pipe_wm *pipe_wm = &crtc_state->wm.skl.optimal;
+	const struct skl_ddb_entry *ddb =
+		&crtc_state->wm.skl.plane_ddb[plane_id];
+	int level;
+
+	for (level = 0; level < i915->display.wm.num_levels; level++)
+		intel_de_write_fw(i915, CUR_WM(pipe, level),
+				  skl_plane_wm_reg_val(skl_plane_wm_level(pipe_wm, plane_id, level)));
+
+	intel_de_write_fw(i915, CUR_WM_TRANS(pipe),
+			  skl_plane_wm_reg_val(skl_plane_trans_wm(pipe_wm, plane_id)));
+
+	if (HAS_HW_SAGV_WM(i915)) {
+		const struct skl_plane_wm *wm = &pipe_wm->planes[plane_id];
+
+		intel_de_write_fw(i915, CUR_WM_SAGV(pipe),
+				  skl_plane_wm_reg_val(&wm->sagv.wm0));
+		intel_de_write_fw(i915, CUR_WM_SAGV_TRANS(pipe),
+				  skl_plane_wm_reg_val(&wm->sagv.trans_wm));
+	}
+
+	intel_de_write_fw(i915, CUR_BUF_CFG(pipe),
+			  skl_plane_ddb_reg_val(ddb));
 }
 
 /* TODO: split into noarm+arm pair */
