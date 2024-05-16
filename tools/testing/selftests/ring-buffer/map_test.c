@@ -73,13 +73,11 @@ static int tracefs_reset(void)
 
 struct tracefs_cpu_map_desc {
 	struct trace_buffer_meta	*meta;
-	void				*data;
 	int				cpu_fd;
 };
 
 int tracefs_cpu_map(struct tracefs_cpu_map_desc *desc, int cpu)
 {
-	unsigned long meta_len, data_len;
 	int page_size = getpagesize();
 	char *cpu_path;
 	void *map;
@@ -100,23 +98,11 @@ int tracefs_cpu_map(struct tracefs_cpu_map_desc *desc, int cpu)
 
 	desc->meta = (struct trace_buffer_meta *)map;
 
-	meta_len = desc->meta->meta_page_size;
-	data_len = desc->meta->subbuf_size * desc->meta->nr_subbufs;
-
-	map = mmap(NULL, data_len, PROT_READ, MAP_SHARED, desc->cpu_fd, meta_len);
-	if (map == MAP_FAILED) {
-		munmap(desc->meta, desc->meta->meta_page_size);
-		return -EINVAL;
-	}
-
-	desc->data = map;
-
 	return 0;
 }
 
 void tracefs_cpu_unmap(struct tracefs_cpu_map_desc *desc)
 {
-	munmap(desc->data, desc->meta->subbuf_size * desc->meta->nr_subbufs);
 	munmap(desc->meta, desc->meta->meta_page_size);
 	close(desc->cpu_fd);
 }
@@ -144,6 +130,9 @@ FIXTURE_SETUP(map)
 	cpu_set_t cpu_mask;
 	bool fail, umount;
 	char *message;
+
+	if (getuid() != 0)
+		SKIP(return, "Skipping: %s", "Please run the test as root");
 
 	if (!tracefs_enabled(&message, &fail, &umount)) {
 		if (fail) {
@@ -212,6 +201,35 @@ again:
 		goto again;
 }
 
+TEST_F(map, data_mmap)
+{
+	struct tracefs_cpu_map_desc *desc = &self->map_desc;
+	unsigned long meta_len, data_len;
+	void *data;
+
+	meta_len = desc->meta->meta_page_size;
+	data_len = desc->meta->subbuf_size * desc->meta->nr_subbufs;
+
+	/* Map all the available subbufs */
+	data = mmap(NULL, data_len, PROT_READ, MAP_SHARED,
+		    desc->cpu_fd, meta_len);
+	ASSERT_NE(data, MAP_FAILED);
+	munmap(data, data_len);
+
+	/* Map all the available subbufs - 1 */
+	data_len -= desc->meta->subbuf_size;
+	data = mmap(NULL, data_len, PROT_READ, MAP_SHARED,
+		    desc->cpu_fd, meta_len);
+	ASSERT_NE(data, MAP_FAILED);
+	munmap(data, data_len);
+
+	/* Overflow the available subbufs by 1 */
+	meta_len += desc->meta->subbuf_size * 2;
+	data = mmap(NULL, data_len, PROT_READ, MAP_SHARED,
+		    desc->cpu_fd, meta_len);
+	ASSERT_EQ(data, MAP_FAILED);
+}
+
 FIXTURE(snapshot) {
 	bool	umount;
 };
@@ -221,6 +239,9 @@ FIXTURE_SETUP(snapshot)
 	bool fail, umount;
 	struct stat sb;
 	char *message;
+
+	if (getuid() != 0)
+		SKIP(return, "Skipping: %s", "Please run the test as root");
 
 	if (stat(TRACEFS_ROOT"/snapshot", &sb))
 		SKIP(return, "Skipping: %s", "snapshot not available");

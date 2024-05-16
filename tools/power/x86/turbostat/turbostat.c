@@ -5688,8 +5688,9 @@ static void probe_intel_uncore_frequency_legacy(void)
 
 static void probe_intel_uncore_frequency_cluster(void)
 {
-	int i;
+	int i, uncore_max_id;
 	char path[256];
+	char path_base[128];
 
 	if (access("/sys/devices/system/cpu/intel_uncore_frequency/uncore00/current_freq_khz", R_OK))
 		return;
@@ -5697,17 +5698,25 @@ static void probe_intel_uncore_frequency_cluster(void)
 	if (quiet)
 		return;
 
-	for (i = 0;; ++i) {
+	for (uncore_max_id = 0;; ++uncore_max_id) {
+
+		sprintf(path_base, "/sys/devices/system/cpu/intel_uncore_frequency/uncore%02d", uncore_max_id);
+
+		/* uncore## start at 00 and skips no numbers, so stop upon first missing */
+		if (access(path_base, R_OK)) {
+			uncore_max_id -= 1;
+			break;
+		}
+	}
+	for (i = uncore_max_id; i >= 0; --i) {
 		int k, l;
-		char path_base[128];
 		int package_id, domain_id, cluster_id;
 		char name_buf[16];
 
 		sprintf(path_base, "/sys/devices/system/cpu/intel_uncore_frequency/uncore%02d", i);
 
-		/* uncore## start at 00 and skip no numbers, so stop upon first missing */
 		if (access(path_base, R_OK))
-			break;
+			err(1, "%s: %s\n", __func__, path_base);
 
 		sprintf(path, "%s/package_id", path_base);
 		package_id = read_sysfs_int(path);

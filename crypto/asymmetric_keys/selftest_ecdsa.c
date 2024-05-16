@@ -45,7 +45,6 @@ static const u8 certs_selftest_ecdsa_keys[] __initconst = {
 	"\x14\x9d\x79\x69\x1c\x7a\xd7\x5d"
 };
 
-
 /*
  * Signed data and detached signature blobs that form the verification tests.
  */

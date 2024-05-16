@@ -1329,7 +1329,7 @@ static int tracing_arm_snapshot_locked(struct trace_array *tr)
 	lockdep_assert_held(&trace_types_lock);
 
 	spin_lock(&tr->snapshot_trigger_lock);
-	if (tr->snapshot == UINT_MAX) {
+	if (tr->snapshot == UINT_MAX || tr->mapped) {
 		spin_unlock(&tr->snapshot_trigger_lock);
 		return -EBUSY;
 	}
@@ -5546,7 +5546,7 @@ static const char readme_msg[] =
 	"\t     kernel return probes support: $retval, $arg<N>, $comm\n"
 	"\t     type: s8/16/32/64, u8/16/32/64, x8/16/32/64, char, string, symbol,\n"
 	"\t           b<bit-width>@<bit-offset>/<container-size>, ustring,\n"
-	"\t           symstr, <type>\\[<array-size>\\]\n"
+	"\t           symstr, %pd/%pD, <type>\\[<array-size>\\]\n"
 #ifdef CONFIG_HIST_TRIGGERS
 	"\t    field: <stype> <name>;\n"
 	"\t    stype: u8/u16/u32/u64, s8/s16/s32/s64, pid_t,\n"
@@ -8210,7 +8210,8 @@ static long tracing_buffers_ioctl(struct file *file, unsigned int cmd, unsigned 
 		if (!(file->f_flags & O_NONBLOCK)) {
 			err = ring_buffer_wait(iter->array_buffer->buffer,
 					       iter->cpu_file,
-					       iter->tr->buffer_percent);
+					       iter->tr->buffer_percent,
+					       NULL, NULL);
 			if (err)
 				return err;
 		}
@@ -8233,26 +8234,6 @@ static long tracing_buffers_ioctl(struct file *file, unsigned int cmd, unsigned 
 	ring_buffer_wake_waiters(iter->array_buffer->buffer, iter->cpu_file);
 
 	mutex_unlock(&trace_types_lock);
-	return 0;
-}
-
-static vm_fault_t tracing_buffers_mmap_fault(struct vm_fault *vmf)
-{
-	struct ftrace_buffer_info *info = vmf->vma->vm_file->private_data;
-	struct trace_iterator *iter = &info->iter;
-	vm_fault_t ret = VM_FAULT_SIGBUS;
-	struct page *page;
-
-	page = ring_buffer_map_fault(iter->array_buffer->buffer, iter->cpu_file,
-				     vmf->pgoff);
-	if (!page)
-		return ret;
-
-	get_page(page);
-	vmf->page = page;
-	vmf->page->mapping = vmf->vma->vm_file->f_mapping;
-	vmf->page->index = vmf->pgoff;
-
 	return 0;
 }
 
@@ -8299,22 +8280,12 @@ static void tracing_buffers_mmap_close(struct vm_area_struct *vma)
 	struct ftrace_buffer_info *info = vma->vm_file->private_data;
 	struct trace_iterator *iter = &info->iter;
 
-	ring_buffer_unmap(iter->array_buffer->buffer, iter->cpu_file);
+	WARN_ON(ring_buffer_unmap(iter->array_buffer->buffer, iter->cpu_file));
 	put_snapshot_map(iter->tr);
 }
 
-static void tracing_buffers_mmap_open(struct vm_area_struct *vma)
-{
-	struct ftrace_buffer_info *info = vma->vm_file->private_data;
-	struct trace_iterator *iter = &info->iter;
-
-	WARN_ON(ring_buffer_map(iter->array_buffer->buffer, iter->cpu_file));
-}
-
 static const struct vm_operations_struct tracing_buffers_vmops = {
-	.open		= tracing_buffers_mmap_open,
 	.close		= tracing_buffers_mmap_close,
-	.fault		= tracing_buffers_mmap_fault,
 };
 
 static int tracing_buffers_mmap(struct file *filp, struct vm_area_struct *vma)
@@ -8323,19 +8294,15 @@ static int tracing_buffers_mmap(struct file *filp, struct vm_area_struct *vma)
 	struct trace_iterator *iter = &info->iter;
 	int ret = 0;
 
-	if (vma->vm_flags & VM_WRITE || vma->vm_flags & VM_EXEC)
-		return -EPERM;
-
-	vm_flags_mod(vma, VM_DONTCOPY | VM_DONTDUMP, VM_MAYWRITE);
-	vma->vm_ops = &tracing_buffers_vmops;
-
 	ret = get_snapshot_map(iter->tr);
 	if (ret)
 		return ret;
 
-	ret = ring_buffer_map(iter->array_buffer->buffer, iter->cpu_file);
+	ret = ring_buffer_map(iter->array_buffer->buffer, iter->cpu_file, vma);
 	if (ret)
 		put_snapshot_map(iter->tr);
+
+	vma->vm_ops = &tracing_buffers_vmops;
 
 	return ret;
 }

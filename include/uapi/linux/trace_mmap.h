@@ -17,8 +17,8 @@
  * @entries:		Number of entries in the ring-buffer.
  * @overrun:		Number of entries lost in the ring-buffer.
  * @read:		Number of entries that have been read.
- * @Reserved1:		Reserved for future use.
- * @Reserved2:		Reserved for future use.
+ * @Reserved1:		Internal use only.
+ * @Reserved2:		Internal use only.
  */
 struct trace_buffer_meta {
 	__u32		meta_page_size;
