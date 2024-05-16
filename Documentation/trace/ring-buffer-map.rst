@@ -17,11 +17,11 @@ Memory mapping setup
 The mapping works with a mmap() of the trace_pipe_raw interface.
 
 The first system page of the mapping contains ring-buffer statistics and
-description. It is referred as the meta-page. One of the most important field of
-the meta-page is the reader. It contains the sub-buffer ID which can be safely
-read by the mapper (see ring-buffer-design.rst).
+description. It is referred to as the meta-page. One of the most important
+fields of the meta-page is the reader. It contains the sub-buffer ID which can
+be safely read by the mapper (see ring-buffer-design.rst).
 
-The meta-page is followed by all the sub-buffers, ordered by ascendant ID. It is
+The meta-page is followed by all the sub-buffers, ordered by ascending ID. It is
 therefore effortless to know where the reader starts in the mapping:
 
 .. code-block:: c

@@ -101,7 +101,6 @@ static const u8 certs_selftest_rsa_keys[] __initconst = {
 	"\x02\xfc\x9e\x5f\x56\x42\x39\x05\xb3"
 };
 
-
 /*
  * Signed data and detached signature blobs that form the verification tests.
  */

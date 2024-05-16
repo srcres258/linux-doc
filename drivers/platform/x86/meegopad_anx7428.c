@@ -14,7 +14,7 @@
  * DP alternate mode.
  *
  * IOW the ANX7428 operates fully autonomous and to the x5-Z8350 SoC
- * things look like there simple is a USB-3 Type-A connector and a
+ * things look like there simply is a USB-3 Type-A connector and a
  * separate DisplayPort connector. Except that the BIOS does not
  * power on the ANX7428 at boot. This driver takes care of powering
  * on the ANX7428.
@@ -35,11 +35,14 @@
 #include <linux/acpi.h>
 #include <linux/bits.h>
 #include <linux/delay.h>
+#include <linux/dev_printk.h>
 #include <linux/dmi.h>
+#include <linux/err.h>
 #include <linux/gpio/consumer.h>
 #include <linux/i2c.h>
 #include <linux/iopoll.h>
 #include <linux/module.h>
+#include <linux/types.h>
 
 /* Register addresses and fields */
 #define VENDOR_ID			0x00
@@ -140,7 +143,6 @@ static struct i2c_driver anx7428_driver = {
 	},
 	.probe = anx7428_probe,
 };
-
 module_i2c_driver(anx7428_driver);
 
 MODULE_AUTHOR("Hans de Goede <hansg@kernel.org>");

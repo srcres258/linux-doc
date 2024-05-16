@@ -6359,8 +6359,7 @@ static void handle_ops_on_dev_replace(struct btrfs_io_context *bioc,
 	 * replace.
 	 * If we have 2 extra stripes, only choose the one with smaller physical.
 	 */
-	if (io_geom->op == BTRFS_MAP_GET_READ_MIRRORS &&
-	    nr_extra_stripes == 2) {
+	if (io_geom->op == BTRFS_MAP_GET_READ_MIRRORS && nr_extra_stripes == 2) {
 		struct btrfs_io_stripe *first = &bioc->stripes[num_stripes];
 		struct btrfs_io_stripe *second = &bioc->stripes[num_stripes + 1];
 
@@ -6805,9 +6804,8 @@ again:
 		io_geom.max_errors = btrfs_chunk_max_errors(map);
 
 	/*
-	 * Check if something changed the dev_replace state since
-	 * we've checked it for the last time and if redo the whole
-	 * mapping operation.
+	 * Check if something changed the dev_replace state since we've checked
+	 * it for the last time and if yes then redo the whole mapping operation.
 	 */
 	down_read(&dev_replace->rwsem);
 	if (dev_replace_is_ongoing !=
@@ -6821,7 +6819,6 @@ again:
 		handle_ops_on_dev_replace(bioc, dev_replace, logical, &io_geom);
 
 	up_read(&dev_replace->rwsem);
-
 
 	*bioc_ret = bioc;
 	bioc->num_stripes = io_geom.num_stripes;
