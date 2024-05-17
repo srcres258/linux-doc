@@ -17,6 +17,7 @@
 #include "xe_gt_sriov_pf_control.h"
 #include "xe_gt_sriov_pf_debugfs.h"
 #include "xe_gt_sriov_pf_helpers.h"
+#include "xe_gt_sriov_pf_monitor.h"
 #include "xe_gt_sriov_pf_policy.h"
 #include "xe_gt_sriov_pf_service.h"
 #include "xe_pm.h"
@@ -55,6 +56,7 @@ static unsigned int extract_vfid(struct dentry *d)
  *      │   │   ├── doorbells_provisioned
  *      │   │   ├── runtime_registers
  *      │   │   ├── negotiated_versions
+ *      │   │   ├── adverse_events
  */
 
 static const struct drm_info_list pf_info[] = {
@@ -87,6 +89,11 @@ static const struct drm_info_list pf_info[] = {
 		"negotiated_versions",
 		.show = xe_gt_debugfs_simple_show,
 		.data = xe_gt_sriov_pf_service_print_version,
+	},
+	{
+		"adverse_events",
+		.show = xe_gt_debugfs_simple_show,
+		.data = xe_gt_sriov_pf_monitor_print_events,
 	},
 };
 
@@ -197,6 +204,71 @@ DEFINE_SRIOV_GT_CONFIG_DEBUGFS_ATTRIBUTE(dbs, u32, "%llu\n");
 DEFINE_SRIOV_GT_CONFIG_DEBUGFS_ATTRIBUTE(exec_quantum, u32, "%llu\n");
 DEFINE_SRIOV_GT_CONFIG_DEBUGFS_ATTRIBUTE(preempt_timeout, u32, "%llu\n");
 
+/*
+ *      /sys/kernel/debug/dri/0/
+ *      ├── gt0
+ *      │   ├── pf
+ *      │   │   ├── threshold_cat_error_count
+ *      │   │   ├── threshold_doorbell_time_us
+ *      │   │   ├── threshold_engine_reset_count
+ *      │   │   ├── threshold_guc_time_us
+ *      │   │   ├── threshold_irq_time_us
+ *      │   │   ├── threshold_page_fault_count
+ *      │   ├── vf1
+ *      │   │   ├── threshold_cat_error_count
+ *      │   │   ├── threshold_doorbell_time_us
+ *      │   │   ├── threshold_engine_reset_count
+ *      │   │   ├── threshold_guc_time_us
+ *      │   │   ├── threshold_irq_time_us
+ *      │   │   ├── threshold_page_fault_count
+ */
+
+static int set_threshold(void *data, u64 val, enum xe_guc_klv_threshold_index index)
+{
+	struct xe_gt *gt = extract_gt(data);
+	unsigned int vfid = extract_vfid(data);
+	struct xe_device *xe = gt_to_xe(gt);
+	int err;
+
+	if (val > (u32)~0ull)
+		return -EOVERFLOW;
+
+	xe_pm_runtime_get(xe);
+	err = xe_gt_sriov_pf_config_set_threshold(gt, vfid, index, val);
+	xe_pm_runtime_put(xe);
+
+	return err;
+}
+
+static int get_threshold(void *data, u64 *val, enum xe_guc_klv_threshold_index index)
+{
+	struct xe_gt *gt = extract_gt(data);
+	unsigned int vfid = extract_vfid(data);
+
+	*val = xe_gt_sriov_pf_config_get_threshold(gt, vfid, index);
+	return 0;
+}
+
+#define DEFINE_SRIOV_GT_THRESHOLD_DEBUGFS_ATTRIBUTE(THRESHOLD, INDEX)		\
+										\
+static int THRESHOLD##_set(void *data, u64 val)					\
+{										\
+	return set_threshold(data, val, INDEX);					\
+}										\
+										\
+static int THRESHOLD##_get(void *data, u64 *val)				\
+{										\
+	return get_threshold(data, val, INDEX);					\
+}										\
+										\
+DEFINE_DEBUGFS_ATTRIBUTE(THRESHOLD##_fops, THRESHOLD##_get, THRESHOLD##_set, "%llu\n")
+
+/* generate all threshold attributes */
+#define define_threshold_attribute(TAG, NAME, ...) \
+	DEFINE_SRIOV_GT_THRESHOLD_DEBUGFS_ATTRIBUTE(NAME, MAKE_XE_GUC_KLV_THRESHOLD_INDEX(TAG));
+MAKE_XE_GUC_KLV_THRESHOLDS_SET(define_threshold_attribute)
+#undef define_threshold_attribute
+
 static void pf_add_config_attrs(struct xe_gt *gt, struct dentry *parent, unsigned int vfid)
 {
 	xe_gt_assert(gt, gt == extract_gt(parent));
@@ -217,6 +289,13 @@ static void pf_add_config_attrs(struct xe_gt *gt, struct dentry *parent, unsigne
 				   &exec_quantum_fops);
 	debugfs_create_file_unsafe("preempt_timeout_us", 0644, parent, parent,
 				   &preempt_timeout_fops);
+
+	/* register all threshold attributes */
+#define register_threshold_attribute(TAG, NAME, ...) \
+	debugfs_create_file_unsafe("threshold_" #NAME, 0644, parent, parent, \
+				   &NAME##_fops);
+	MAKE_XE_GUC_KLV_THRESHOLDS_SET(register_threshold_attribute)
+#undef register_threshold_attribute
 }
 
 /*
