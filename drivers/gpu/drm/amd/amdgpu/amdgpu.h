@@ -112,7 +112,6 @@
 #include "amdgpu_xcp.h"
 #include "amdgpu_seq64.h"
 #include "amdgpu_reg_state.h"
-#include "amdgpu_umsch_mm.h"
 
 #define MAX_GPU_INSTANCE		64
 
@@ -222,6 +221,7 @@ extern int amdgpu_mes;
 extern int amdgpu_mes_log_enable;
 extern int amdgpu_mes_kiq;
 extern int amdgpu_uni_mes;
+extern int amdgpu_jpeg_test;
 extern int amdgpu_noretry;
 extern int amdgpu_force_asic_type;
 extern int amdgpu_smartshift_bias;
@@ -1019,6 +1019,7 @@ struct amdgpu_device {
 
 	/* jpeg */
 	struct amdgpu_jpeg		jpeg;
+	bool enable_jpeg_test;
 
 	/* vpe */
 	struct amdgpu_vpe		vpe;
@@ -1167,6 +1168,7 @@ struct amdgpu_device {
 	bool                            debug_largebar;
 	bool                            debug_disable_soft_recovery;
 	bool                            debug_use_vram_fw_buf;
+	bool                            debug_enable_ras_aca;
 };
 
 static inline uint32_t amdgpu_ip_version(const struct amdgpu_device *adev,

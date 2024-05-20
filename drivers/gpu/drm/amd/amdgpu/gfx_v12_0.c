@@ -3608,6 +3608,7 @@ static int gfx_v12_0_set_powergating_state(void *handle,
 		return 0;
 
 	switch (amdgpu_ip_version(adev, GC_HWIP, 0)) {
+	case IP_VERSION(12, 0, 0):
 	case IP_VERSION(12, 0, 1):
 		amdgpu_gfx_off_ctrl(adev, enable);
 		break;
@@ -3857,6 +3858,7 @@ static int gfx_v12_0_set_clockgating_state(void *handle,
 		return 0;
 
 	switch (adev->ip_versions[GC_HWIP][0]) {
+	case IP_VERSION(12, 0, 0):
 	case IP_VERSION(12, 0, 1):
 		gfx_v12_0_update_gfx_clock_gating(adev,
 						  state == AMD_CG_STATE_GATE);

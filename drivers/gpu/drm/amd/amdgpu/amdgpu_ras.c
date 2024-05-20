@@ -2183,11 +2183,14 @@ static void amdgpu_ras_interrupt_process_handler(struct work_struct *work)
 int amdgpu_ras_interrupt_dispatch(struct amdgpu_device *adev,
 		struct ras_dispatch_if *info)
 {
-	struct ras_manager *obj = amdgpu_ras_find_obj(adev, &info->head);
-	struct ras_ih_data *data = &obj->ih_data;
+	struct ras_manager *obj;
+	struct ras_ih_data *data;
 
+	obj = amdgpu_ras_find_obj(adev, &info->head);
 	if (!obj)
 		return -EINVAL;
+
+	data = &obj->ih_data;
 
 	if (data->inuse == 0)
 		return 0;
@@ -3619,12 +3622,11 @@ int amdgpu_ras_late_init(struct amdgpu_device *adev)
 	amdgpu_ras_event_mgr_init(adev);
 
 	if (amdgpu_aca_is_enabled(adev)) {
-		if (amdgpu_in_reset(adev))
-			r = amdgpu_aca_reset(adev);
-		 else
+		if (!amdgpu_in_reset(adev)) {
 			r = amdgpu_aca_init(adev);
-		if (r)
-			return r;
+			if (r)
+				return r;
+		}
 
 		if (!amdgpu_sriov_vf(adev))
 			amdgpu_ras_set_aca_debug_mode(adev, false);
@@ -4298,21 +4300,8 @@ static struct ras_err_info *amdgpu_ras_error_get_info(struct ras_err_data *err_d
 
 void amdgpu_ras_add_mca_err_addr(struct ras_err_info *err_info, struct ras_err_addr *err_addr)
 {
-	struct ras_err_addr *mca_err_addr;
-
 	/* This function will be retired. */
 	return;
-	mca_err_addr = kzalloc(sizeof(*mca_err_addr), GFP_KERNEL);
-	if (!mca_err_addr)
-		return;
-
-	INIT_LIST_HEAD(&mca_err_addr->node);
-
-	mca_err_addr->err_status = err_addr->err_status;
-	mca_err_addr->err_ipid = err_addr->err_ipid;
-	mca_err_addr->err_addr = err_addr->err_addr;
-
-	list_add_tail(&mca_err_addr->node, &err_info->err_addr_list);
 }
 
 void amdgpu_ras_del_mca_err_addr(struct ras_err_info *err_info, struct ras_err_addr *mca_err_addr)
@@ -4514,4 +4503,22 @@ int amdgpu_ras_reserve_page(struct amdgpu_device *adev, uint64_t pfn)
 	mutex_unlock(&con->page_rsv_lock);
 
 	return ret;
+}
+
+void amdgpu_ras_event_log_print(struct amdgpu_device *adev, u64 event_id,
+				const char *fmt, ...)
+{
+	struct va_format vaf;
+	va_list args;
+
+	va_start(args, fmt);
+	vaf.fmt = fmt;
+	vaf.va = &args;
+
+	if (amdgpu_ras_event_id_is_valid(adev, event_id))
+		dev_printk(KERN_INFO, adev->dev, "{%llu}%pV", event_id, &vaf);
+	else
+		dev_printk(KERN_INFO, adev->dev, "%pV", &vaf);
+
+	va_end(args);
 }
