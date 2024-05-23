@@ -6,22 +6,15 @@
 #ifndef _XE_MMIO_H_
 #define _XE_MMIO_H_
 
-#include <linux/delay.h>
-#include <linux/io-64-nonatomic-lo-hi.h>
-
-#include "regs/xe_reg_defs.h"
-#include "xe_device_types.h"
-#include "xe_gt_printk.h"
 #include "xe_gt_types.h"
 
-struct drm_device;
-struct drm_file;
 struct xe_device;
+struct xe_reg;
 
 #define LMEM_BAR		2
 
 int xe_mmio_init(struct xe_device *xe);
-void xe_mmio_probe_tiles(struct xe_device *xe);
+int xe_mmio_probe_tiles(struct xe_device *xe);
 
 u8 xe_mmio_read8(struct xe_gt *gt, struct xe_reg reg);
 u16 xe_mmio_read16(struct xe_gt *gt, struct xe_reg reg);

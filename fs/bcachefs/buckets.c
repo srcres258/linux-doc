@@ -646,9 +646,10 @@ next:
 		} else {
 			struct bkey_ptrs ptrs;
 			union bch_extent_entry *entry;
+
+			rcu_read_lock();
 restart_drop_ptrs:
 			ptrs = bch2_bkey_ptrs(bkey_i_to_s(new));
-			rcu_read_lock();
 			bkey_for_each_ptr_decode(bkey_i_to_s(new).k, ptrs, p, entry) {
 				struct bch_dev *ca = bch2_dev_rcu(c, p.ptr.dev);
 				struct bucket *g = PTR_GC_BUCKET(ca, &p.ptr);
@@ -1472,7 +1473,7 @@ int bch2_trans_mark_dev_sbs_flags(struct bch_fs *c,
 	for_each_online_member(c, ca) {
 		int ret = bch2_trans_mark_dev_sb(c, ca, flags);
 		if (ret) {
-			bch2_dev_put(ca);
+			percpu_ref_put(&ca->io_ref);
 			return ret;
 		}
 	}

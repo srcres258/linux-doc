@@ -241,7 +241,7 @@ static void guc_write_params(struct xe_guc *guc)
 		xe_mmio_write32(gt, SOFT_SCRATCH(1 + i), guc->params[i]);
 }
 
-static void guc_fini(struct drm_device *drm, void *arg)
+static void guc_fini_hw(void *arg)
 {
 	struct xe_guc *guc = arg;
 	struct xe_gt *gt = guc_to_gt(guc);
@@ -295,6 +295,23 @@ static int xe_guc_realloc_post_hwconfig(struct xe_guc *guc)
 	return 0;
 }
 
+static int vf_guc_init(struct xe_guc *guc)
+{
+	int err;
+
+	xe_guc_comm_init_early(guc);
+
+	err = xe_guc_ct_init(&guc->ct);
+	if (err)
+		return err;
+
+	err = xe_guc_relay_init(&guc->relay);
+	if (err)
+		return err;
+
+	return 0;
+}
+
 int xe_guc_init(struct xe_guc *guc)
 {
 	struct xe_device *xe = guc_to_xe(guc);
@@ -308,6 +325,13 @@ int xe_guc_init(struct xe_guc *guc)
 
 	if (!xe_uc_fw_is_enabled(&guc->fw))
 		return 0;
+
+	if (IS_SRIOV_VF(xe)) {
+		ret = vf_guc_init(guc);
+		if (ret)
+			goto out;
+		return 0;
+	}
 
 	ret = xe_guc_log_init(&guc->log);
 	if (ret)
@@ -325,7 +349,7 @@ int xe_guc_init(struct xe_guc *guc)
 	if (ret)
 		goto out;
 
-	ret = drmm_add_action_or_reset(&xe->drm, guc_fini, guc);
+	ret = devm_add_action_or_reset(xe->drm.dev, guc_fini_hw, guc);
 	if (ret)
 		goto out;
 
@@ -342,6 +366,19 @@ out:
 	return ret;
 }
 
+static int vf_guc_init_post_hwconfig(struct xe_guc *guc)
+{
+	int err;
+
+	err = xe_guc_submit_init(guc, xe_gt_sriov_vf_guc_ids(guc_to_gt(guc)));
+	if (err)
+		return err;
+
+	/* XXX xe_guc_db_mgr_init not needed for now */
+
+	return 0;
+}
+
 /**
  * xe_guc_init_post_hwconfig - initialize GuC post hwconfig load
  * @guc: The GuC object
@@ -352,13 +389,16 @@ int xe_guc_init_post_hwconfig(struct xe_guc *guc)
 {
 	int ret;
 
+	if (IS_SRIOV_VF(guc_to_xe(guc)))
+		return vf_guc_init_post_hwconfig(guc);
+
 	ret = xe_guc_realloc_post_hwconfig(guc);
 	if (ret)
 		return ret;
 
 	guc_init_params_post_hwconfig(guc);
 
-	ret = xe_guc_submit_init(guc);
+	ret = xe_guc_submit_init(guc, ~0);
 	if (ret)
 		return ret;
 

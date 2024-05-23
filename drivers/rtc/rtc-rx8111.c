@@ -95,6 +95,9 @@ enum rx8111_regfield {
 	RX8111_REGF_INIEN,
 	RX8111_REGF_CHGEN,
 
+	/* RX8111_REG_STATUS_MON. */
+	RX8111_REGF_VLOW,
+
 	/* Sentinel value. */
 	RX8111_REGF_MAX
 };
@@ -129,6 +132,8 @@ static const struct reg_field rx8111_regfields[] = {
 	[RX8111_REGF_SWSEL1] = REG_FIELD(RX8111_REG_PWR_SWITCH_CTRL, 3, 3),
 	[RX8111_REGF_INIEN]  = REG_FIELD(RX8111_REG_PWR_SWITCH_CTRL, 6, 6),
 	[RX8111_REGF_CHGEN]  = REG_FIELD(RX8111_REG_PWR_SWITCH_CTRL, 7, 7),
+
+	[RX8111_REGF_VLOW]  = REG_FIELD(RX8111_REG_STATUS_MON, 1, 1),
 };
 
 static const struct regmap_config rx8111_regmap_config = {
@@ -170,14 +175,14 @@ static int rx8111_read_time(struct device *dev, struct rtc_time *tm)
 	}
 
 	if (FIELD_GET(RX8111_FLAG_XST_BIT, regval)) {
-		dev_warn(data->dev,
-			 "Crystal oscillation stopped, time is not reliable\n");
+		dev_dbg(data->dev,
+			"Crystal oscillation stopped, time is not reliable\n");
 		return -EINVAL;
 	}
 
 	if (FIELD_GET(RX8111_FLAG_VLF_BIT, regval)) {
-		dev_warn(data->dev,
-			 "Low voltage detected, time is not reliable\n");
+		dev_dbg(data->dev,
+			"Low voltage detected, time is not reliable\n");
 		return -EINVAL;
 	}
 
@@ -188,7 +193,7 @@ static int rx8111_read_time(struct device *dev, struct rtc_time *tm)
 	}
 
 	if (regval) {
-		dev_warn(data->dev, "Clock stopped, time is not reliable\n");
+		dev_dbg(data->dev, "Clock stopped, time is not reliable\n");
 		return -EINVAL;
 	}
 
@@ -275,6 +280,13 @@ static int rx8111_ioctl(struct device *dev, unsigned int cmd, unsigned long arg)
 			return ret;
 
 		vlval = regval ? RTC_VL_DATA_INVALID : 0;
+
+		ret = regmap_field_read(data->regfields[RX8111_REGF_VLOW],
+					&regval);
+		if (ret)
+			return ret;
+
+		vlval |= regval ? RTC_VL_BACKUP_LOW : 0;
 
 		return put_user(vlval, (typeof(vlval) __user *)arg);
 	default:
