@@ -706,7 +706,8 @@ SYSCALL_DEFINE6(setxattrat, int, dfd, const char __user *, pathname, unsigned in
 	if (error)
 		return error;
 
-	return do_setxattrat(dfd, pathname, at_flags, name, (const void __user *)args.value,
+	return do_setxattrat(dfd, pathname, at_flags, name,
+			     (const void __user *)(unsigned long)args.value,
 			     args.size, args.flags);
 }
 
@@ -852,7 +853,9 @@ SYSCALL_DEFINE6(getxattrat, int, dfd, const char __user *, pathname, unsigned in
 	if (args.flags != 0)
 		return -EINVAL;
 
-	return do_getxattrat(dfd, pathname, at_flags, name, (void __user *)args.value, args.size);
+	return do_getxattrat(dfd, pathname, at_flags, name,
+			     (void __user *)(unsigned long)args.value,
+			     args.size);
 }
 
 SYSCALL_DEFINE4(getxattr, const char __user *, pathname,
