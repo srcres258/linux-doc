@@ -22,6 +22,7 @@
 #include "xe_gt.h"
 #include "xe_gt_mcr.h"
 #include "xe_gt_printk.h"
+#include "xe_gt_sriov_vf.h"
 #include "xe_macros.h"
 #include "xe_module.h"
 #include "xe_sriov.h"
@@ -479,6 +480,9 @@ u32 xe_mmio_read32(struct xe_gt *gt, struct xe_reg reg)
 	struct xe_tile *tile = gt_to_tile(gt);
 	u32 addr = xe_mmio_adjusted_addr(gt, reg.addr);
 
+	if (!reg.vf && IS_SRIOV_VF(gt_to_xe(gt)))
+		return xe_gt_sriov_vf_read32(gt, reg);
+
 	return readl((reg.ext ? tile->mmio_ext.regs : tile->mmio.regs) + addr);
 }
 
@@ -615,6 +619,67 @@ int xe_mmio_wait32(struct xe_gt *gt, struct xe_reg reg, u32 mask, u32 val, u32 t
 	if (ret != 0) {
 		read = xe_mmio_read32(gt, reg);
 		if ((read & mask) == val)
+			ret = 0;
+	}
+
+	if (out_val)
+		*out_val = read;
+
+	return ret;
+}
+
+/**
+ * xe_mmio_wait32_not() - Wait for a register to return anything other than the given masked value
+ * @gt: MMIO target GT
+ * @reg: register to read value from
+ * @mask: mask to be applied to the value read from the register
+ * @val: value to match after applying the mask
+ * @timeout_us: time out after this period of time. Wait logic tries to be
+ * smart, applying an exponential backoff until @timeout_us is reached.
+ * @out_val: if not NULL, points where to store the last unmasked value
+ * @atomic: needs to be true if calling from an atomic context
+ *
+ * This function polls for a masked value to change from a given value and
+ * returns zero on success or -ETIMEDOUT if timed out.
+ *
+ * Note that @timeout_us represents the minimum amount of time to wait before
+ * giving up. The actual time taken by this function can be a little more than
+ * @timeout_us for different reasons, specially in non-atomic contexts. Thus,
+ * it is possible that this function succeeds even after @timeout_us has passed.
+ */
+int xe_mmio_wait32_not(struct xe_gt *gt, struct xe_reg reg, u32 mask, u32 val, u32 timeout_us,
+		       u32 *out_val, bool atomic)
+{
+	ktime_t cur = ktime_get_raw();
+	const ktime_t end = ktime_add_us(cur, timeout_us);
+	int ret = -ETIMEDOUT;
+	s64 wait = 10;
+	u32 read;
+
+	for (;;) {
+		read = xe_mmio_read32(gt, reg);
+		if ((read & mask) != val) {
+			ret = 0;
+			break;
+		}
+
+		cur = ktime_get_raw();
+		if (!ktime_before(cur, end))
+			break;
+
+		if (ktime_after(ktime_add_us(cur, wait), end))
+			wait = ktime_us_delta(end, cur);
+
+		if (atomic)
+			udelay(wait);
+		else
+			usleep_range(wait, wait << 1);
+		wait <<= 1;
+	}
+
+	if (ret != 0) {
+		read = xe_mmio_read32(gt, reg);
+		if ((read & mask) != val)
 			ret = 0;
 	}
 

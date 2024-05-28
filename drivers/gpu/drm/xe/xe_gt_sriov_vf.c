@@ -4,6 +4,7 @@
  */
 
 #include <linux/bitfield.h>
+#include <linux/bsearch.h>
 
 #include <drm/drm_managed.h>
 #include <drm/drm_print.h>
@@ -12,16 +13,22 @@
 #include "abi/guc_communication_mmio_abi.h"
 #include "abi/guc_klvs_abi.h"
 #include "abi/guc_relay_actions_abi.h"
+#include "regs/xe_gt_regs.h"
+#include "regs/xe_gtt_defs.h"
 
 #include "xe_assert.h"
 #include "xe_device.h"
+#include "xe_ggtt.h"
 #include "xe_gt_sriov_printk.h"
 #include "xe_gt_sriov_vf.h"
 #include "xe_gt_sriov_vf_types.h"
 #include "xe_guc.h"
 #include "xe_guc_hxg_helpers.h"
 #include "xe_guc_relay.h"
+#include "xe_mmio.h"
 #include "xe_sriov.h"
+#include "xe_uc_fw.h"
+#include "xe_wopcm.h"
 
 #define make_u64_from_u32(hi, lo) ((u64)((u64)(u32)(hi) << 32 | (u32)(lo)))
 
@@ -282,6 +289,41 @@ static int guc_action_query_single_klv64(struct xe_guc *guc, u32 key, u64 *value
 	return 0;
 }
 
+static bool has_gmdid(struct xe_device *xe)
+{
+	return GRAPHICS_VERx100(xe) >= 1270;
+}
+
+/**
+ * xe_gt_sriov_vf_gmdid - Query GMDID over MMIO.
+ * @gt: the &xe_gt
+ *
+ * This function is for VF use only.
+ *
+ * Return: value of GMDID KLV on success or 0 on failure.
+ */
+u32 xe_gt_sriov_vf_gmdid(struct xe_gt *gt)
+{
+	const char *type = xe_gt_is_media_type(gt) ? "media" : "graphics";
+	struct xe_guc *guc = &gt->uc.guc;
+	u32 value;
+	int err;
+
+	xe_gt_assert(gt, IS_SRIOV_VF(gt_to_xe(gt)));
+	xe_gt_assert(gt, !GRAPHICS_VERx100(gt_to_xe(gt)) || has_gmdid(gt_to_xe(gt)));
+	xe_gt_assert(gt, gt->sriov.vf.guc_version.major > 1 || gt->sriov.vf.guc_version.minor >= 2);
+
+	err = guc_action_query_single_klv32(guc, GUC_KLV_GLOBAL_CFG_GMD_ID_KEY, &value);
+	if (unlikely(err)) {
+		xe_gt_sriov_err(gt, "Failed to obtain %s GMDID (%pe)\n",
+				type, ERR_PTR(err));
+		return 0;
+	}
+
+	xe_gt_sriov_dbg(gt, "%s GMDID = %#x\n", type, value);
+	return value;
+}
+
 static int vf_get_ggtt_info(struct xe_gt *gt)
 {
 	struct xe_gt_sriov_vf_selfconfig *config = &gt->sriov.vf.self_config;
@@ -378,6 +420,14 @@ static int vf_get_submission_cfg(struct xe_gt *gt)
 	return config->num_ctxs ? 0 : -ENODATA;
 }
 
+static void vf_cache_gmdid(struct xe_gt *gt)
+{
+	xe_gt_assert(gt, has_gmdid(gt_to_xe(gt)));
+	xe_gt_assert(gt, IS_SRIOV_VF(gt_to_xe(gt)));
+
+	gt->sriov.vf.runtime.gmdid = xe_gt_sriov_vf_gmdid(gt);
+}
+
 /**
  * xe_gt_sriov_vf_query_config - Query SR-IOV config data over MMIO.
  * @gt: the &xe_gt
@@ -405,6 +455,9 @@ int xe_gt_sriov_vf_query_config(struct xe_gt *gt)
 	if (unlikely(err))
 		return err;
 
+	if (has_gmdid(xe))
+		vf_cache_gmdid(gt);
+
 	return 0;
 }
 
@@ -423,6 +476,94 @@ u16 xe_gt_sriov_vf_guc_ids(struct xe_gt *gt)
 	xe_gt_assert(gt, gt->sriov.vf.self_config.num_ctxs);
 
 	return gt->sriov.vf.self_config.num_ctxs;
+}
+
+static int vf_balloon_ggtt(struct xe_gt *gt)
+{
+	struct xe_gt_sriov_vf_selfconfig *config = &gt->sriov.vf.self_config;
+	struct xe_tile *tile = gt_to_tile(gt);
+	struct xe_ggtt *ggtt = tile->mem.ggtt;
+	struct xe_device *xe = gt_to_xe(gt);
+	u64 start, end;
+	int err;
+
+	xe_gt_assert(gt, IS_SRIOV_VF(xe));
+	xe_gt_assert(gt, !xe_gt_is_media_type(gt));
+
+	if (!config->ggtt_size)
+		return -ENODATA;
+
+	/*
+	 * VF can only use part of the GGTT as allocated by the PF:
+	 *
+	 *      WOPCM                                  GUC_GGTT_TOP
+	 *      |<------------ Total GGTT size ------------------>|
+	 *
+	 *           VF GGTT base -->|<- size ->|
+	 *
+	 *      +--------------------+----------+-----------------+
+	 *      |////////////////////|   block  |\\\\\\\\\\\\\\\\\|
+	 *      +--------------------+----------+-----------------+
+	 *
+	 *      |<--- balloon[0] --->|<-- VF -->|<-- balloon[1] ->|
+	 */
+
+	start = xe_wopcm_size(xe);
+	end = config->ggtt_base;
+	if (end != start) {
+		err = xe_ggtt_balloon(ggtt, start, end, &tile->sriov.vf.ggtt_balloon[0]);
+		if (err)
+			goto failed;
+	}
+
+	start = config->ggtt_base + config->ggtt_size;
+	end = GUC_GGTT_TOP;
+	if (end != start) {
+		err = xe_ggtt_balloon(ggtt, start, end, &tile->sriov.vf.ggtt_balloon[1]);
+		if (err)
+			goto deballoon;
+	}
+
+	return 0;
+
+deballoon:
+	xe_ggtt_deballoon(ggtt, &tile->sriov.vf.ggtt_balloon[0]);
+failed:
+	return err;
+}
+
+static void deballoon_ggtt(struct drm_device *drm, void *arg)
+{
+	struct xe_tile *tile = arg;
+	struct xe_ggtt *ggtt = tile->mem.ggtt;
+
+	xe_tile_assert(tile, IS_SRIOV_VF(tile_to_xe(tile)));
+	xe_ggtt_deballoon(ggtt, &tile->sriov.vf.ggtt_balloon[1]);
+	xe_ggtt_deballoon(ggtt, &tile->sriov.vf.ggtt_balloon[0]);
+}
+
+/**
+ * xe_gt_sriov_vf_prepare_ggtt - Prepare a VF's GGTT configuration.
+ * @gt: the &xe_gt
+ *
+ * This function is for VF use only.
+ *
+ * Return: 0 on success or a negative error code on failure.
+ */
+int xe_gt_sriov_vf_prepare_ggtt(struct xe_gt *gt)
+{
+	struct xe_tile *tile = gt_to_tile(gt);
+	struct xe_device *xe = tile_to_xe(tile);
+	int err;
+
+	if (xe_gt_is_media_type(gt))
+		return 0;
+
+	err = vf_balloon_ggtt(gt);
+	if (err)
+		return err;
+
+	return drmm_add_action_or_reset(&xe->drm, deballoon_ggtt, tile);
 }
 
 static int relay_action_handshake(struct xe_gt *gt, u32 *major, u32 *minor)
@@ -675,6 +816,63 @@ failed:
 	xe_gt_sriov_err(gt, "Failed to get runtime info (%pe)\n",
 			ERR_PTR(err));
 	return err;
+}
+
+static int vf_runtime_reg_cmp(const void *a, const void *b)
+{
+	const struct vf_runtime_reg *ra = a;
+	const struct vf_runtime_reg *rb = b;
+
+	return (int)ra->offset - (int)rb->offset;
+}
+
+static struct vf_runtime_reg *vf_lookup_reg(struct xe_gt *gt, u32 addr)
+{
+	struct xe_gt_sriov_vf_runtime *runtime = &gt->sriov.vf.runtime;
+	struct vf_runtime_reg key = { .offset = addr };
+
+	xe_gt_assert(gt, IS_SRIOV_VF(gt_to_xe(gt)));
+
+	return bsearch(&key, runtime->regs, runtime->regs_size, sizeof(key),
+		       vf_runtime_reg_cmp);
+}
+
+/**
+ * xe_gt_sriov_vf_read32 - Get a register value from the runtime data.
+ * @gt: the &xe_gt
+ * @reg: the register to read
+ *
+ * This function is for VF use only.
+ * This function shall be called after VF has connected to PF.
+ * This function is dedicated for registers that VFs can't read directly.
+ *
+ * Return: register value obtained from the PF or 0 if not found.
+ */
+u32 xe_gt_sriov_vf_read32(struct xe_gt *gt, struct xe_reg reg)
+{
+	u32 addr = xe_mmio_adjusted_addr(gt, reg.addr);
+	struct vf_runtime_reg *rr;
+
+	xe_gt_assert(gt, IS_SRIOV_VF(gt_to_xe(gt)));
+	xe_gt_assert(gt, gt->sriov.vf.pf_version.major);
+	xe_gt_assert(gt, !reg.vf);
+
+	if (reg.addr == GMD_ID.addr) {
+		xe_gt_sriov_dbg_verbose(gt, "gmdid(%#x) = %#x\n",
+					addr, gt->sriov.vf.runtime.gmdid);
+		return gt->sriov.vf.runtime.gmdid;
+	}
+
+	rr = vf_lookup_reg(gt, addr);
+	if (!rr) {
+		xe_gt_WARN(gt, IS_ENABLED(CONFIG_DRM_XE_DEBUG),
+			   "VF is trying to read an inaccessible register %#x+%#x\n",
+			   reg.addr, addr - reg.addr);
+		return 0;
+	}
+
+	xe_gt_sriov_dbg_verbose(gt, "runtime[%#x] = %#x\n", addr, rr->value);
+	return rr->value;
 }
 
 /**

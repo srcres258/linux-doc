@@ -4138,17 +4138,6 @@ static int icl_check_nv12_planes(struct intel_crtc_state *crtc_state)
 	return 0;
 }
 
-static bool c8_planes_changed(const struct intel_crtc_state *new_crtc_state)
-{
-	struct intel_crtc *crtc = to_intel_crtc(new_crtc_state->uapi.crtc);
-	struct intel_atomic_state *state =
-		to_intel_atomic_state(new_crtc_state->uapi.state);
-	const struct intel_crtc_state *old_crtc_state =
-		intel_atomic_get_old_crtc_state(state, crtc);
-
-	return !old_crtc_state->c8_planes != !new_crtc_state->c8_planes;
-}
-
 static u16 hsw_linetime_wm(const struct intel_crtc_state *crtc_state)
 {
 	const struct drm_display_mode *pipe_mode =
@@ -4247,18 +4236,9 @@ static int intel_crtc_atomic_check(struct intel_atomic_state *state,
 			return ret;
 	}
 
-	/*
-	 * May need to update pipe gamma enable bits
-	 * when C8 planes are getting enabled/disabled.
-	 */
-	if (c8_planes_changed(crtc_state))
-		crtc_state->uapi.color_mgmt_changed = true;
-
-	if (intel_crtc_needs_color_update(crtc_state)) {
-		ret = intel_color_check(crtc_state);
-		if (ret)
-			return ret;
-	}
+	ret = intel_color_check(state, crtc);
+	if (ret)
+		return ret;
 
 	ret = intel_compute_pipe_wm(state, crtc);
 	if (ret) {
@@ -8233,11 +8213,11 @@ void i830_disable_pipe(struct drm_i915_private *dev_priv, enum pipe pipe)
 		    pipe_name(pipe));
 
 	drm_WARN_ON(&dev_priv->drm,
-		    intel_de_read(dev_priv, DSPCNTR(PLANE_A)) & DISP_ENABLE);
+		    intel_de_read(dev_priv, DSPCNTR(dev_priv, PLANE_A)) & DISP_ENABLE);
 	drm_WARN_ON(&dev_priv->drm,
-		    intel_de_read(dev_priv, DSPCNTR(PLANE_B)) & DISP_ENABLE);
+		    intel_de_read(dev_priv, DSPCNTR(dev_priv, PLANE_B)) & DISP_ENABLE);
 	drm_WARN_ON(&dev_priv->drm,
-		    intel_de_read(dev_priv, DSPCNTR(PLANE_C)) & DISP_ENABLE);
+		    intel_de_read(dev_priv, DSPCNTR(dev_priv, PLANE_C)) & DISP_ENABLE);
 	drm_WARN_ON(&dev_priv->drm,
 		    intel_de_read(dev_priv, CURCNTR(dev_priv, PIPE_A)) & MCURSOR_MODE_MASK);
 	drm_WARN_ON(&dev_priv->drm,

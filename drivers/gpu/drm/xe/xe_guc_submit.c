@@ -35,6 +35,7 @@
 #include "xe_macros.h"
 #include "xe_map.h"
 #include "xe_mocs.h"
+#include "xe_pm.h"
 #include "xe_ring_ops_types.h"
 #include "xe_sched_job.h"
 #include "xe_trace.h"
@@ -762,7 +763,7 @@ static void guc_exec_queue_free_job(struct drm_sched_job *drm_job)
 {
 	struct xe_sched_job *job = to_xe_sched_job(drm_job);
 
-	xe_exec_queue_update_runtime(job->q);
+	xe_exec_queue_update_run_ticks(job->q);
 
 	trace_xe_sched_job_free(job);
 	xe_sched_job_put(job);
@@ -814,55 +815,6 @@ static void disable_scheduling_deregister(struct xe_guc *guc,
 		       G2H_LEN_DW_SCHED_CONTEXT_MODE_SET +
 		       G2H_LEN_DW_DEREGISTER_CONTEXT, 2);
 }
-
-static void guc_exec_queue_print(struct xe_exec_queue *q, struct drm_printer *p);
-
-#if IS_ENABLED(CONFIG_DRM_XE_SIMPLE_ERROR_CAPTURE)
-static void simple_error_capture(struct xe_exec_queue *q)
-{
-	struct xe_guc *guc = exec_queue_to_guc(q);
-	struct xe_device *xe = guc_to_xe(guc);
-	struct drm_printer p = drm_err_printer(&xe->drm, NULL);
-	struct xe_hw_engine *hwe;
-	enum xe_hw_engine_id id;
-	u32 adj_logical_mask = q->logical_mask;
-	u32 width_mask = (0x1 << q->width) - 1;
-	int i;
-	bool cookie;
-
-	if (q->vm && !q->vm->error_capture.capture_once) {
-		q->vm->error_capture.capture_once = true;
-		cookie = dma_fence_begin_signalling();
-		for (i = 0; q->width > 1 && i < XE_HW_ENGINE_MAX_INSTANCE;) {
-			if (adj_logical_mask & BIT(i)) {
-				adj_logical_mask |= width_mask << i;
-				i += q->width;
-			} else {
-				++i;
-			}
-		}
-
-		if (xe_force_wake_get(gt_to_fw(guc_to_gt(guc)), XE_FORCEWAKE_ALL))
-			xe_gt_info(guc_to_gt(guc),
-				   "failed to get forcewake for error capture");
-		xe_guc_ct_print(&guc->ct, &p, true);
-		guc_exec_queue_print(q, &p);
-		for_each_hw_engine(hwe, guc_to_gt(guc), id) {
-			if (hwe->class != q->hwe->class ||
-			    !(BIT(hwe->logical_instance) & adj_logical_mask))
-				continue;
-			xe_hw_engine_print(hwe, &p);
-		}
-		xe_analyze_vm(&p, q->vm, q->gt->info.id);
-		xe_force_wake_put(gt_to_fw(guc_to_gt(guc)), XE_FORCEWAKE_ALL);
-		dma_fence_end_signalling(cookie);
-	}
-}
-#else
-static void simple_error_capture(struct xe_exec_queue *q)
-{
-}
-#endif
 
 static void xe_guc_exec_queue_trigger_cleanup(struct xe_exec_queue *q)
 {
@@ -988,17 +940,16 @@ guc_exec_queue_timedout_job(struct drm_sched_job *drm_job)
 		return DRM_GPU_SCHED_STAT_NOMINAL;
 	}
 
-	drm_notice(&xe->drm, "Timedout job: seqno=%u, guc_id=%d, flags=0x%lx",
-		   xe_sched_job_seqno(job), q->guc->id, q->flags);
+	drm_notice(&xe->drm, "Timedout job: seqno=%u, lrc_seqno=%u, guc_id=%d, flags=0x%lx",
+		   xe_sched_job_seqno(job), xe_sched_job_lrc_seqno(job),
+		   q->guc->id, q->flags);
 	xe_gt_WARN(q->gt, q->flags & EXEC_QUEUE_FLAG_KERNEL,
 		   "Kernel-submitted job timed out\n");
 	xe_gt_WARN(q->gt, q->flags & EXEC_QUEUE_FLAG_VM && !exec_queue_killed(q),
 		   "VM job timed out on non-killed execqueue\n");
 
-	if (!exec_queue_killed(q)) {
-		simple_error_capture(q);
+	if (!exec_queue_killed(q))
 		xe_devcoredump(job);
-	}
 
 	trace_xe_sched_job_timedout(job);
 
@@ -1088,6 +1039,7 @@ static void __guc_exec_queue_fini_async(struct work_struct *w)
 	struct xe_exec_queue *q = ge->q;
 	struct xe_guc *guc = exec_queue_to_guc(q);
 
+	xe_pm_runtime_get(guc_to_xe(guc));
 	trace_xe_exec_queue_destroy(q);
 
 	if (xe_exec_queue_is_lr(q))
@@ -1098,6 +1050,7 @@ static void __guc_exec_queue_fini_async(struct work_struct *w)
 
 	kfree(ge);
 	xe_exec_queue_fini(q);
+	xe_pm_runtime_put(guc_to_xe(guc));
 }
 
 static void guc_exec_queue_fini_async(struct xe_exec_queue *q)

@@ -54,7 +54,7 @@ void bch_dump_bucket(struct btree_keys *b)
 int __bch_count_data(struct btree_keys *b)
 {
 	unsigned int ret = 0;
-	struct btree_iter_stack iter;
+	struct btree_iter iter;
 	struct bkey *k;
 
 	min_heap_init(&iter.heap, NULL, MAX_BSETS);
@@ -69,7 +69,7 @@ void __bch_check_keys(struct btree_keys *b, const char *fmt, ...)
 {
 	va_list args;
 	struct bkey *k, *p = NULL;
-	struct btree_iter_stack iter;
+	struct btree_iter iter;
 	const char *err;
 
 	min_heap_init(&iter.heap, NULL, MAX_BSETS);
@@ -883,7 +883,7 @@ unsigned int bch_btree_insert_key(struct btree_keys *b, struct bkey *k,
 	unsigned int status = BTREE_INSERT_STATUS_NO_INSERT;
 	struct bset *i = bset_tree_last(b)->data;
 	struct bkey *m, *prev = NULL;
-	struct btree_iter_stack iter;
+	struct btree_iter iter;
 	struct bkey preceding_key_on_stack = ZERO_KEY;
 	struct bkey *preceding_key_p = &preceding_key_on_stack;
 
@@ -901,9 +901,9 @@ unsigned int bch_btree_insert_key(struct btree_keys *b, struct bkey *k,
 	else
 		preceding_key(k, &preceding_key_p);
 
-	m = bch_btree_iter_stack_init(b, &iter, preceding_key_p);
+	m = bch_btree_iter_init(b, &iter, preceding_key_p);
 
-	if (b->ops->insert_fixup(b, k, &iter.iter, replace_key))
+	if (b->ops->insert_fixup(b, k, &iter, replace_key))
 		return status;
 
 	status = BTREE_INSERT_STATUS_INSERT;
@@ -1121,33 +1121,33 @@ void bch_btree_iter_push(struct btree_iter *iter, struct bkey *k,
 				 NULL));
 }
 
-static struct bkey *__bch_btree_iter_stack_init(struct btree_keys *b,
-						struct btree_iter_stack *iter,
-						struct bkey *search,
-						struct bset_tree *start)
+static struct bkey *__bch_btree_iter_init(struct btree_keys *b,
+					  struct btree_iter *iter,
+					  struct bkey *search,
+					  struct bset_tree *start)
 {
 	struct bkey *ret = NULL;
 
-	iter->iter.size = ARRAY_SIZE(iter->stack_data);
-	iter->iter.used = 0;
+	iter->heap.size = ARRAY_SIZE(iter->heap.preallocated);
+	iter->heap.nr = 0;
 
 #ifdef CONFIG_BCACHE_DEBUG
-	iter->iter.b = b;
+	iter->b = b;
 #endif
 
 	for (; start <= bset_tree_last(b); start++) {
 		ret = bch_bset_search(b, start, search);
-		bch_btree_iter_push(&iter->iter, ret, bset_bkey_last(start->data));
+		bch_btree_iter_push(iter, ret, bset_bkey_last(start->data));
 	}
 
 	return ret;
 }
 
-struct bkey *bch_btree_iter_stack_init(struct btree_keys *b,
-				 struct btree_iter_stack *iter,
+struct bkey *bch_btree_iter_init(struct btree_keys *b,
+				 struct btree_iter *iter,
 				 struct bkey *search)
 {
-	return __bch_btree_iter_stack_init(b, iter, search, b->set);
+	return __bch_btree_iter_init(b, iter, search, b->set);
 }
 
 static inline struct bkey *__bch_btree_iter_next(struct btree_iter *iter,
@@ -1326,10 +1326,11 @@ void bch_btree_sort_partial(struct btree_keys *b, unsigned int start,
 			    struct bset_sort_state *state)
 {
 	size_t order = b->page_order, keys = 0;
-	struct btree_iter_stack iter;
+	struct btree_iter iter;
 	int oldsize = bch_count_data(b);
 
-	__bch_btree_iter_stack_init(b, &iter, NULL, &b->set[start]);
+	min_heap_init(&iter.heap, NULL, MAX_BSETS);
+	__bch_btree_iter_init(b, &iter, NULL, &b->set[start]);
 
 	if (start) {
 		unsigned int i;
@@ -1340,7 +1341,7 @@ void bch_btree_sort_partial(struct btree_keys *b, unsigned int start,
 		order = get_order(__set_bytes(b->set->data, keys));
 	}
 
-	__btree_sort(b, &iter.iter, start, order, false, state);
+	__btree_sort(b, &iter, start, order, false, state);
 
 	EBUG_ON(oldsize >= 0 && bch_count_data(b) != oldsize);
 }
@@ -1356,11 +1357,13 @@ void bch_btree_sort_into(struct btree_keys *b, struct btree_keys *new,
 			 struct bset_sort_state *state)
 {
 	uint64_t start_time = local_clock();
-	struct btree_iter_stack iter;
+	struct btree_iter iter;
 
-	bch_btree_iter_stack_init(b, &iter, NULL);
+	min_heap_init(&iter.heap, NULL, MAX_BSETS);
 
-	btree_mergesort(b, new->set->data, &iter.iter, false, true);
+	bch_btree_iter_init(b, &iter, NULL);
+
+	btree_mergesort(b, new->set->data, &iter, false, true);
 
 	time_stats_update(&state->time, start_time);
 

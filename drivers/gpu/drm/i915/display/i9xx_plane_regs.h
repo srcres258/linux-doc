@@ -9,10 +9,10 @@
 #include "intel_display_reg_defs.h"
 
 #define _DSPAADDR_VLV				0x7017C /* vlv/chv */
-#define DSPADDR_VLV(plane)			_MMIO_PIPE2(dev_priv, plane, _DSPAADDR_VLV)
+#define DSPADDR_VLV(dev_priv, plane)		_MMIO_PIPE2(dev_priv, plane, _DSPAADDR_VLV)
 
 #define _DSPACNTR				0x70180
-#define DSPCNTR(plane)				_MMIO_PIPE2(dev_priv, plane, _DSPACNTR)
+#define DSPCNTR(dev_priv, plane)		_MMIO_PIPE2(dev_priv, plane, _DSPACNTR)
 #define   DISP_ENABLE			REG_BIT(31)
 #define   DISP_PIPE_GAMMA_ENABLE	REG_BIT(30)
 #define   DISP_FORMAT_MASK		REG_GENMASK(29, 26)
@@ -44,65 +44,65 @@
 #define   DISP_MIRROR			REG_BIT(8) /* CHV pipe B */
 
 #define _DSPAADDR				0x70184 /* pre-i965 */
-#define DSPADDR(plane)				_MMIO_PIPE2(dev_priv, plane, _DSPAADDR)
+#define DSPADDR(dev_priv, plane)		_MMIO_PIPE2(dev_priv, plane, _DSPAADDR)
 
 #define _DSPALINOFF				0x70184 /* i965+ */
-#define DSPLINOFF(plane)			_MMIO_PIPE2(dev_priv, plane, _DSPALINOFF)
+#define DSPLINOFF(dev_priv, plane)		_MMIO_PIPE2(dev_priv, plane, _DSPALINOFF)
 
 #define _DSPASTRIDE				0x70188
-#define DSPSTRIDE(plane)			_MMIO_PIPE2(dev_priv, plane, _DSPASTRIDE)
+#define DSPSTRIDE(dev_priv, plane)		_MMIO_PIPE2(dev_priv, plane, _DSPASTRIDE)
 
 #define _DSPAPOS				0x7018C /* pre-g4x */
-#define DSPPOS(plane)				_MMIO_PIPE2(dev_priv, plane, _DSPAPOS)
+#define DSPPOS(dev_priv, plane)			_MMIO_PIPE2(dev_priv, plane, _DSPAPOS)
 #define   DISP_POS_Y_MASK		REG_GENMASK(31, 16)
 #define   DISP_POS_Y(y)			REG_FIELD_PREP(DISP_POS_Y_MASK, (y))
 #define   DISP_POS_X_MASK		REG_GENMASK(15, 0)
 #define   DISP_POS_X(x)			REG_FIELD_PREP(DISP_POS_X_MASK, (x))
 
 #define _DSPASIZE				0x70190 /* pre-g4x */
-#define DSPSIZE(plane)				_MMIO_PIPE2(dev_priv, plane, _DSPASIZE)
+#define DSPSIZE(dev_priv, plane)		_MMIO_PIPE2(dev_priv, plane, _DSPASIZE)
 #define   DISP_HEIGHT_MASK		REG_GENMASK(31, 16)
 #define   DISP_HEIGHT(h)		REG_FIELD_PREP(DISP_HEIGHT_MASK, (h))
 #define   DISP_WIDTH_MASK		REG_GENMASK(15, 0)
 #define   DISP_WIDTH(w)			REG_FIELD_PREP(DISP_WIDTH_MASK, (w))
 
 #define _DSPASURF				0x7019C /* i965+ */
-#define DSPSURF(plane)				_MMIO_PIPE2(dev_priv, plane, _DSPASURF)
+#define DSPSURF(dev_priv, plane)		_MMIO_PIPE2(dev_priv, plane, _DSPASURF)
 #define   DISP_ADDR_MASK		REG_GENMASK(31, 12)
 
 #define _DSPATILEOFF				0x701A4 /* i965+ */
-#define DSPTILEOFF(plane)			_MMIO_PIPE2(dev_priv, plane, _DSPATILEOFF)
+#define DSPTILEOFF(dev_priv, plane)		_MMIO_PIPE2(dev_priv, plane, _DSPATILEOFF)
 #define   DISP_OFFSET_Y_MASK		REG_GENMASK(31, 16)
 #define   DISP_OFFSET_Y(y)		REG_FIELD_PREP(DISP_OFFSET_Y_MASK, (y))
 #define   DISP_OFFSET_X_MASK		REG_GENMASK(15, 0)
 #define   DISP_OFFSET_X(x)		REG_FIELD_PREP(DISP_OFFSET_X_MASK, (x))
 
 #define _DSPAOFFSET				0x701A4 /* hsw+ */
-#define DSPOFFSET(plane)			_MMIO_PIPE2(dev_priv, plane, _DSPAOFFSET)
+#define DSPOFFSET(dev_priv, plane)		_MMIO_PIPE2(dev_priv, plane, _DSPAOFFSET)
 
 #define _DSPASURFLIVE				0x701AC /* g4x+ */
-#define DSPSURFLIVE(plane)			_MMIO_PIPE2(dev_priv, plane, _DSPASURFLIVE)
+#define DSPSURFLIVE(dev_priv, plane)		_MMIO_PIPE2(dev_priv, plane, _DSPASURFLIVE)
 
 #define _DSPAGAMC				0x701E0 /* pre-g4x */
-#define DSPGAMC(plane, i)			_MMIO_PIPE2(dev_priv, plane, _DSPAGAMC + (5 - (i)) * 4) /* plane C only, 6 x u0.8 */
+#define DSPGAMC(dev_priv, plane, i)		_MMIO_PIPE2(dev_priv, plane, _DSPAGAMC + (5 - (i)) * 4) /* plane C only, 6 x u0.8 */
 
 /* CHV pipe B primary plane */
-#define _PRIMPOS_A		0x60a08
-#define PRIMPOS(plane)		_MMIO_TRANS2(dev_priv, plane, _PRIMPOS_A)
+#define _PRIMPOS_A			0x60a08
+#define PRIMPOS(dev_priv, plane)	_MMIO_TRANS2(dev_priv, plane, _PRIMPOS_A)
 #define   PRIM_POS_Y_MASK	REG_GENMASK(31, 16)
 #define   PRIM_POS_Y(y)		REG_FIELD_PREP(PRIM_POS_Y_MASK, (y))
 #define   PRIM_POS_X_MASK	REG_GENMASK(15, 0)
 #define   PRIM_POS_X(x)		REG_FIELD_PREP(PRIM_POS_X_MASK, (x))
 
-#define _PRIMSIZE_A		0x60a0c
-#define PRIMSIZE(plane)		_MMIO_TRANS2(dev_priv, plane, _PRIMSIZE_A)
+#define _PRIMSIZE_A			0x60a0c
+#define PRIMSIZE(dev_priv, plane)	_MMIO_TRANS2(dev_priv, plane, _PRIMSIZE_A)
 #define   PRIM_HEIGHT_MASK	REG_GENMASK(31, 16)
 #define   PRIM_HEIGHT(h)	REG_FIELD_PREP(PRIM_HEIGHT_MASK, (h))
 #define   PRIM_WIDTH_MASK	REG_GENMASK(15, 0)
 #define   PRIM_WIDTH(w)		REG_FIELD_PREP(PRIM_WIDTH_MASK, (w))
 
-#define _PRIMCNSTALPHA_A	0x60a10
-#define PRIMCNSTALPHA(plane)	_MMIO_TRANS2(dev_priv, plane, _PRIMCNSTALPHA_A)
+#define _PRIMCNSTALPHA_A		0x60a10
+#define PRIMCNSTALPHA(dev_priv, plane)	_MMIO_TRANS2(dev_priv, plane, _PRIMCNSTALPHA_A)
 #define   PRIM_CONST_ALPHA_ENABLE	REG_BIT(31)
 #define   PRIM_CONST_ALPHA_MASK		REG_GENMASK(7, 0)
 #define   PRIM_CONST_ALPHA(alpha)	REG_FIELD_PREP(PRIM_CONST_ALPHA_MASK, (alpha))

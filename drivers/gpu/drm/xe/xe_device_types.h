@@ -196,6 +196,9 @@ struct xe_tile {
 		struct {
 			/** @sriov.vf.memirq: Memory Based Interrupts. */
 			struct xe_memirq memirq;
+
+			/** @sriov.vf.ggtt_balloon: GGTT regions excluded from use. */
+			struct drm_mm_node ggtt_balloon[2];
 		} vf;
 	} sriov;
 
@@ -431,9 +434,6 @@ struct xe_device {
 		/** @d3cold.allowed: Indicates if d3cold is a valid device state */
 		bool allowed;
 
-		/** @d3cold.power_lost: Indicates if card has really lost power. */
-		bool power_lost;
-
 		/**
 		 * @d3cold.vram_threshold:
 		 *
@@ -555,8 +555,8 @@ struct xe_file {
 		struct mutex lock;
 	} exec_queue;
 
-	/** @runtime: hw engine class runtime in ticks for this drm client */
-	u64 runtime[XE_ENGINE_CLASS_MAX];
+	/** @run_ticks: hw engine class run time in ticks for this drm client */
+	u64 run_ticks[XE_ENGINE_CLASS_MAX];
 
 	/** @client: drm client */
 	struct xe_drm_client *client;

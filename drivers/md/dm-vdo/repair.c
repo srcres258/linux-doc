@@ -51,7 +51,7 @@ struct recovery_point {
 	bool increment_applied;
 };
 
-MIN_HEAP(struct numbered_block_mapping, replay_heap);
+DEFINE_MIN_HEAP(struct numbered_block_mapping, replay_heap);
 
 struct repair_completion {
 	/* The completion header */

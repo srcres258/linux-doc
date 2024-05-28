@@ -11,7 +11,7 @@
 #include <linux/printk.h>
 #include <linux/random.h>
 
-MIN_HEAP(int, min_heap_test);
+DEFINE_MIN_HEAP(int, min_heap_test);
 
 static __init bool less_than(const void *lhs, const void *rhs, void __always_unused *args)
 {

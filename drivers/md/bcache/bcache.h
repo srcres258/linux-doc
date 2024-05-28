@@ -458,7 +458,7 @@ struct cache {
 	/* Allocation stuff: */
 	struct bucket		*buckets;
 
-	MIN_HEAP(struct bucket *, cache_heap) heap;
+	DEFINE_MIN_HEAP(struct bucket *, cache_heap) heap;
 
 	/*
 	 * If nonzero, we know we aren't going to find any buckets to invalidate

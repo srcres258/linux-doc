@@ -154,6 +154,21 @@ boot-image-$(CONFIG_EFI_ZBOOT)		:= vmlinuz.efi
 boot-image-$(CONFIG_XIP_KERNEL)		:= xipImage
 KBUILD_IMAGE				:= $(boot)/$(boot-image-y)
 
+boot					:= arch/riscv/boot
+boot-image-y				:= Image
+boot-image-$(CONFIG_KERNEL_BZIP2)	:= Image.bz2
+boot-image-$(CONFIG_KERNEL_GZIP)	:= Image.gz
+boot-image-$(CONFIG_KERNEL_LZ4)		:= Image.lz4
+boot-image-$(CONFIG_KERNEL_LZMA)	:= Image.lzma
+boot-image-$(CONFIG_KERNEL_LZO)		:= Image.lzo
+boot-image-$(CONFIG_KERNEL_ZSTD)	:= Image.zst
+ifdef CONFIG_RISCV_M_MODE
+boot-image-$(CONFIG_ARCH_CANAAN)	:= loader.bin
+endif
+boot-image-$(CONFIG_EFI_ZBOOT)		:= vmlinuz.efi
+boot-image-$(CONFIG_XIP_KERNEL)		:= xipImage
+KBUILD_IMAGE				:= $(boot)/$(boot-image-y)
+
 libs-y += arch/riscv/lib/
 libs-$(CONFIG_EFI_STUB) += $(objtree)/drivers/firmware/efi/libstub/lib.a
 

@@ -1389,18 +1389,11 @@ struct btrfs_device *btrfs_scan_one_device(const char *path, blk_mode_t flags,
 	bool new_device_added = false;
 	struct btrfs_device *device = NULL;
 	struct file *bdev_file;
-	u64 bytenr, bytenr_orig;
+	u64 bytenr;
 	dev_t devt;
 	int ret;
 
 	lockdep_assert_held(&uuid_mutex);
-
-	/*
-	 * we would like to check all the supers, but that would make
-	 * a btrfs mount succeed after a mkfs from a different FS.
-	 * So, we need to add a special mount option to scan for
-	 * later supers, using BTRFS_SUPER_MIRROR_MAX instead
-	 */
 
 	/*
 	 * Avoid an exclusive open here, as the systemd-udev may initiate the
@@ -1416,7 +1409,12 @@ struct btrfs_device *btrfs_scan_one_device(const char *path, blk_mode_t flags,
 	if (IS_ERR(bdev_file))
 		return ERR_CAST(bdev_file);
 
-	bytenr_orig = btrfs_sb_offset(0);
+	/*
+	 * We would like to check all the super blocks, but doing so would
+	 * allow a mount to succeed after a mkfs from a different filesystem.
+	 * Currently, recovery from a bad primary btrfs superblock is done
+	 * using the userspace command 'btrfs check --super'.
+	 */
 	ret = btrfs_sb_log_location_bdev(file_bdev(bdev_file), 0, READ, &bytenr);
 	if (ret) {
 		device = ERR_PTR(ret);
@@ -1424,7 +1422,7 @@ struct btrfs_device *btrfs_scan_one_device(const char *path, blk_mode_t flags,
 	}
 
 	disk_super = btrfs_read_disk_super(file_bdev(bdev_file), bytenr,
-					   bytenr_orig);
+					   btrfs_sb_offset(0));
 	if (IS_ERR(disk_super)) {
 		device = ERR_CAST(disk_super);
 		goto error_bdev_put;
@@ -5646,8 +5644,6 @@ static struct btrfs_block_group *create_chunk(struct btrfs_trans_handle *trans,
 	u64 start = ctl->start;
 	u64 type = ctl->type;
 	int ret;
-	int i;
-	int j;
 
 	map = btrfs_alloc_chunk_map(ctl->num_stripes, GFP_NOFS);
 	if (!map)
@@ -5662,8 +5658,8 @@ static struct btrfs_block_group *create_chunk(struct btrfs_trans_handle *trans,
 	map->sub_stripes = ctl->sub_stripes;
 	map->num_stripes = ctl->num_stripes;
 
-	for (i = 0; i < ctl->ndevs; ++i) {
-		for (j = 0; j < ctl->dev_stripes; ++j) {
+	for (int i = 0; i < ctl->ndevs; i++) {
+		for (int j = 0; j < ctl->dev_stripes; j++) {
 			int s = i * ctl->dev_stripes + j;
 			map->stripes[s].dev = devices_info[i].dev;
 			map->stripes[s].physical = devices_info[i].dev_offset +
@@ -6641,7 +6637,6 @@ int btrfs_map_block(struct btrfs_fs_info *fs_info, enum btrfs_map_op op,
 	struct btrfs_chunk_map *map;
 	struct btrfs_io_geometry io_geom = { 0 };
 	u64 map_offset;
-	int i;
 	int ret = 0;
 	int num_copies;
 	struct btrfs_io_context *bioc = NULL;
@@ -6785,7 +6780,7 @@ again:
 		 * For all other non-RAID56 profiles, just copy the target
 		 * stripe into the bioc.
 		 */
-		for (i = 0; i < io_geom.num_stripes; i++) {
+		for (int i = 0; i < io_geom.num_stripes; i++) {
 			ret = set_io_stripe(fs_info, logical, length,
 					    &bioc->stripes[i], map, &io_geom);
 			if (ret < 0)
@@ -6803,15 +6798,9 @@ again:
 	if (op != BTRFS_MAP_READ)
 		io_geom.max_errors = btrfs_chunk_max_errors(map);
 
-	/*
-	 * Check if something changed the dev_replace state since we've checked
-	 * it for the last time and if yes then redo the whole mapping operation.
-	 */
-	down_read(&dev_replace->rwsem);
-	if (dev_replace_is_ongoing !=
-	    btrfs_dev_replace_is_ongoing(dev_replace)) {
-		up_read(&dev_replace->rwsem);
-		goto again;
+	if (dev_replace_is_ongoing && dev_replace->tgtdev != NULL &&
+	    op != BTRFS_MAP_READ) {
+		handle_ops_on_dev_replace(bioc, dev_replace, logical, &io_geom);
 	}
 
 	if (dev_replace_is_ongoing && dev_replace->tgtdev != NULL &&

@@ -2856,14 +2856,14 @@ static bool __discard_trans_pmd_locked(struct vm_area_struct *vma,
 				       unsigned long addr, pmd_t *pmdp,
 				       struct folio *folio)
 {
+	VM_WARN_ON_FOLIO(folio_test_swapbacked(folio), folio);
+	VM_WARN_ON_FOLIO(!folio_test_anon(folio), folio);
+
 	struct mm_struct *mm = vma->vm_mm;
 	int ref_count, map_count;
 	pmd_t orig_pmd = *pmdp;
-	struct mmu_gather tlb;
 	struct page *page;
 
-	if (pmd_dirty(orig_pmd) || folio_test_dirty(folio))
-		return false;
 	if (unlikely(!pmd_present(orig_pmd) || !pmd_trans_huge(orig_pmd)))
 		return false;
 
@@ -2871,9 +2871,12 @@ static bool __discard_trans_pmd_locked(struct vm_area_struct *vma,
 	if (unlikely(page_folio(page) != folio))
 		return false;
 
-	tlb_gather_mmu(&tlb, mm);
-	orig_pmd = pmdp_huge_get_and_clear(mm, addr, pmdp);
-	tlb_remove_pmd_tlb_entry(&tlb, pmdp, addr);
+	if (folio_test_dirty(folio) || pmd_dirty(orig_pmd)) {
+		folio_set_swapbacked(folio);
+		return false;
+	}
+
+	orig_pmd = pmdp_huge_clear_flush(vma, addr, pmdp);
 
 	/*
 	 * Syncing against concurrent GUP-fast:
@@ -2892,14 +2895,16 @@ static bool __discard_trans_pmd_locked(struct vm_area_struct *vma,
 	smp_rmb();
 
 	/*
-	 * If the PMD or folio is redirtied at this point, or if there are
-	 * unexpected references, we will give up to discard this folio
+	 * If the folio or its PMD is redirtied at this point, or if there
+	 * are unexpected references, we will give up to discard this folio
 	 * and remap it.
 	 *
 	 * The only folio refs must be one from isolation plus the rmap(s).
 	 */
-	if (ref_count != map_count + 1 || folio_test_dirty(folio) ||
-	    pmd_dirty(orig_pmd)) {
+	if (folio_test_dirty(folio) || pmd_dirty(orig_pmd))
+		folio_set_swapbacked(folio);
+
+	if (folio_test_swapbacked(folio) || ref_count != map_count + 1) {
 		set_pmd_at(mm, addr, pmdp, orig_pmd);
 		return false;
 	}
@@ -2907,6 +2912,8 @@ static bool __discard_trans_pmd_locked(struct vm_area_struct *vma,
 	folio_remove_rmap_pmd(folio, page, vma);
 	zap_deposited_table(mm, pmdp);
 	add_mm_counter(mm, MM_ANONPAGES, -HPAGE_PMD_NR);
+	if (vma->vm_flags & VM_LOCKED)
+		mlock_drain_local();
 	folio_put(folio);
 
 	return true;
@@ -3078,7 +3085,7 @@ static void __split_huge_page(struct page *page, struct list_head *list,
 	split_page_memcg(head, order, new_order);
 
 	if (folio_test_anon(folio) && folio_test_swapcache(folio)) {
-		offset = swp_offset(folio->swap);
+		offset = swap_cache_index(folio->swap);
 		swap_cache = swap_address_space(folio->swap);
 		xa_lock(&swap_cache->i_pages);
 	}
@@ -3422,21 +3429,10 @@ out:
 	return ret;
 }
 
-void folio_undo_large_rmappable(struct folio *folio)
+void __folio_undo_large_rmappable(struct folio *folio)
 {
 	struct deferred_split *ds_queue;
 	unsigned long flags;
-
-	if (folio_order(folio) <= 1)
-		return;
-
-	/*
-	 * At this point, there is no one trying to add the folio to
-	 * deferred_list. If folio is not in deferred_list, it's safe
-	 * to check without acquiring the split_queue_lock.
-	 */
-	if (data_race(list_empty(&folio->_deferred_list)))
-		return;
 
 	ds_queue = get_deferred_split_queue(folio);
 	spin_lock_irqsave(&ds_queue->split_queue_lock, flags);

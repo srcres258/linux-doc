@@ -1347,7 +1347,13 @@ struct xe_vm *xe_vm_create(struct xe_device *xe, u32 flags)
 
 	vm->pt_ops = &xelp_pt_ops;
 
-	if (!(flags & XE_VM_FLAG_MIGRATION))
+	/*
+	 * Long-running workloads are not protected by the scheduler references.
+	 * By design, run_job for long-running workloads returns NULL and the
+	 * scheduler drops all the references of it, hence protecting the VM
+	 * for this case is necessary.
+	 */
+	if (flags & XE_VM_FLAG_LR_MODE)
 		xe_pm_runtime_get_noresume(xe);
 
 	vm_resv_obj = drm_gpuvm_resv_object_alloc(&xe->drm);
@@ -1457,7 +1463,7 @@ err_no_resv:
 	for_each_tile(tile, xe, id)
 		xe_range_fence_tree_fini(&vm->rftree[id]);
 	kfree(vm);
-	if (!(flags & XE_VM_FLAG_MIGRATION))
+	if (flags & XE_VM_FLAG_LR_MODE)
 		xe_pm_runtime_put(xe);
 	return ERR_PTR(err);
 }
@@ -1592,7 +1598,7 @@ static void vm_destroy_work_func(struct work_struct *w)
 
 	mutex_destroy(&vm->snap_mutex);
 
-	if (!(vm->flags & XE_VM_FLAG_MIGRATION))
+	if (vm->flags & XE_VM_FLAG_LR_MODE)
 		xe_pm_runtime_put(xe);
 
 	for_each_tile(tile, xe, id)
@@ -3385,55 +3391,6 @@ int xe_vm_invalidate_vma(struct xe_vma *vma)
 	}
 
 	vma->tile_invalidated = vma->tile_mask;
-
-	return 0;
-}
-
-int xe_analyze_vm(struct drm_printer *p, struct xe_vm *vm, int gt_id)
-{
-	struct drm_gpuva *gpuva;
-	bool is_vram;
-	uint64_t addr;
-
-	if (!down_read_trylock(&vm->lock)) {
-		drm_printf(p, " Failed to acquire VM lock to dump capture");
-		return 0;
-	}
-	if (vm->pt_root[gt_id]) {
-		addr = xe_bo_addr(vm->pt_root[gt_id]->bo, 0, XE_PAGE_SIZE);
-		is_vram = xe_bo_is_vram(vm->pt_root[gt_id]->bo);
-		drm_printf(p, " VM root: A:0x%llx %s\n", addr,
-			   is_vram ? "VRAM" : "SYS");
-	}
-
-	drm_gpuvm_for_each_va(gpuva, &vm->gpuvm) {
-		struct xe_vma *vma = gpuva_to_vma(gpuva);
-		bool is_userptr = xe_vma_is_userptr(vma);
-		bool is_null = xe_vma_is_null(vma);
-
-		if (is_null) {
-			addr = 0;
-		} else if (is_userptr) {
-			struct sg_table *sg = to_userptr_vma(vma)->userptr.sg;
-			struct xe_res_cursor cur;
-
-			if (sg) {
-				xe_res_first_sg(sg, 0, XE_PAGE_SIZE, &cur);
-				addr = xe_res_dma(&cur);
-			} else {
-				addr = 0;
-			}
-		} else {
-			addr = __xe_bo_addr(xe_vma_bo(vma), 0, XE_PAGE_SIZE);
-			is_vram = xe_bo_is_vram(xe_vma_bo(vma));
-		}
-		drm_printf(p, " [%016llx-%016llx] S:0x%016llx A:%016llx %s\n",
-			   xe_vma_start(vma), xe_vma_end(vma) - 1,
-			   xe_vma_size(vma),
-			   addr, is_null ? "NULL" : is_userptr ? "USR" :
-			   is_vram ? "VRAM" : "SYS");
-	}
-	up_read(&vm->lock);
 
 	return 0;
 }

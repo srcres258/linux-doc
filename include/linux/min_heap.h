@@ -21,9 +21,9 @@ struct _name {	\
 	_type preallocated[_nr];	\
 }
 
-#define MIN_HEAP(_type, _name) MIN_HEAP_PREALLOCATED(_type, _name, 0)
+#define DEFINE_MIN_HEAP(_type, _name) MIN_HEAP_PREALLOCATED(_type, _name, 0)
 
-typedef MIN_HEAP(char, min_heap_char) min_heap_char;
+typedef DEFINE_MIN_HEAP(char, min_heap_char) min_heap_char;
 
 #define __minheap_cast(_heap)		(typeof((_heap)->data[0]) *)
 #define __minheap_obj_size(_heap)	sizeof((_heap)->data[0])

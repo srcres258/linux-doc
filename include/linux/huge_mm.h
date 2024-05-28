@@ -134,8 +134,8 @@ static inline bool hugepage_flags_enabled(void)
 	 * So we don't need to look at huge_anon_orders_inherit.
 	 */
 	return hugepage_global_enabled() ||
-	       huge_anon_orders_always ||
-	       huge_anon_orders_madvise;
+	       READ_ONCE(huge_anon_orders_always) ||
+	       READ_ONCE(huge_anon_orders_madvise);
 }
 
 static inline int highest_order(unsigned long orders)
@@ -278,6 +278,7 @@ struct mthp_stat {
 	unsigned long stats[ilog2(MAX_PTRS_PER_PTE) + 1][__MTHP_STAT_COUNT];
 };
 
+#ifdef CONFIG_SYSFS
 DECLARE_PER_CPU(struct mthp_stat, mthp_stats);
 
 static inline void count_mthp_stat(int order, enum mthp_stat_item item)
@@ -287,6 +288,11 @@ static inline void count_mthp_stat(int order, enum mthp_stat_item item)
 
 	this_cpu_inc(mthp_stats.stats[order][item]);
 }
+#else
+static inline void count_mthp_stat(int order, enum mthp_stat_item item)
+{
+}
+#endif
 
 #define transparent_hugepage_use_zero_page()				\
 	(transparent_hugepage_flags &					\
@@ -414,17 +420,6 @@ void split_huge_pmd_locked(struct vm_area_struct *vma, unsigned long address,
 bool unmap_huge_pmd_locked(struct vm_area_struct *vma, unsigned long addr,
 			   pmd_t *pmdp, struct folio *folio);
 
-static inline void align_huge_pmd_range(struct vm_area_struct *vma,
-					unsigned long *start,
-					unsigned long *end)
-{
-	*start = ALIGN(*start, HPAGE_PMD_SIZE);
-	*end = ALIGN_DOWN(*end, HPAGE_PMD_SIZE);
-
-	VM_WARN_ON_ONCE(vma->vm_start > *start);
-	VM_WARN_ON_ONCE(vma->vm_end < *end);
-}
-
 #else /* CONFIG_TRANSPARENT_HUGEPAGE */
 
 static inline bool folio_test_pmd_mappable(struct folio *folio)
@@ -490,9 +485,6 @@ static inline void split_huge_pmd_address(struct vm_area_struct *vma,
 static inline void split_huge_pmd_locked(struct vm_area_struct *vma,
 					 unsigned long address, pmd_t *pmd,
 					 bool freeze, struct folio *folio) {}
-static inline void align_huge_pmd_range(struct vm_area_struct *vma,
-					unsigned long *start,
-					unsigned long *end) {}
 
 static inline bool unmap_huge_pmd_locked(struct vm_area_struct *vma,
 					 unsigned long addr, pmd_t *pmdp,

@@ -45,6 +45,13 @@ int bch2_printbuf_make_room(struct printbuf *out, unsigned extra)
 
 	unsigned new_size = roundup_pow_of_two(out->size + extra);
 
+	/* Sanity check... */
+	if (new_size > PAGE_SIZE << MAX_PAGE_ORDER) {
+		out->allocation_failure = true;
+		out->overflow = true;
+		return -ENOMEM;
+	}
+
 	/*
 	 * Note: output buffer must be freeable with kfree(), it's not required
 	 * that the user use printbuf_exit().
@@ -307,6 +314,20 @@ void bch2_prt_newline(struct printbuf *buf)
 
 	buf->last_field		= buf->pos;
 	buf->cur_tabstop	= 0;
+}
+
+void bch2_printbuf_strip_trailing_newline(struct printbuf *out)
+{
+	for (int p = out->pos - 1; p >= 0; --p) {
+		if (out->buf[p] == '\n') {
+			out->pos = p;
+			break;
+		}
+		if (out->buf[p] != ' ')
+			break;
+	}
+
+	printbuf_nul_terminate_reserved(out);
 }
 
 static void __prt_tab(struct printbuf *out)

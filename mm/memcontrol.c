@@ -3848,7 +3848,7 @@ void __memcg_slab_free_hook(struct kmem_cache *s, struct slab *slab,
 #endif /* CONFIG_MEMCG_KMEM */
 
 /*
- * Because page_memcg(head) is not set on tails, set it now.
+ * Because folio_memcg(head) is not set on tails, set it now.
  */
 void split_page_memcg(struct page *head, int old_order, int new_order)
 {
@@ -6189,7 +6189,7 @@ static struct page *mc_handle_swap_pte(struct vm_area_struct *vma,
 	 * Because swap_cache_get_folio() updates some statistics counter,
 	 * we call find_get_page() with swapper_space directly.
 	 */
-	page = find_get_page(swap_address_space(ent), swp_offset(ent));
+	page = find_get_page(swap_address_space(ent), swap_cache_index(ent));
 	entry->val = ent.val;
 
 	return page;
@@ -7916,8 +7916,7 @@ void mem_cgroup_migrate(struct folio *old, struct folio *new)
 	 * In addition, the old folio is about to be freed after migration, so
 	 * removing from the split queue a bit earlier seems reasonable.
 	 */
-	if (folio_test_large(old) && folio_test_large_rmappable(old))
-		folio_undo_large_rmappable(old);
+	folio_undo_large_rmappable(old);
 	old->memcg_data = 0;
 }
 

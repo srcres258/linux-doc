@@ -691,7 +691,6 @@ void netfs_write_collection_worker(struct work_struct *work)
 
 	if (wreq->iocb) {
 		size_t written = min(wreq->transferred, wreq->len);
-
 		wreq->iocb->ki_pos += written;
 		if (wreq->iocb->ki_complete)
 			wreq->iocb->ki_complete(

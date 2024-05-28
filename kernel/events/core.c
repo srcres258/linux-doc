@@ -3701,7 +3701,7 @@ static void swap_ptr(void *l, void *r, void __always_unused *args)
 	swap(*lp, *rp);
 }
 
-MIN_HEAP(struct perf_event *, perf_event_min_heap);
+DEFINE_MIN_HEAP(struct perf_event *, perf_event_min_heap);
 
 static const struct min_heap_callbacks perf_min_heap = {
 	.less = perf_less_group_idx,
