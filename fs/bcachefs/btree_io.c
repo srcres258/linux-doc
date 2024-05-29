@@ -538,7 +538,7 @@ static void btree_err_msg(struct printbuf *out, struct bch_fs *c,
 	if (i)
 		prt_printf(out, " bset u64s %u", le16_to_cpu(i->u64s));
 	if (k)
-		prt_printf(out, " bset byte offset %zu",
+		prt_printf(out, " bset byte offset %lu",
 			   (unsigned long)(void *)k -
 			   ((unsigned long)(void *)i & ~511UL));
 	prt_str(out, ": ");

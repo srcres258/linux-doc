@@ -803,8 +803,8 @@ struct nft_payload_set {
 
 /* This is not struct vlan_hdr. */
 struct nft_payload_vlan_hdr {
-        __be16          h_vlan_proto;
-        __be16          h_vlan_TCI;
+	__be16			h_vlan_proto;
+	__be16			h_vlan_TCI;
 };
 
 static bool

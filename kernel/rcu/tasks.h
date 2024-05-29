@@ -1469,22 +1469,7 @@ static void rcu_st_need_qs(struct task_struct *t, u8 v)
  */
 u8 rcu_trc_cmpxchg_need_qs(struct task_struct *t, u8 old, u8 new)
 {
-	union rcu_special ret;
-	union rcu_special trs_old = READ_ONCE(t->trc_reader_special);
-	union rcu_special trs_new = trs_old;
-
-	if (trs_old.b.need_qs != old)
-		return trs_old.b.need_qs;
-	trs_new.b.need_qs = new;
-
-	// Although cmpxchg() appears to KCSAN to update all four bytes,
-	// only the .b.need_qs byte actually changes.
-	instrument_atomic_read_write(&t->trc_reader_special.b.need_qs,
-				     sizeof(t->trc_reader_special.b.need_qs));
-	// Avoid false-positive KCSAN failures.
-	ret.s = data_race(cmpxchg(&t->trc_reader_special.s, trs_old.s, trs_new.s));
-
-	return ret.b.need_qs;
+	return cmpxchg(&t->trc_reader_special.b.need_qs, old, new);
 }
 EXPORT_SYMBOL_GPL(rcu_trc_cmpxchg_need_qs);
 
@@ -1747,6 +1732,16 @@ static void rcu_tasks_trace_pregp_step(struct list_head *hop)
 	// allow safe access to the hop list.
 	for_each_online_cpu(cpu) {
 		rcu_read_lock();
+		// Note that cpu_curr_snapshot() picks up the target
+		// CPU's current task while its runqueue is locked with
+		// an smp_mb__after_spinlock().  This ensures that either
+		// the grace-period kthread will see that task's read-side
+		// critical section or the task will see the updater's pre-GP
+		// accesses.  The trailing smp_mb() in cpu_curr_snapshot() 
+		// does not currently play a role other than simplify
+		// that function's ordering semantics.  If these simplified
+		// ordering semantics continue to be redundant, that smp_mb()
+		// might be removed.
 		t = cpu_curr_snapshot(cpu);
 		if (rcu_tasks_trace_pertask_prep(t, true))
 			trc_add_holdout(t, hop);

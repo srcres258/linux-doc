@@ -1142,11 +1142,6 @@ static inline struct mem_cgroup *obj_cgroup_memcg(struct obj_cgroup *objcg)
 	return NULL;
 }
 
-static inline struct mem_cgroup *folio_memcg(struct folio *folio)
-{
-	return NULL;
-}
-
 static inline struct mem_cgroup *folio_memcg_rcu(struct folio *folio)
 {
 	WARN_ON_ONCE(!rcu_read_lock_held());

@@ -665,8 +665,6 @@ static unsigned int bch_root_usage(struct cache_set *c)
 
 	min_heap_init(&iter.heap, NULL, MAX_BSETS);
 
-	min_heap_init(&iter.heap, NULL, MAX_BSETS);
-
 	goto lock_root;
 
 	do {

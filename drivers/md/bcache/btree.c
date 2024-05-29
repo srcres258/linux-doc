@@ -1920,8 +1920,6 @@ static int bch_btree_check_recurse(struct btree *b, struct btree_op *op)
 
 	min_heap_init(&iter.heap, NULL, MAX_BSETS);
 
-	min_heap_init(&iter.heap, NULL, MAX_BSETS);
-
 	for_each_key_filter(&b->keys, k, &iter, bch_ptr_invalid)
 		bch_initial_mark_key(b->c, b->level, k);
 

@@ -1365,6 +1365,8 @@ void bch_btree_sort_into(struct btree_keys *b, struct btree_keys *new,
 
 	btree_mergesort(b, new->set->data, &iter, false, true);
 
+	btree_mergesort(b, new->set->data, &iter, false, true);
+
 	time_stats_update(&state->time, start_time);
 
 	new->set->size = 0; // XXX: why?

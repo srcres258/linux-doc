@@ -297,6 +297,11 @@ int bch2_sb_downgrade_update(struct bch_fs *c)
 
 		downgrade_table_extra(c, &table);
 
+		if (!dst->recovery_passes[0] &&
+		    !dst->recovery_passes[1] &&
+		    !dst->nr_errors)
+			continue;
+
 		table.nr += sizeof(*dst) + sizeof(dst->errors[0]) * le16_to_cpu(dst->nr_errors);
 	}
 

@@ -773,14 +773,13 @@ EXPORT_SYMBOL(of_graph_get_port_parent);
 struct device_node *of_graph_get_remote_port_parent(
 			       const struct device_node *node)
 {
-	struct device_node *np, *pp;
+	struct device_node *pp;
 
 	/* Get remote endpoint node. */
-	np = of_graph_get_remote_endpoint(node);
+	struct device_node *np __free(device_node) =
+			    of_graph_get_remote_endpoint(node);
 
 	pp = of_graph_get_port_parent(np);
-
-	of_node_put(np);
 
 	return pp;
 }
@@ -835,17 +834,18 @@ EXPORT_SYMBOL(of_graph_get_endpoint_count);
 struct device_node *of_graph_get_remote_node(const struct device_node *node,
 					     u32 port, u32 endpoint)
 {
-	struct device_node *endpoint_node, *remote;
+	struct device_node *endpoint_node __free(device_node) =
+			    of_graph_get_endpoint_by_regs(node, port, endpoint);
 
-	endpoint_node = of_graph_get_endpoint_by_regs(node, port, endpoint);
+	struct device_node *remote __free(device_node) =
+			    of_graph_get_remote_port_parent(endpoint_node);
+
 	if (!endpoint_node) {
 		pr_debug("no valid endpoint (%d, %d) for node %pOF\n",
 			 port, endpoint, node);
 		return NULL;
 	}
 
-	remote = of_graph_get_remote_port_parent(endpoint_node);
-	of_node_put(endpoint_node);
 	if (!remote) {
 		pr_debug("no valid remote node\n");
 		return NULL;
@@ -853,7 +853,6 @@ struct device_node *of_graph_get_remote_node(const struct device_node *node,
 
 	if (!of_device_is_available(remote)) {
 		pr_debug("not available for remote node\n");
-		of_node_put(remote);
 		return NULL;
 	}
 
@@ -1064,19 +1063,15 @@ static void of_link_to_phandle(struct device_node *con_np,
 			      struct device_node *sup_np,
 			      u8 flags)
 {
-	struct device_node *tmp_np = of_node_get(sup_np);
+	struct device_node *tmp_np __free(device_node) = of_node_get(sup_np);
 
 	/* Check that sup_np and its ancestors are available. */
 	while (tmp_np) {
-		if (of_fwnode_handle(tmp_np)->dev) {
-			of_node_put(tmp_np);
+		if (of_fwnode_handle(tmp_np)->dev)
 			break;
-		}
 
-		if (!of_device_is_available(tmp_np)) {
-			of_node_put(tmp_np);
+		if (!of_device_is_available(tmp_np))
 			return;
-		}
 
 		tmp_np = of_get_next_parent(tmp_np);
 	}
@@ -1322,7 +1317,13 @@ static struct device_node *parse_interrupt_map(struct device_node *np,
 	addrcells = of_bus_n_addr_cells(np);
 
 	imap = of_get_property(np, "interrupt-map", &imaplen);
-	if (!imap || imaplen <= (addrcells + intcells))
+	imaplen /= sizeof(*imap);
+
+	/*
+	 * Check that we have enough runway for the child unit interrupt
+	 * specifier and a phandle. That's the bare minimum we can expect.
+	 */
+	if (!imap || imaplen <= (addrcells + intcells + 1))
 		return NULL;
 	imap_end = imap + imaplen;
 
@@ -1346,8 +1347,14 @@ static struct device_node *parse_interrupt_map(struct device_node *np,
 		if (!index)
 			return sup_args.np;
 
-		of_node_put(sup_args.np);
+		/*
+		 * Account for the full parent unit interrupt specifier
+		 * (address cells, interrupt cells, and phandle).
+		 */
+		imap += of_bus_n_addr_cells(sup_args.np);
 		imap += sup_args.args_count + 1;
+
+		of_node_put(sup_args.np);
 		index--;
 	}
 

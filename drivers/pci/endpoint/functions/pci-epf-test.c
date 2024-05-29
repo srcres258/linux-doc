@@ -812,7 +812,6 @@ static int pci_epf_test_link_down(struct pci_epf *epf)
 
 static const struct pci_epc_event_ops pci_epf_test_event_ops = {
 	.epc_init = pci_epf_test_epc_init,
-	.epc_deinit = pci_epf_test_epc_deinit,
 	.link_up = pci_epf_test_link_up,
 	.link_down = pci_epf_test_link_down,
 };
@@ -915,13 +914,10 @@ static int pci_epf_test_bind(struct pci_epf *epf)
 static void pci_epf_test_unbind(struct pci_epf *epf)
 {
 	struct pci_epf_test *epf_test = epf_get_drvdata(epf);
-	struct pci_epc *epc = epf->epc;
 
 	cancel_delayed_work(&epf_test->cmd_handler);
-	if (epc->init_complete) {
-		pci_epf_test_clean_dma_chan(epf_test);
-		pci_epf_test_clear_bar(epf);
-	}
+	pci_epf_test_clean_dma_chan(epf_test);
+	pci_epf_test_clear_bar(epf);
 	pci_epf_test_free_space(epf);
 }
 

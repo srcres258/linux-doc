@@ -268,7 +268,10 @@ int bch2_alloc_v4_invalid(struct bch_fs *c, struct bkey_s_c k,
 	case BCH_DATA_free:
 	case BCH_DATA_need_gc_gens:
 	case BCH_DATA_need_discard:
-		bkey_fsck_err_on(bch2_bucket_sectors_total(*a.v) || a.v->stripe,
+		bkey_fsck_err_on(stripe_sectors ||
+				 a.v->dirty_sectors ||
+				 a.v->cached_sectors ||
+				 a.v->stripe,
 				 c, err, alloc_key_empty_but_have_data,
 				 "empty data type free but have data %u.%u.%u %u",
 				 stripe_sectors,
@@ -346,6 +349,7 @@ void bch2_alloc_to_text(struct printbuf *out, struct bch_fs *c, struct bkey_s_c 
 	prt_printf(out, "need_discard      %llu\n",	BCH_ALLOC_V4_NEED_DISCARD(a));
 	prt_printf(out, "need_inc_gen      %llu\n",	BCH_ALLOC_V4_NEED_INC_GEN(a));
 	prt_printf(out, "dirty_sectors     %u\n",	a->dirty_sectors);
+	prt_printf(out, "stripe_sectors    %u\n",	a->stripe_sectors);
 	prt_printf(out, "cached_sectors    %u\n",	a->cached_sectors);
 	prt_printf(out, "stripe            %u\n",	a->stripe);
 	prt_printf(out, "stripe_redundancy %u\n",	a->stripe_redundancy);

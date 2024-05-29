@@ -1979,4 +1979,5 @@ static void __exit exit_fat_fs(void)
 module_init(init_fat_fs)
 module_exit(exit_fat_fs)
 
+MODULE_DESCRIPTION("Core FAT filesystem support");
 MODULE_LICENSE("GPL");
