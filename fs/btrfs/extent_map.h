@@ -4,12 +4,11 @@
 #define BTRFS_EXTENT_MAP_H
 
 #include <linux/compiler_types.h>
-#include <linux/rwlock_types.h>
+#include <linux/spinlock_types.h>
 #include <linux/rbtree.h>
 #include <linux/list.h>
 #include <linux/refcount.h>
 #include "misc.h"
-#include "extent_map.h"
 #include "compression.h"
 
 struct btrfs_inode;

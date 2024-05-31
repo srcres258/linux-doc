@@ -1558,12 +1558,13 @@ static noinline_for_stack int writepage_delalloc(struct btrfs_inode *inode,
 {
 	struct btrfs_fs_info *fs_info = inode_to_fs_info(&inode->vfs_inode);
 	struct folio *folio = page_folio(page);
+	const bool is_subpage = btrfs_is_subpage(fs_info, page->mapping);
 	const u64 page_start = page_offset(page);
 	const u64 page_end = page_start + PAGE_SIZE - 1;
 	/*
-	 * Saves the last found delalloc end. As the delalloc end can go beyond
-	 * page boundary, thus we can not rely on subpage bitmap to locate
-	 * the last dealloc end.
+	 * Save the last found delalloc end. As the delalloc end can go beyond
+	 * page boundary, thus we cannot rely on subpage bitmap to locate the
+	 * last delalloc end.
 	 */
 	u64 last_delalloc_end = 0;
 	u64 delalloc_start = page_start;
@@ -1571,7 +1572,7 @@ static noinline_for_stack int writepage_delalloc(struct btrfs_inode *inode,
 	u64 delalloc_to_write = 0;
 	int ret = 0;
 
-	/* Lock all (subpage) dealloc ranges inside the page first. */
+	/* Lock all (subpage) delalloc ranges inside the page first. */
 	while (delalloc_start < page_end) {
 		delalloc_end = page_end;
 		if (!find_lock_delalloc_range(&inode->vfs_inode, page,
@@ -1587,13 +1588,17 @@ static noinline_for_stack int writepage_delalloc(struct btrfs_inode *inode,
 		continue;
 	}
 	delalloc_start = page_start;
-	/* Run the delalloc ranges for above locked ranges. */
-	while (last_delalloc_end && delalloc_start < page_end) {
+
+	if (!last_delalloc_end)
+		goto out;
+
+	/* Run the delalloc ranges for the above locked ranges. */
+	while (delalloc_start < page_end) {
 		u64 found_start;
 		u32 found_len;
 		bool found;
 
-		if (!btrfs_is_subpage(fs_info, page->mapping)) {
+		if (!is_subpage) {
 			/*
 			 * For non-subpage case, the found delalloc range must
 			 * cover this page and there must be only one locked
@@ -1610,25 +1615,48 @@ static noinline_for_stack int writepage_delalloc(struct btrfs_inode *inode,
 			break;
 		/*
 		 * The subpage range covers the last sector, the delalloc range may
-		 * end beyonds the page boundary, use the saved delalloc_end
+		 * end beyond the page boundary, use the saved delalloc_end
 		 * instead.
 		 */
 		if (found_start + found_len >= page_end)
 			found_len = last_delalloc_end + 1 - found_start;
 
-		if (ret < 0) {
-			/* Cleanup the remaining locked ranges. */
+		if (ret >= 0) {
+			/* No errors hit so far, run the current delalloc range. */
+			ret = btrfs_run_delalloc_range(inode, page, found_start,
+						       found_start + found_len - 1,
+						       wbc);
+		} else {
+			/*
+			 * We've hit an error during previous delalloc range,
+			 * have to cleanup the remaining locked ranges.
+			 */
 			unlock_extent(&inode->io_tree, found_start,
 				      found_start + found_len - 1, NULL);
 			__unlock_for_delalloc(&inode->vfs_inode, page, found_start,
 					      found_start + found_len - 1);
-		} else {
-			ret = btrfs_run_delalloc_range(inode, page, found_start,
-						       found_start + found_len - 1, wbc);
 		}
+
+		/*
+		 * We can hit btrfs_run_delalloc_range() with >0 return value.
+		 *
+		 * This happens when either the IO is already done and page
+		 * unlocked (inline) or the IO submission and page unlock would
+		 * be handled as async (compression).
+		 *
+		 * Inline is only possible for regular sectorsize for now.
+		 *
+		 * Compression is possible for both subpage and regular cases,
+		 * but even for subpage compression only happens for page aligned
+		 * range, thus the found delalloc range must go beyond current
+		 * page.
+		 */
+		if (ret > 0)
+			ASSERT(!is_subpage || found_start + found_len >= page_end);
+
 		/*
 		 * Above btrfs_run_delalloc_range() may have unlocked the page,
-		 * Thus for the last range, we can not touch the page anymore.
+		 * thus for the last range, we cannot touch the page anymore.
 		 */
 		if (found_start + found_len >= last_delalloc_end + 1)
 			break;
@@ -1637,7 +1665,7 @@ static noinline_for_stack int writepage_delalloc(struct btrfs_inode *inode,
 	}
 	if (ret < 0)
 		return ret;
-
+out:
 	if (last_delalloc_end)
 		delalloc_end = last_delalloc_end;
 	else
@@ -2534,6 +2562,8 @@ void extent_write_locked_range(struct inode *inode, struct page *locked_page,
 
 		/* Make sure the mapping tag for page dirty gets cleared. */
 		if (nr == 0) {
+			struct folio *folio;
+
 			folio = page_folio(page);
 			btrfs_folio_set_writeback(fs_info, folio, cur, cur_len);
 			btrfs_folio_clear_writeback(fs_info, folio, cur, cur_len);

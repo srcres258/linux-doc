@@ -754,7 +754,6 @@ static ssize_t iwl_dbgfs_fw_ver_read(struct file *file, char __user *user_buf,
 	struct iwl_mvm *mvm = file->private_data;
 	char *buff, *pos, *endpos;
 	static const size_t bufsz = 1024;
-	char _fw_name_pre[FW_NAME_PRE_BUFSIZE];
 	int ret;
 
 	buff = kmalloc(bufsz, GFP_KERNEL);
@@ -764,8 +763,8 @@ static ssize_t iwl_dbgfs_fw_ver_read(struct file *file, char __user *user_buf,
 	pos = buff;
 	endpos = pos + bufsz;
 
-	pos += scnprintf(pos, endpos - pos, "FW prefix: %s\n",
-			 iwl_drv_get_fwname_pre(mvm->trans, _fw_name_pre));
+	pos += scnprintf(pos, endpos - pos, "FW id: %s\n",
+			 mvm->fwrt.fw->fw_version);
 	pos += scnprintf(pos, endpos - pos, "FW: %s\n",
 			 mvm->fwrt.fw->human_readable);
 	pos += scnprintf(pos, endpos - pos, "Device: %s\n",
@@ -1619,6 +1618,15 @@ static int _iwl_dbgfs_inject_beacon_ie(struct iwl_mvm *mvm, char *bin, int len)
 					 &beacon_cmd.tim_size,
 					 beacon->data, beacon->len);
 
+		if (iwl_fw_lookup_cmd_ver(mvm->fw,
+					  BEACON_TEMPLATE_CMD, 0) >= 14) {
+			u32 offset = iwl_mvm_find_ie_offset(beacon->data,
+							    WLAN_EID_S1G_TWT,
+							    beacon->len);
+
+			beacon_cmd.btwt_offset = cpu_to_le32(offset);
+		}
+
 		iwl_mvm_mac_ctxt_send_beacon_cmd(mvm, beacon, &beacon_cmd,
 						 sizeof(beacon_cmd));
 	}
@@ -2440,6 +2448,9 @@ void iwl_mvm_dbgfs_register(struct iwl_mvm *mvm)
 
 	debugfs_create_file("mem", 0600, mvm->debugfs_dir, mvm,
 			    &iwl_dbgfs_mem_ops);
+
+	debugfs_create_bool("rx_ts_ptp", 0600, mvm->debugfs_dir,
+			    &mvm->rx_ts_ptp);
 
 	/*
 	 * Create a symlink with mac80211. It will be removed when mac80211

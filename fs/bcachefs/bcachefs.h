@@ -207,6 +207,7 @@
 #include <linux/zstd.h>
 
 #include "bcachefs_format.h"
+#include "disk_accounting_types.h"
 #include "errcode.h"
 #include "fifo.h"
 #include "nocow_locking_types.h"
@@ -540,9 +541,7 @@ struct bch_dev {
 	unsigned long		*buckets_nouse;
 	struct rw_semaphore	bucket_lock;
 
-	struct bch_dev_usage		*usage_base;
-	struct bch_dev_usage __percpu	*usage[JOURNAL_BUF_NR];
-	struct bch_dev_usage __percpu	*usage_gc;
+	struct bch_dev_usage __percpu	*usage;
 
 	/* Allocator: */
 	u64			new_fs_bucket_idx;
@@ -583,6 +582,7 @@ struct bch_dev {
 	x(new_fs)			\
 	x(started)			\
 	x(btree_running)		\
+	x(accounting_replay_done)	\
 	x(may_go_rw)			\
 	x(rw)				\
 	x(was_rw)			\
@@ -661,8 +661,6 @@ struct btree_trans_buf {
 	struct btree_trans	*trans;
 };
 
-#define REPLICAS_DELTA_LIST_MAX	(1U << 16)
-
 #define BCACHEFS_ROOT_SUBVOL_INUM					\
 	((subvol_inum) { BCACHEFS_ROOT_SUBVOL,	BCACHEFS_ROOT_INO })
 
@@ -732,15 +730,14 @@ struct bch_fs {
 
 	struct bch_dev __rcu	*devs[BCH_SB_MEMBERS_MAX];
 
+	struct bch_accounting_mem accounting[2];
+
 	struct bch_replicas_cpu replicas;
 	struct bch_replicas_cpu replicas_gc;
 	struct mutex		replicas_gc_lock;
-	mempool_t		replicas_delta_pool;
 
 	struct journal_entry_res btree_root_journal_res;
-	struct journal_entry_res replicas_journal_res;
 	struct journal_entry_res clock_journal_res;
-	struct journal_entry_res dev_usage_journal_res;
 
 	struct bch_disk_groups_cpu __rcu *disk_groups;
 
@@ -879,14 +876,8 @@ struct bch_fs {
 	struct percpu_rw_semaphore	mark_lock;
 
 	seqcount_t			usage_lock;
-	struct bch_fs_usage		*usage_base;
-	struct bch_fs_usage __percpu	*usage[JOURNAL_BUF_NR];
-	struct bch_fs_usage __percpu	*usage_gc;
+	struct bch_fs_usage_base __percpu *usage;
 	u64 __percpu		*online_reserved;
-
-	/* single element mempool: */
-	struct mutex		usage_scratch_lock;
-	struct bch_fs_usage_online *usage_scratch;
 
 	struct io_clock		io_clock[2];
 

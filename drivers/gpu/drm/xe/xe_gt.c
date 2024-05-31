@@ -93,14 +93,16 @@ void xe_gt_sanitize(struct xe_gt *gt)
 	gt->uc.guc.submission_state.enabled = false;
 }
 
-/*
- * Clean up the GT structures before driver removal. This function should only
- * act on objects/structures that must be cleaned before the driver removal
- * callback is complete and therefore can't be deferred to a drmm action.
+/**
+ * xe_gt_remove() - Clean up the GT structures before driver removal
+ * @gt: the GT object
+ *
+ * This function should only act on objects/structures that must be cleaned
+ * before the driver removal callback is complete and therefore can't be
+ * deferred to a drmm action.
  */
-static void gt_remove(void *arg)
+void xe_gt_remove(struct xe_gt *gt)
 {
-	struct xe_gt *gt = arg;
 	int i;
 
 	xe_uc_remove(&gt->uc);
@@ -297,8 +299,8 @@ int xe_gt_record_default_lrcs(struct xe_gt *gt)
 		}
 
 		xe_map_memcpy_from(xe, default_lrc,
-				   &q->lrc[0].bo->vmap,
-				   xe_lrc_pphwsp_offset(&q->lrc[0]),
+				   &q->lrc[0]->bo->vmap,
+				   xe_lrc_pphwsp_offset(q->lrc[0]),
 				   xe_gt_lrc_size(gt, hwe->class));
 
 		gt->default_lrc[hwe->class] = default_lrc;
@@ -502,8 +504,7 @@ int xe_gt_init_hwconfig(struct xe_gt *gt)
 	if (err)
 		goto out;
 
-	xe_gt_topology_init(gt);
-	xe_gt_mcr_init(gt);
+	xe_gt_mcr_init_early(gt);
 	xe_pat_init(gt);
 
 	err = xe_uc_init(&gt->uc);
@@ -513,6 +514,9 @@ int xe_gt_init_hwconfig(struct xe_gt *gt)
 	err = xe_uc_init_hwconfig(&gt->uc);
 	if (err)
 		goto out_fw;
+
+	xe_gt_topology_init(gt);
+	xe_gt_mcr_init(gt);
 
 out_fw:
 	xe_force_wake_put(gt_to_fw(gt), XE_FW_GT);
@@ -566,7 +570,7 @@ int xe_gt_init(struct xe_gt *gt)
 
 	xe_gt_record_user_engines(gt);
 
-	return devm_add_action_or_reset(gt_to_xe(gt)->drm.dev, gt_remove, gt);
+	return 0;
 }
 
 void xe_gt_record_user_engines(struct xe_gt *gt)

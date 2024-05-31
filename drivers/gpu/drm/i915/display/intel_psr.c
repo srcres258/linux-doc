@@ -559,20 +559,10 @@ exit:
 static void _panel_replay_init_dpcd(struct intel_dp *intel_dp)
 {
 	struct drm_i915_private *i915 = dp_to_i915(intel_dp);
-	u8 pr_dpcd = 0;
-
-	intel_dp->psr.sink_panel_replay_support = false;
-	drm_dp_dpcd_readb(&intel_dp->aux, DP_PANEL_REPLAY_CAP, &pr_dpcd);
-
-	if (!(pr_dpcd & DP_PANEL_REPLAY_SUPPORT)) {
-		drm_dbg_kms(&i915->drm,
-			    "Panel replay is not supported by panel\n");
-		return;
-	}
 
 	intel_dp->psr.sink_panel_replay_support = true;
 
-	if (pr_dpcd & DP_PANEL_REPLAY_SU_SUPPORT)
+	if (intel_dp->pr_dpcd & DP_PANEL_REPLAY_SU_SUPPORT)
 		intel_dp->psr.sink_panel_replay_su_support = true;
 
 	drm_dbg_kms(&i915->drm,
@@ -630,10 +620,13 @@ static void _psr_init_dpcd(struct intel_dp *intel_dp)
 
 void intel_psr_init_dpcd(struct intel_dp *intel_dp)
 {
-	_panel_replay_init_dpcd(intel_dp);
-
 	drm_dp_dpcd_read(&intel_dp->aux, DP_PSR_SUPPORT, intel_dp->psr_dpcd,
 			 sizeof(intel_dp->psr_dpcd));
+	drm_dp_dpcd_readb(&intel_dp->aux, DP_PANEL_REPLAY_CAP,
+			  &intel_dp->pr_dpcd);
+
+	if (intel_dp->pr_dpcd & DP_PANEL_REPLAY_SUPPORT)
+		_panel_replay_init_dpcd(intel_dp);
 
 	if (intel_dp->psr_dpcd[0])
 		_psr_init_dpcd(intel_dp);
@@ -3597,15 +3590,10 @@ psr_source_status(struct intel_dp *intel_dp, struct seq_file *m)
 	seq_printf(m, "Source PSR/PanelReplay status: %s [0x%08x]\n", status, val);
 }
 
-static int intel_psr_status(struct seq_file *m, struct intel_dp *intel_dp)
+static void intel_psr_sink_capability(struct intel_dp *intel_dp,
+				      struct seq_file *m)
 {
-	struct drm_i915_private *dev_priv = dp_to_i915(intel_dp);
-	enum transcoder cpu_transcoder = intel_dp->psr.transcoder;
 	struct intel_psr *psr = &intel_dp->psr;
-	intel_wakeref_t wakeref;
-	const char *status;
-	bool enabled;
-	u32 val;
 
 	seq_printf(m, "Sink support: PSR = %s",
 		   str_yes_no(psr->sink_support));
@@ -3615,12 +3603,13 @@ static int intel_psr_status(struct seq_file *m, struct intel_dp *intel_dp)
 	seq_printf(m, ", Panel Replay = %s", str_yes_no(psr->sink_panel_replay_support));
 	seq_printf(m, ", Panel Replay Selective Update = %s\n",
 		   str_yes_no(psr->sink_panel_replay_su_support));
+}
 
-	if (!(psr->sink_support || psr->sink_panel_replay_support))
-		return 0;
-
-	wakeref = intel_runtime_pm_get(&dev_priv->runtime_pm);
-	mutex_lock(&psr->lock);
+static void intel_psr_print_mode(struct intel_dp *intel_dp,
+				 struct seq_file *m)
+{
+	struct intel_psr *psr = &intel_dp->psr;
+	const char *status;
 
 	if (psr->panel_replay_enabled)
 		status = psr->sel_update_enabled ? "Panel Replay Selective Update Enabled" :
@@ -3630,6 +3619,26 @@ static int intel_psr_status(struct seq_file *m, struct intel_dp *intel_dp)
 	else
 		status = "disabled";
 	seq_printf(m, "PSR mode: %s\n", status);
+}
+
+static int intel_psr_status(struct seq_file *m, struct intel_dp *intel_dp)
+{
+	struct drm_i915_private *dev_priv = dp_to_i915(intel_dp);
+	enum transcoder cpu_transcoder = intel_dp->psr.transcoder;
+	struct intel_psr *psr = &intel_dp->psr;
+	intel_wakeref_t wakeref;
+	bool enabled;
+	u32 val, psr2_ctl;
+
+	intel_psr_sink_capability(intel_dp, m);
+
+	if (!(psr->sink_support || psr->sink_panel_replay_support))
+		return 0;
+
+	wakeref = intel_runtime_pm_get(&dev_priv->runtime_pm);
+	mutex_lock(&psr->lock);
+
+	intel_psr_print_mode(intel_dp, m);
 
 	if (!psr->enabled) {
 		seq_printf(m, "PSR sink not reliable: %s\n",
@@ -3640,6 +3649,12 @@ static int intel_psr_status(struct seq_file *m, struct intel_dp *intel_dp)
 
 	if (psr->panel_replay_enabled) {
 		val = intel_de_read(dev_priv, TRANS_DP2_CTL(cpu_transcoder));
+
+		if (intel_dp_is_edp(intel_dp))
+			psr2_ctl = intel_de_read(dev_priv,
+						 EDP_PSR2_CTL(dev_priv,
+							      cpu_transcoder));
+
 		enabled = val & TRANS_DP2_PANEL_REPLAY_ENABLE;
 	} else if (psr->sel_update_enabled) {
 		val = intel_de_read(dev_priv,
@@ -3651,6 +3666,9 @@ static int intel_psr_status(struct seq_file *m, struct intel_dp *intel_dp)
 	}
 	seq_printf(m, "Source PSR/PanelReplay ctl: %s [0x%08x]\n",
 		   str_enabled_disabled(enabled), val);
+	if (psr->panel_replay_enabled && intel_dp_is_edp(intel_dp))
+		seq_printf(m, "PSR2_CTL: 0x%08x\n",
+			   psr2_ctl);
 	psr_source_status(intel_dp, m);
 	seq_printf(m, "Busy frontbuffer bits: 0x%08x\n",
 		   psr->busy_frontbuffer_bits);
