@@ -51,6 +51,7 @@
 #include "xe_ttm_stolen_mgr.h"
 #include "xe_ttm_sys_mgr.h"
 #include "xe_vm.h"
+#include "xe_vram.h"
 #include "xe_wait_user_fence.h"
 
 static int xe_file_open(struct drm_device *dev, struct drm_file *file)
@@ -96,12 +97,16 @@ static void xe_file_close(struct drm_device *dev, struct drm_file *file)
 	struct xe_exec_queue *q;
 	unsigned long idx;
 
-	mutex_lock(&xef->exec_queue.lock);
+	/*
+	 * No need for exec_queue.lock here as there is no contention for it
+	 * when FD is closing as IOCTLs presumably can't be modifying the
+	 * xarray. Taking exec_queue.lock here causes undue dependency on
+	 * vm->lock taken during xe_exec_queue_kill().
+	 */
 	xa_for_each(&xef->exec_queue.xa, idx, q) {
 		xe_exec_queue_kill(q);
 		xe_exec_queue_put(q);
 	}
-	mutex_unlock(&xef->exec_queue.lock);
 	xa_destroy(&xef->exec_queue.xa);
 	mutex_destroy(&xef->exec_queue.lock);
 	mutex_lock(&xef->vm.lock);
@@ -541,6 +546,7 @@ int xe_device_probe(struct xe_device *xe)
 	struct xe_tile *tile;
 	struct xe_gt *gt;
 	int err;
+	u8 last_gt;
 	u8 id;
 
 	xe_pat_init_early(xe);
@@ -615,7 +621,7 @@ int xe_device_probe(struct xe_device *xe)
 	if (err)
 		goto err_irq_shutdown;
 
-	err = xe_mmio_probe_vram(xe);
+	err = xe_vram_probe(xe);
 	if (err)
 		goto err_irq_shutdown;
 
@@ -639,16 +645,18 @@ int xe_device_probe(struct xe_device *xe)
 		goto err_irq_shutdown;
 
 	for_each_gt(gt, xe, id) {
+		last_gt = id;
+
 		err = xe_gt_init(gt);
 		if (err)
-			goto err_irq_shutdown;
+			goto err_fini_gt;
 	}
 
 	xe_heci_gsc_init(xe);
 
 	err = xe_display_init(xe);
 	if (err)
-		goto err_irq_shutdown;
+		goto err_fini_gt;
 
 	err = drm_dev_register(&xe->drm, 0);
 	if (err)
@@ -664,6 +672,15 @@ int xe_device_probe(struct xe_device *xe)
 
 err_fini_display:
 	xe_display_driver_remove(xe);
+
+err_fini_gt:
+	for_each_gt(gt, xe, id) {
+		if (id < last_gt)
+			xe_gt_remove(gt);
+		else
+			break;
+	}
+
 err_irq_shutdown:
 	xe_irq_shutdown(xe);
 err:
@@ -681,11 +698,17 @@ static void xe_device_remove_display(struct xe_device *xe)
 
 void xe_device_remove(struct xe_device *xe)
 {
+	struct xe_gt *gt;
+	u8 id;
+
 	xe_device_remove_display(xe);
 
 	xe_display_fini(xe);
 
 	xe_heci_gsc_fini(xe);
+
+	for_each_gt(gt, xe, id)
+		xe_gt_remove(gt);
 
 	xe_irq_shutdown(xe);
 }

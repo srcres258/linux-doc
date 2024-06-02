@@ -488,6 +488,13 @@ struct bch_opts {
 #undef x
 };
 
+struct bch2_opts_parse {
+	struct bch_opts opts;
+
+	/* to save opts that can't be parsed before the FS is opened: */
+	struct printbuf parse_later;
+};
+
 static const __maybe_unused struct bch_opts bch2_opts_default = {
 #define x(_name, _bits, _mode, _type, _sb_opt, _default, ...)		\
 	._name##_defined = true,					\
@@ -566,7 +573,10 @@ void bch2_opt_to_text(struct printbuf *, struct bch_fs *, struct bch_sb *,
 
 int bch2_opt_check_may_set(struct bch_fs *, int, u64);
 int bch2_opts_check_may_set(struct bch_fs *);
-int bch2_parse_mount_opts(struct bch_fs *, struct bch_opts *, char *);
+int bch2_parse_one_mount_opt(struct bch_fs *, struct bch_opts *,
+			     struct printbuf *, const char *, const char *);
+int bch2_parse_mount_opts(struct bch_fs *, struct bch_opts *, struct printbuf *,
+			  char *);
 
 /* inode opts: */
 

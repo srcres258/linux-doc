@@ -14,14 +14,19 @@
 #endif
 
 #define __SYSCALL(nr, sym) extern long __ia32_##sym(const struct pt_regs *);
+#define __SYSCALL_NORETURN(nr, sym) extern long __noreturn __ia32_##sym(const struct pt_regs *);
 #include <asm/syscalls_32.h>
-#undef __SYSCALL
+#undef  __SYSCALL
+
+#undef  __SYSCALL_NORETURN
+#define __SYSCALL_NORETURN __SYSCALL
 
 #define __SYSCALL(nr, sym) __ia32_##sym,
 __visible const sys_call_ptr_t ia32_sys_call_table[] = {
 #include <asm/syscalls_32.h>
 };
-#undef __SYSCALL
+#undef  __SYSCALL
+#endif
 
 #define __SYSCALL(nr, sym) case nr: return __ia32_##sym(regs);
 long ia32_sys_call(const struct pt_regs *regs, unsigned int nr)

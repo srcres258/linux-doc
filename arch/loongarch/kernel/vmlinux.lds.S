@@ -143,11 +143,11 @@ SECTIONS
 
 #ifdef CONFIG_EFI_STUB
 	/* header symbols */
-	_kernel_entry = kernel_entry & PHYSADDR_MASK;
-	_kernel_asize = _end - _text;
-	_kernel_fsize = _edata - _text;
-	_kernel_vsize = _end - __initdata_begin;
-	_kernel_rsize = _edata - __initdata_begin;
+	_kernel_entry = ABSOLUTE(kernel_entry & PHYSADDR_MASK);
+	_kernel_asize = ABSOLUTE(_end - _text);
+	_kernel_fsize = ABSOLUTE(_edata - _text);
+	_kernel_vsize = ABSOLUTE(_end - __initdata_begin);
+	_kernel_rsize = ABSOLUTE(_edata - __initdata_begin);
 #endif
 
 	.gptab.sdata : {

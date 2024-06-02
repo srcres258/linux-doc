@@ -130,8 +130,8 @@ static int ipv4_privileged_ports(const struct ctl_table *table, int write,
 	return ret;
 }
 
-static void inet_get_ping_group_range_table(const struct ctl_table *table, kgid_t *low,
-					    kgid_t *high)
+static void inet_get_ping_group_range_table(const struct ctl_table *table,
+					    kgid_t *low, kgid_t *high)
 {
 	kgid_t *data = table->data;
 	struct net *net =
@@ -146,7 +146,8 @@ static void inet_get_ping_group_range_table(const struct ctl_table *table, kgid_
 }
 
 /* Update system visible IP port range */
-static void set_ping_group_range(const struct ctl_table *table, kgid_t low, kgid_t high)
+static void set_ping_group_range(const struct ctl_table *table,
+				 kgid_t low, kgid_t high)
 {
 	kgid_t *data = table->data;
 	struct net *net =

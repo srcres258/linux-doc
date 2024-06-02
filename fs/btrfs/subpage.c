@@ -711,8 +711,8 @@ void btrfs_folio_assert_not_dirty(const struct btrfs_fs_info *fs_info,
 				  struct folio *folio, u64 start, u32 len)
 {
 	struct btrfs_subpage *subpage;
-	int start_bit;
-	int nbits;
+	unsigned int start_bit;
+	unsigned int nbits;
 	unsigned long flags;
 
 	if (!IS_ENABLED(CONFIG_BTRFS_ASSERT))
@@ -784,7 +784,7 @@ void btrfs_folio_unlock_writer(struct btrfs_fs_info *fs_info,
  * This is for folio already locked by plain lock_page()/folio_lock(), which
  * doesn't have any subpage awareness.
  *
- * This would populate the involved subpage ranges so that subpage helpers can
+ * This populates the involved subpage ranges so that subpage helpers can
  * properly unlock them.
  */
 void btrfs_folio_set_writer_lock(const struct btrfs_fs_info *fs_info,
@@ -792,8 +792,8 @@ void btrfs_folio_set_writer_lock(const struct btrfs_fs_info *fs_info,
 {
 	struct btrfs_subpage *subpage;
 	unsigned long flags;
-	int start_bit;
-	int nbits;
+	unsigned int start_bit;
+	unsigned int nbits;
 	int ret;
 
 	ASSERT(folio_test_locked(folio));
@@ -814,8 +814,7 @@ void btrfs_folio_set_writer_lock(const struct btrfs_fs_info *fs_info,
 
 /*
  * Find any subpage writer locked range inside @folio, starting at file offset
- * @search_start.
- * The caller should ensure the folio is locked.
+ * @search_start. The caller should ensure the folio is locked.
  *
  * Return true and update @found_start_ret and @found_len_ret to the first
  * writer locked range.
@@ -827,12 +826,12 @@ bool btrfs_subpage_find_writer_locked(const struct btrfs_fs_info *fs_info,
 {
 	struct btrfs_subpage_info *subpage_info = fs_info->subpage_info;
 	struct btrfs_subpage *subpage = folio_get_private(folio);
-	const int len = PAGE_SIZE - offset_in_page(search_start);
-	const int start_bit = subpage_calc_start_bit(fs_info, folio, locked,
-						     search_start, len);
-	const int locked_bitmap_start = subpage_info->locked_offset;
-	const int locked_bitmap_end = locked_bitmap_start +
-				      subpage_info->bitmap_nr_bits;
+	const unsigned int len = PAGE_SIZE - offset_in_page(search_start);
+	const unsigned int start_bit = subpage_calc_start_bit(fs_info, folio,
+						locked, search_start, len);
+	const unsigned int locked_bitmap_start = subpage_info->locked_offset;
+	const unsigned int locked_bitmap_end = locked_bitmap_start +
+					       subpage_info->bitmap_nr_bits;
 	unsigned long flags;
 	int first_zero;
 	int first_set;
@@ -840,17 +839,21 @@ bool btrfs_subpage_find_writer_locked(const struct btrfs_fs_info *fs_info,
 
 	ASSERT(folio_test_locked(folio));
 	spin_lock_irqsave(&subpage->lock, flags);
-	first_set = find_next_bit(subpage->bitmaps, locked_bitmap_end,
-				  start_bit);
+	first_set = find_next_bit(subpage->bitmaps, locked_bitmap_end, start_bit);
 	if (first_set >= locked_bitmap_end)
 		goto out;
 
 	found = true;
+
 	*found_start_ret = folio_pos(folio) +
 		((first_set - locked_bitmap_start) << fs_info->sectorsize_bits);
+	/*
+	 * Since @first_set is ensured to be smaller than locked_bitmap_end
+	 * here, @found_start_ret should be inside the folio.
+	 */
+	ASSERT(*found_start_ret < folio_pos(folio) + PAGE_SIZE);
 
-	first_zero = find_next_zero_bit(subpage->bitmaps,
-					locked_bitmap_end, first_set);
+	first_zero = find_next_zero_bit(subpage->bitmaps, locked_bitmap_end, first_set);
 	*found_len_ret = (first_zero - first_set) << fs_info->sectorsize_bits;
 out:
 	spin_unlock_irqrestore(&subpage->lock, flags);
@@ -858,14 +861,13 @@ out:
 }
 
 /*
- * Unlike btrfs_folio_end_writer_lock() which unlock a specified subpage range,
- * this would end all writer locked ranges of a page.
+ * Unlike btrfs_folio_end_writer_lock() which unlocks a specified subpage range,
+ * this ends all writer locked ranges of a page.
  *
  * This is for the locked page of __extent_writepage(), as the locked page
  * can contain several locked subpage ranges.
  */
-void btrfs_folio_end_all_writers(const struct btrfs_fs_info *fs_info,
-				 struct folio *folio)
+void btrfs_folio_end_all_writers(const struct btrfs_fs_info *fs_info, struct folio *folio)
 {
 	struct btrfs_subpage *subpage = folio_get_private(folio);
 	u64 folio_start = folio_pos(folio);

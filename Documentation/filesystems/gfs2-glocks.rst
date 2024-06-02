@@ -55,9 +55,9 @@ all the modes. Only inode glocks use the DF mode for example.
 
 Table of glock operations and per type constants:
 
-=============      =============================================================
+==============     =============================================================
 Field              Purpose
-=============      =============================================================
+==============     =============================================================
 go_sync            Called before remote state change (e.g. to sync dirty data)
 go_xmote_bh        Called after remote state change (e.g. to refill cache)
 go_inval           Called if remote state change requires invalidating the cache
@@ -70,7 +70,7 @@ go_unlocked        Called when a glock is unlocked (dlm_unlock())
 go_type            The type of the glock, ``LM_TYPE_*``
 go_flags	   GLOF_ASPACE is set, if the glock has an address space
                    associated with it
-=============      =============================================================
+==============     =============================================================
 
 The minimum hold time for each lock is the time after a remote lock
 grant for which we ignore remote demote requests. This is in order to
@@ -87,9 +87,9 @@ glock.
 
 Locking rules for glock operations:
 
-=============    ======================    =============================
+==============   ======================    =============================
 Operation        GLF_LOCK bit lock held    gl_lockref.lock spinlock held
-=============    ======================    =============================
+==============   ======================    =============================
 go_sync               Yes                       No
 go_xmote_bh           Yes                       No
 go_inval              Yes                       No
@@ -98,7 +98,7 @@ go_held               No                        No
 go_dump               Sometimes                 Yes
 go_callback           Sometimes (N/A)           Yes
 go_unlocked           Yes                       No
-=============    ======================    =============================
+==============   ======================    =============================
 
 .. Note::
 
