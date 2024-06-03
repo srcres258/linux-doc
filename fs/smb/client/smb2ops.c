@@ -5000,8 +5000,6 @@ static int __cifs_sfu_make_node(unsigned int xid, struct inode *inode,
 		break;
 	case S_IFSOCK:
 		strscpy(pdev.type, "LnxSOCK");
-		pdev.major = cpu_to_le64(MAJOR(dev));
-		pdev.minor = cpu_to_le64(MINOR(dev));
 		break;
 	case S_IFIFO:
 		strscpy(pdev.type, "LnxFIFO");

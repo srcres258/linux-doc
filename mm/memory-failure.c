@@ -886,16 +886,16 @@ static int kill_accessing_process(struct task_struct *p, unsigned long pfn,
  * potential causes is that the page state has been changed due to
  * underlying race condition. This is the most severe outcomes.
  *
- * MF_FAILED - The m-f() handler marks the page as PG_hwpoisoned'ed. It
- * should have killed the process, but it can't isolate the page, due to
- * conditions such as extra pin, unmap failure, etc. Accessing the page
- * again will trigger another MCE and the process will be killed by the
- * m-f() handler immediately.
+ * MF_FAILED - The m-f() handler marks the page as PG_hwpoisoned'ed.
+ * It should have killed the process, but it can't isolate the page,
+ * due to conditions such as extra pin, unmap failure, etc. Accessing
+ * the page again may trigger another MCE and the process will be killed
+ * by the m-f() handler immediately.
  *
- * MF_DELAYED - The m-f() handler marks the page as PG_hwpoisoned'ed. The
- * page is unmapped, but perhaps remains in LRU or file mapping. An attempt
- * to access the page again will trigger page fault and the PF handler
- * will kill the process.
+ * MF_DELAYED - The m-f() handler marks the page as PG_hwpoisoned'ed.
+ * The page is unmapped, and is removed from the LRU or file mapping.
+ * An attempt to access the page again will trigger page fault and the
+ * PF handler will kill the process.
  *
  * MF_RECOVERED - The m-f() handler marks the page as PG_hwpoisoned'ed.
  * The page has been completely isolated, that is, unmapped, taken out of
@@ -1113,7 +1113,6 @@ static int me_pagecache_dirty(struct page_state *ps, struct page *p)
 	struct folio *folio = page_folio(p);
 	struct address_space *mapping = folio_mapping(folio);
 
-	SetPageError(p);
 	/* TBD: print more information about the file. */
 	if (mapping) {
 		/*
@@ -1121,34 +1120,6 @@ static int me_pagecache_dirty(struct page_state *ps, struct page *p)
 		 * who check the mapping.
 		 * This way the application knows that something went
 		 * wrong with its dirty file data.
-		 *
-		 * There's one open issue:
-		 *
-		 * The EIO will be only reported on the next IO
-		 * operation and then cleared through the IO map.
-		 * Normally Linux has two mechanisms to pass IO error
-		 * first through the AS_EIO flag in the address space
-		 * and then through the PageError flag in the page.
-		 * Since we drop pages on memory failure handling the
-		 * only mechanism open to use is through AS_AIO.
-		 *
-		 * This has the disadvantage that it gets cleared on
-		 * the first operation that returns an error, while
-		 * the PageError bit is more sticky and only cleared
-		 * when the page is reread or dropped.  If an
-		 * application assumes it will always get error on
-		 * fsync, but does other operations on the fd before
-		 * and the page is dropped between then the error
-		 * will not be properly reported.
-		 *
-		 * This can already happen even without hwpoisoned
-		 * pages: first on metadata IO errors (which only
-		 * report through AS_EIO) or when the page is dropped
-		 * at the wrong time.
-		 *
-		 * So right now we assume that the application DTRT on
-		 * the first EIO, but we're not worse than other parts
-		 * of the kernel.
 		 */
 		mapping_set_error(mapping, -EIO);
 	}
@@ -2087,7 +2058,6 @@ retry:
 			folio = page_folio(p);
 			res = kill_accessing_process(current, folio_pfn(folio), flags);
 			action_result(pfn, MF_MSG_ALREADY_POISONED, MF_FAILED);
-			return res;
 		}
 		return res;
 	} else if (res == -EBUSY) {
@@ -2200,15 +2170,13 @@ out:
  * application has a chance to recover. Also, application processes'
  * election for MCE early killed will be honored.
  */
-static int kill_procs_now(struct page *p, unsigned long pfn, int flags,
+static void kill_procs_now(struct page *p, unsigned long pfn, int flags,
 				struct folio *folio)
 {
 	LIST_HEAD(tokill);
 
 	collect_procs(folio, p, &tokill, flags & MF_ACTION_REQUIRED);
 	kill_procs(&tokill, true, pfn, flags);
-
-	return -EHWPOISON;
 }
 
 /**
@@ -2353,7 +2321,8 @@ try_again:
 		 */
 		folio_set_has_hwpoisoned(folio);
 		if (try_to_split_thp_page(p, false) < 0) {
-			res = kill_procs_now(p, pfn, flags, folio);
+			res = -EHWPOISON;
+			kill_procs_now(p, pfn, flags, folio);
 			put_page(p);
 			action_result(pfn, MF_MSG_UNSPLIT_THP, MF_FAILED);
 			goto unlock_mutex;

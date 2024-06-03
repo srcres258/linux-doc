@@ -562,10 +562,6 @@ static inline void swap_free_nr(swp_entry_t entry, int nr_pages)
 {
 }
 
-static inline void swap_free_nr(swp_entry_t entry, int nr_pages)
-{
-}
-
 static inline void put_swap_folio(struct folio *folio, swp_entry_t swp)
 {
 }

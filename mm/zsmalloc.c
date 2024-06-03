@@ -832,6 +832,27 @@ static void reset_page(struct page *page)
 	__ClearPageZsmalloc(page);
 }
 
+static int trylock_zspage(struct zspage *zspage)
+{
+	struct page *cursor, *fail;
+
+	for (cursor = get_first_page(zspage); cursor != NULL; cursor =
+					get_next_page(cursor)) {
+		if (!trylock_page(cursor)) {
+			fail = cursor;
+			goto unlock;
+		}
+	}
+
+	return 1;
+unlock:
+	for (cursor = get_first_page(zspage); cursor != fail; cursor =
+					get_next_page(cursor))
+		unlock_page(cursor);
+
+	return 0;
+}
+
 static void __free_zspage(struct zs_pool *pool, struct size_class *class,
 				struct zspage *zspage)
 {
