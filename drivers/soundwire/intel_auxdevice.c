@@ -155,15 +155,37 @@ static int sdw_master_read_intel_prop(struct sdw_bus *bus)
 		SDW_MASTER_QUIRKS_CLEAR_INITIAL_PARITY;
 
 	intel_prop = devm_kzalloc(bus->dev, sizeof(*intel_prop), GFP_KERNEL);
-	if (!intel_prop)
+	if (!intel_prop) {
+		fwnode_handle_put(link);
 		return -ENOMEM;
+	}
 
 	/* initialize with hardware defaults, in case the properties are not found */
+	intel_prop->clde = 0x0;
+	intel_prop->doaise2 = 0x0;
+	intel_prop->dodse2 = 0x0;
+	intel_prop->clds = 0x0;
+	intel_prop->clss = 0x0;
 	intel_prop->doaise = 0x1;
 	intel_prop->doais = 0x3;
 	intel_prop->dodse  = 0x0;
 	intel_prop->dods  = 0x1;
 
+	fwnode_property_read_u16(link,
+				 "intel-sdw-clde",
+				 &intel_prop->clde);
+	fwnode_property_read_u16(link,
+				 "intel-sdw-doaise2",
+				 &intel_prop->doaise2);
+	fwnode_property_read_u16(link,
+				 "intel-sdw-dodse2",
+				 &intel_prop->dodse2);
+	fwnode_property_read_u16(link,
+				 "intel-sdw-clds",
+				 &intel_prop->clds);
+	fwnode_property_read_u16(link,
+				 "intel-sdw-clss",
+				 &intel_prop->clss);
 	fwnode_property_read_u16(link,
 				 "intel-sdw-doaise",
 				 &intel_prop->doaise);
@@ -183,6 +205,8 @@ static int sdw_master_read_intel_prop(struct sdw_bus *bus)
 		intel_prop->doais,
 		intel_prop->dodse,
 		intel_prop->dods);
+
+	fwnode_handle_put(link);
 
 	return 0;
 }

@@ -86,10 +86,10 @@
 			compatible = "mediatek,mt7981-pwm";
 			reg = <0 0x10048000 0 0x1000>;
 			clocks = <&infracfg CLK_INFRA_PWM_STA>,
-				<&infracfg CLK_INFRA_PWM_HCK>,
-				<&infracfg CLK_INFRA_PWM1_CK>,
-				<&infracfg CLK_INFRA_PWM2_CK>,
-				<&infracfg CLK_INFRA_PWM3_CK>;
+				 <&infracfg CLK_INFRA_PWM_HCK>,
+				 <&infracfg CLK_INFRA_PWM1_CK>,
+				 <&infracfg CLK_INFRA_PWM2_CK>,
+				 <&infracfg CLK_INFRA_PWM3_CK>;
 			clock-names = "top", "main", "pwm1", "pwm2", "pwm3";
 			#pwm-cells = <2>;
 		};
@@ -114,6 +114,13 @@
 			gpio-controller;
 			#gpio-cells = <2>;
 			#interrupt-cells = <2>;
+		};
+
+		efuse@11f20000 {
+			compatible = "mediatek,mt7981-efuse", "mediatek,efuse";
+			reg = <0 0x11f20000 0 0x1000>;
+			#address-cells = <1>;
+			#size-cells = <1>;
 		};
 
 		clock-controller@15000000 {
