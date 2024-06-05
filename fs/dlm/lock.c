@@ -389,38 +389,6 @@ void dlm_put_rsb(struct dlm_rsb *r)
 	put_rsb(r);
 }
 
-static int pre_rsb_struct(struct dlm_ls *ls)
-{
-	struct dlm_rsb *r1, *r2;
-	int count = 0;
-
-	spin_lock_bh(&ls->ls_new_rsb_spin);
-	if (ls->ls_new_rsb_count > dlm_config.ci_new_rsb_count / 2) {
-		spin_unlock_bh(&ls->ls_new_rsb_spin);
-		return 0;
-	}
-	spin_unlock_bh(&ls->ls_new_rsb_spin);
-
-	r1 = dlm_allocate_rsb(ls);
-	r2 = dlm_allocate_rsb(ls);
-
-	spin_lock_bh(&ls->ls_new_rsb_spin);
-	if (r1) {
-		list_add(&r1->res_hashchain, &ls->ls_new_rsb);
-		ls->ls_new_rsb_count++;
-	}
-	if (r2) {
-		list_add(&r2->res_hashchain, &ls->ls_new_rsb);
-		ls->ls_new_rsb_count++;
-	}
-	count = ls->ls_new_rsb_count;
-	spin_unlock_bh(&ls->ls_new_rsb_spin);
-
-	if (!count)
-		return -ENOMEM;
-	return 0;
-}
-
 /* connected with timer_delete_sync() in dlm_ls_stop() to stop
  * new timers when recovery is triggered and don't run them
  * again until a dlm_timer_resume() tries it again.
@@ -652,22 +620,10 @@ static int get_rsb_struct(struct dlm_ls *ls, const void *name, int len,
 			  struct dlm_rsb **r_ret)
 {
 	struct dlm_rsb *r;
-	int count;
 
-	spin_lock_bh(&ls->ls_new_rsb_spin);
-	if (list_empty(&ls->ls_new_rsb)) {
-		count = ls->ls_new_rsb_count;
-		spin_unlock_bh(&ls->ls_new_rsb_spin);
-		log_debug(ls, "find_rsb retry %d %d %s",
-			  count, dlm_config.ci_new_rsb_count,
-			  (const char *)name);
-		return -EAGAIN;
-	}
-
-	r = list_first_entry(&ls->ls_new_rsb, struct dlm_rsb, res_hashchain);
-	list_del(&r->res_hashchain);
-	ls->ls_new_rsb_count--;
-	spin_unlock_bh(&ls->ls_new_rsb_spin);
+	r = dlm_allocate_rsb(ls);
+	if (!r)
+		return -ENOMEM;
 
 	r->res_ls = ls;
 	r->res_length = len;
@@ -792,13 +748,6 @@ static int find_rsb_dir(struct dlm_ls *ls, const void *name, int len,
 	}
 
  retry:
-	if (create) {
-		error = pre_rsb_struct(ls);
-		if (error < 0)
-			goto out;
-	}
-
- retry_lookup:
 
 	/* check if the rsb is in keep state under read lock - likely path */
 	read_lock_bh(&ls->ls_rsbtbl_lock);
@@ -832,7 +781,7 @@ static int find_rsb_dir(struct dlm_ls *ls, const void *name, int len,
 	if (!error) {
 		if (!rsb_flag(r, RSB_TOSS)) {
 			write_unlock_bh(&ls->ls_rsbtbl_lock);
-			goto retry_lookup;
+			goto retry;
 		}
 	} else {
 		write_unlock_bh(&ls->ls_rsbtbl_lock);
@@ -898,9 +847,7 @@ static int find_rsb_dir(struct dlm_ls *ls, const void *name, int len,
 		goto out;
 
 	error = get_rsb_struct(ls, name, len, &r);
-	if (error == -EAGAIN)
-		goto retry;
-	if (error)
+	if (WARN_ON_ONCE(error))
 		goto out;
 
 	r->res_hash = hash;
@@ -952,7 +899,7 @@ static int find_rsb_dir(struct dlm_ls *ls, const void *name, int len,
 		 */
 		write_unlock_bh(&ls->ls_rsbtbl_lock);
 		dlm_free_rsb(r);
-		goto retry_lookup;
+		goto retry;
 	} else if (!error) {
 		list_add(&r->res_rsbs_list, &ls->ls_keep);
 	}
@@ -976,11 +923,6 @@ static int find_rsb_nodir(struct dlm_ls *ls, const void *name, int len,
 	int error;
 
  retry:
-	error = pre_rsb_struct(ls);
-	if (error < 0)
-		goto out;
-
- retry_lookup:
 
 	/* check if the rsb is in keep state under read lock - likely path */
 	read_lock_bh(&ls->ls_rsbtbl_lock);
@@ -1015,7 +957,7 @@ static int find_rsb_nodir(struct dlm_ls *ls, const void *name, int len,
 	if (!error) {
 		if (!rsb_flag(r, RSB_TOSS)) {
 			write_unlock_bh(&ls->ls_rsbtbl_lock);
-			goto retry_lookup;
+			goto retry;
 		}
 	} else {
 		write_unlock_bh(&ls->ls_rsbtbl_lock);
@@ -1070,10 +1012,7 @@ static int find_rsb_nodir(struct dlm_ls *ls, const void *name, int len,
 	 */
 
 	error = get_rsb_struct(ls, name, len, &r);
-	if (error == -EAGAIN) {
-		goto retry;
-	}
-	if (error)
+	if (WARN_ON_ONCE(error))
 		goto out;
 
 	r->res_hash = hash;
@@ -1090,7 +1029,7 @@ static int find_rsb_nodir(struct dlm_ls *ls, const void *name, int len,
 		 */
 		write_unlock_bh(&ls->ls_rsbtbl_lock);
 		dlm_free_rsb(r);
-		goto retry_lookup;
+		goto retry;
 	} else if (!error) {
 		list_add(&r->res_rsbs_list, &ls->ls_keep);
 	}
@@ -1304,11 +1243,6 @@ int dlm_master_lookup(struct dlm_ls *ls, int from_nodeid, const char *name,
 	}
 
  retry:
-	error = pre_rsb_struct(ls);
-	if (error < 0)
-		return error;
-
- retry_lookup:
 
 	/* check if the rsb is in keep state under read lock - likely path */
 	read_lock_bh(&ls->ls_rsbtbl_lock);
@@ -1354,7 +1288,7 @@ int dlm_master_lookup(struct dlm_ls *ls, int from_nodeid, const char *name,
 			/* something as changed, very unlikely but
 			 * try again
 			 */
-			goto retry_lookup;
+			goto retry;
 		}
 	} else {
 		write_unlock_bh(&ls->ls_rsbtbl_lock);
@@ -1376,16 +1310,13 @@ int dlm_master_lookup(struct dlm_ls *ls, int from_nodeid, const char *name,
 
  not_found:
 	error = get_rsb_struct(ls, name, len, &r);
-	if (error == -EAGAIN)
-		goto retry;
-	if (error)
+	if (WARN_ON_ONCE(error))
 		goto out;
 
 	r->res_hash = hash;
 	r->res_dir_nodeid = our_nodeid;
 	r->res_master_nodeid = from_nodeid;
 	r->res_nodeid = from_nodeid;
-	kref_init(&r->res_ref);
 	rsb_set_flag(r, RSB_TOSS);
 
 	write_lock_bh(&ls->ls_rsbtbl_lock);
@@ -1396,7 +1327,7 @@ int dlm_master_lookup(struct dlm_ls *ls, int from_nodeid, const char *name,
 		 */
 		write_unlock_bh(&ls->ls_rsbtbl_lock);
 		dlm_free_rsb(r);
-		goto retry_lookup;
+		goto retry;
 	} else if (error) {
 		write_unlock_bh(&ls->ls_rsbtbl_lock);
 		/* should never happen */
@@ -1504,10 +1435,14 @@ static void detach_lkb(struct dlm_lkb *lkb)
 }
 
 static int _create_lkb(struct dlm_ls *ls, struct dlm_lkb **lkb_ret,
-		       int start, int end)
+		       unsigned long start, unsigned long end)
 {
+	struct xa_limit limit;
 	struct dlm_lkb *lkb;
 	int rv;
+
+	limit.max = end;
+	limit.min = start;
 
 	lkb = dlm_allocate_lkb(ls);
 	if (!lkb)
@@ -1522,14 +1457,12 @@ static int _create_lkb(struct dlm_ls *ls, struct dlm_lkb **lkb_ret,
 	INIT_LIST_HEAD(&lkb->lkb_ownqueue);
 	INIT_LIST_HEAD(&lkb->lkb_rsb_lookup);
 
-	write_lock_bh(&ls->ls_lkbidr_lock);
-	rv = idr_alloc(&ls->ls_lkbidr, lkb, start, end, GFP_NOWAIT);
-	if (rv >= 0)
-		lkb->lkb_id = rv;
-	write_unlock_bh(&ls->ls_lkbidr_lock);
+	write_lock_bh(&ls->ls_lkbxa_lock);
+	rv = xa_alloc(&ls->ls_lkbxa, &lkb->lkb_id, lkb, limit, GFP_ATOMIC);
+	write_unlock_bh(&ls->ls_lkbxa_lock);
 
 	if (rv < 0) {
-		log_error(ls, "create_lkb idr error %d", rv);
+		log_error(ls, "create_lkb xa error %d", rv);
 		dlm_free_lkb(lkb);
 		return rv;
 	}
@@ -1540,18 +1473,18 @@ static int _create_lkb(struct dlm_ls *ls, struct dlm_lkb **lkb_ret,
 
 static int create_lkb(struct dlm_ls *ls, struct dlm_lkb **lkb_ret)
 {
-	return _create_lkb(ls, lkb_ret, 1, 0);
+	return _create_lkb(ls, lkb_ret, 1, ULONG_MAX);
 }
 
 static int find_lkb(struct dlm_ls *ls, uint32_t lkid, struct dlm_lkb **lkb_ret)
 {
 	struct dlm_lkb *lkb;
 
-	read_lock_bh(&ls->ls_lkbidr_lock);
-	lkb = idr_find(&ls->ls_lkbidr, lkid);
+	read_lock_bh(&ls->ls_lkbxa_lock);
+	lkb = xa_load(&ls->ls_lkbxa, lkid);
 	if (lkb)
 		kref_get(&lkb->lkb_ref);
-	read_unlock_bh(&ls->ls_lkbidr_lock);
+	read_unlock_bh(&ls->ls_lkbxa_lock);
 
 	*lkb_ret = lkb;
 	return lkb ? 0 : -ENOENT;
@@ -1576,10 +1509,10 @@ static int __put_lkb(struct dlm_ls *ls, struct dlm_lkb *lkb)
 	int rv;
 
 	rv = dlm_kref_put_write_lock_bh(&lkb->lkb_ref, kill_lkb,
-					&ls->ls_lkbidr_lock);
+					&ls->ls_lkbxa_lock);
 	if (rv) {
-		idr_remove(&ls->ls_lkbidr, lkid);
-		write_unlock_bh(&ls->ls_lkbidr_lock);
+		xa_erase(&ls->ls_lkbxa, lkid);
+		write_unlock_bh(&ls->ls_lkbxa_lock);
 
 		detach_lkb(lkb);
 
