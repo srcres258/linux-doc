@@ -611,15 +611,10 @@ int tcp_v4_err(struct sk_buff *skb, u32 info)
 
 		ip_icmp_error(sk, skb, err, th->dest, info, (u8 *)th);
 
-		if (!sock_owned_by_user(sk)) {
-			WRITE_ONCE(sk->sk_err, err);
-
-			sk_error_report(sk);
-
-			tcp_done(sk);
-		} else {
+		if (!sock_owned_by_user(sk))
+			tcp_done_with_error(sk, err);
+		else
 			WRITE_ONCE(sk->sk_err_soft, err);
-		}
 		goto out;
 	}
 
@@ -2049,8 +2044,7 @@ bool tcp_add_backlog(struct sock *sk, struct sk_buff *skb,
 	      TCP_SKB_CB(skb)->tcp_flags) & TCPHDR_ACK) ||
 	    ((TCP_SKB_CB(tail)->tcp_flags ^
 	      TCP_SKB_CB(skb)->tcp_flags) & (TCPHDR_ECE | TCPHDR_CWR)) ||
-	    !mptcp_skb_can_collapse(tail, skb) ||
-	    skb_cmp_decrypted(tail, skb) ||
+	    !tcp_skb_can_collapse_rx(tail, skb) ||
 	    thtail->doff != th->doff ||
 	    memcmp(thtail + 1, th + 1, hdrlen - sizeof(*th)))
 		goto no_coalesce;
@@ -3619,6 +3613,8 @@ void __init tcp_v4_init(void)
 		 * ACK sent in SYN-RECV and TIME-WAIT state.
 		 */
 		inet_sk(sk)->pmtudisc = IP_PMTUDISC_DO;
+
+		sk->sk_clockid = CLOCK_MONOTONIC;
 
 		per_cpu(ipv4_tcp_sk, cpu) = sk;
 	}
