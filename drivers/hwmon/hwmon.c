@@ -310,7 +310,7 @@ static int hwmon_attr_base(enum hwmon_sensor_types type)
 	return 1;
 }
 
-#if IS_ENABLED(CONFIG_I2C)
+#if IS_REACHABLE(CONFIG_I2C)
 
 /*
  * PEC support
