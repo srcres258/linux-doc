@@ -204,7 +204,7 @@ static void fpu_init_guest_permissions(struct fpu_guest *gfpu)
 		return;
 
 	spin_lock_irq(&current->sighand->siglock);
-	fpuperm = &current->group_leader->thread.fpu->guest_perm;
+	fpuperm = &x86_task_fpu(current->group_leader)->guest_perm;
 	perm = fpuperm->__state_perm;
 
 	/* First fpstate allocation locks down permissions. */
@@ -316,7 +316,7 @@ EXPORT_SYMBOL_GPL(fpu_update_guest_xfd);
  */
 void fpu_sync_guest_vmexit_xfd_state(void)
 {
-	struct fpstate *fps = current->thread.fpu->fpstate;
+	struct fpstate *fps = x86_task_fpu(current)->fpstate;
 
 	lockdep_assert_irqs_disabled();
 	if (fpu_state_size_dynamic()) {
@@ -330,7 +330,7 @@ EXPORT_SYMBOL_GPL(fpu_sync_guest_vmexit_xfd_state);
 int fpu_swap_kvm_fpstate(struct fpu_guest *guest_fpu, bool enter_guest)
 {
 	struct fpstate *guest_fps = guest_fpu->fpstate;
-	struct fpu *fpu = current->thread.fpu;
+	struct fpu *fpu = x86_task_fpu(current);
 	struct fpstate *cur_fps = fpu->fpstate;
 
 	fpregs_lock();
@@ -430,7 +430,7 @@ void kernel_fpu_begin_mask(unsigned int kfpu_mask)
 	if (!(current->flags & (PF_KTHREAD | PF_USER_WORKER)) &&
 	    !test_thread_flag(TIF_NEED_FPU_LOAD)) {
 		set_thread_flag(TIF_NEED_FPU_LOAD);
-		save_fpregs_to_fpstate(current->thread.fpu);
+		save_fpregs_to_fpstate(x86_task_fpu(current));
 	}
 	__cpu_invalidate_fpregs_state();
 
@@ -458,7 +458,7 @@ EXPORT_SYMBOL_GPL(kernel_fpu_end);
  */
 void fpu_sync_fpstate(struct fpu *fpu)
 {
-	WARN_ON_FPU(fpu != current->thread.fpu);
+	WARN_ON_FPU(fpu != x86_task_fpu(current));
 
 	fpregs_lock();
 	trace_x86_fpu_before_save(fpu);
@@ -543,7 +543,7 @@ void fpstate_reset(struct fpu *fpu)
 static inline void fpu_inherit_perms(struct fpu *dst_fpu)
 {
 	if (fpu_state_size_dynamic()) {
-		struct fpu *src_fpu = current->group_leader->thread.fpu;
+		struct fpu *src_fpu = x86_task_fpu(current->group_leader);
 
 		spin_lock_irq(&current->sighand->siglock);
 		/* Fork also inherits the permissions of the parent */
@@ -563,7 +563,7 @@ static int update_fpu_shstk(struct task_struct *dst, unsigned long ssp)
 	if (!ssp)
 		return 0;
 
-	xstate = get_xsave_addr(&dst->thread.fpu->fpstate->regs.xsave,
+	xstate = get_xsave_addr(&x86_task_fpu(dst)->fpstate->regs.xsave,
 				XFEATURE_CET_USER);
 
 	/*
@@ -591,12 +591,10 @@ int fpu_clone(struct task_struct *dst, unsigned long clone_flags, bool minimal,
 	 * This is safe because task_struct size is a multiple of cacheline size.
 	 */
 	struct fpu *dst_fpu = (void *)dst + sizeof(*dst);
-	struct fpu *src_fpu = current->thread.fpu;
+	struct fpu *src_fpu = x86_task_fpu(current);
 
 	BUILD_BUG_ON(sizeof(*dst) % SMP_CACHE_BYTES != 0);
 	BUG_ON(!src_fpu);
-
-	dst->thread.fpu = dst_fpu;
 
 	/* The new task's FPU state cannot be valid in the hardware. */
 	dst_fpu->last_cpu = -1;
@@ -678,7 +676,7 @@ void fpu__drop(struct fpu *fpu)
 {
 	preempt_disable();
 
-	if (fpu == current->thread.fpu) {
+	if (fpu == x86_task_fpu(current)) {
 		/* Ignore delayed exceptions from user space */
 		asm volatile("1: fwait\n"
 			     "2:\n"
@@ -712,7 +710,7 @@ static inline void restore_fpregs_from_init_fpstate(u64 features_mask)
  */
 static void fpu_reset_fpregs(void)
 {
-	struct fpu *fpu = current->thread.fpu;
+	struct fpu *fpu = x86_task_fpu(current);
 
 	fpregs_lock();
 	__fpu_invalidate_fpregs_state(fpu);
@@ -741,7 +739,7 @@ static void fpu_reset_fpregs(void)
  */
 void fpu__clear_user_states(struct fpu *fpu)
 {
-	WARN_ON_FPU(fpu != current->thread.fpu);
+	WARN_ON_FPU(fpu != x86_task_fpu(current));
 
 	fpregs_lock();
 	if (!cpu_feature_enabled(X86_FEATURE_FPU)) {
@@ -774,7 +772,7 @@ void fpu__clear_user_states(struct fpu *fpu)
 
 void fpu_flush_thread(void)
 {
-	fpstate_reset(current->thread.fpu);
+	fpstate_reset(x86_task_fpu(current));
 	fpu_reset_fpregs();
 }
 /*
@@ -815,7 +813,7 @@ void fpregs_lock_and_load(void)
  */
 void fpregs_assert_state_consistent(void)
 {
-	struct fpu *fpu = current->thread.fpu;
+	struct fpu *fpu = x86_task_fpu(current);
 
 	if (test_thread_flag(TIF_NEED_FPU_LOAD))
 		return;
@@ -827,7 +825,7 @@ EXPORT_SYMBOL_GPL(fpregs_assert_state_consistent);
 
 void fpregs_mark_activate(void)
 {
-	struct fpu *fpu = current->thread.fpu;
+	struct fpu *fpu = x86_task_fpu(current);
 
 	fpregs_activate(fpu);
 	fpu->last_cpu = smp_processor_id();
