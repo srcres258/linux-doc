@@ -106,15 +106,15 @@ const char *gpiod_get_label(struct gpio_desc *desc)
 	unsigned long flags;
 
 	flags = READ_ONCE(desc->flags);
-	if (test_bit(FLAG_USED_AS_IRQ, &flags) &&
-	    !test_bit(FLAG_REQUESTED, &flags))
-		return "interrupt";
-
-	if (!test_bit(FLAG_REQUESTED, &flags))
-		return NULL;
 
 	label = srcu_dereference_check(desc->label, &desc->gdev->desc_srcu,
 				srcu_read_lock_held(&desc->gdev->desc_srcu));
+
+	if (test_bit(FLAG_USED_AS_IRQ, &flags))
+		return label->str ?: "interrupt";
+
+	if (!test_bit(FLAG_REQUESTED, &flags))
+		return NULL;
 
 	return label->str;
 }
@@ -4795,11 +4795,11 @@ static void gpiolib_dbg_show(struct seq_file *s, struct gpio_device *gdev)
 
 	for_each_gpio_desc(gc, desc) {
 		guard(srcu)(&desc->gdev->desc_srcu);
-		if (test_bit(FLAG_REQUESTED, &desc->flags)) {
+		is_irq = test_bit(FLAG_USED_AS_IRQ, &desc->flags);
+		if (is_irq || test_bit(FLAG_REQUESTED, &desc->flags)) {
 			gpiod_get_direction(desc);
 			is_out = test_bit(FLAG_IS_OUT, &desc->flags);
 			value = gpio_chip_get_value(gc, desc);
-			is_irq = test_bit(FLAG_USED_AS_IRQ, &desc->flags);
 			active_low = test_bit(FLAG_ACTIVE_LOW, &desc->flags);
 			seq_printf(s, " gpio-%-3u (%-20.20s|%-20.20s) %s %s %s%s\n",
 				   gpio, desc->name ?: "", gpiod_get_label(desc),

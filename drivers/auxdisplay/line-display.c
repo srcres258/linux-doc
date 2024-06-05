@@ -315,9 +315,9 @@ static int linedisp_init_map(struct linedisp *linedisp)
 }
 
 #ifdef CONFIG_PANEL_BOOT_MESSAGE
-#define LINE_DISP_INIT_TEXT CONFIG_PANEL_BOOT_MESSAGE
+#define LINEDISP_INIT_TEXT CONFIG_PANEL_BOOT_MESSAGE
 #else
-#define LINE_DISP_INIT_TEXT "Linux " UTS_RELEASE "       "
+#define LINEDISP_INIT_TEXT "Linux " UTS_RELEASE "       "
 #endif
 
 /**
@@ -367,7 +367,7 @@ int linedisp_register(struct linedisp *linedisp, struct device *parent,
 		goto out_del_timer;
 
 	/* display a default message */
-	err = linedisp_display(linedisp, LINE_DISP_INIT_TEXT, -1);
+	err = linedisp_display(linedisp, LINEDISP_INIT_TEXT, -1);
 	if (err)
 		goto out_del_dev;
 
