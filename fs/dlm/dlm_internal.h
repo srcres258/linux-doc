@@ -36,7 +36,7 @@
 #include <linux/miscdevice.h>
 #include <linux/rhashtable.h>
 #include <linux/mutex.h>
-#include <linux/idr.h>
+#include <linux/xarray.h>
 #include <linux/ratelimit.h>
 #include <linux/uaccess.h>
 
@@ -316,16 +316,13 @@ struct dlm_rsb {
 	int			res_nodeid;
 	int			res_master_nodeid;
 	int			res_dir_nodeid;
-	int			res_id;		/* for ls_recover_idr */
+	unsigned long		res_id;		/* for ls_recover_xa */
 	uint32_t                res_lvbseq;
 	uint32_t		res_hash;
 	unsigned long		res_toss_time;
 	uint32_t		res_first_lkid;
 	struct list_head	res_lookup;	/* lkbs waiting on first */
-	union {
-		struct list_head	res_hashchain;
-		struct rhash_head	res_node; /* rsbtbl */
-	};
+	struct rhash_head	res_node;	/* rsbtbl */
 	struct list_head	res_grantqueue;
 	struct list_head	res_convertqueue;
 	struct list_head	res_waitqueue;
@@ -559,16 +556,8 @@ struct rcom_lock {
 	char			rl_lvb[];
 };
 
-/*
- * The max number of resources per rsbtbl bucket that shrink will attempt
- * to remove in each iteration.
- */
-
-#define DLM_REMOVE_NAMES_MAX 8
-
 struct dlm_ls {
 	struct list_head	ls_list;	/* list of lockspaces */
-	dlm_lockspace_t		*ls_local_handle;
 	uint32_t		ls_global_id;	/* global unique lockspace ID */
 	uint32_t		ls_generation;
 	uint32_t		ls_exflags;
@@ -578,11 +567,10 @@ struct dlm_ls {
 	wait_queue_head_t	ls_count_wait;
 	int			ls_create_count; /* create/release refcount */
 	unsigned long		ls_flags;	/* LSFL_ */
-	unsigned long		ls_scan_time;
 	struct kobject		ls_kobj;
 
-	struct idr		ls_lkbidr;
-	rwlock_t		ls_lkbidr_lock;
+	struct xarray		ls_lkbxa;
+	rwlock_t		ls_lkbxa_lock;
 
 	struct rhashtable	ls_rsbtbl;
 	rwlock_t		ls_rsbtbl_lock;
@@ -604,10 +592,6 @@ struct dlm_ls {
 
 	spinlock_t		ls_orphans_lock;
 	struct list_head	ls_orphans;
-
-	spinlock_t		ls_new_rsb_spin;
-	int			ls_new_rsb_count;
-	struct list_head	ls_new_rsb;	/* new rsb structs */
 
 	struct list_head	ls_nodes;	/* current nodes in ls */
 	struct list_head	ls_nodes_gone;	/* dead node list, recovery */
@@ -664,8 +648,8 @@ struct dlm_ls {
 	struct list_head	ls_recover_list;
 	spinlock_t		ls_recover_list_lock;
 	int			ls_recover_list_count;
-	struct idr		ls_recover_idr;
-	spinlock_t		ls_recover_idr_lock;
+	struct xarray		ls_recover_xa;
+	spinlock_t		ls_recover_xa_lock;
 	wait_queue_head_t	ls_wait_general;
 	wait_queue_head_t	ls_recover_lock_wait;
 	spinlock_t		ls_clear_proc_locks;
