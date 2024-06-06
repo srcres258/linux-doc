@@ -3499,12 +3499,32 @@ static struct extent_buffer *grab_extent_buffer(
 struct folio *folio = page_folio(page);
 struct extent_buffer *exists;
 
-/*
- * For subpage case, we completely rely on radix tree to ensure we
- * don't try to insert two ebs for the same bytenr.  So here we always
- * return NULL and just continue.
- */
-if (fs_info->nodesize < PAGE_SIZE)
+	lockdep_assert_held(&page->mapping->i_private_lock);
+
+	/*
+	 * For subpage case, we completely rely on radix tree to ensure we
+	 * don't try to insert two ebs for the same bytenr.  So here we always
+	 * return NULL and just continue.
+	 */
+	if (fs_info->nodesize < PAGE_SIZE)
+		return NULL;
+
+	/* Page not yet attached to an extent buffer */
+	if (!folio_test_private(folio))
+		return NULL;
+
+	/*
+	 * We could have already allocated an eb for this page and attached one
+	 * so lets see if we can get a ref on the existing eb, and if we can we
+	 * know it's good and we can just return that one, else we know we can
+	 * just overwrite folio private.
+	 */
+	exists = folio_get_private(folio);
+	if (atomic_inc_not_zero(&exists->refs))
+		return exists;
+
+	WARN_ON(PageDirty(page));
+	folio_detach_private(folio);
 	return NULL;
 
 /* Page not yet attached to an extent buffer */
@@ -3731,12 +3751,12 @@ finish:
 	ASSERT(!ret);
 	/*
 	 * To inform we have extra eb under allocation, so that
-	 * detach_extent_buffer_page() won't release the folio private
-	 * when the eb hasn't yet been inserted into radix tree.
+	 * detach_extent_buffer_page() won't release the folio private when the
+	 * eb hasn't yet been inserted into radix tree.
 	 *
 	 * The ref will be decreased when the eb released the page, in
-	 * detach_extent_buffer_page().
-	 * Thus needs no special handling in error path.
+	 * detach_extent_buffer_page().  Thus needs no special handling in
+	 * error path.
 	 */
 	btrfs_folio_inc_eb_refs(fs_info, eb->folios[i]);
 	spin_unlock(&mapping->i_private_lock);

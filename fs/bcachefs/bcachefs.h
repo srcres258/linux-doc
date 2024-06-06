@@ -269,6 +269,8 @@ do {									\
 
 #define bch2_fmt(_c, fmt)		bch2_log_msg(_c, fmt "\n")
 
+void bch2_print_str(struct bch_fs *, const char *);
+
 __printf(2, 3)
 void bch2_print_opts(struct bch_opts *, const char *, ...);
 
@@ -532,8 +534,8 @@ struct bch_dev {
 	/*
 	 * Buckets:
 	 * Per-bucket arrays are protected by c->mark_lock, bucket_lock and
-	 * gc_lock, for device resize - holding any is sufficient for access:
-	 * Or rcu_read_lock(), but only for dev_ptr_stale():
+	 * gc_gens_lock, for device resize - holding any is sufficient for
+	 * access: Or rcu_read_lock(), but only for dev_ptr_stale():
 	 */
 	struct bucket_array __rcu *buckets_gc;
 	struct bucket_gens __rcu *bucket_gens;
@@ -936,7 +938,6 @@ struct bch_fs {
 	 * The allocation code needs gc_mark in struct bucket to be correct, but
 	 * it's not while a gc is in progress.
 	 */
-	struct rw_semaphore	gc_lock;
 	struct mutex		gc_gens_lock;
 
 	/* IO PATH */

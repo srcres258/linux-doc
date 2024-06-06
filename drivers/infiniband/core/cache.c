@@ -803,9 +803,10 @@ static void release_gid_table(struct ib_device *device,
 		if (is_gid_entry_free(table->data_vec[i]))
 			continue;
 
-		dev_err(&device->dev,
-			"GID entry ref leak for index %d ref=%u\n", i,
-			kref_read(&table->data_vec[i]->kref));
+		WARN_ONCE(true,
+			  "GID entry ref leak for dev %s index %d ref=%u\n",
+			  dev_name(&device->dev), i,
+			  kref_read(&table->data_vec[i]->kref));
 	}
 
 	mutex_destroy(&table->lock);

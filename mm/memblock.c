@@ -194,8 +194,8 @@ bool __init_memblock memblock_overlaps_region(struct memblock_type *type,
 	for (i = 0; i < type->cnt; i++)
 		if (memblock_addrs_overlap(base, size, type->regions[i].base,
 					   type->regions[i].size))
-			break;
-	return i < type->cnt;
+			return true;
+	return false;
 }
 
 /**
@@ -1376,7 +1376,8 @@ bool __init_memblock memblock_validate_numa_coverage(unsigned long threshold_byt
  * Walk @type and ensure that regions don't cross the boundaries defined by
  * [@base, @base + @size).  Crossing regions are split at the boundaries,
  * which may create at most two more regions.  The index of the first
- * region inside the range is returned in *@start_rgn and end in *@end_rgn.
+ * region inside the range is returned in *@start_rgn and the index of the
+ * first region after the range is returned in *@end_rgn.
  *
  * Return:
  * 0 on success, -errno on failure.
@@ -2641,7 +2642,7 @@ static void __init free_memmap(unsigned long start_pfn, unsigned long end_pfn)
 	 * downwards.
 	 */
 	pg = PAGE_ALIGN(__pa(start_pg));
-	pgend = __pa(end_pg) & PAGE_MASK;
+	pgend = PAGE_ALIGN_DOWN(__pa(end_pg));
 
 	/*
 	 * If there are free pages between these, free the section of the

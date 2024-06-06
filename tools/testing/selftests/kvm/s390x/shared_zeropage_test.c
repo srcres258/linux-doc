@@ -11,6 +11,7 @@
 #include "test_util.h"
 #include "kvm_util.h"
 #include "kselftest.h"
+#include "ucall_common.h"
 
 static void set_storage_key(void *addr, uint8_t skey)
 {

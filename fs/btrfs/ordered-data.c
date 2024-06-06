@@ -224,7 +224,7 @@ static void insert_ordered_extent(struct btrfs_ordered_extent *entry)
 	spin_lock_irq(&inode->ordered_tree_lock);
 	node = tree_insert(&inode->ordered_tree, entry->file_offset,
 			   &entry->rb_node);
-	if (node)
+	if (unlikely(node))
 		btrfs_panic(fs_info, -EEXIST,
 				"inconsistency in ordered tree at offset %llu",
 				entry->file_offset);
@@ -783,10 +783,10 @@ u64 btrfs_wait_ordered_extents(struct btrfs_root *root, u64 nr,
 		btrfs_queue_work(fs_info->flush_workers, &ordered->flush_work);
 
 		cond_resched();
-		spin_lock(&root->ordered_extent_lock);
 		if (nr != U64_MAX)
 			nr--;
 		count++;
+		spin_lock(&root->ordered_extent_lock);
 	}
 	list_splice_tail(&skipped, &root->ordered_extents);
 	list_splice_tail(&splice, &root->ordered_extents);
@@ -829,10 +829,10 @@ void btrfs_wait_ordered_roots(struct btrfs_fs_info *fs_info, u64 nr,
 		done = btrfs_wait_ordered_extents(root, nr, bg);
 		btrfs_put_root(root);
 
-		spin_lock(&fs_info->ordered_root_lock);
-		if (nr != U64_MAX) {
+		if (nr != U64_MAX)
 			nr -= done;
-		}
+
+		spin_lock(&fs_info->ordered_root_lock);
 	}
 	list_splice_tail(&splice, &fs_info->ordered_roots);
 	spin_unlock(&fs_info->ordered_root_lock);
@@ -1247,14 +1247,32 @@ struct btrfs_ordered_extent *btrfs_split_ordered_extent(
 	/* One ref for the tree. */
 	refcount_inc(&new->refs);
 
-	spin_lock_irq(&inode->ordered_tree_lock);
-	/* Remove from tree once */
-	node = &ordered->rb_node;
-	rb_erase(node, &inode->ordered_tree);
-	RB_CLEAR_NODE(node);
-	if (inode->ordered_tree_last == node)
-		inode->ordered_tree_last = NULL;
+	/*
+	 * Take the root's ordered_extent_lock to avoid a race with
+	 * btrfs_wait_ordered_extents() when updating the disk_bytenr and
+	 * disk_num_bytes fields of the ordered extent below. And we disable
+	 * IRQs because the inode's ordered_tree_lock is used in IRQ context
+	 * elsewhere.
+	 *
+	 * There's no concern about a previous caller of
+	 * btrfs_wait_ordered_extents() getting the trimmed ordered extent
+	 * before we insert the new one, because even if it gets the ordered
+	 * extent before it's trimmed and the new one inserted, right before it
+	 * uses it or during its use, the ordered extent might have been
+	 * trimmed in the meanwhile, and it missed the new ordered extent.
+	 * There's no way around this and it's harmless for current use cases,
+	 * so we take the root's ordered_extent_lock to fix that race during
+	 * trimming and silence tools like KCSAN.
+	 */
+	spin_lock_irq(&root->ordered_extent_lock);
+	spin_lock(&inode->ordered_tree_lock);
 
+	/*
+	 * We don't have overlapping ordered extents (that would imply double
+	 * allocation of extents) and we checked above that the split length
+	 * does not cross the ordered extent's num_bytes field, so there's
+	 * no need to remove it and re-insert it in the tree.
+	 */
 	ordered->file_offset += len;
 	ordered->disk_bytenr += len;
 	ordered->num_bytes -= len;
@@ -1284,18 +1302,10 @@ struct btrfs_ordered_extent *btrfs_split_ordered_extent(
 		offset += sum->len;
 	}
 
-	/* Re-insert the node */
-	node = tree_insert(&inode->ordered_tree, ordered->file_offset,
-			   &ordered->rb_node);
-	if (node)
-		btrfs_panic(fs_info, -EEXIST,
-			"zoned: inconsistency in ordered tree at offset %llu",
-			ordered->file_offset);
-
 	node = tree_insert(&inode->ordered_tree, new->file_offset, &new->rb_node);
-	if (node)
+	if (unlikely(node))
 		btrfs_panic(fs_info, -EEXIST,
-			"zoned: inconsistency in ordered tree at offset %llu",
+			"inconsistency in ordered tree at offset %llu after split",
 			new->file_offset);
 	spin_unlock_irq(&inode->ordered_tree_lock);
 

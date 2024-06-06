@@ -18,16 +18,8 @@
 
 #define CACHELINE_BYTES 64
 
-enum dsb_id {
-	INVALID_DSB = -1,
-	DSB1,
-	DSB2,
-	DSB3,
-	MAX_DSB_PER_PIPE
-};
-
 struct intel_dsb {
-	enum dsb_id id;
+	enum intel_dsb_id id;
 
 	struct intel_dsb_buffer dsb_buf;
 	struct intel_crtc *crtc;
@@ -120,9 +112,9 @@ static void intel_dsb_dump(struct intel_dsb *dsb)
 }
 
 static bool is_dsb_busy(struct drm_i915_private *i915, enum pipe pipe,
-			enum dsb_id id)
+			enum intel_dsb_id dsb_id)
 {
-	return intel_de_read_fw(i915, DSB_CTRL(pipe, id)) & DSB_STATUS_BUSY;
+	return intel_de_read_fw(i915, DSB_CTRL(pipe, dsb_id)) & DSB_STATUS_BUSY;
 }
 
 static void intel_dsb_emit(struct intel_dsb *dsb, u32 ldw, u32 udw)
@@ -443,6 +435,7 @@ void intel_dsb_wait(struct intel_dsb *dsb)
 /**
  * intel_dsb_prepare() - Allocate, pin and map the DSB command buffer.
  * @crtc_state: the CRTC state
+ * @dsb_id: the DSB engine to use
  * @max_cmds: number of commands we need to fit into command buffer
  *
  * This function prepare the command buffer which is used to store dsb
@@ -452,6 +445,7 @@ void intel_dsb_wait(struct intel_dsb *dsb)
  * DSB context, NULL on failure
  */
 struct intel_dsb *intel_dsb_prepare(const struct intel_crtc_state *crtc_state,
+				    enum intel_dsb_id dsb_id,
 				    unsigned int max_cmds)
 {
 	struct intel_crtc *crtc = to_intel_crtc(crtc_state->uapi.crtc);
@@ -481,7 +475,7 @@ struct intel_dsb *intel_dsb_prepare(const struct intel_crtc_state *crtc_state,
 
 	intel_runtime_pm_put(&i915->runtime_pm, wakeref);
 
-	dsb->id = DSB1;
+	dsb->id = dsb_id;
 	dsb->crtc = crtc;
 	dsb->size = size / 4; /* in dwords */
 	dsb->free_pos = 0;
@@ -496,7 +490,7 @@ out_put_rpm:
 out:
 	drm_info_once(&i915->drm,
 		      "[CRTC:%d:%s] DSB %d queue setup failed, will fallback to MMIO for display HW programming\n",
-		      crtc->base.base.id, crtc->base.name, DSB1);
+		      crtc->base.base.id, crtc->base.name, dsb_id);
 
 	return NULL;
 }

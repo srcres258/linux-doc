@@ -90,6 +90,19 @@ const char * const bch2_fs_flag_strs[] = {
 	NULL
 };
 
+void bch2_print_str(struct bch_fs *c, const char *str)
+{
+#ifdef __KERNEL__
+	struct stdio_redirect *stdio = bch2_fs_stdio_redirect(c);
+
+	if (unlikely(stdio)) {
+		bch2_stdio_redirect_printf(stdio, true, "%s", str);
+		return;
+	}
+#endif
+	bch2_print_string_as_lines(KERN_ERR, str);
+}
+
 __printf(2, 0)
 static void bch2_print_maybe_redirect(struct stdio_redirect *stdio, const char *fmt, va_list args)
 {
@@ -751,7 +764,6 @@ static struct bch_fs *bch2_fs_alloc(struct bch_sb *sb, struct bch_opts opts)
 	init_waitqueue_head(&c->ro_ref_wait);
 	sema_init(&c->online_fsck_mutex, 1);
 
-	init_rwsem(&c->gc_lock);
 	mutex_init(&c->gc_gens_lock);
 	atomic_set(&c->journal_keys.ref, 1);
 	c->journal_keys.initial_ref_held = true;

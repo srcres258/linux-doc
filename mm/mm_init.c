@@ -363,7 +363,7 @@ static void __init find_zone_movable_pfns_for_nodes(void)
 
 			nid = memblock_get_region_node(r);
 
-			usable_startpfn = PFN_DOWN(r->base);
+			usable_startpfn = memblock_region_memory_base_pfn(r);
 			zone_movable_pfn[nid] = zone_movable_pfn[nid] ?
 				min(usable_startpfn, zone_movable_pfn[nid]) :
 				usable_startpfn;
@@ -676,6 +676,14 @@ defer_init(int nid, unsigned long pfn, unsigned long end_pfn)
 
 	if (early_page_ext_enabled())
 		return false;
+
+	/* Always populate low zones for address-constrained allocations */
+	if (end_pfn < pgdat_end_pfn(NODE_DATA(nid)))
+		return false;
+
+	if (NODE_DATA(nid)->first_deferred_pfn != ULONG_MAX)
+		return true;
+
 	/*
 	 * prev_end_pfn static that contains the end of previous zone
 	 * No need to protect because called very early in boot before smp_init.
@@ -685,12 +693,6 @@ defer_init(int nid, unsigned long pfn, unsigned long end_pfn)
 		nr_initialised = 0;
 	}
 
-	/* Always populate low zones for address-constrained allocations */
-	if (end_pfn < pgdat_end_pfn(NODE_DATA(nid)))
-		return false;
-
-	if (NODE_DATA(nid)->first_deferred_pfn != ULONG_MAX)
-		return true;
 	/*
 	 * We start only with one section of pages, more pages are added as
 	 * needed until the rest of deferred pages are initialized.
@@ -2019,10 +2021,12 @@ static unsigned long  __init deferred_init_pages(struct zone *zone,
 }
 
 /*
- * This function is meant to pre-load the iterator for the zone init.
- * Specifically it walks through the ranges until we are caught up to the
- * first_init_pfn value and exits there. If we never encounter the value we
- * return false indicating there are no valid ranges left.
+ * This function is meant to pre-load the iterator for the zone init from
+ * a given point.
+ * Specifically it walks through the ranges starting with initial index
+ * passed to it until we are caught up to the first_init_pfn value and
+ * exits there. If we never encounter the value we return false indicating
+ * there are no valid ranges left.
  */
 static bool __init
 deferred_init_mem_pfn_range_in_zone_from(u64 *i, struct zone *zone,

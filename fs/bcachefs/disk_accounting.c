@@ -3,6 +3,7 @@
 #include "bcachefs.h"
 #include "bcachefs_ioctl.h"
 #include "btree_cache.h"
+#include "btree_journal_iter.h"
 #include "btree_update.h"
 #include "btree_write_buffer.h"
 #include "buckets.h"
@@ -182,7 +183,9 @@ static inline bool accounting_to_replicas(struct bch_replicas_entry_v1 *r, struc
 
 	switch (acc_k.type) {
 	case BCH_DISK_ACCOUNTING_replicas:
-		memcpy(r, &acc_k.replicas, replicas_entry_bytes(&acc_k.replicas));
+		unsafe_memcpy(r, &acc_k.replicas,
+			      replicas_entry_bytes(&acc_k.replicas),
+			      "variable length struct");
 		return true;
 	default:
 		return false;
@@ -310,6 +313,44 @@ int bch2_fs_replicas_usage_read(struct bch_fs *c, darray_char *usage)
 	return ret;
 }
 
+int bch2_fs_accounting_read(struct bch_fs *c, darray_char *out_buf, unsigned accounting_types_mask)
+{
+
+	struct bch_accounting_mem *acc = &c->accounting[0];
+	int ret = 0;
+
+	darray_init(out_buf);
+
+	percpu_down_read(&c->mark_lock);
+	darray_for_each(acc->k, i) {
+		struct disk_accounting_pos a_p;
+		bpos_to_disk_accounting_pos(&a_p, i->pos);
+
+		if (!(accounting_types_mask & BIT(a_p.type)))
+			continue;
+
+		ret = darray_make_room(out_buf, sizeof(struct bkey_i_accounting) +
+				       sizeof(u64) * i->nr_counters);
+		if (ret)
+			break;
+
+		struct bkey_i_accounting *a_out =
+			bkey_accounting_init((void *) &darray_top(*out_buf));
+		set_bkey_val_u64s(&a_out->k, i->nr_counters);
+		a_out->k.p = i->pos;
+		bch2_accounting_mem_read(c, i->pos, a_out->v.d, i->nr_counters);
+
+		if (!bch2_accounting_key_is_zero(accounting_i_to_s_c(a_out)))
+			out_buf->nr += bkey_bytes(&a_out->k);
+	}
+
+	percpu_up_read(&c->mark_lock);
+
+	if (ret)
+		darray_exit(out_buf);
+	return ret;
+}
+
 void bch2_fs_accounting_to_text(struct printbuf *out, struct bch_fs *c)
 {
 	struct bch_accounting_mem *acc = &c->accounting[0];
@@ -428,7 +469,7 @@ int bch2_accounting_gc_done(struct bch_fs *c)
 			for (unsigned j = 0; j < nr; j++)
 				src_v[j] -= dst_v[j];
 
-			if (fsck_err(c, accounting_mismatch, "%s", buf.buf)) {
+			if (fsck_err(trans, accounting_mismatch, "%s", buf.buf)) {
 				ret = commit_do(trans, NULL, NULL, 0,
 						bch2_disk_accounting_mod(trans, &acc_k, src_v, nr, false));
 				if (ret)
@@ -459,7 +500,7 @@ fsck_err:
 	return ret;
 }
 
-static int accounting_read_key(struct bch_fs *c, struct bkey_s_c k)
+static int accounting_read_key(struct bch_fs *c, struct btree_trans *trans, struct bkey_s_c k)
 {
 	struct printbuf buf = PRINTBUF;
 
@@ -478,7 +519,7 @@ static int accounting_read_key(struct bch_fs *c, struct bkey_s_c k)
 	bpos_to_disk_accounting_pos(&acc, k.k->p);
 
 	if (fsck_err_on(ret == -BCH_ERR_btree_insert_need_mark_replicas,
-			c, accounting_replicas_not_marked,
+			trans, accounting_replicas_not_marked,
 			"accounting not marked in superblock replicas\n  %s",
 			(bch2_accounting_key_to_text(&buf, &acc),
 			 buf.buf)))
@@ -502,13 +543,15 @@ int bch2_accounting_read(struct bch_fs *c)
 				BTREE_ITER_prefetch|BTREE_ITER_all_snapshots, k, ({
 			struct bkey u;
 			struct bkey_s_c k = bch2_btree_path_peek_slot_exact(btree_iter_path(trans, &iter), &u);
-			accounting_read_key(c, k);
+			accounting_read_key(c, trans, k);
 		})));
 	if (ret)
 		goto err;
 
 	struct journal_keys *keys = &c->journal_keys;
+	struct journal_key *dst = keys->data;
 	move_gap(keys, keys->nr);
+
 	darray_for_each(*keys, i) {
 		if (i->k->k.type == KEY_TYPE_accounting) {
 			struct bkey_s_c k = bkey_i_to_s_c(i->k);
@@ -522,11 +565,26 @@ int bch2_accounting_read(struct bch_fs *c)
 			if (applied)
 				continue;
 
-			ret = accounting_read_key(c, k);
+			if (i + 1 < &darray_top(*keys) &&
+			    i[1].k->k.type == KEY_TYPE_accounting &&
+			    !journal_key_cmp(i, i + 1)) {
+				BUG_ON(bversion_cmp(i[0].k->k.version, i[1].k->k.version) >= 0);
+
+				i[1].journal_seq = i[0].journal_seq;
+
+				bch2_accounting_accumulate(bkey_i_to_accounting(i[1].k),
+							   bkey_s_c_to_accounting(k));
+				continue;
+			}
+
+			ret = accounting_read_key(c, NULL, k);
 			if (ret)
 				goto err;
 		}
+
+		*dst++ = *i;
 	}
+	keys->gap = keys->nr = dst - keys->data;
 
 	percpu_down_read(&c->mark_lock);
 	preempt_disable();
