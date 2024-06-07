@@ -3682,8 +3682,10 @@ retry:
 
 	existing_folio = filemap_lock_folio(mapping, index + i);
 	/* The page cache only exists for a very short time, just retry. */
-	if (IS_ERR(existing_folio))
+	if (IS_ERR(existing_folio)) {
+		existing_folio = NULL;
 		goto retry;
+	}
 
 	/* For now, we should only have single-page folios for btree inode. */
 	ASSERT(folio_nr_pages(existing_folio) == 1);

@@ -43,6 +43,8 @@
 #include <drm/drm_blend.h>
 #include <drm/drm_fourcc.h>
 
+#include "gem/i915_gem_stolen.h"
+#include "gt/intel_gt_types.h"
 #include "i915_drv.h"
 #include "i915_reg.h"
 #include "i915_utils.h"

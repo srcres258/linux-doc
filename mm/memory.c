@@ -1519,12 +1519,6 @@ static __always_inline void zap_present_folio_ptes(struct mmu_gather *tlb,
 		if (unlikely(folio_mapcount(folio) < 0))
 			print_bad_pte(vma, addr, ptent, page);
 	}
-
-	if (want_init_mlocked_on_free() && folio_test_mlocked(folio) &&
-	    !delay_rmap && folio_test_anon(folio)) {
-		kernel_init_pages(page, folio_nr_pages(folio));
-	}
-
 	if (unlikely(__tlb_remove_folio_pages(tlb, page, nr, delay_rmap))) {
 		*force_flush = true;
 		*force_break = true;
@@ -4353,6 +4347,10 @@ check_folio:
 	add_mm_counter(vma->vm_mm, MM_ANONPAGES, nr_pages);
 	add_mm_counter(vma->vm_mm, MM_SWAPENTS, -nr_pages);
 	pte = mk_pte(page, vma->vm_page_prot);
+	if (pte_swp_soft_dirty(vmf->orig_pte))
+		pte = pte_mksoft_dirty(pte);
+	if (pte_swp_uffd_wp(vmf->orig_pte))
+		pte = pte_mkuffd_wp(pte);
 
 	/*
 	 * Same logic as in do_wp_page(); however, optimize for pages that are
@@ -4361,20 +4359,19 @@ check_folio:
 	 * exclusivity.
 	 */
 	if (!folio_test_ksm(folio) &&
-	    (exclusive || (folio_ref_count(folio) == nr_pages &&
-			   folio_nr_pages(folio) == nr_pages))) {
-		if (vmf->flags & FAULT_FLAG_WRITE) {
-			pte = maybe_mkwrite(pte_mkdirty(pte), vma);
-			vmf->flags &= ~FAULT_FLAG_WRITE;
+	    (exclusive || folio_ref_count(folio) == 1)) {
+		if ((vma->vm_flags & VM_WRITE) && !userfaultfd_pte_wp(vma, pte) &&
+		    !vma_soft_dirty_enabled(vma)) {
+			pte = pte_mkwrite(pte, vma);
+			if (vmf->flags & FAULT_FLAG_WRITE) {
+				pte = pte_mkdirty(pte);
+				vmf->flags &= ~FAULT_FLAG_WRITE;
+			}
 		}
 		rmap_flags |= RMAP_EXCLUSIVE;
 	}
 	folio_ref_add(folio, nr_pages - 1);
 	flush_icache_pages(vma, page, nr_pages);
-	if (pte_swp_soft_dirty(vmf->orig_pte))
-		pte = pte_mksoft_dirty(pte);
-	if (pte_swp_uffd_wp(vmf->orig_pte))
-		pte = pte_mkuffd_wp(pte);
 	vmf->orig_pte = pte_advance_pfn(pte, page_idx);
 
 	/* ksm created a completely new copy */

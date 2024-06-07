@@ -54,7 +54,8 @@ DEFINE_PER_CPU(struct fpu *, fpu_fpregs_owner_ctx);
 #ifdef CONFIG_X86_DEBUG_FPU
 struct fpu *x86_task_fpu(struct task_struct *task)
 {
-	WARN_ON_ONCE(task == &init_task);
+	if (WARN_ON_ONCE(task->flags & PF_KTHREAD))
+		return NULL;
 
 	return (void *)task + sizeof(*task);
 }
@@ -265,16 +266,16 @@ EXPORT_SYMBOL_GPL(fpu_alloc_guest_fpstate);
 
 void fpu_free_guest_fpstate(struct fpu_guest *gfpu)
 {
-	struct fpstate *fps = gfpu->fpstate;
+	struct fpstate *fpstate = gfpu->fpstate;
 
-	if (!fps)
+	if (!fpstate)
 		return;
 
-	if (WARN_ON_ONCE(!fps->is_valloc || !fps->is_guest || fps->in_use))
+	if (WARN_ON_ONCE(!fpstate->is_valloc || !fpstate->is_guest || fpstate->in_use))
 		return;
 
 	gfpu->fpstate = NULL;
-	vfree(fps);
+	vfree(fpstate);
 }
 EXPORT_SYMBOL_GPL(fpu_free_guest_fpstate);
 
@@ -325,12 +326,12 @@ EXPORT_SYMBOL_GPL(fpu_update_guest_xfd);
  */
 void fpu_sync_guest_vmexit_xfd_state(void)
 {
-	struct fpstate *fps = x86_task_fpu(current)->fpstate;
+	struct fpstate *fpstate = x86_task_fpu(current)->fpstate;
 
 	lockdep_assert_irqs_disabled();
 	if (fpu_state_size_dynamic()) {
-		rdmsrl(MSR_IA32_XFD, fps->xfd);
-		__this_cpu_write(xfd_state, fps->xfd);
+		rdmsrl(MSR_IA32_XFD, fpstate->xfd);
+		__this_cpu_write(xfd_state, fpstate->xfd);
 	}
 }
 EXPORT_SYMBOL_GPL(fpu_sync_guest_vmexit_xfd_state);
@@ -678,8 +679,16 @@ int fpu_clone(struct task_struct *dst, unsigned long clone_flags, bool minimal,
  * a state-restore is coming: either an explicit one,
  * or a reschedule.
  */
-void fpu__drop(struct fpu *fpu)
+void fpu__drop(struct task_struct *tsk)
 {
+	struct fpu *fpu;
+
+	/* PF_KTHREAD tasks do not use the FPU context area: */
+	if (tsk->flags & PF_KTHREAD)
+		return;
+
+	fpu = x86_task_fpu(tsk);
+
 	preempt_disable();
 
 	if (fpu == x86_task_fpu(current)) {

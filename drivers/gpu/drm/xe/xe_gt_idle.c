@@ -197,6 +197,12 @@ static void gt_idle_fini(void *arg)
 
 	xe_gt_idle_disable_pg(gt);
 
+	if (gt_to_xe(gt)->info.skip_guc_pc) {
+		XE_WARN_ON(xe_force_wake_get(gt_to_fw(gt), XE_FW_GT));
+		xe_gt_idle_disable_c6(gt);
+		xe_force_wake_put(gt_to_fw(gt), XE_FW_GT);
+	}
+
 	sysfs_remove_files(kobj, gt_idle_attrs);
 	kobject_put(kobj);
 }
@@ -250,7 +256,7 @@ void xe_gt_idle_enable_c6(struct xe_gt *gt)
 void xe_gt_idle_disable_c6(struct xe_gt *gt)
 {
 	xe_device_assert_mem_access(gt_to_xe(gt));
-	xe_force_wake_assert_held(gt_to_fw(gt), XE_FORCEWAKE_ALL);
+	xe_force_wake_assert_held(gt_to_fw(gt), XE_FW_GT);
 
 	xe_mmio_write32(gt, RC_CONTROL, 0);
 	xe_mmio_write32(gt, RC_STATE, 0);

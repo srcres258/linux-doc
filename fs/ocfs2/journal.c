@@ -479,28 +479,6 @@ bail:
 	return status;
 }
 
-
-struct ocfs2_triggers {
-	struct jbd2_buffer_trigger_type	ot_triggers;
-	int				ot_offset;
-	struct super_block		*sb;
-};
-
-enum ocfs2_journal_trigger_type {
-	OCFS2_JTR_DI,
-	OCFS2_JTR_EB,
-	OCFS2_JTR_RB,
-	OCFS2_JTR_GD,
-	OCFS2_JTR_DB,
-	OCFS2_JTR_XB,
-	OCFS2_JTR_DQ,
-	OCFS2_JTR_DR,
-	OCFS2_JTR_DL,
-	OCFS2_JTR_NONE  /* This must be the last entry */
-};
-
-#define OCFS2_JOURNAL_TRIGGER_COUNT OCFS2_JTR_NONE
-
 static inline struct ocfs2_triggers *to_ocfs2_trigger(struct jbd2_buffer_trigger_type *triggers)
 {
 	return container_of(triggers, struct ocfs2_triggers, ot_triggers);
@@ -626,6 +604,15 @@ static void ocfs2_setup_csum_triggers(struct super_block *sb,
 	ot->sb = sb;
 }
 
+void ocfs2_initialize_journal_triggers(struct super_block *sb,
+				       struct ocfs2_triggers triggers[])
+{
+	enum ocfs2_journal_trigger_type type;
+
+	for (type = OCFS2_JTR_DI; type < OCFS2_JOURNAL_TRIGGER_COUNT; type++)
+		ocfs2_setup_csum_triggers(sb, type, &triggers[type]);
+}
+
 static int __ocfs2_journal_access(handle_t *handle,
 				  struct ocfs2_caching_info *ci,
 				  struct buffer_head *bh,
@@ -706,101 +693,91 @@ static int __ocfs2_journal_access(handle_t *handle,
 int ocfs2_journal_access_di(handle_t *handle, struct ocfs2_caching_info *ci,
 			    struct buffer_head *bh, int type)
 {
-	struct ocfs2_triggers di_triggers;
+	struct ocfs2_super *osb = OCFS2_SB(ocfs2_metadata_cache_get_super(ci));
 
-	ocfs2_setup_csum_triggers(ocfs2_metadata_cache_get_super(ci),
-				 OCFS2_JTR_DI, &di_triggers);
-
-	return __ocfs2_journal_access(handle, ci, bh, &di_triggers, type);
+	return __ocfs2_journal_access(handle, ci, bh,
+				      &osb->s_journal_triggers[OCFS2_JTR_DI],
+				      type);
 }
 
 int ocfs2_journal_access_eb(handle_t *handle, struct ocfs2_caching_info *ci,
 			    struct buffer_head *bh, int type)
 {
-	struct ocfs2_triggers eb_triggers;
+	struct ocfs2_super *osb = OCFS2_SB(ocfs2_metadata_cache_get_super(ci));
 
-	ocfs2_setup_csum_triggers(ocfs2_metadata_cache_get_super(ci),
-				 OCFS2_JTR_EB, &eb_triggers);
-
-	return __ocfs2_journal_access(handle, ci, bh, &eb_triggers, type);
+	return __ocfs2_journal_access(handle, ci, bh,
+				      &osb->s_journal_triggers[OCFS2_JTR_EB],
+				      type);
 }
 
 int ocfs2_journal_access_rb(handle_t *handle, struct ocfs2_caching_info *ci,
 			    struct buffer_head *bh, int type)
 {
-	struct ocfs2_triggers rb_triggers;
+	struct ocfs2_super *osb = OCFS2_SB(ocfs2_metadata_cache_get_super(ci));
 
-	ocfs2_setup_csum_triggers(ocfs2_metadata_cache_get_super(ci),
-				 OCFS2_JTR_RB, &rb_triggers);
-
-	return __ocfs2_journal_access(handle, ci, bh, &rb_triggers,
+	return __ocfs2_journal_access(handle, ci, bh,
+				      &osb->s_journal_triggers[OCFS2_JTR_RB],
 				      type);
 }
 
 int ocfs2_journal_access_gd(handle_t *handle, struct ocfs2_caching_info *ci,
 			    struct buffer_head *bh, int type)
 {
-	struct ocfs2_triggers gd_triggers;
+	struct ocfs2_super *osb = OCFS2_SB(ocfs2_metadata_cache_get_super(ci));
 
-	ocfs2_setup_csum_triggers(ocfs2_metadata_cache_get_super(ci),
-				 OCFS2_JTR_GD, &gd_triggers);
-
-	return __ocfs2_journal_access(handle, ci, bh, &gd_triggers, type);
+	return __ocfs2_journal_access(handle, ci, bh,
+				     &osb->s_journal_triggers[OCFS2_JTR_GD],
+				     type);
 }
 
 int ocfs2_journal_access_db(handle_t *handle, struct ocfs2_caching_info *ci,
 			    struct buffer_head *bh, int type)
 {
-	struct ocfs2_triggers db_triggers;
+	struct ocfs2_super *osb = OCFS2_SB(ocfs2_metadata_cache_get_super(ci));
 
-	ocfs2_setup_csum_triggers(ocfs2_metadata_cache_get_super(ci),
-				 OCFS2_JTR_DB, &db_triggers);
-
-	return __ocfs2_journal_access(handle, ci, bh, &db_triggers, type);
+	return __ocfs2_journal_access(handle, ci, bh,
+				     &osb->s_journal_triggers[OCFS2_JTR_DB],
+				     type);
 }
 
 int ocfs2_journal_access_xb(handle_t *handle, struct ocfs2_caching_info *ci,
 			    struct buffer_head *bh, int type)
 {
-	struct ocfs2_triggers xb_triggers;
+	struct ocfs2_super *osb = OCFS2_SB(ocfs2_metadata_cache_get_super(ci));
 
-	ocfs2_setup_csum_triggers(ocfs2_metadata_cache_get_super(ci),
-				 OCFS2_JTR_XB, &xb_triggers);
-
-	return __ocfs2_journal_access(handle, ci, bh, &xb_triggers, type);
+	return __ocfs2_journal_access(handle, ci, bh,
+				     &osb->s_journal_triggers[OCFS2_JTR_XB],
+				     type);
 }
 
 int ocfs2_journal_access_dq(handle_t *handle, struct ocfs2_caching_info *ci,
 			    struct buffer_head *bh, int type)
 {
-	struct ocfs2_triggers dq_triggers;
+	struct ocfs2_super *osb = OCFS2_SB(ocfs2_metadata_cache_get_super(ci));
 
-	ocfs2_setup_csum_triggers(ocfs2_metadata_cache_get_super(ci),
-				 OCFS2_JTR_DQ, &dq_triggers);
-
-	return __ocfs2_journal_access(handle, ci, bh, &dq_triggers, type);
+	return __ocfs2_journal_access(handle, ci, bh,
+				     &osb->s_journal_triggers[OCFS2_JTR_DQ],
+				     type);
 }
 
 int ocfs2_journal_access_dr(handle_t *handle, struct ocfs2_caching_info *ci,
 			    struct buffer_head *bh, int type)
 {
-	struct ocfs2_triggers dr_triggers;
+	struct ocfs2_super *osb = OCFS2_SB(ocfs2_metadata_cache_get_super(ci));
 
-	ocfs2_setup_csum_triggers(ocfs2_metadata_cache_get_super(ci),
-				 OCFS2_JTR_DR, &dr_triggers);
-
-	return __ocfs2_journal_access(handle, ci, bh, &dr_triggers, type);
+	return __ocfs2_journal_access(handle, ci, bh,
+				     &osb->s_journal_triggers[OCFS2_JTR_DR],
+				     type);
 }
 
 int ocfs2_journal_access_dl(handle_t *handle, struct ocfs2_caching_info *ci,
 			    struct buffer_head *bh, int type)
 {
-	struct ocfs2_triggers dl_triggers;
+	struct ocfs2_super *osb = OCFS2_SB(ocfs2_metadata_cache_get_super(ci));
 
-	ocfs2_setup_csum_triggers(ocfs2_metadata_cache_get_super(ci),
-				 OCFS2_JTR_DL, &dl_triggers);
-
-	return __ocfs2_journal_access(handle, ci, bh, &dl_triggers, type);
+	return __ocfs2_journal_access(handle, ci, bh,
+				     &osb->s_journal_triggers[OCFS2_JTR_DL],
+				     type);
 }
 
 int ocfs2_journal_access(handle_t *handle, struct ocfs2_caching_info *ci,

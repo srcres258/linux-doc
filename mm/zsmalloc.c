@@ -307,14 +307,6 @@ static void cache_free_zspage(struct zspage *zspage)
 	kmem_cache_free(zspage_cache, zspage);
 }
 
-static void rcu_free_zspage(struct rcu_head *h)
-{
-	struct zspage *zspage = container_of(h, struct zspage, rcu_head);
-	struct zs_pool *pool = zspage->pool;
-
-	kmem_cache_free(pool->zspage_cachep, zspage);
-}
-
 /* pool->lock(which owns the handle) synchronizes races */
 static void record_obj(unsigned long handle, unsigned long obj)
 {

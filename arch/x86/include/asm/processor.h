@@ -507,7 +507,7 @@ struct thread_struct {
 #ifdef CONFIG_X86_DEBUG_FPU
 extern struct fpu *x86_task_fpu(struct task_struct *task);
 #else
-# define x86_task_fpu(task) ((struct fpu *)((void *)task + sizeof(*task)))
+# define x86_task_fpu(task) ((struct fpu *)((void *)(task) + sizeof(*(task))))
 #endif
 
 /*
