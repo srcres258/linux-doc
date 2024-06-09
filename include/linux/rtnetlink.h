@@ -47,6 +47,10 @@ extern int rtnl_is_locked(void);
 extern int rtnl_lock_killable(void);
 extern bool refcount_dec_and_rtnl_lock(refcount_t *r);
 
+extern struct mutex rtnl_mutex;
+extern void get_rtnl_holder(void);
+extern void put_rtnl_holder(void);
+
 DEFINE_LOCK_GUARD_0(rtnl, rtnl_lock(), rtnl_unlock())
 
 extern wait_queue_head_t netdev_unregistering_wq;

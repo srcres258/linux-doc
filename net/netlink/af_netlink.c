@@ -2332,11 +2332,17 @@ static int netlink_dump(struct sock *sk, bool lock_taken)
 
 		if (cb->flags & RTNL_FLAG_DUMP_UNLOCKED)
 			extra_mutex = NULL;
-		if (extra_mutex)
+		if (extra_mutex) {
+			if (extra_mutex == &rtnl_mutex)
+				get_rtnl_holder();
 			mutex_lock(extra_mutex);
+		}
 		nlk->dump_done_errno = cb->dump(skb, cb);
-		if (extra_mutex)
+		if (extra_mutex) {
 			mutex_unlock(extra_mutex);
+			if (extra_mutex == &rtnl_mutex)
+				put_rtnl_holder();
+		}
 
 		/* EMSGSIZE plus something already in the skb means
 		 * that there's more to dump but current skb has filled up.
