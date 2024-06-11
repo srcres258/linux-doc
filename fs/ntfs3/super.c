@@ -468,7 +468,7 @@ static int ntfs3_volinfo(struct seq_file *m, void *o)
 	struct super_block *sb = m->private;
 	struct ntfs_sb_info *sbi = sb->s_fs_info;
 
-	seq_printf(m, "ntfs%d.%d\n%u\n%zu\n\%zu\n%zu\n%s\n%s\n",
+	seq_printf(m, "ntfs%d.%d\n%u\n%zu\n%zu\n%zu\n%s\n%s\n",
 		   sbi->volume.major_ver, sbi->volume.minor_ver,
 		   sbi->cluster_size, sbi->used.bitmap.nbits,
 		   sbi->mft.bitmap.nbits,
@@ -1191,6 +1191,8 @@ static int ntfs_fill_super(struct super_block *sb, struct fs_context *fc)
 	CLST vcn, lcn, len;
 	struct ATTRIB *attr;
 	const struct VOLUME_INFO *info;
+	u32 done, bytes;
+	struct ATTR_DEF_ENTRY *t;
 	u16 *shared;
 	struct MFT_REF ref;
 	bool ro = sb_rdonly(sb);
@@ -1443,20 +1445,38 @@ static int ntfs_fill_super(struct super_block *sb, struct fs_context *fc)
 			goto put_inode_out;
 		}
 
-		/* Read the entire file. */
-		err = inode_read_data(inode, def_table, bytes);
-		if (err) {
-			ntfs_err(sb, "Failed to read $AttrDef (%d).", err);
-		} else {
-			/* Check content and store sorted array. */
-			err = ntfs_check_attr_def(sbi, def_table, bytes);
-			if (err)
-				ntfs_err(sb, "$AttrDef is corrupted.");
-		}
+	/* Read the entire file. */
+	err = inode_read_data(inode, sbi->def_table, bytes);
+	if (err) {
+		ntfs_err(sb, "Failed to read $AttrDef (%d).", err);
+		goto put_inode_out;
+	}
 
-		kfree(def_table);
-		if (err)
-			goto put_inode_out;
+	if (ATTR_STD != t->type) {
+		ntfs_err(sb, "$AttrDef is corrupted.");
+		err = -EINVAL;
+		goto put_inode_out;
+	}
+
+	t += 1;
+	sbi->def_entries = 1;
+	done = sizeof(struct ATTR_DEF_ENTRY);
+
+	while (done + sizeof(struct ATTR_DEF_ENTRY) <= bytes) {
+		u32 t32 = le32_to_cpu(t->type);
+		u64 sz = le64_to_cpu(t->max_sz);
+
+		if ((t32 & 0xF) || le32_to_cpu(t[-1].type) >= t32)
+			break;
+
+		if (t->type == ATTR_REPARSE)
+			sbi->reparse.max_size = sz;
+		else if (t->type == ATTR_EA)
+			sbi->ea_max_size = sz;
+
+		done += sizeof(struct ATTR_DEF_ENTRY);
+		t += 1;
+		sbi->def_entries += 1;
 	}
 	iput(inode);
 
@@ -1856,8 +1876,7 @@ static int __init init_ntfs_fs(void)
 
 	ntfs_inode_cachep = kmem_cache_create(
 		"ntfs_inode_cache", sizeof(struct ntfs_inode), 0,
-		(SLAB_RECLAIM_ACCOUNT | SLAB_ACCOUNT),
-		init_once);
+		(SLAB_RECLAIM_ACCOUNT | SLAB_ACCOUNT), init_once);
 	if (!ntfs_inode_cachep) {
 		err = -ENOMEM;
 		goto out1;

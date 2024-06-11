@@ -103,7 +103,8 @@ u32 i915_get_vblank_counter(struct drm_crtc *crtc)
 	 * we get a low value that's stable across two reads of the high
 	 * register.
 	 */
-	frame = intel_de_read64_2x32(dev_priv, PIPEFRAMEPIXEL(pipe), PIPEFRAME(pipe));
+	frame = intel_de_read64_2x32(dev_priv, PIPEFRAMEPIXEL(dev_priv, pipe),
+				     PIPEFRAME(dev_priv, pipe));
 
 	pixel = frame & PIPE_PIXEL_MASK;
 	frame = (frame >> PIPE_FRAME_LOW_SHIFT) & 0xffffff;
@@ -125,7 +126,7 @@ u32 g4x_get_vblank_counter(struct drm_crtc *crtc)
 	if (!vblank->max_vblank_count)
 		return 0;
 
-	return intel_de_read(dev_priv, PIPE_FRMCOUNT_G4X(pipe));
+	return intel_de_read(dev_priv, PIPE_FRMCOUNT_G4X(dev_priv, pipe));
 }
 
 static u32 intel_crtc_scanlines_since_frame_timestamp(struct intel_crtc *crtc)
@@ -248,7 +249,7 @@ static int __intel_get_crtc_scanline(struct intel_crtc *crtc)
 
 	vtotal = intel_mode_vtotal(mode);
 
-	position = intel_de_read_fw(dev_priv, PIPEDSL(pipe)) & PIPEDSL_LINE_MASK;
+	position = intel_de_read_fw(dev_priv, PIPEDSL(dev_priv, pipe)) & PIPEDSL_LINE_MASK;
 
 	/*
 	 * On HSW, the DSL reg (0x70000) appears to return 0 if we
@@ -267,7 +268,8 @@ static int __intel_get_crtc_scanline(struct intel_crtc *crtc)
 
 		for (i = 0; i < 100; i++) {
 			udelay(1);
-			temp = intel_de_read_fw(dev_priv, PIPEDSL(pipe)) & PIPEDSL_LINE_MASK;
+			temp = intel_de_read_fw(dev_priv,
+						PIPEDSL(dev_priv, pipe)) & PIPEDSL_LINE_MASK;
 			if (temp != position) {
 				position = temp;
 				break;
@@ -385,7 +387,7 @@ static bool i915_get_crtc_scanoutpos(struct drm_crtc *_crtc,
 		 * We can split this into vertical and horizontal
 		 * scanout position.
 		 */
-		position = (intel_de_read_fw(dev_priv, PIPEFRAMEPIXEL(pipe)) & PIPE_PIXEL_MASK) >> PIPE_PIXEL_SHIFT;
+		position = (intel_de_read_fw(dev_priv, PIPEFRAMEPIXEL(dev_priv, pipe)) & PIPE_PIXEL_MASK) >> PIPE_PIXEL_SHIFT;
 
 		/* convert to pixel counts */
 		vbl_start *= htotal;
@@ -474,7 +476,7 @@ int intel_get_crtc_scanline(struct intel_crtc *crtc)
 static bool pipe_scanline_is_moving(struct drm_i915_private *dev_priv,
 				    enum pipe pipe)
 {
-	i915_reg_t reg = PIPEDSL(pipe);
+	i915_reg_t reg = PIPEDSL(dev_priv, pipe);
 	u32 line1, line2;
 
 	line1 = intel_de_read(dev_priv, reg) & PIPEDSL_LINE_MASK;

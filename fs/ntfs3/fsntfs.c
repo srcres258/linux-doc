@@ -2664,7 +2664,7 @@ int ntfs_set_label(struct ntfs_sb_info *sbi, u8 *label, int len)
 		goto out;
 
 	uni_bytes = uni->len * sizeof(u16);
-	if (uni_bytes > sbi->attrdef.label_max_size) {
+	if (uni_bytes > NTFS_LABEL_MAX_LENGTH * sizeof(u16)) {
 		ntfs_warn(sbi->sb, "new label is too long");
 		err = -EFBIG;
 		goto out;
@@ -2682,6 +2682,12 @@ int ntfs_set_label(struct ntfs_sb_info *sbi, u8 *label, int len)
 
 	/* write new label in on-disk struct. */
 	memcpy(resident_data(attr), uni->name, uni_bytes);
+
+	/* update cached value of current label. */
+	if (len >= ARRAY_SIZE(sbi->volume.label))
+		len = ARRAY_SIZE(sbi->volume.label) - 1;
+	memcpy(sbi->volume.label, label, len);
+	sbi->volume.label[len] = 0;
 	mark_inode_dirty_sync(&ni->vfs_inode);
 
 unlock_out:

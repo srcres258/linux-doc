@@ -507,14 +507,14 @@ struct thread_struct {
 #ifdef CONFIG_X86_DEBUG_FPU
 extern struct fpu *x86_task_fpu(struct task_struct *task);
 #else
-# define x86_task_fpu(task) ((struct fpu *)((void *)(task) + sizeof(*(task))))
+# define x86_task_fpu(task)	((struct fpu *)((void *)(task) + sizeof(*(task))))
 #endif
 
 /*
  * X86 doesn't need any embedded-FPU-struct quirks:
  */
-static inline void arch_thread_struct_whitelist(unsigned long *offset,
-						unsigned long *size)
+static inline void
+arch_thread_struct_whitelist(unsigned long *offset, unsigned long *size)
 {
 	*offset = 0;
 	*size = 0;

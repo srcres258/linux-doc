@@ -83,7 +83,7 @@ assert_hdmi_transcoder_func_disabled(struct drm_i915_private *dev_priv,
 				     enum transcoder cpu_transcoder)
 {
 	drm_WARN(&dev_priv->drm,
-		 intel_de_read(dev_priv, TRANS_DDI_FUNC_CTL(cpu_transcoder)) &
+		 intel_de_read(dev_priv, TRANS_DDI_FUNC_CTL(dev_priv, cpu_transcoder)) &
 		 TRANS_DDI_FUNC_ENABLE,
 		 "HDMI transcoder function enabled, expecting disabled\n");
 }
@@ -1476,7 +1476,8 @@ static int kbl_repositioning_enc_en_signal(struct intel_connector *connector,
 	int ret;
 
 	for (;;) {
-		scanline = intel_de_read(dev_priv, PIPEDSL(crtc->pipe));
+		scanline = intel_de_read(dev_priv,
+					 PIPEDSL(dev_priv, crtc->pipe));
 		if (scanline > 100 && scanline < 200)
 			break;
 		usleep_range(25, 50);

@@ -1376,20 +1376,39 @@ struct chromaticity {
 	u8 chromaticity_from_edid_base_block:1;
 	u8 rsvd:6;
 
-	u8 red_green;
-	u8 blue_white;
-	u8 red_x;
-	u8 red_y;
-	u8 green_x;
-	u8 green_y;
-	u8 blue_x;
-	u8 blue_y;
-	u8 white_x;
-	u8 white_y;
+	u8 green_y_lo:2;
+	u8 green_x_lo:2;
+	u8 red_y_lo:2;
+	u8 red_x_lo:2;
+	u8 white_y_lo:2;
+	u8 white_x_lo:2;
+	u8 blue_y_lo:2;
+	u8 blue_x_lo:2;
+
+	u8 red_x_hi;
+	u8 red_y_hi;
+	u8 green_x_hi;
+	u8 green_y_hi;
+	u8 blue_x_hi;
+	u8 blue_y_hi;
+	u8 white_x_hi;
+	u8 white_y_hi;
+} __packed;
+
+struct luminance_and_gamma {
+	u8 luminance_enable:1;						/* 211+ */
+	u8 gamma_enable:1;						/* 211+ */
+	u8 rsvd:6;
+
+	u16 min_luminance;						/* 211+ */
+	u16 max_luminance;						/* 211+ */
+	u16 one_percent_max_luminance;					/* 211+ */
+	u8 gamma;							/* 211+ */
 } __packed;
 
 struct bdb_chromaticity {
 	struct chromaticity chromaticity[16];
+	struct luminance_and_gamma luminance_and_gamma[16];		/* 211+ */
 } __packed;
 
 /*

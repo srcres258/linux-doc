@@ -2790,10 +2790,10 @@ out_free_blocks:
 	return ret;
 }
 
-static noinline_for_stack int prealloc_file_extent_cluster(
-				struct btrfs_inode *inode,
-				const struct file_extent_cluster *cluster)
+static noinline_for_stack int prealloc_file_extent_cluster(struct reloc_control *rc)
 {
+	const struct file_extent_cluster *cluster = &rc->cluster;
+	struct btrfs_inode *inode = BTRFS_I(rc->data_inode);
 	u64 alloc_hint = 0;
 	u64 start;
 	u64 end;
@@ -2899,11 +2899,14 @@ static noinline_for_stack int prealloc_file_extent_cluster(
 	return ret;
 }
 
-static noinline_for_stack int setup_relocation_extent_mapping(struct inode *inode,
-				u64 start, u64 end, u64 block_start)
+static noinline_for_stack int setup_relocation_extent_mapping(struct reloc_control *rc)
 {
+	struct btrfs_inode *inode = BTRFS_I(rc->data_inode);
 	struct extent_map *em;
 	struct extent_state *cached_state = NULL;
+	u64 offset = inode->reloc_block_group_start;
+	u64 start = rc->cluster.start - offset;
+	u64 end = rc->cluster.end - offset;
 	int ret = 0;
 
 	em = alloc_extent_map();
@@ -2912,14 +2915,14 @@ static noinline_for_stack int setup_relocation_extent_mapping(struct inode *inod
 
 	em->start = start;
 	em->len = end + 1 - start;
-	em->disk_bytenr = block_start;
+	em->disk_bytenr = rc->cluster.start;
 	em->disk_num_bytes = em->len;
 	em->ram_bytes = em->len;
 	em->flags |= EXTENT_FLAG_PINNED;
 
-	lock_extent(&BTRFS_I(inode)->io_tree, start, end, &cached_state);
-	ret = btrfs_replace_extent_map_range(BTRFS_I(inode), em, false);
-	unlock_extent(&BTRFS_I(inode)->io_tree, start, end, &cached_state);
+	lock_extent(&inode->io_tree, start, end, &cached_state);
+	ret = btrfs_replace_extent_map_range(inode, em, false);
+	unlock_extent(&inode->io_tree, start, end, &cached_state);
 	free_extent_map(em);
 
 	return ret;
@@ -2947,10 +2950,12 @@ static u64 get_cluster_boundary_end(const struct file_extent_cluster *cluster,
 	return cluster->boundary[cluster_nr + 1] - 1;
 }
 
-static int relocate_one_folio(struct inode *inode, struct file_ra_state *ra,
-			      const struct file_extent_cluster *cluster,
+static int relocate_one_folio(struct reloc_control *rc,
+			      struct file_ra_state *ra,
 			      int *cluster_nr, unsigned long index)
 {
+	const struct file_extent_cluster *cluster = &rc->cluster;
+	struct inode *inode = rc->data_inode;
 	struct btrfs_fs_info *fs_info = inode_to_fs_info(inode);
 	u64 offset = BTRFS_I(inode)->reloc_block_group_start;
 	const unsigned long last_index = (cluster->end - offset) >> PAGE_SHIFT;
@@ -3084,9 +3089,10 @@ release_folio:
 	return ret;
 }
 
-static int relocate_file_extent_cluster(struct inode *inode,
-					const struct file_extent_cluster *cluster)
+static int relocate_file_extent_cluster(struct reloc_control *rc)
 {
+	struct inode *inode = rc->data_inode;
+	const struct file_extent_cluster *cluster = &rc->cluster;
 	u64 offset = BTRFS_I(inode)->reloc_block_group_start;
 	unsigned long index;
 	unsigned long last_index;
@@ -3101,21 +3107,20 @@ static int relocate_file_extent_cluster(struct inode *inode,
 	if (!ra)
 		return -ENOMEM;
 
-	ret = prealloc_file_extent_cluster(BTRFS_I(inode), cluster);
+	ret = prealloc_file_extent_cluster(rc);
 	if (ret)
 		goto out;
 
 	file_ra_state_init(ra, inode->i_mapping);
 
-	ret = setup_relocation_extent_mapping(inode, cluster->start - offset,
-				   cluster->end - offset, cluster->start);
+	ret = setup_relocation_extent_mapping(rc);
 	if (ret)
 		goto out;
 
 	last_index = (cluster->end - offset) >> PAGE_SHIFT;
 	for (index = (cluster->start - offset) >> PAGE_SHIFT;
 	     index <= last_index && !ret; index++)
-		ret = relocate_one_folio(inode, ra, cluster, &cluster_nr, index);
+		ret = relocate_one_folio(rc, ra, &cluster_nr, index);
 	if (ret == 0)
 		WARN_ON(cluster_nr != cluster->nr);
 out:
@@ -3123,15 +3128,16 @@ out:
 	return ret;
 }
 
-static noinline_for_stack int relocate_data_extent(struct inode *inode,
-				const struct btrfs_key *extent_key,
-				struct file_extent_cluster *cluster)
+static noinline_for_stack int relocate_data_extent(struct reloc_control *rc,
+					   const struct btrfs_key *extent_key)
 {
+	struct inode *inode = rc->data_inode;
+	struct file_extent_cluster *cluster = &rc->cluster;
 	int ret;
 	struct btrfs_root *root = BTRFS_I(inode)->root;
 
 	if (cluster->nr > 0 && extent_key->objectid != cluster->end + 1) {
-		ret = relocate_file_extent_cluster(inode, cluster);
+		ret = relocate_file_extent_cluster(rc);
 		if (ret)
 			return ret;
 		cluster->nr = 0;
@@ -3157,7 +3163,7 @@ static noinline_for_stack int relocate_data_extent(struct inode *inode,
 		 * the cluster we need to relocate.
 		 */
 		root->relocation_src_root = cluster->owning_root;
-		ret = relocate_file_extent_cluster(inode, cluster);
+		ret = relocate_file_extent_cluster(rc);
 		if (ret)
 			return ret;
 		cluster->nr = 0;
@@ -3176,7 +3182,7 @@ static noinline_for_stack int relocate_data_extent(struct inode *inode,
 	cluster->nr++;
 
 	if (cluster->nr >= MAX_EXTENTS) {
-		ret = relocate_file_extent_cluster(inode, cluster);
+		ret = relocate_file_extent_cluster(rc);
 		if (ret)
 			return ret;
 		cluster->nr = 0;
@@ -3745,8 +3751,7 @@ restart:
 		if (rc->stage == MOVE_DATA_EXTENTS &&
 		    (flags & BTRFS_EXTENT_FLAG_DATA)) {
 			rc->found_file_extent = true;
-			ret = relocate_data_extent(rc->data_inode,
-						   &key, &rc->cluster);
+			ret = relocate_data_extent(rc, &key);
 			if (ret < 0) {
 				err = ret;
 				break;
@@ -3775,8 +3780,7 @@ restart:
 	}
 
 	if (!err) {
-		ret = relocate_file_extent_cluster(rc->data_inode,
-						   &rc->cluster);
+		ret = relocate_file_extent_cluster(rc);
 		if (ret < 0)
 			err = ret;
 	}
@@ -4003,15 +4007,13 @@ static void free_reloc_control(struct reloc_control *rc)
 /*
  * Print the block group being relocated
  */
-static void describe_relocation(struct btrfs_fs_info *fs_info,
-				struct btrfs_block_group *block_group)
+static void describe_relocation(struct btrfs_block_group *block_group)
 {
 	char buf[128] = {'\0'};
 
 	btrfs_describe_block_groups(block_group->flags, buf, sizeof(buf));
 
-	btrfs_info(fs_info,
-		   "relocating block group %llu flags %s",
+	btrfs_info(block_group->fs_info, "relocating block group %llu flags %s",
 		   block_group->start, buf);
 }
 
@@ -4119,7 +4121,7 @@ int btrfs_relocate_block_group(struct btrfs_fs_info *fs_info, u64 group_start)
 		goto out;
 	}
 
-	describe_relocation(fs_info, rc->block_group);
+	describe_relocation(rc->block_group);
 
 	btrfs_wait_block_group_reservations(rc->block_group);
 	btrfs_wait_nocow_writers(rc->block_group);

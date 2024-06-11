@@ -788,8 +788,24 @@ static bool slab_add_kunit_errors(void)
 	kunit_put_resource(resource);
 	return true;
 }
+
+static bool slab_in_kunit_test(void)
+{
+	struct kunit_resource *resource;
+
+	if (!kunit_get_current_test())
+		return false;
+
+	resource = kunit_find_named_resource(current->kunit_test, "slab_errors");
+	if (!resource)
+		return false;
+
+	kunit_put_resource(resource);
+	return true;
+}
 #else
 static inline bool slab_add_kunit_errors(void) { return false; }
+static inline bool slab_in_kunit_test(void) { return false; }
 #endif
 
 static inline unsigned int size_from_object(struct kmem_cache *s)
@@ -962,11 +978,9 @@ void print_tracking(struct kmem_cache *s, void *object)
 
 static void print_slab_info(const struct slab *slab)
 {
-	struct folio *folio = (struct folio *)slab_folio(slab);
-
 	pr_err("Slab 0x%p objects=%u used=%u fp=0x%p flags=%pGp\n",
 	       slab, slab->objects, slab->inuse, slab->freelist,
-	       folio_flags(folio, 0));
+	       &slab->__page_flags);
 }
 
 /*
@@ -1192,8 +1206,6 @@ static int check_bytes_and_report(struct kmem_cache *s, struct slab *slab,
 	pr_err("0x%p-0x%p @offset=%tu. First byte 0x%x instead of 0x%x\n",
 					fault, end - 1, fault - addr,
 					fault[0], value);
-	print_trailer(s, slab, object);
-	add_taint(TAINT_BAD_PAGE, LOCKDEP_NOW_UNRELIABLE);
 
 skip_bug_print:
 	restore_bytes(s, what, value, fault, end);
@@ -1216,8 +1228,8 @@ skip_bug_print:
  * 	Padding is extended by another word if Redzoning is enabled and
  * 	object_size == inuse.
  *
- * 	We fill with 0xbb (RED_INACTIVE) for inactive objects and with
- * 	0xcc (RED_ACTIVE) for objects in use.
+ * 	We fill with 0xbb (SLUB_RED_INACTIVE) for inactive objects and with
+ * 	0xcc (SLUB_RED_ACTIVE) for objects in use.
  *
  * object + s->inuse
  * 	Meta data starts here.
@@ -1302,15 +1314,16 @@ static int check_object(struct kmem_cache *s, struct slab *slab,
 	u8 *p = object;
 	u8 *endobject = object + s->object_size;
 	unsigned int orig_size, kasan_meta_size;
+	int ret = 1;
 
 	if (s->flags & SLAB_RED_ZONE) {
 		if (!check_bytes_and_report(s, slab, object, "Left Redzone",
 			object - s->red_left_pad, val, s->red_left_pad))
-			return 0;
+			ret = 0;
 
 		if (!check_bytes_and_report(s, slab, object, "Right Redzone",
 			endobject, val, s->inuse - s->object_size))
-			return 0;
+			ret = 0;
 
 		if (slub_debug_orig_size(s) && val == SLUB_RED_ACTIVE) {
 			orig_size = get_orig_size(s, object);
@@ -1319,14 +1332,15 @@ static int check_object(struct kmem_cache *s, struct slab *slab,
 				!check_bytes_and_report(s, slab, object,
 					"kmalloc Redzone", p + orig_size,
 					val, s->object_size - orig_size)) {
-				return 0;
+				ret = 0;
 			}
 		}
 	} else {
 		if ((s->flags & SLAB_POISON) && s->object_size < s->inuse) {
-			check_bytes_and_report(s, slab, p, "Alignment padding",
+			if (!check_bytes_and_report(s, slab, p, "Alignment padding",
 				endobject, POISON_INUSE,
-				s->inuse - s->object_size);
+				s->inuse - s->object_size))
+				ret = 0;
 		}
 	}
 
@@ -1342,27 +1356,25 @@ static int check_object(struct kmem_cache *s, struct slab *slab,
 			    !check_bytes_and_report(s, slab, p, "Poison",
 					p + kasan_meta_size, POISON_FREE,
 					s->object_size - kasan_meta_size - 1))
-				return 0;
+				ret = 0;
 			if (kasan_meta_size < s->object_size &&
 			    !check_bytes_and_report(s, slab, p, "End Poison",
 					p + s->object_size - 1, POISON_END, 1))
-				return 0;
+				ret = 0;
 		}
 		/*
 		 * check_pad_bytes cleans up on its own.
 		 */
-		check_pad_bytes(s, slab, p);
+		if (!check_pad_bytes(s, slab, p))
+			ret = 0;
 	}
 
-	if (!freeptr_outside_object(s) && val == SLUB_RED_ACTIVE)
-		/*
-		 * Object and freepointer overlap. Cannot check
-		 * freepointer while object is allocated.
-		 */
-		return 1;
-
-	/* Check free pointer validity */
-	if (!check_valid_pointer(s, slab, get_freepointer(s, p))) {
+	/*
+	 * Cannot check freepointer while object is allocated if
+	 * object and freepointer overlap.
+	 */
+	if ((freeptr_outside_object(s) || val != SLUB_RED_ACTIVE) &&
+	    !check_valid_pointer(s, slab, get_freepointer(s, p))) {
 		object_err(s, slab, p, "Freepointer corrupt");
 		/*
 		 * No choice but to zap it and thus lose the remainder
@@ -1370,9 +1382,15 @@ static int check_object(struct kmem_cache *s, struct slab *slab,
 		 * another error because the object count is now wrong.
 		 */
 		set_freepointer(s, p, NULL);
-		return 0;
+		ret = 0;
 	}
-	return 1;
+
+	if (!ret && !slab_in_kunit_test()) {
+		print_trailer(s, slab, object);
+		add_taint(TAINT_BAD_PAGE, LOCKDEP_NOW_UNRELIABLE);
+	}
+
+	return ret;
 }
 
 static int check_slab(struct kmem_cache *s, struct slab *slab)
@@ -2533,7 +2551,7 @@ static void discard_slab(struct kmem_cache *s, struct slab *slab)
  */
 static inline bool slab_test_node_partial(const struct slab *slab)
 {
-	return folio_test_workingset((struct folio *)slab_folio(slab));
+	return folio_test_workingset(slab_folio(slab));
 }
 
 static inline void slab_set_node_partial(struct slab *slab)
@@ -5187,10 +5205,9 @@ static int calculate_sizes(struct kmem_cache *s)
 	 */
 	s->inuse = size;
 
-	if (slub_debug_orig_size(s) ||
-	    (flags & (SLAB_TYPESAFE_BY_RCU | SLAB_POISON)) ||
-	    ((flags & SLAB_RED_ZONE) && s->object_size < sizeof(void *)) ||
-	    s->ctor) {
+	if ((flags & (SLAB_TYPESAFE_BY_RCU | SLAB_POISON)) || s->ctor ||
+	    ((flags & SLAB_RED_ZONE) &&
+	     (s->object_size < sizeof(void *) || slub_debug_orig_size(s)))) {
 		/*
 		 * Relocate free pointer after the object if it is not
 		 * permitted to overwrite the first word of the object on
@@ -5198,7 +5215,9 @@ static int calculate_sizes(struct kmem_cache *s)
 		 *
 		 * This is the case if we do RCU, have a constructor or
 		 * destructor, are poisoning the objects, or are
-		 * redzoning an object smaller than sizeof(void *).
+		 * redzoning an object smaller than sizeof(void *) or are
+		 * redzoning an object with slub_debug_orig_size() enabled,
+		 * in which case the right redzone may be extended.
 		 *
 		 * The assumption that s->offset >= s->inuse means free
 		 * pointer is outside of the object is used in the
