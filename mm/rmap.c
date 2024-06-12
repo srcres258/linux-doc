@@ -1684,7 +1684,7 @@ static bool try_to_unmap_one(struct folio *folio, struct vm_area_struct *vma,
 
 		if (!pvmw.pte) {
 			pmd_mapped = true;
-			if (unmap_huge_pmd_locked(vma, range.start, pvmw.pmd,
+			if (unmap_huge_pmd_locked(vma, pvmw.address, pvmw.pmd,
 						  folio))
 				goto walk_done;
 
@@ -1694,12 +1694,10 @@ static bool try_to_unmap_one(struct folio *folio, struct vm_area_struct *vma,
 				 * once again from that now-PTE-mapped page
 				 * table.
 				 */
-				split_huge_pmd_locked(vma, range.start,
+				split_huge_pmd_locked(vma, pvmw.address,
 						      pvmw.pmd, false, folio);
-				pvmw.pmd = NULL;
-				spin_unlock(pvmw.ptl);
-				pvmw.ptl = NULL;
 				flags &= ~TTU_SPLIT_HUGE_PMD;
+				page_vma_mapped_walk_restart(&pvmw);
 				continue;
 			}
 		}
@@ -1834,8 +1832,7 @@ static bool try_to_unmap_one(struct folio *folio, struct vm_area_struct *vma,
 				 * PMD-mapped folio as lazyfree if the folio or
 				 * its PMD was redirtied.
 				 */
-				if (!pmd_mapped)
-					WARN_ON_ONCE(1);
+				WARN_ON_ONCE(!pmd_mapped);
 				goto walk_done_err;
 			}
 

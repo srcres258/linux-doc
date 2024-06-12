@@ -30,16 +30,11 @@
  * - Pages falling into physical memory gaps - not IORESOURCE_SYSRAM. Trying
  *   to read/write these pages might end badly. Don't touch!
  * - The zero page(s)
- * - Pages not added to the page allocator when onlining a section because
- *   they were excluded via the online_page_callback() or because they are
- *   PG_hwpoison.
  * - Pages allocated in the context of kexec/kdump (loaded kernel image,
  *   control pages, vmcoreinfo)
  * - MMIO/DMA pages. Some architectures don't allow to ioremap pages that are
  *   not marked PG_reserved (as they might be in use by somebody else who does
  *   not respect the caching strategy).
- * - Pages part of an offline section (struct pages of offline sections should
- *   not be trusted as they will be initialized when first onlined).
  * - MCA pages on ia64
  * - Pages holding CPU notes for POWER Firmware Assisted Dump
  * - Device memory (e.g. PMEM, DAX, HMM)
@@ -945,20 +940,23 @@ PAGEFLAG_FALSE(HasHWPoisoned, has_hwpoisoned)
  * mistaken for a page type value.
  */
 
-#define PAGE_TYPE_BASE	0x80000000
-/*
- * Reserve 0xffff0000 - 0xfffffffe to catch _mapcount underflows and
- * allow owners that set a type to reuse the lower 16 bit for their own
- * purposes.
- */
-#define PG_buddy	0x40000000
-#define PG_offline	0x20000000
-#define PG_table	0x10000000
-#define PG_guard	0x08000000
-#define PG_hugetlb	0x04000000
-#define PG_slab		0x02000000
-#define PG_zsmalloc	0x01000000
-#define PAGE_MAPCOUNT_RESERVE	(~0x0000ffff)
+enum pagetype {
+	/*
+	 * Reserve 0xffff0000 - 0xfffffffe to catch _mapcount underflows and
+	 * allow owners that set a type to reuse the lower 16 bit for their own
+	 * purposes.
+	 */
+	PG_buddy	= 0x40000000,
+	PG_offline	= 0x20000000,
+	PG_table	= 0x10000000,
+	PG_guard	= 0x08000000,
+	PG_hugetlb	= 0x04000000,
+	PG_slab		= 0x02000000,
+	PG_zsmalloc	= 0x01000000,
+
+	PAGE_TYPE_BASE	= 0x80000000,
+	PAGE_MAPCOUNT_RESERVE	= ~0x0000ffff,
+};
 
 #define PageType(page, flag)						\
 	((page->page_type & (PAGE_TYPE_BASE | flag)) == PAGE_TYPE_BASE)
@@ -1021,15 +1019,22 @@ PAGE_TYPE_OPS(Buddy, buddy, buddy)
  * The content of these pages is effectively stale. Such pages should not
  * be touched (read/write/dump/save) except by their owner.
  *
+ * When a memory block gets onlined, all pages are initialized with a
+ * refcount of 1 and PageOffline(). generic_online_page() will
+ * take care of clearing PageOffline().
+ *
  * If a driver wants to allow to offline unmovable PageOffline() pages without
  * putting them back to the buddy, it can do so via the memory notifier by
  * decrementing the reference count in MEM_GOING_OFFLINE and incrementing the
  * reference count in MEM_CANCEL_OFFLINE. When offlining, the PageOffline()
- * pages (now with a reference count of zero) are treated like free pages,
- * allowing the containing memory block to get offlined. A driver that
+ * pages (now with a reference count of zero) are treated like free (unmanaged)
+ * pages, allowing the containing memory block to get offlined. A driver that
  * relies on this feature is aware that re-onlining the memory block will
- * require to re-set the pages PageOffline() and not giving them to the
- * buddy via online_page_callback_t.
+ * require not giving them to the buddy via generic_online_page().
+ *
+ * Memory offlining code will not adjust the managed page count for any
+ * PageOffline() pages, treating them like they were never exposed to the
+ * buddy using generic_online_page().
  *
  * There are drivers that mark a page PageOffline() and expect there won't be
  * any further access to page content. PFN walkers that read content of random

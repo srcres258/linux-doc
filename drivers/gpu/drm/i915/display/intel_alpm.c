@@ -11,12 +11,12 @@
 #include "intel_dp_aux.h"
 #include "intel_psr_regs.h"
 
-static bool intel_alpm_aux_wake_supported(struct intel_dp *intel_dp)
+bool intel_alpm_aux_wake_supported(struct intel_dp *intel_dp)
 {
 	return intel_dp->alpm_dpcd & DP_ALPM_CAP;
 }
 
-static bool intel_alpm_aux_less_wake_supported(struct intel_dp *intel_dp)
+bool intel_alpm_aux_less_wake_supported(struct intel_dp *intel_dp)
 {
 	return intel_dp->alpm_dpcd & DP_ALPM_AUX_LESS_CAP;
 }
@@ -159,7 +159,7 @@ static int _lnl_compute_aux_less_alpm_params(struct intel_dp *intel_dp,
 	if (i915->display.params.psr_safest_params)
 		aux_less_wake_lines = ALPM_CTL_AUX_LESS_WAKE_TIME_MASK;
 
-	intel_dp->alpm_parameters.fast_wake_lines = aux_less_wake_lines;
+	intel_dp->alpm_parameters.aux_less_wake_lines = aux_less_wake_lines;
 	intel_dp->alpm_parameters.silence_period_sym_clocks = silence_period;
 	intel_dp->alpm_parameters.lfps_half_cycle_num_of_syms = lfps_half_cycle;
 
@@ -298,7 +298,7 @@ void intel_alpm_lobf_compute_config(struct intel_dp *intel_dp,
 	if (intel_alpm_aux_less_wake_supported(intel_dp))
 		waketime_in_lines = intel_dp->alpm_parameters.io_wake_lines;
 	else
-		waketime_in_lines = intel_dp->alpm_parameters.fast_wake_lines;
+		waketime_in_lines = intel_dp->alpm_parameters.aux_less_wake_lines;
 
 	crtc_state->has_lobf = (context_latency + guardband) >
 		(first_sdp_position + waketime_in_lines);
@@ -323,7 +323,8 @@ static void lnl_alpm_configure(struct intel_dp *intel_dp,
 	    (crtc_state->has_lobf && intel_alpm_aux_less_wake_supported(intel_dp))) {
 		alpm_ctl = ALPM_CTL_ALPM_ENABLE |
 			ALPM_CTL_ALPM_AUX_LESS_ENABLE |
-			ALPM_CTL_AUX_LESS_SLEEP_HOLD_TIME_50_SYMBOLS;
+			ALPM_CTL_AUX_LESS_SLEEP_HOLD_TIME_50_SYMBOLS |
+			ALPM_CTL_AUX_LESS_WAKE_TIME(intel_dp->alpm_parameters.aux_less_wake_lines);
 
 		intel_de_write(dev_priv,
 			       PORT_ALPM_CTL(dev_priv, cpu_transcoder),

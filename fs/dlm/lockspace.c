@@ -407,6 +407,9 @@ static int new_lockspace(const char *name, const char *cluster,
 		ls->ls_ops_arg = ops_arg;
 	}
 
+	if (flags & DLM_LSFL_SOFTIRQ)
+		set_bit(LSFL_SOFTIRQ, &ls->ls_flags);
+
 	/* ls_exflags are forced to match among nodes, and we don't
 	 * need to require all nodes to have some flags set
 	 */
@@ -499,12 +502,13 @@ static int new_lockspace(const char *name, const char *cluster,
 	list_add(&ls->ls_list, &lslist);
 	spin_unlock_bh(&lslist_lock);
 
-	if (flags & DLM_LSFL_FS) {
-		error = dlm_callback_start(ls);
-		if (error) {
-			log_error(ls, "can't start dlm_callback %d", error);
-			goto out_delist;
-		}
+	if (flags & DLM_LSFL_FS)
+		set_bit(LSFL_FS, &ls->ls_flags);
+
+	error = dlm_callback_start(ls);
+	if (error) {
+		log_error(ls, "can't start dlm_callback %d", error);
+		goto out_delist;
 	}
 
 	init_waitqueue_head(&ls->ls_recover_lock_wait);
@@ -628,6 +632,9 @@ int dlm_new_user_lockspace(const char *name, const char *cluster,
 			   void *ops_arg, int *ops_result,
 			   dlm_lockspace_t **lockspace)
 {
+	if (flags & DLM_LSFL_SOFTIRQ)
+		return -EINVAL;
+
 	return __dlm_new_lockspace(name, cluster, flags, lvblen, ops,
 				   ops_arg, ops_result, lockspace);
 }

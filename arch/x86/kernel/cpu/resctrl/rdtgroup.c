@@ -1450,8 +1450,8 @@ out:
 unsigned int rdtgroup_cbm_to_size(struct rdt_resource *r,
 				  struct rdt_domain *d, unsigned long cbm)
 {
-	struct cacheinfo *ci;
 	unsigned int size = 0;
+	struct cacheinfo *ci;
 	int num_b;
 
 	num_b = bitmap_weight(&cbm, r->cache.cbm_len);

@@ -1702,7 +1702,7 @@ static inline bool can_change_pmd_writable(struct vm_area_struct *vma,
 		return false;
 
 	/* Do we need write faults for softdirty tracking? */
-	if (vma_soft_dirty_enabled(vma) && !pmd_soft_dirty(pmd))
+	if (pmd_needs_soft_dirty_wp(vma, pmd))
 		return false;
 
 	/* Do we need write faults for uffd-wp tracking? */
@@ -2853,9 +2853,9 @@ static void unmap_folio(struct folio *folio)
 	try_to_unmap_flush();
 }
 
-static bool __discard_trans_pmd_locked(struct vm_area_struct *vma,
-				       unsigned long addr, pmd_t *pmdp,
-				       struct folio *folio)
+static bool __discard_anon_folio_pmd_locked(struct vm_area_struct *vma,
+					    unsigned long addr, pmd_t *pmdp,
+					    struct folio *folio)
 {
 	VM_WARN_ON_FOLIO(folio_test_swapbacked(folio), folio);
 	VM_WARN_ON_FOLIO(!folio_test_anon(folio), folio);
@@ -2928,7 +2928,7 @@ bool unmap_huge_pmd_locked(struct vm_area_struct *vma, unsigned long addr,
 	VM_WARN_ON_ONCE(!IS_ALIGNED(addr, HPAGE_PMD_SIZE));
 
 	if (folio_test_anon(folio) && !folio_test_swapbacked(folio))
-		return __discard_trans_pmd_locked(vma, addr, pmdp, folio);
+		return __discard_anon_folio_pmd_locked(vma, addr, pmdp, folio);
 
 	return false;
 }
@@ -3257,30 +3257,36 @@ int split_huge_page_to_list_to_order(struct page *page, struct list_head *list,
 	if (new_order >= folio_order(folio))
 		return -EINVAL;
 
-	/* Cannot split anonymous THP to order-1 */
-	if (new_order == 1 && folio_test_anon(folio)) {
-		VM_WARN_ONCE(1, "Cannot split to order-1 folio");
-		return -EINVAL;
-	}
-
-	if (new_order) {
-		/* Only swapping a whole PMD-mapped folio is supported */
-		if (folio_test_swapcache(folio))
+	if (folio_test_anon(folio)) {
+		/* order-1 is not supported for anonymous THP. */
+		if (new_order == 1) {
+			VM_WARN_ONCE(1, "Cannot split to order-1 folio");
 			return -EINVAL;
+		}
+	} else if (new_order) {
 		/* Split shmem folio to non-zero order not supported */
 		if (shmem_mapping(folio->mapping)) {
 			VM_WARN_ONCE(1,
 				"Cannot split shmem folio to non-0 order");
 			return -EINVAL;
 		}
-		/* No split if the file system does not support large folio */
-		if (!mapping_large_folio_support(folio->mapping)) {
+		/*
+		 * No split if the file system does not support large folio.
+		 * Note that we might still have THPs in such mappings due to
+		 * CONFIG_READ_ONLY_THP_FOR_FS. But in that case, the mapping
+		 * does not actually support large folios properly.
+		 */
+		if (IS_ENABLED(CONFIG_READ_ONLY_THP_FOR_FS) &&
+		    !mapping_large_folio_support(folio->mapping)) {
 			VM_WARN_ONCE(1,
 				"Cannot split file folio to non-0 order");
 			return -EINVAL;
 		}
 	}
 
+	/* Only swapping a whole PMD-mapped folio is supported */
+	if (folio_test_swapcache(folio) && new_order)
+		return -EINVAL;
 
 	is_hzp = is_huge_zero_folio(folio);
 	if (is_hzp) {

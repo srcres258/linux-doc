@@ -684,7 +684,7 @@ void fpu__drop(struct task_struct *tsk)
 	struct fpu *fpu;
 
 	/* PF_KTHREAD tasks do not use the FPU context area: */
-	if (tsk->flags & PF_KTHREAD)
+	if (tsk->flags & (PF_KTHREAD | PF_USER_WORKER))
 		return;
 
 	fpu = x86_task_fpu(tsk);

@@ -196,9 +196,7 @@ int swap_writepage(struct page *page, struct writeback_control *wbc)
 		return ret;
 	}
 	if (zswap_store(folio)) {
-		folio_start_writeback(folio);
 		folio_unlock(folio);
-		folio_end_writeback(folio);
 		return 0;
 	}
 	if (!mem_cgroup_zswap_writeback_enabled(folio_memcg(folio))) {
@@ -495,10 +493,10 @@ static void swap_read_folio_bdev_async(struct folio *folio,
 	submit_bio(bio);
 }
 
-void swap_read_folio(struct folio *folio, bool synchronous,
-		struct swap_iocb **plug)
+void swap_read_folio(struct folio *folio, struct swap_iocb **plug)
 {
 	struct swap_info_struct *sis = swp_swap_info(folio->swap);
+	bool synchronous = sis->flags & SWP_SYNCHRONOUS_IO;
 	bool workingset = folio_test_workingset(folio);
 	unsigned long pflags;
 	bool in_thrashing;
@@ -523,7 +521,7 @@ void swap_read_folio(struct folio *folio, bool synchronous,
 		folio_unlock(folio);
 	} else if (data_race(sis->flags & SWP_FS_OPS)) {
 		swap_read_folio_fs(folio, plug);
-	} else if (synchronous || (sis->flags & SWP_SYNCHRONOUS_IO)) {
+	} else if (synchronous) {
 		swap_read_folio_bdev_sync(folio, sis);
 	} else {
 		swap_read_folio_bdev_async(folio, sis);
