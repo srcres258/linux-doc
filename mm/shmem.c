@@ -132,11 +132,11 @@ struct shmem_options {
 };
 
 #ifdef CONFIG_TRANSPARENT_HUGEPAGE
-static unsigned long huge_anon_shmem_orders_always __read_mostly;
-static unsigned long huge_anon_shmem_orders_madvise __read_mostly;
-static unsigned long huge_anon_shmem_orders_inherit __read_mostly;
-static unsigned long huge_anon_shmem_orders_within_size __read_mostly;
-static DEFINE_SPINLOCK(huge_anon_shmem_orders_lock);
+static unsigned long huge_shmem_orders_always __read_mostly;
+static unsigned long huge_shmem_orders_madvise __read_mostly;
+static unsigned long huge_shmem_orders_inherit __read_mostly;
+static unsigned long huge_shmem_orders_within_size __read_mostly;
+static DEFINE_SPINLOCK(huge_shmem_orders_lock);
 #endif
 
 #ifdef CONFIG_TMPFS
@@ -1612,12 +1612,12 @@ static gfp_t limit_gfp_mask(gfp_t huge_gfp, gfp_t limit_gfp)
 }
 
 #ifdef CONFIG_TRANSPARENT_HUGEPAGE
-static unsigned long anon_shmem_allowable_huge_orders(struct inode *inode,
+static unsigned long shmem_allowable_huge_orders(struct inode *inode,
 				struct vm_area_struct *vma, pgoff_t index,
 				bool global_huge)
 {
-	unsigned long mask = READ_ONCE(huge_anon_shmem_orders_always);
-	unsigned long within_size_orders = READ_ONCE(huge_anon_shmem_orders_within_size);
+	unsigned long mask = READ_ONCE(huge_shmem_orders_always);
+	unsigned long within_size_orders = READ_ONCE(huge_shmem_orders_within_size);
 	unsigned long vm_flags = vma->vm_flags;
 	/*
 	 * Check all the (large) orders below HPAGE_PMD_ORDER + 1 that
@@ -1647,7 +1647,7 @@ static unsigned long anon_shmem_allowable_huge_orders(struct inode *inode,
 	 * means non-PMD sized THP can not override 'huge' mount option now.
 	 */
 	if (shmem_huge == SHMEM_HUGE_FORCE)
-		return READ_ONCE(huge_anon_shmem_orders_inherit);
+		return READ_ONCE(huge_shmem_orders_inherit);
 
 	/* Allow mTHP that will be fully within i_size. */
 	order = highest_order(within_size_orders);
@@ -1663,17 +1663,17 @@ static unsigned long anon_shmem_allowable_huge_orders(struct inode *inode,
 	}
 
 	if (vm_flags & VM_HUGEPAGE)
-		mask |= READ_ONCE(huge_anon_shmem_orders_madvise);
+		mask |= READ_ONCE(huge_shmem_orders_madvise);
 
 	if (global_huge)
-		mask |= READ_ONCE(huge_anon_shmem_orders_inherit);
+		mask |= READ_ONCE(huge_shmem_orders_inherit);
 
 	return orders & mask;
 }
 
-static unsigned long anon_shmem_suitable_orders(struct inode *inode, struct vm_fault *vmf,
-					struct address_space *mapping, pgoff_t index,
-					unsigned long orders)
+static unsigned long shmem_suitable_orders(struct inode *inode, struct vm_fault *vmf,
+					   struct address_space *mapping, pgoff_t index,
+					   unsigned long orders)
 {
 	struct vm_area_struct *vma = vmf->vma;
 	unsigned long pages;
@@ -1697,16 +1697,16 @@ static unsigned long anon_shmem_suitable_orders(struct inode *inode, struct vm_f
 	return orders;
 }
 #else
-static unsigned long anon_shmem_allowable_huge_orders(struct inode *inode,
+static unsigned long shmem_allowable_huge_orders(struct inode *inode,
 				struct vm_area_struct *vma, pgoff_t index,
 				bool global_huge)
 {
 	return 0;
 }
 
-static unsigned long anon_shmem_suitable_orders(struct inode *inode, struct vm_fault *vmf,
-					struct address_space *mapping, pgoff_t index,
-					unsigned long orders)
+static unsigned long shmem_suitable_orders(struct inode *inode, struct vm_fault *vmf,
+					   struct address_space *mapping, pgoff_t index,
+					   unsigned long orders)
 {
 	return 0;
 }
@@ -1743,7 +1743,7 @@ static struct folio *shmem_alloc_and_add_folio(struct vm_fault *vmf,
 
 	if (orders > 0) {
 		if (vma && vma_is_anon_shmem(vma)) {
-			suitable_orders = anon_shmem_suitable_orders(inode, vmf,
+			suitable_orders = shmem_suitable_orders(inode, vmf,
 							mapping, index, orders);
 		} else if (orders & BIT(HPAGE_PMD_ORDER)) {
 			pages = HPAGE_PMD_NR;
@@ -2163,7 +2163,7 @@ repeat:
 			     vma ? vma->vm_flags : 0);
 	/* Find hugepage orders that are allowed for anonymous shmem. */
 	if (vma && vma_is_anon_shmem(vma))
-		orders = anon_shmem_allowable_huge_orders(inode, vma, index, huge);
+		orders = shmem_allowable_huge_orders(inode, vma, index, huge);
 	else if (huge)
 		orders = BIT(HPAGE_PMD_ORDER);
 
@@ -2459,11 +2459,11 @@ unsigned long shmem_get_unmapped_area(struct file *file,
 			 * provide a suitable alignment address.
 			 */
 #ifdef CONFIG_TRANSPARENT_HUGEPAGE
-			hpage_orders = READ_ONCE(huge_anon_shmem_orders_always);
-			hpage_orders |= READ_ONCE(huge_anon_shmem_orders_within_size);
-			hpage_orders |= READ_ONCE(huge_anon_shmem_orders_madvise);
+			hpage_orders = READ_ONCE(huge_shmem_orders_always);
+			hpage_orders |= READ_ONCE(huge_shmem_orders_within_size);
+			hpage_orders |= READ_ONCE(huge_shmem_orders_madvise);
 			if (SHMEM_SB(sb)->huge != SHMEM_HUGE_NEVER)
-				hpage_orders |= READ_ONCE(huge_anon_shmem_orders_inherit);
+				hpage_orders |= READ_ONCE(huge_shmem_orders_inherit);
 
 			if (hpage_orders > 0) {
 				order = highest_order(hpage_orders);
@@ -4847,9 +4847,9 @@ void __init shmem_init(void)
 
 	/*
 	 * Default to setting PMD-sized THP to inherit the global setting and
-	 * disable all other multi-size THPs, when anonymous shmem uses mTHP.
+	 * disable all other multi-size THPs.
 	 */
-	huge_anon_shmem_orders_inherit = BIT(HPAGE_PMD_ORDER);
+	huge_shmem_orders_inherit = BIT(HPAGE_PMD_ORDER);
 #endif
 	return;
 
@@ -4911,7 +4911,7 @@ static ssize_t shmem_enabled_store(struct kobject *kobj,
 
 	/* Do not override huge allocation policy with non-PMD sized mTHP */
 	if (huge == SHMEM_HUGE_FORCE &&
-	    huge_anon_shmem_orders_inherit != BIT(HPAGE_PMD_ORDER))
+	    huge_shmem_orders_inherit != BIT(HPAGE_PMD_ORDER))
 		return -EINVAL;
 
 	shmem_huge = huge;
@@ -4928,13 +4928,13 @@ static ssize_t thpsize_shmem_enabled_show(struct kobject *kobj,
 	int order = to_thpsize(kobj)->order;
 	const char *output;
 
-	if (test_bit(order, &huge_anon_shmem_orders_always))
+	if (test_bit(order, &huge_shmem_orders_always))
 		output = "[always] inherit within_size advise never";
-	else if (test_bit(order, &huge_anon_shmem_orders_inherit))
+	else if (test_bit(order, &huge_shmem_orders_inherit))
 		output = "always [inherit] within_size advise never";
-	else if (test_bit(order, &huge_anon_shmem_orders_within_size))
+	else if (test_bit(order, &huge_shmem_orders_within_size))
 		output = "always inherit [within_size] advise never";
-	else if (test_bit(order, &huge_anon_shmem_orders_madvise))
+	else if (test_bit(order, &huge_shmem_orders_madvise))
 		output = "always inherit within_size [advise] never";
 	else
 		output = "always inherit within_size advise [never]";
@@ -4950,45 +4950,45 @@ static ssize_t thpsize_shmem_enabled_store(struct kobject *kobj,
 	ssize_t ret = count;
 
 	if (sysfs_streq(buf, "always")) {
-		spin_lock(&huge_anon_shmem_orders_lock);
-		clear_bit(order, &huge_anon_shmem_orders_inherit);
-		clear_bit(order, &huge_anon_shmem_orders_madvise);
-		clear_bit(order, &huge_anon_shmem_orders_within_size);
-		set_bit(order, &huge_anon_shmem_orders_always);
-		spin_unlock(&huge_anon_shmem_orders_lock);
+		spin_lock(&huge_shmem_orders_lock);
+		clear_bit(order, &huge_shmem_orders_inherit);
+		clear_bit(order, &huge_shmem_orders_madvise);
+		clear_bit(order, &huge_shmem_orders_within_size);
+		set_bit(order, &huge_shmem_orders_always);
+		spin_unlock(&huge_shmem_orders_lock);
 	} else if (sysfs_streq(buf, "inherit")) {
 		/* Do not override huge allocation policy with non-PMD sized mTHP */
 		if (shmem_huge == SHMEM_HUGE_FORCE &&
 		    order != HPAGE_PMD_ORDER)
 			return -EINVAL;
 
-		spin_lock(&huge_anon_shmem_orders_lock);
-		clear_bit(order, &huge_anon_shmem_orders_always);
-		clear_bit(order, &huge_anon_shmem_orders_madvise);
-		clear_bit(order, &huge_anon_shmem_orders_within_size);
-		set_bit(order, &huge_anon_shmem_orders_inherit);
-		spin_unlock(&huge_anon_shmem_orders_lock);
+		spin_lock(&huge_shmem_orders_lock);
+		clear_bit(order, &huge_shmem_orders_always);
+		clear_bit(order, &huge_shmem_orders_madvise);
+		clear_bit(order, &huge_shmem_orders_within_size);
+		set_bit(order, &huge_shmem_orders_inherit);
+		spin_unlock(&huge_shmem_orders_lock);
 	} else if (sysfs_streq(buf, "within_size")) {
-		spin_lock(&huge_anon_shmem_orders_lock);
-		clear_bit(order, &huge_anon_shmem_orders_always);
-		clear_bit(order, &huge_anon_shmem_orders_inherit);
-		clear_bit(order, &huge_anon_shmem_orders_madvise);
-		set_bit(order, &huge_anon_shmem_orders_within_size);
-		spin_unlock(&huge_anon_shmem_orders_lock);
+		spin_lock(&huge_shmem_orders_lock);
+		clear_bit(order, &huge_shmem_orders_always);
+		clear_bit(order, &huge_shmem_orders_inherit);
+		clear_bit(order, &huge_shmem_orders_madvise);
+		set_bit(order, &huge_shmem_orders_within_size);
+		spin_unlock(&huge_shmem_orders_lock);
 	} else if (sysfs_streq(buf, "madvise")) {
-		spin_lock(&huge_anon_shmem_orders_lock);
-		clear_bit(order, &huge_anon_shmem_orders_always);
-		clear_bit(order, &huge_anon_shmem_orders_inherit);
-		clear_bit(order, &huge_anon_shmem_orders_within_size);
-		set_bit(order, &huge_anon_shmem_orders_madvise);
-		spin_unlock(&huge_anon_shmem_orders_lock);
+		spin_lock(&huge_shmem_orders_lock);
+		clear_bit(order, &huge_shmem_orders_always);
+		clear_bit(order, &huge_shmem_orders_inherit);
+		clear_bit(order, &huge_shmem_orders_within_size);
+		set_bit(order, &huge_shmem_orders_madvise);
+		spin_unlock(&huge_shmem_orders_lock);
 	} else if (sysfs_streq(buf, "never")) {
-		spin_lock(&huge_anon_shmem_orders_lock);
-		clear_bit(order, &huge_anon_shmem_orders_always);
-		clear_bit(order, &huge_anon_shmem_orders_inherit);
-		clear_bit(order, &huge_anon_shmem_orders_within_size);
-		clear_bit(order, &huge_anon_shmem_orders_madvise);
-		spin_unlock(&huge_anon_shmem_orders_lock);
+		spin_lock(&huge_shmem_orders_lock);
+		clear_bit(order, &huge_shmem_orders_always);
+		clear_bit(order, &huge_shmem_orders_inherit);
+		clear_bit(order, &huge_shmem_orders_within_size);
+		clear_bit(order, &huge_shmem_orders_madvise);
+		spin_unlock(&huge_shmem_orders_lock);
 	} else {
 		ret = -EINVAL;
 	}

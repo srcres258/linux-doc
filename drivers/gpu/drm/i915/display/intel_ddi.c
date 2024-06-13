@@ -3516,11 +3516,10 @@ intel_ddi_pre_pll_enable(struct intel_atomic_state *state,
 	bool is_tc_port = intel_encoder_is_tc(encoder);
 
 	if (is_tc_port) {
-		struct intel_crtc *master_crtc =
-			to_intel_crtc(crtc_state->uapi.crtc);
+		struct intel_crtc *crtc = to_intel_crtc(crtc_state->uapi.crtc);
 
 		intel_tc_port_get_link(dig_port, crtc_state->lane_count);
-		intel_ddi_update_active_dpll(state, encoder, master_crtc);
+		intel_ddi_update_active_dpll(state, encoder, crtc);
 	}
 
 	main_link_aux_power_domain_get(dig_port, crtc_state);
@@ -4277,10 +4276,10 @@ static bool crtcs_port_sync_compatible(const struct intel_crtc_state *crtc_state
 {
 	/*
 	 * FIXME the modeset sequence is currently wrong and
-	 * can't deal with bigjoiner + port sync at the same time.
+	 * can't deal with joiner + port sync at the same time.
 	 */
 	return crtc_state1->hw.active && crtc_state2->hw.active &&
-		!crtc_state1->bigjoiner_pipes && !crtc_state2->bigjoiner_pipes &&
+		!crtc_state1->joiner_pipes && !crtc_state2->joiner_pipes &&
 		crtc_state1->output_types == crtc_state2->output_types &&
 		crtc_state1->output_format == crtc_state2->output_format &&
 		crtc_state1->lane_count == crtc_state2->lane_count &&

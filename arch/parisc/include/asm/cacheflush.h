@@ -39,10 +39,8 @@ void flush_cache_mm(struct mm_struct *mm);
 void flush_kernel_vmap_range(void *vaddr, int size);
 void invalidate_kernel_vmap_range(void *vaddr, int size);
 
-// #define flush_cache_vmap(start, end)		flush_cache_all()
 void flush_cache_vmap(unsigned long start, unsigned long end);
 #define flush_cache_vmap_early(start, end)	do { } while (0)
-// #define flush_cache_vunmap(start, end)		flush_cache_all()
 void flush_cache_vunmap(unsigned long start, unsigned long end);
 
 void flush_dcache_folio(struct folio *folio);

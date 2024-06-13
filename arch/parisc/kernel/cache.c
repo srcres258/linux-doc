@@ -20,6 +20,7 @@
 #include <linux/sched.h>
 #include <linux/sched/mm.h>
 #include <linux/syscalls.h>
+#include <linux/vmalloc.h>
 #include <asm/pdc.h>
 #include <asm/cache.h>
 #include <asm/cacheflush.h>
@@ -896,9 +897,17 @@ void flush_kernel_vmap_range(void *vaddr, int size)
 	unsigned long start = (unsigned long)vaddr;
 	unsigned long end = start + size;
 
-	WARN_ON(IS_ENABLED(CONFIG_SMP) && arch_irqs_disabled());
-
 	flush_tlb_kernel_range(start, end);
+
+	if (!static_branch_likely(&parisc_has_dcache))
+		return;
+
+	/* If interrupts are disabled, we can only do local flush */
+	if (WARN_ON(IS_ENABLED(CONFIG_SMP) && arch_irqs_disabled())) {
+		flush_data_cache_local(NULL);
+		return;
+	}
+
 	flush_data_cache();
 }
 EXPORT_SYMBOL(flush_kernel_vmap_range);
@@ -911,9 +920,17 @@ void invalidate_kernel_vmap_range(void *vaddr, int size)
 	/* Ensure DMA is complete */
 	asm_syncdma();
 
-	WARN_ON(IS_ENABLED(CONFIG_SMP) && arch_irqs_disabled());
-
 	flush_tlb_kernel_range(start, end);
+
+	if (!static_branch_likely(&parisc_has_dcache))
+		return;
+
+	/* If interrupts are disabled, we can only do local flush */
+	if (WARN_ON(IS_ENABLED(CONFIG_SMP) && arch_irqs_disabled())) {
+		flush_data_cache_local(NULL);
+		return;
+	}
+
 	flush_data_cache();
 }
 EXPORT_SYMBOL(invalidate_kernel_vmap_range);
