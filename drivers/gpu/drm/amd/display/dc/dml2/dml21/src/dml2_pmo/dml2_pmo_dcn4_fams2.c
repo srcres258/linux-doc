@@ -929,7 +929,8 @@ static bool all_timings_support_svp(const struct dml2_pmo_instance *pmo,
 
 			/* check recout height covers entire otg vactive, and single plane */
 			if (num_planes_per_stream[plane_descriptor->stream_index] > 1 ||
-					!plane_descriptor->composition.rect_out_height_spans_vactive) {
+					!plane_descriptor->composition.rect_out_height_spans_vactive ||
+					plane_descriptor->composition.rotation_angle != dml2_rotation_0) {
 				return false;
 			}
 		}
@@ -1361,7 +1362,7 @@ static bool validate_pstate_support_strategy_cofunctionality(struct dml2_pmo_ins
 			break;
 		}
 
-		strategy_matches_drr_requirements =
+		strategy_matches_drr_requirements &=
 				stream_matches_drr_policy(pmo, display_cfg, per_stream_pstate_strategy[stream_index], stream_index);
 
 		if (per_stream_pstate_strategy[stream_index] == dml2_pmo_pstate_strategy_fw_svp ||
