@@ -147,6 +147,8 @@ void bch2_flush_fsck_errs(struct bch_fs *);
 
 #define __fsck_err_on(cond, c, _flags, _err_type, ...)			\
 ({									\
+	might_sleep();							\
+									\
 	if (type_is(c, struct bch_fs *))				\
 		WARN_ON(bch2_current_has_btree_trans((struct bch_fs *) c));\
 									\

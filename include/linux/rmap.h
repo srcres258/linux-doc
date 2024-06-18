@@ -717,14 +717,16 @@ static inline void page_vma_mapped_walk_done(struct page_vma_mapped_walk *pvmw)
 static inline void
 page_vma_mapped_walk_restart(struct page_vma_mapped_walk *pvmw)
 {
-	WARN_ON_ONCE(!pvmw->pmd);
-	WARN_ON_ONCE(!pvmw->ptl);
+	WARN_ON_ONCE(!pvmw->pmd && !pvmw->pte);
 
-	if (pvmw->ptl)
+	if (likely(pvmw->ptl))
 		spin_unlock(pvmw->ptl);
+	else
+		WARN_ON_ONCE(1);
 
 	pvmw->ptl = NULL;
 	pvmw->pmd = NULL;
+	pvmw->pte = NULL;
 }
 
 bool page_vma_mapped_walk(struct page_vma_mapped_walk *pvmw);
@@ -746,8 +748,6 @@ int pfn_mkclean_range(unsigned long pfn, unsigned long nr_pages, pgoff_t pgoff,
 		      struct vm_area_struct *vma);
 
 void remove_migration_ptes(struct folio *src, struct folio *dst, bool locked);
-
-unsigned long page_mapped_in_vma(struct page *page, struct vm_area_struct *vma);
 
 /*
  * rmap_walk_control: To control rmap traversing for specific needs

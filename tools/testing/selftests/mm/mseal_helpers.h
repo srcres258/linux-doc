@@ -1,9 +1,5 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 
-#ifndef __NR_mseal
-#define __NR_mseal 462
-#endif
-
 #define FAIL_TEST_IF_FALSE(test_passed)					\
 	do {								\
 		if (!(test_passed)) {					\

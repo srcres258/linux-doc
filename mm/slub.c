@@ -845,10 +845,12 @@ static int disable_higher_order_debug;
 static inline void metadata_access_enable(void)
 {
 	kasan_disable_current();
+	kmsan_disable_current();
 }
 
 static inline void metadata_access_disable(void)
 {
+	kmsan_enable_current();
 	kasan_enable_current();
 }
 
@@ -1153,7 +1155,12 @@ static void init_object(struct kmem_cache *s, void *object, u8 val)
 	unsigned int poison_size = s->object_size;
 
 	if (s->flags & SLAB_RED_ZONE) {
-		memset(p - s->red_left_pad, val, s->red_left_pad);
+		/*
+		 * Use __memset() here and below in order to avoid overwriting
+		 * the KMSAN shadow. Keeping the shadow makes it possible to
+		 * distinguish uninit-value from use-after-free.
+		 */
+		__memset(p - s->red_left_pad, val, s->red_left_pad);
 
 		if (slub_debug_orig_size(s) && val == SLUB_RED_ACTIVE) {
 			/*
@@ -1166,12 +1173,12 @@ static void init_object(struct kmem_cache *s, void *object, u8 val)
 	}
 
 	if (s->flags & __OBJECT_POISON) {
-		memset(p, POISON_FREE, poison_size - 1);
-		p[poison_size - 1] = POISON_END;
+		__memset(p, POISON_FREE, poison_size - 1);
+		__memset(p + poison_size - 1, POISON_END, 1);
 	}
 
 	if (s->flags & SLAB_RED_ZONE)
-		memset(p + poison_size, val, s->inuse - poison_size);
+		__memset(p + poison_size, val, s->inuse - poison_size);
 }
 
 static void restore_bytes(struct kmem_cache *s, char *message, u8 data,
@@ -1192,6 +1199,7 @@ static int check_bytes_and_report(struct kmem_cache *s, struct slab *slab,
 	metadata_access_enable();
 	fault = memchr_inv(kasan_reset_tag(start), value, bytes);
 	metadata_access_disable();
+	kmsan_unpoison_memory(&fault, sizeof(fault));
 	if (!fault)
 		return 1;
 
@@ -1296,6 +1304,7 @@ static void slab_pad_check(struct kmem_cache *s, struct slab *slab)
 	metadata_access_enable();
 	fault = memchr_inv(kasan_reset_tag(pad), POISON_INUSE, remainder);
 	metadata_access_disable();
+	kmsan_unpoison_memory(&fault, sizeof(fault));
 	if (!fault)
 		return;
 	while (end > fault && end[-1] == POISON_INUSE)
@@ -3957,7 +3966,6 @@ bool slab_post_alloc_hook(struct kmem_cache *s, struct list_lru *lru,
 			  unsigned int orig_size)
 {
 	unsigned int zero_size = s->object_size;
-	struct slabobj_ext *obj_exts;
 	bool kasan_init = init;
 	size_t i;
 	gfp_t init_flags = flags & gfp_allowed_mask;
@@ -4000,9 +4008,11 @@ bool slab_post_alloc_hook(struct kmem_cache *s, struct list_lru *lru,
 		kmemleak_alloc_recursive(p[i], s->object_size, 1,
 					 s->flags, init_flags);
 		kmsan_slab_alloc(s, p[i], init_flags);
-		if (need_slab_obj_ext()) {
-			obj_exts = prepare_slab_obj_exts_hook(s, flags, p[i]);
 #ifdef CONFIG_MEM_ALLOC_PROFILING
+		if (need_slab_obj_ext()) {
+			struct slabobj_ext *obj_exts;
+
+			obj_exts = prepare_slab_obj_exts_hook(s, flags, p[i]);
 			/*
 			 * Currently obj_exts is used only for allocation profiling.
 			 * If other users appear then mem_alloc_profiling_enabled()
@@ -4010,8 +4020,8 @@ bool slab_post_alloc_hook(struct kmem_cache *s, struct list_lru *lru,
 			 */
 			if (likely(obj_exts))
 				alloc_tag_add(&obj_exts->ref, current->alloc_tag, s->size);
-#endif
 		}
+#endif
 	}
 
 	return memcg_slab_post_alloc_hook(s, lru, flags, size, p);

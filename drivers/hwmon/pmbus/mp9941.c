@@ -3,6 +3,8 @@
  * Hardware monitoring driver for MPS Multi-phase Digital VR Controllers(MP9941)
  */
 
+#include <linux/bitfield.h>
+#include <linux/bits.h>
 #include <linux/i2c.h>
 #include <linux/module.h>
 #include <linux/of_device.h>

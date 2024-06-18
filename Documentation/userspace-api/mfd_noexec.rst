@@ -1,7 +1,7 @@
 .. SPDX-License-Identifier: GPL-2.0
 
 ==================================
-Introduction of non executable mfd
+Introduction of non-executable mfd
 ==================================
 :Author:
     Daniel Verkamp <dverkamp@chromium.org>
@@ -30,7 +30,7 @@ use of executable memfds and an attacker's [3].
 To address those above:
  - Let memfd_create() set X bit at creation time.
  - Let memfd be sealed for modifying X bit when NX is set.
- - Add a new pid namespace sysctl: vm.memfd_noexec to help applications to
+ - Add a new pid namespace sysctl: vm.memfd_noexec to help applications in
    migrating and enforcing non-executable MFD.
 
 User API

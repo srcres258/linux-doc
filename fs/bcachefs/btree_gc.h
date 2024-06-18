@@ -47,15 +47,6 @@ static inline struct gc_pos gc_pos_btree(enum btree_id btree, unsigned level,
 	};
 }
 
-/*
- * GC position of the pointers within a btree node: note, _not_ for &b->key
- * itself, that lives in the parent node:
- */
-static inline struct gc_pos gc_pos_btree_node(struct btree *b)
-{
-	return gc_pos_btree(b->c.btree_id, b->c.level, b->key.k.p);
-}
-
 static inline int gc_btree_order(enum btree_id btree)
 {
 	if (btree == BTREE_ID_alloc)
@@ -86,6 +77,8 @@ static inline bool gc_visited(struct bch_fs *c, struct gc_pos pos)
 
 	return ret;
 }
+
+void bch2_gc_pos_to_text(struct printbuf *, struct gc_pos *);
 
 int bch2_gc_gens(struct bch_fs *);
 void bch2_gc_gens_async(struct bch_fs *);

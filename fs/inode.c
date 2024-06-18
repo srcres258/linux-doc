@@ -162,6 +162,7 @@ int inode_init_always(struct super_block *sb, struct inode *inode)
 	inode->i_sb = sb;
 	inode->i_blkbits = sb->s_blocksize_bits;
 	inode->i_flags = 0;
+	inode->i_state = 0;
 	atomic64_set(&inode->i_sequence, 0);
 	atomic_set(&inode->i_count, 1);
 	inode->i_op = &empty_iops;
@@ -232,7 +233,6 @@ int inode_init_always(struct super_block *sb, struct inode *inode)
 	if (unlikely(security_inode_alloc(inode)))
 		return -ENOMEM;
 
-	inode->i_state = 0;
 	this_cpu_inc(nr_inodes);
 
 	return 0;

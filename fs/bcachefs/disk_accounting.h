@@ -104,22 +104,29 @@ static inline int accounting_pos_cmp(const void *_l, const void *_r)
 	return bpos_cmp(*l, *r);
 }
 
-int bch2_accounting_mem_mod_slowpath(struct bch_fs *, struct bkey_s_c_accounting, bool);
+int bch2_accounting_mem_insert(struct bch_fs *, struct bkey_s_c_accounting, bool);
+void bch2_accounting_mem_gc(struct bch_fs *);
 
 static inline int __bch2_accounting_mem_mod(struct bch_fs *c, struct bkey_s_c_accounting a, bool gc)
 {
-	struct bch_accounting_mem *acc = &c->accounting[gc];
-	unsigned idx = eytzinger0_find(acc->k.data, acc->k.nr, sizeof(acc->k.data[0]),
-				       accounting_pos_cmp, &a.k->p);
-	if (unlikely(idx >= acc->k.nr))
-		return bch2_accounting_mem_mod_slowpath(c, a, gc);
+	struct bch_accounting_mem *acc = &c->accounting;
+	unsigned idx;
 
-	unsigned offset = acc->k.data[idx].offset;
+	EBUG_ON(gc && !acc->gc_running);
 
-	EBUG_ON(bch2_accounting_counters(a.k) != acc->k.data[idx].nr_counters);
+	while ((idx = eytzinger0_find(acc->k.data, acc->k.nr, sizeof(acc->k.data[0]),
+				      accounting_pos_cmp, &a.k->p)) >= acc->k.nr) {
+		int ret = bch2_accounting_mem_insert(c, a, gc);
+		if (ret)
+			return ret;
+	}
+
+	struct accounting_mem_entry *e = &acc->k.data[idx];
+
+	EBUG_ON(bch2_accounting_counters(a.k) != e->nr_counters);
 
 	for (unsigned i = 0; i < bch2_accounting_counters(a.k); i++)
-		this_cpu_add(acc->v[offset + i], a.v->d[i]);
+		this_cpu_add(e->v[gc][i], a.v->d[i]);
 	return 0;
 }
 
@@ -166,37 +173,38 @@ static inline int bch2_accounting_mem_add(struct btree_trans *trans, struct bkey
 	return ret;
 }
 
-static inline void bch2_accounting_mem_read_counters(struct bch_fs *c, unsigned idx,
-						     u64 *v, unsigned nr, bool gc)
+static inline void bch2_accounting_mem_read_counters(struct bch_accounting_mem *acc,
+						     unsigned idx, u64 *v, unsigned nr, bool gc)
 {
 	memset(v, 0, sizeof(*v) * nr);
 
-	struct bch_accounting_mem *acc = &c->accounting[gc];
 	if (unlikely(idx >= acc->k.nr))
 		return;
 
-	unsigned offset = acc->k.data[idx].offset;
-	nr = min_t(unsigned, nr, acc->k.data[idx].nr_counters);
+	struct accounting_mem_entry *e = &acc->k.data[idx];
+
+	nr = min_t(unsigned, nr, e->nr_counters);
 
 	for (unsigned i = 0; i < nr; i++)
-		v[i] = percpu_u64_get(acc->v + offset + i);
+		v[i] = percpu_u64_get(e->v[gc] + i);
 }
 
 static inline void bch2_accounting_mem_read(struct bch_fs *c, struct bpos p,
 					    u64 *v, unsigned nr)
 {
-	struct bch_accounting_mem *acc = &c->accounting[0];
+	struct bch_accounting_mem *acc = &c->accounting;
 	unsigned idx = eytzinger0_find(acc->k.data, acc->k.nr, sizeof(acc->k.data[0]),
 				       accounting_pos_cmp, &p);
 
-	bch2_accounting_mem_read_counters(c, idx, v, nr, false);
+	bch2_accounting_mem_read_counters(acc, idx, v, nr, false);
 }
 
 int bch2_fs_replicas_usage_read(struct bch_fs *, darray_char *);
 int bch2_fs_accounting_read(struct bch_fs *, darray_char *, unsigned);
 void bch2_fs_accounting_to_text(struct printbuf *, struct bch_fs *);
 
-int bch2_accounting_gc_done(struct bch_fs *);
+int bch2_gc_accounting_start(struct bch_fs *);
+int bch2_gc_accounting_done(struct bch_fs *);
 
 int bch2_accounting_read(struct bch_fs *);
 
@@ -205,7 +213,7 @@ int bch2_dev_usage_init(struct bch_dev *, bool);
 
 void bch2_verify_accounting_clean(struct bch_fs *c);
 
-void bch2_accounting_free(struct bch_accounting_mem *);
+void bch2_accounting_gc_free(struct bch_fs *);
 void bch2_fs_accounting_exit(struct bch_fs *);
 
 #endif /* _BCACHEFS_DISK_ACCOUNTING_H */

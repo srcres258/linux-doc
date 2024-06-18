@@ -1185,9 +1185,10 @@ struct file *kernel_file_open(const struct path *path, int flags,
 	error = do_dentry_open(f, NULL);
 	if (error) {
 		fput(f);
-		f = ERR_PTR(error);
-	} else
-		fsnotify_open(f);
+		return ERR_PTR(error);
+	}
+
+	fsnotify_open(f);
 	return f;
 }
 EXPORT_SYMBOL_GPL(kernel_file_open);

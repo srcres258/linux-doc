@@ -91,10 +91,11 @@ static int bch2_btree_cache_cmp_fn(struct rhashtable_compare_arg *arg,
 }
 
 static const struct rhashtable_params bch_btree_cache_params = {
-	.head_offset	= offsetof(struct btree, hash),
-	.key_offset	= offsetof(struct btree, hash_val),
-	.key_len	= sizeof(u64),
-	.obj_cmpfn	= bch2_btree_cache_cmp_fn,
+	.head_offset		= offsetof(struct btree, hash),
+	.key_offset		= offsetof(struct btree, hash_val),
+	.key_len		= sizeof(u64),
+	.obj_cmpfn		= bch2_btree_cache_cmp_fn,
+	.automatic_shrinking	= true,
 };
 
 static int btree_node_data_alloc(struct bch_fs *c, struct btree *b, gfp_t gfp)
@@ -1254,6 +1255,14 @@ out:
 const char *bch2_btree_id_str(enum btree_id btree)
 {
 	return btree < BTREE_ID_NR ? __bch2_btree_ids[btree] : "(unknown)";
+}
+
+void bch2_btree_id_to_text(struct printbuf *out, enum btree_id btree)
+{
+	if (btree < BTREE_ID_NR)
+		prt_str(out, __bch2_btree_ids[btree]);
+	else
+		prt_printf(out, "(unknown btree %u)", btree);
 }
 
 void bch2_btree_pos_to_text(struct printbuf *out, struct bch_fs *c, const struct btree *b)

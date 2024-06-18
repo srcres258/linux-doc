@@ -1567,7 +1567,7 @@ static __always_inline void __folio_remove_rmap(struct folio *folio,
 		    list_empty(&folio->_deferred_list))
 			deferred_split_folio(folio);
 	}
-	__folio_mod_stat(folio, nr, nr_pmdmapped);
+	__folio_mod_stat(folio, -nr, -nr_pmdmapped);
 
 	/*
 	 * It would be tidy to reset folio_test_anon mapping when fully
@@ -1679,11 +1679,10 @@ static bool try_to_unmap_one(struct folio *folio, struct vm_area_struct *vma,
 			if (!folio_test_large(folio) ||
 			    (!pvmw.pte && (flags & TTU_SPLIT_HUGE_PMD)))
 				mlock_vma_folio(folio, vma);
-			goto walk_done_err;
+			goto walk_abort;
 		}
 
 		if (!pvmw.pte) {
-			pmd_mapped = true;
 			if (unmap_huge_pmd_locked(vma, pvmw.address, pvmw.pmd,
 						  folio))
 				goto walk_done;
@@ -1741,7 +1740,7 @@ static bool try_to_unmap_one(struct folio *folio, struct vm_area_struct *vma,
 			if (!anon) {
 				VM_BUG_ON(!(flags & TTU_RMAP_LOCKED));
 				if (!hugetlb_vma_trylock_write(vma))
-					goto walk_done_err;
+					goto walk_abort;
 				if (huge_pmd_unshare(mm, vma, address, pvmw.pte)) {
 					hugetlb_vma_unlock_write(vma);
 					flush_tlb_range(vma,
@@ -1827,13 +1826,8 @@ static bool try_to_unmap_one(struct folio *folio, struct vm_area_struct *vma,
 			 */
 			if (unlikely(folio_test_swapbacked(folio) !=
 					folio_test_swapcache(folio))) {
-				/*
-				 * unmap_huge_pmd_locked() will unmark a
-				 * PMD-mapped folio as lazyfree if the folio or
-				 * its PMD was redirtied.
-				 */
-				WARN_ON_ONCE(!pmd_mapped);
-				goto walk_done_err;
+				WARN_ON_ONCE(1);
+				goto walk_abort;
 			}
 
 			/* MADV_FREE page check */
@@ -1872,17 +1866,17 @@ static bool try_to_unmap_one(struct folio *folio, struct vm_area_struct *vma,
 				 */
 				set_pte_at(mm, address, pvmw.pte, pteval);
 				folio_set_swapbacked(folio);
-				goto walk_done_err;
+				goto walk_abort;
 			}
 
 			if (swap_duplicate(entry) < 0) {
 				set_pte_at(mm, address, pvmw.pte, pteval);
-				goto walk_done_err;
+				goto walk_abort;
 			}
 			if (arch_unmap_one(mm, vma, address, pteval) < 0) {
 				swap_free(entry);
 				set_pte_at(mm, address, pvmw.pte, pteval);
-				goto walk_done_err;
+				goto walk_abort;
 			}
 
 			/* See folio_try_share_anon_rmap(): clear PTE first. */
@@ -1890,7 +1884,7 @@ static bool try_to_unmap_one(struct folio *folio, struct vm_area_struct *vma,
 			    folio_try_share_anon_rmap_pte(folio, subpage)) {
 				swap_free(entry);
 				set_pte_at(mm, address, pvmw.pte, pteval);
-				goto walk_done_err;
+				goto walk_abort;
 			}
 			if (list_empty(&mm->mmlist)) {
 				spin_lock(&mmlist_lock);
@@ -1931,7 +1925,7 @@ discard:
 			mlock_drain_local();
 		folio_put(folio);
 		continue;
-walk_done_err:
+walk_abort:
 		ret = false;
 walk_done:
 		page_vma_mapped_walk_done(&pvmw);

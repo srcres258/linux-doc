@@ -70,12 +70,9 @@ static const struct cxsr_latency cxsr_latency_table[] = {
 	{0, 1, 400, 800, 6042, 36042, 6584, 36584},    /* DDR3-800 SC */
 };
 
-static const struct cxsr_latency *intel_get_cxsr_latency(struct drm_i915_private *i915)
+static const struct cxsr_latency *pnv_get_cxsr_latency(struct drm_i915_private *i915)
 {
 	int i;
-
-	if (i915->fsb_freq == 0 || i915->mem_freq == 0)
-		return NULL;
 
 	for (i = 0; i < ARRAY_SIZE(cxsr_latency_table); i++) {
 		const struct cxsr_latency *latency = &cxsr_latency_table[i];
@@ -83,12 +80,14 @@ static const struct cxsr_latency *intel_get_cxsr_latency(struct drm_i915_private
 
 		if (is_desktop == latency->is_desktop &&
 		    i915->is_ddr3 == latency->is_ddr3 &&
-		    i915->fsb_freq == latency->fsb_freq &&
-		    i915->mem_freq == latency->mem_freq)
+		    DIV_ROUND_CLOSEST(i915->fsb_freq, 1000) == latency->fsb_freq &&
+		    DIV_ROUND_CLOSEST(i915->mem_freq, 1000) == latency->mem_freq)
 			return latency;
 	}
 
-	drm_dbg_kms(&i915->drm, "Unknown FSB/MEM found, disable CxSR\n");
+	drm_dbg_kms(&i915->drm,
+		    "Could not find CxSR latency for DDR%s, FSB %u kHz, MEM %u kHz\n",
+		    i915->is_ddr3 ? "3" : "2", i915->fsb_freq, i915->mem_freq);
 
 	return NULL;
 }
@@ -637,10 +636,9 @@ static void pnv_update_wm(struct drm_i915_private *dev_priv)
 	u32 reg;
 	unsigned int wm;
 
-	latency = intel_get_cxsr_latency(dev_priv);
+	latency = pnv_get_cxsr_latency(dev_priv);
 	if (!latency) {
-		drm_dbg_kms(&dev_priv->drm,
-			    "Unknown FSB/MEM found, disable CxSR\n");
+		drm_dbg_kms(&dev_priv->drm, "Unknown FSB/MEM, disabling CxSR\n");
 		intel_set_memory_cxsr(dev_priv, false);
 		return;
 	}
@@ -4029,13 +4027,8 @@ void i9xx_wm_init(struct drm_i915_private *dev_priv)
 		g4x_setup_wm_latency(dev_priv);
 		dev_priv->display.funcs.wm = &g4x_wm_funcs;
 	} else if (IS_PINEVIEW(dev_priv)) {
-		if (!intel_get_cxsr_latency(dev_priv)) {
-			drm_info(&dev_priv->drm,
-				 "failed to find known CxSR latency "
-				 "(found ddr%s fsb freq %d, mem freq %d), "
-				 "disabling CxSR\n",
-				 (dev_priv->is_ddr3 == 1) ? "3" : "2",
-				 dev_priv->fsb_freq, dev_priv->mem_freq);
+		if (!pnv_get_cxsr_latency(dev_priv)) {
+			drm_info(&dev_priv->drm,  "Unknown FSB/MEM, disabling CxSR\n");
 			/* Disable CxSR and never update its watermark again */
 			intel_set_memory_cxsr(dev_priv, false);
 			dev_priv->display.funcs.wm = &nop_funcs;

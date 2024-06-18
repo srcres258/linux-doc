@@ -810,6 +810,7 @@ int bch2_trigger_alloc(struct btree_trans *trans,
 		       enum btree_iter_update_trigger_flags flags)
 {
 	struct bch_fs *c = trans->c;
+	struct printbuf buf = PRINTBUF;
 	int ret = 0;
 
 	struct bch_dev *ca = bch2_dev_bucket_tryget(c, new.k->p);
@@ -925,9 +926,14 @@ int bch2_trigger_alloc(struct btree_trans *trans,
 		}
 
 		if (new_a->gen != old_a->gen) {
-			percpu_down_read(&c->mark_lock);
-			*bucket_gen(ca, new.k->p.offset) = new_a->gen;
-			percpu_up_read(&c->mark_lock);
+			rcu_read_lock();
+			u8 *gen = bucket_gen(ca, new.k->p.offset);
+			if (unlikely(!gen)) {
+				rcu_read_unlock();
+				goto invalid_bucket;
+			}
+			*gen = new_a->gen;
+			rcu_read_unlock();
 		}
 
 #define eval_state(_a, expr)		({ const struct bch_alloc_v4 *a = _a; expr; })
@@ -955,13 +961,23 @@ int bch2_trigger_alloc(struct btree_trans *trans,
 	if ((flags & BTREE_TRIGGER_gc) && (flags & BTREE_TRIGGER_insert)) {
 		rcu_read_lock();
 		struct bucket *g = gc_bucket(ca, new.k->p.offset);
+		if (unlikely(!g)) {
+			rcu_read_unlock();
+			goto invalid_bucket;
+		}
 		g->gen_valid	= 1;
 		g->gen		= new_a->gen;
 		rcu_read_unlock();
 	}
 err:
+	printbuf_exit(&buf);
 	bch2_dev_put(ca);
 	return ret;
+invalid_bucket:
+	bch2_fs_inconsistent(c, "reference to invalid bucket\n  %s",
+			     (bch2_bkey_val_to_text(&buf, c, new.s_c), buf.buf));
+	ret = -EIO;
+	goto err;
 }
 
 /*

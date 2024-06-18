@@ -732,7 +732,7 @@ struct bch_fs {
 
 	struct bch_dev __rcu	*devs[BCH_SB_MEMBERS_MAX];
 
-	struct bch_accounting_mem accounting[2];
+	struct bch_accounting_mem accounting;
 
 	struct bch_replicas_cpu replicas;
 	struct bch_replicas_cpu replicas_gc;
@@ -791,7 +791,8 @@ struct bch_fs {
 
 	/* BTREE CACHE */
 	struct bio_set		btree_bio;
-	struct workqueue_struct	*io_complete_wq;
+	struct workqueue_struct	*btree_read_complete_wq;
+	struct workqueue_struct	*btree_write_submit_wq;
 
 	struct btree_root	btree_roots_known[BTREE_ID_NR];
 	DARRAY(struct btree_root) btree_roots_extra;

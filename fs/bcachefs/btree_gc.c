@@ -45,6 +45,22 @@
 #define DROP_PREV_NODE		11
 #define DID_FILL_FROM_SCAN	12
 
+static const char * const bch2_gc_phase_strs[] = {
+#define x(n)	#n,
+	GC_PHASES()
+#undef x
+	NULL
+};
+
+void bch2_gc_pos_to_text(struct printbuf *out, struct gc_pos *p)
+{
+	prt_str(out, bch2_gc_phase_strs[p->phase]);
+	prt_char(out, ' ');
+	bch2_btree_id_to_text(out, p->btree);
+	prt_printf(out, " l=%u ", p->level);
+	bch2_bpos_to_text(out, p->pos);
+}
+
 static struct bkey_s unsafe_bkey_s_c_to_s(struct bkey_s_c k)
 {
 	return (struct bkey_s) {{{
@@ -721,7 +737,7 @@ static int bch2_mark_superblocks(struct bch_fs *c)
 
 static void bch2_gc_free(struct bch_fs *c)
 {
-	bch2_accounting_free(&c->accounting[1]);
+	bch2_accounting_gc_free(c);
 
 	genradix_free(&c->reflink_gc_table);
 	genradix_free(&c->gc_stripes);
@@ -769,6 +785,9 @@ static int bch2_alloc_write_key(struct btree_trans *trans,
 	struct bch_alloc_v4 old_gc, gc, old_convert, new;
 	const struct bch_alloc_v4 *old;
 	int ret;
+
+	if (!bucket_valid(ca, k.k->p.offset))
+		return 0;
 
 	old = bch2_alloc_to_v4(k, &old_convert);
 	gc = new = *old;
@@ -894,6 +913,8 @@ static int bch2_gc_alloc_start(struct bch_fs *c)
 
 		buckets->first_bucket	= ca->mi.first_bucket;
 		buckets->nbuckets	= ca->mi.nbuckets;
+		buckets->nbuckets_minus_first =
+			buckets->nbuckets - buckets->first_bucket;
 		rcu_assign_pointer(ca->buckets_gc, buckets);
 	}
 
@@ -1087,7 +1108,8 @@ int bch2_check_allocations(struct bch_fs *c)
 
 	bch2_btree_interior_updates_flush(c);
 
-	ret   = bch2_gc_start(c) ?:
+	ret   = bch2_gc_accounting_start(c) ?:
+		bch2_gc_start(c) ?:
 		bch2_gc_alloc_start(c) ?:
 		bch2_gc_reflink_start(c);
 	if (ret)
@@ -1107,7 +1129,7 @@ int bch2_check_allocations(struct bch_fs *c)
 	c->gc_count++;
 
 	ret   = bch2_gc_alloc_done(c) ?:
-		bch2_accounting_gc_done(c) ?:
+		bch2_gc_accounting_done(c) ?:
 		bch2_gc_stripes_done(c) ?:
 		bch2_gc_reflink_done(c);
 out:

@@ -21,7 +21,7 @@ static int mana_ib_cfg_vport_steering(struct mana_ib_dev *dev,
 
 	gc = mdev_to_gc(dev);
 
-	req_buf_size = struct_size(req, indir_tab, MANA_INDIRECT_TABLE_SIZE);
+	req_buf_size = struct_size(req, indir_tab, MANA_INDIRECT_TABLE_DEF_SIZE);
 	req = kzalloc(req_buf_size, GFP_KERNEL);
 	if (!req)
 		return -ENOMEM;
@@ -41,18 +41,18 @@ static int mana_ib_cfg_vport_steering(struct mana_ib_dev *dev,
 	if (log_ind_tbl_size)
 		req->rss_enable = true;
 
-	req->num_indir_entries = MANA_INDIRECT_TABLE_SIZE;
+	req->num_indir_entries = MANA_INDIRECT_TABLE_DEF_SIZE;
 	req->indir_tab_offset = offsetof(struct mana_cfg_rx_steer_req_v2,
 					 indir_tab);
 	req->update_indir_tab = true;
 	req->cqe_coalescing_enable = 1;
 
 	/* The ind table passed to the hardware must have
-	 * MANA_INDIRECT_TABLE_SIZE entries. Adjust the verb
+	 * MANA_INDIRECT_TABLE_DEF_SIZE entries. Adjust the verb
 	 * ind_table to MANA_INDIRECT_TABLE_SIZE if required
 	 */
 	ibdev_dbg(&dev->ib_dev, "ind table size %u\n", 1 << log_ind_tbl_size);
-	for (i = 0; i < MANA_INDIRECT_TABLE_SIZE; i++) {
+	for (i = 0; i < MANA_INDIRECT_TABLE_DEF_SIZE; i++) {
 		req->indir_tab[i] = ind_table[i % (1 << log_ind_tbl_size)];
 		ibdev_dbg(&dev->ib_dev, "index %u handle 0x%llx\n", i,
 			  req->indir_tab[i]);
@@ -137,7 +137,7 @@ static int mana_ib_create_qp_rss(struct ib_qp *ibqp, struct ib_pd *pd,
 	}
 
 	ind_tbl_size = 1 << ind_tbl->log_ind_tbl_size;
-	if (ind_tbl_size > MANA_INDIRECT_TABLE_SIZE) {
+	if (ind_tbl_size > MANA_INDIRECT_TABLE_DEF_SIZE) {
 		ibdev_dbg(&mdev->ib_dev,
 			  "Indirect table size %d exceeding limit\n",
 			  ind_tbl_size);
@@ -398,6 +398,22 @@ err_free_vport:
 	return err;
 }
 
+static int mana_table_store_qp(struct mana_ib_dev *mdev, struct mana_ib_qp *qp)
+{
+	refcount_set(&qp->refcount, 1);
+	init_completion(&qp->free);
+	return xa_insert_irq(&mdev->qp_table_wq, qp->ibqp.qp_num, qp,
+			     GFP_KERNEL);
+}
+
+static void mana_table_remove_qp(struct mana_ib_dev *mdev,
+				 struct mana_ib_qp *qp)
+{
+	xa_erase_irq(&mdev->qp_table_wq, qp->ibqp.qp_num);
+	mana_put_qp_ref(qp);
+	wait_for_completion(&qp->free);
+}
+
 static int mana_ib_create_rc_qp(struct ib_qp *ibqp, struct ib_pd *ibpd,
 				struct ib_qp_init_attr *attr, struct ib_udata *udata)
 {
@@ -459,6 +475,10 @@ static int mana_ib_create_rc_qp(struct ib_qp *ibqp, struct ib_pd *ibpd,
 			goto destroy_qp;
 		}
 	}
+
+	err = mana_table_store_qp(mdev, qp);
+	if (err)
+		goto destroy_qp;
 
 	return 0;
 
@@ -619,6 +639,8 @@ static int mana_ib_destroy_rc_qp(struct mana_ib_qp *qp, struct ib_udata *udata)
 	struct mana_ib_dev *mdev =
 		container_of(qp->ibqp.device, struct mana_ib_dev, ib_dev);
 	int i;
+
+	mana_table_remove_qp(mdev, qp);
 
 	/* Ignore return code as there is not much we can do about it.
 	 * The error message is printed inside.

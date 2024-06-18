@@ -65,6 +65,15 @@ config CLK_X1E80100_TCSRCC
 	  Support for the TCSR clock controller on X1E80100 devices.
 	  Say Y if you want to use peripheral devices such as SD/UFS.
 
+config CLK_QCM2290_GPUCC
+	tristate "QCM2290 Graphics Clock Controller"
+	depends on ARM64 || COMPILE_TEST
+	select CLK_QCM2290_GCC
+	help
+	  Support for the graphics clock controller on QCM2290 devices.
+	  Say Y if you want to support graphics controller devices and
+	  functionality such as 3D graphics.
+
 config QCOM_A53PLL
 	tristate "MSM8916 A53 PLL"
 	help
@@ -248,6 +257,15 @@ config IPQ_GCC_9574
 	  Say Y if you want to use peripheral devices such as UART, SPI,
 	  i2c, USB, SD/eMMC, etc. Select this for the root clock
 	  of ipq9574.
+
+config IPQ_NSSCC_QCA8K
+	tristate "QCA8K(QCA8386 or QCA8084) NSS Clock Controller"
+	depends on MDIO_BUS || COMPILE_TEST
+	help
+	  Support for NSS(Network SubSystem) clock controller on
+	  qca8386/qca8084 chip.
+	  Say Y or M if you want to use network features of switch or
+	  PHY device. Select this for the root clock of qca8k.
 
 config MSM_GCC_8660
 	tristate "MSM8660 Global Clock Controller"

@@ -224,6 +224,8 @@ int __bch2_fsck_err(struct bch_fs *c,
 	int ret = -BCH_ERR_fsck_ignore;
 	const char *action_orig = "fix?", *action = action_orig;
 
+	might_sleep();
+
 	if (!c)
 		c = trans->c;
 

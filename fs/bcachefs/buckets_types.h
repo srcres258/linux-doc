@@ -23,6 +23,7 @@ struct bucket_array {
 	struct rcu_head		rcu;
 	u16			first_bucket;
 	size_t			nbuckets;
+	size_t			nbuckets_minus_first;
 	struct bucket		b[];
 };
 
@@ -30,6 +31,7 @@ struct bucket_gens {
 	struct rcu_head		rcu;
 	u16			first_bucket;
 	size_t			nbuckets;
+	size_t			nbuckets_minus_first;
 	u8			b[];
 };
 

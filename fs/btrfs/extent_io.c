@@ -3146,20 +3146,21 @@ if (!folio_test_private(folio)) {
 	return;
 }
 
-if (fs_info->nodesize >= PAGE_SIZE) {
-	/*
-	 * We do this since we'll remove the pages after we've
-	 * removed the eb from the radix tree, so we could race
-	 * and have this page now attached to the new eb.  So
-	 * only clear folio if it's still connected to
-	 * this eb.
-	 */
-	if (folio_test_private(folio) && folio_get_private(folio) == eb) {
-		BUG_ON(test_bit(EXTENT_BUFFER_DIRTY, &eb->bflags));
-		BUG_ON(folio_test_dirty(folio));
-		BUG_ON(folio_test_writeback(folio));
-		/* We need to make sure we haven't be attached to a new eb. */
-		folio_detach_private(folio);
+/* Release all pages attached to the extent buffer */
+static void btrfs_release_extent_buffer_pages(const struct extent_buffer *eb)
+{
+	ASSERT(!extent_buffer_under_io(eb));
+
+	for (int i = 0; i < INLINE_EXTENT_BUFFER_PAGES; i++) {
+		struct folio *folio = eb->folios[i];
+
+		if (!folio)
+			continue;
+
+		detach_extent_buffer_folio(eb, folio);
+
+		/* One for when we allocated the folio. */
+		folio_put(folio);
 	}
 	if (mapped)
 		spin_unlock(&folio->mapping->i_private_lock);

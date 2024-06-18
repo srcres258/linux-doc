@@ -4924,13 +4924,17 @@ vm_fault_t finish_fault(struct vm_fault *vmf)
 		pgoff_t idx = folio_page_idx(folio, page);
 		/* The page offset of vmf->address within the VMA. */
 		pgoff_t vma_off = vmf->pgoff - vmf->vma->vm_pgoff;
+		/* The index of the entry in the pagetable for fault page. */
+		pgoff_t pte_off = pte_index(vmf->address);
 
 		/*
 		 * Fallback to per-page fault in case the folio size in page
-		 * cache beyond the VMA limits.
+		 * cache beyond the VMA limits and PMD pagetable limits.
 		 */
 		if (unlikely(vma_off < idx ||
-			     vma_off + (nr_pages - idx) > vma_pages(vma))) {
+			    vma_off + (nr_pages - idx) > vma_pages(vma) ||
+			    pte_off < idx ||
+			    pte_off + (nr_pages - idx)  > PTRS_PER_PTE)) {
 			nr_pages = 1;
 		} else {
 			/* Now we can set mappings for the whole large folio. */
@@ -5275,10 +5279,16 @@ static void numa_rebuild_large_mapping(struct vm_fault *vmf, struct vm_area_stru
 				       bool ignore_writable, bool pte_write_upgrade)
 {
 	int nr = pte_pfn(fault_pte) - folio_pfn(folio);
-	unsigned long start = max(vmf->address - nr * PAGE_SIZE, vma->vm_start);
-	unsigned long end = min(vmf->address + (folio_nr_pages(folio) - nr) * PAGE_SIZE, vma->vm_end);
-	pte_t *start_ptep = vmf->pte - (vmf->address - start) / PAGE_SIZE;
-	unsigned long addr;
+	unsigned long start, end, addr = vmf->address;
+	unsigned long addr_start = addr - (nr << PAGE_SHIFT);
+	unsigned long pt_start = ALIGN_DOWN(addr, PMD_SIZE);
+	pte_t *start_ptep;
+
+	/* Stay within the VMA and within the page table. */
+	start = max3(addr_start, pt_start, vma->vm_start);
+	end = min3(addr_start + folio_size(folio), pt_start + PMD_SIZE,
+		   vma->vm_end);
+	start_ptep = vmf->pte - ((addr - start) >> PAGE_SHIFT);
 
 	/* Restore all PTEs' mapping of the large folio */
 	for (addr = start; addr != end; start_ptep++, addr += PAGE_SIZE) {

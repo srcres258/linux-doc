@@ -1048,7 +1048,7 @@ config ARCH_MMAP_RND_BITS_DEFAULT
 
 config FORCE_MAX_MMAP_RND_BITS
 	bool "Force maximum number of bits to use for ASLR of mmap base address"
-	default n
+	default y if !64BIT
 	help
 	  ARCH_MMAP_RND_BITS and ARCH_MMAP_RND_COMPAT_BITS represent the number
 	  of bits to use for ASLR and if no custom value is assigned (EXPERT)

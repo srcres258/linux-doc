@@ -2872,10 +2872,8 @@ static bool __discard_anon_folio_pmd_locked(struct vm_area_struct *vma,
 	if (unlikely(page_folio(page) != folio))
 		return false;
 
-	if (folio_test_dirty(folio) || pmd_dirty(orig_pmd)) {
-		folio_set_swapbacked(folio);
+	if (folio_test_dirty(folio) || pmd_dirty(orig_pmd))
 		return false;
-	}
 
 	orig_pmd = pmdp_huge_clear_flush(vma, addr, pmdp);
 
@@ -2902,10 +2900,8 @@ static bool __discard_anon_folio_pmd_locked(struct vm_area_struct *vma,
 	 *
 	 * The only folio refs must be one from isolation plus the rmap(s).
 	 */
-	if (folio_test_dirty(folio) || pmd_dirty(orig_pmd))
-		folio_set_swapbacked(folio);
-
-	if (folio_test_swapbacked(folio) || ref_count != map_count + 1) {
+	if (folio_test_dirty(folio) || pmd_dirty(orig_pmd) ||
+	    ref_count != map_count + 1) {
 		set_pmd_at(mm, addr, pmdp, orig_pmd);
 		return false;
 	}
