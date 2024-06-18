@@ -1266,6 +1266,8 @@ patternProperties:
     description: Schindler
   "^schneider,.*":
     description: Schneider Electric
+  "^sciosense,.*":
+    description: ScioSense B.V.
   "^seagate,.*":
     description: Seagate Technology PLC
   "^seeed,.*":
