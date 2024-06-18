@@ -444,7 +444,6 @@ bool dc_dmub_srv_p_state_delegate(struct dc *dc, bool should_manage_pstate, stru
 		for (i = 0, pipe_idx = 0; i < dc->res_pool->pipe_count; i++) {
 			struct pipe_ctx *pipe = &context->res_ctx.pipe_ctx[i];
 
-			stream_status = NULL;
 			if (!pipe->stream)
 				continue;
 
@@ -464,7 +463,6 @@ bool dc_dmub_srv_p_state_delegate(struct dc *dc, bool should_manage_pstate, stru
 	for (i = 0, k = 0; context && i < dc->res_pool->pipe_count; i++) {
 		struct pipe_ctx *pipe = &context->res_ctx.pipe_ctx[i];
 
-		stream_status = NULL;
 		if (!resource_is_pipe_type(pipe, OTG_MASTER))
 			continue;
 
@@ -1256,6 +1254,9 @@ static void dc_dmub_srv_notify_idle(const struct dc *dc, bool allow_idle)
 
 	cmd.idle_opt_notify_idle.cntl_data.driver_idle = allow_idle;
 
+	if (dc->work_arounds.skip_psr_ips_crtc_disable)
+		cmd.idle_opt_notify_idle.cntl_data.skip_otg_disable = true;
+
 	if (allow_idle) {
 		volatile struct dmub_shared_state_ips_driver *ips_driver =
 			&dc_dmub_srv->dmub->shared_state[DMUB_SHARED_SHARE_FEATURE__IPS_DRIVER].data.ips_driver;
@@ -1505,6 +1506,8 @@ void dc_dmub_srv_apply_idle_power_optimizations(const struct dc *dc, bool allow_
 	if (!dc_dmub_srv || !dc_dmub_srv->dmub)
 		return;
 
+	allow_idle &= (!dc->debug.ips_disallow_entry);
+
 	if (dc_dmub_srv->idle_allowed == allow_idle)
 		return;
 
@@ -1653,6 +1656,8 @@ void dc_dmub_srv_fams2_update_config(struct dc *dc,
 	/* send global configuration parameters */
 	global_cmd->config.global.max_allow_delay_us = 100 * 1000; //100ms
 	global_cmd->config.global.lock_wait_time_us = 5000; //5ms
+	global_cmd->config.global.recovery_timeout_us = 5000; //5ms
+	global_cmd->config.global.hwfq_flip_programming_delay_us = 100; //100us
 
 	/* copy static feature configuration */
 	global_cmd->config.global.features.all = dc->debug.fams2_config.all;
