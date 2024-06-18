@@ -242,23 +242,25 @@ enum {
  * space with SWAPFILE_CLUSTER pages long and naturally aligns in disk. All
  * free clusters are organized into a list. We fetch an entry from the list to
  * get a free cluster.
- *
- * The data field stores next cluster if the cluster is free or cluster usage
- * counter otherwise. The flags field determines if a cluster is free. This is
- * protected by swap_info_struct.lock.
  */
 struct swap_cluster_info {
 	spinlock_t lock;	/*
-				 * Protect swap_cluster_info fields
+				 * Protect swap_cluster_info bitfields
 				 * and swap_info_struct->swap_map
 				 * elements correspond to the swap
 				 * cluster
 				 */
-	unsigned int data:24;
-	unsigned int flags:8;
+	unsigned int count:12;
+	unsigned int state:3;
+	unsigned int order:4;
+	struct list_head list;	/* Protected by swap_info_struct->lock */
 };
-#define CLUSTER_FLAG_FREE 1 /* This cluster is free */
-#define CLUSTER_FLAG_NEXT_NULL 2 /* This cluster has no next cluster */
+
+#define CLUSTER_STATE_FREE	1 /* This cluster is free */
+#define CLUSTER_STATE_PER_CPU	2 /* This cluster on per_cpu_cluster  */
+#define CLUSTER_STATE_SCANNED	3 /* This cluster off per_cpu_cluster */
+#define CLUSTER_STATE_NONFULL	4 /* This cluster is on nonfull list */
+
 
 /*
  * The first page in the swap file is the swap header, which is always marked
@@ -283,11 +285,6 @@ struct percpu_cluster {
 	unsigned int next[SWAP_NR_ORDERS]; /* Likely next allocation offset */
 };
 
-struct swap_cluster_list {
-	struct swap_cluster_info head;
-	struct swap_cluster_info tail;
-};
-
 /*
  * The in-memory structure used to track swap areas.
  */
@@ -299,8 +296,11 @@ struct swap_info_struct {
 	signed char	type;		/* strange name for an index */
 	unsigned int	max;		/* extent of the swap_map */
 	unsigned char *swap_map;	/* vmalloc'ed array of usage counts */
+	unsigned long *zeromap;		/* vmalloc'ed bitmap to track zero pages */
 	struct swap_cluster_info *cluster_info; /* cluster info. Only for SSD */
-	struct swap_cluster_list free_clusters; /* free clusters list */
+	struct list_head free_clusters; /* free clusters list */
+	struct list_head nonfull_clusters[SWAP_NR_ORDERS];
+					/* list of cluster that contains at least one free slot */
 	unsigned int lowest_bit;	/* index of first free in swap_map */
 	unsigned int highest_bit;	/* index of last free in swap_map */
 	unsigned int pages;		/* total of usable pages of swap */
@@ -331,7 +331,7 @@ struct swap_info_struct {
 					 * list.
 					 */
 	struct work_struct discard_work; /* discard worker */
-	struct swap_cluster_list discard_clusters; /* discard clusters list */
+	struct list_head discard_clusters; /* discard clusters list */
 	struct plist_node avail_lists[]; /*
 					   * entries in swap_avail_heads, one
 					   * entry per node.
@@ -404,10 +404,13 @@ extern unsigned long try_to_free_pages(struct zonelist *zonelist, int order,
 
 #define MEMCG_RECLAIM_MAY_SWAP (1 << 1)
 #define MEMCG_RECLAIM_PROACTIVE (1 << 2)
+#define MIN_SWAPPINESS 0
+#define MAX_SWAPPINESS 200
 extern unsigned long try_to_free_mem_cgroup_pages(struct mem_cgroup *memcg,
 						  unsigned long nr_pages,
 						  gfp_t gfp_mask,
-						  unsigned int reclaim_options);
+						  unsigned int reclaim_options,
+						  int *swappiness);
 extern unsigned long mem_cgroup_shrink_node(struct mem_cgroup *mem,
 						gfp_t gfp_mask, bool noswap,
 						pg_data_t *pgdat,
@@ -477,7 +480,7 @@ extern int add_swap_count_continuation(swp_entry_t, gfp_t);
 extern void swap_shmem_alloc(swp_entry_t);
 extern int swap_duplicate(swp_entry_t);
 extern int swapcache_prepare(swp_entry_t);
-extern void swap_free(swp_entry_t);
+extern void swap_free_nr(swp_entry_t entry, int nr_pages);
 extern void swapcache_free_entries(swp_entry_t *entries, int n);
 extern void free_swap_and_cache_nr(swp_entry_t entry, int nr);
 int swap_type_of(dev_t device, sector_t offset);
@@ -555,7 +558,7 @@ static inline int swapcache_prepare(swp_entry_t swp)
 	return 0;
 }
 
-static inline void swap_free(swp_entry_t swp)
+static inline void swap_free_nr(swp_entry_t entry, int nr_pages)
 {
 }
 
@@ -601,6 +604,11 @@ static inline int add_swap_extent(struct swap_info_struct *sis,
 static inline void free_swap_and_cache(swp_entry_t entry)
 {
 	free_swap_and_cache_nr(entry, 1);
+}
+
+static inline void swap_free(swp_entry_t entry)
+{
+	swap_free_nr(entry, 1);
 }
 
 #ifdef CONFIG_MEMCG
