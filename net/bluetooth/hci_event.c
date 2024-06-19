@@ -6920,6 +6920,10 @@ static void hci_le_big_sync_established_evt(struct hci_dev *hdev, void *data,
 
 		bis = hci_conn_hash_lookup_handle(hdev, handle);
 		if (!bis) {
+			if (handle > HCI_CONN_HANDLE_MAX) {
+				bt_dev_dbg(hdev, "ignore too large handle %u", handle);
+				continue;
+			}
 			bis = hci_conn_add(hdev, ISO_LINK, BDADDR_ANY,
 					   HCI_ROLE_SLAVE, handle);
 			if (IS_ERR(bis))
@@ -6987,6 +6991,8 @@ static void hci_le_big_info_adv_report_evt(struct hci_dev *hdev, void *data,
 
 	if (!pa_sync)
 		goto unlock;
+
+	pa_sync->iso_qos.bcast.encryption = ev->encryption;
 
 	/* Notify iso layer */
 	hci_connect_cfm(pa_sync, 0);

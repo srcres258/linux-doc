@@ -5343,7 +5343,7 @@ F:	drivers/infiniband/hw/usnic/
 
 CLANG CONTROL FLOW INTEGRITY SUPPORT
 M:	Sami Tolvanen <samitolvanen@google.com>
-M:	Kees Cook <keescook@chromium.org>
+M:	Kees Cook <kees@kernel.org>
 R:	Nathan Chancellor <nathan@kernel.org>
 L:	llvm@lists.linux.dev
 S:	Supported
@@ -8271,7 +8271,7 @@ F:	rust/kernel/net/phy.rs
 
 EXEC & BINFMT API, ELF
 R:	Eric Biederman <ebiederm@xmission.com>
-R:	Kees Cook <keescook@chromium.org>
+R:	Kees Cook <kees@kernel.org>
 L:	linux-mm@kvack.org
 S:	Supported
 T:	git git://git.kernel.org/pub/scm/linux/kernel/git/kees/linux.git for-next/execve
@@ -8678,7 +8678,7 @@ S:	Maintained
 F:	drivers/net/ethernet/nvidia/*
 
 FORTIFY_SOURCE
-M:	Kees Cook <keescook@chromium.org>
+M:	Kees Cook <kees@kernel.org>
 L:	linux-hardening@vger.kernel.org
 S:	Supported
 T:	git git://git.kernel.org/pub/scm/linux/kernel/git/kees/linux.git for-next/hardening
@@ -9168,7 +9168,7 @@ F:	include/linux/mfd/gsc.h
 F:	include/linux/platform_data/gsc_hwmon.h
 
 GCC PLUGINS
-M:	Kees Cook <keescook@chromium.org>
+M:	Kees Cook <kees@kernel.org>
 L:	linux-hardening@vger.kernel.org
 S:	Maintained
 T:	git git://git.kernel.org/pub/scm/linux/kernel/git/kees/linux.git for-next/hardening
@@ -9302,7 +9302,7 @@ S:	Maintained
 F:	drivers/input/touchscreen/resistive-adc-touch.c
 
 GENERIC STRING LIBRARY
-M:	Kees Cook <keescook@chromium.org>
+M:	Kees Cook <kees@kernel.org>
 R:	Andy Shevchenko <andy@kernel.org>
 L:	linux-hardening@vger.kernel.org
 S:	Supported
@@ -12018,7 +12018,7 @@ F:	scripts/package/
 F:	usr/
 
 KERNEL HARDENING (not covered by other areas)
-M:	Kees Cook <keescook@chromium.org>
+M:	Kees Cook <kees@kernel.org>
 R:	Gustavo A. R. Silva <gustavoars@kernel.org>
 L:	linux-hardening@vger.kernel.org
 S:	Supported
@@ -12548,7 +12548,7 @@ F:	drivers/scsi/53c700*
 
 LEAKING_ADDRESSES
 M:	Tycho Andersen <tycho@tycho.pizza>
-R:	Kees Cook <keescook@chromium.org>
+R:	Kees Cook <kees@kernel.org>
 L:	linux-hardening@vger.kernel.org
 S:	Maintained
 T:	git git://git.kernel.org/pub/scm/linux/kernel/git/kees/linux.git for-next/hardening
@@ -12844,7 +12844,7 @@ F:	arch/powerpc/platforms/8xx/
 F:	arch/powerpc/platforms/83xx/
 
 LINUX KERNEL DUMP TEST MODULE (LKDTM)
-M:	Kees Cook <keescook@chromium.org>
+M:	Kees Cook <kees@kernel.org>
 S:	Maintained
 F:	drivers/misc/lkdtm/*
 F:	tools/testing/selftests/lkdtm/*
@@ -12974,7 +12974,7 @@ Q:	http://patchwork.linuxtv.org/project/linux-media/list/
 F:	drivers/media/usb/dvb-usb-v2/lmedm04*
 
 LOADPIN SECURITY MODULE
-M:	Kees Cook <keescook@chromium.org>
+M:	Kees Cook <kees@kernel.org>
 S:	Supported
 T:	git git://git.kernel.org/pub/scm/linux/kernel/git/kees/linux.git for-next/hardening
 F:	Documentation/admin-guide/LSM/LoadPin.rst
@@ -14823,6 +14823,12 @@ M:	UNGLinuxDriver@microchip.com
 L:	netdev@vger.kernel.org
 S:	Maintained
 F:	drivers/net/ethernet/microchip/lan966x/*
+
+MICROCHIP LAN966X OIC DRIVER
+M:	Herve Codina <herve.codina@bootlin.com>
+S:	Maintained
+F:	Documentation/devicetree/bindings/interrupt-controller/microchip,lan966x-oic.yaml
+F:	drivers/irqchip/irq-lan966x-oic.c
 
 MICROCHIP LCDFB DRIVER
 M:	Nicolas Ferre <nicolas.ferre@microchip.com>
@@ -18139,7 +18145,7 @@ F:	tools/testing/selftests/proc/
 
 PROC SYSCTL
 M:	Luis Chamberlain <mcgrof@kernel.org>
-M:	Kees Cook <keescook@chromium.org>
+M:	Kees Cook <kees@kernel.org>
 M:	Joel Granados <j.granados@samsung.com>
 L:	linux-kernel@vger.kernel.org
 L:	linux-fsdevel@vger.kernel.org
@@ -18195,7 +18201,7 @@ F:	Documentation/devicetree/bindings/net/pse-pd/
 F:	drivers/net/pse-pd/
 
 PSTORE FILESYSTEM
-M:	Kees Cook <keescook@chromium.org>
+M:	Kees Cook <kees@kernel.org>
 R:	Tony Luck <tony.luck@intel.com>
 R:	Guilherme G. Piccoli <gpiccoli@igalia.com>
 L:	linux-hardening@vger.kernel.org
@@ -20211,7 +20217,7 @@ F:	drivers/media/cec/platform/seco/seco-cec.c
 F:	drivers/media/cec/platform/seco/seco-cec.h
 
 SECURE COMPUTING
-M:	Kees Cook <keescook@chromium.org>
+M:	Kees Cook <kees@kernel.org>
 R:	Andy Lutomirski <luto@amacapital.net>
 R:	Will Drewry <wad@chromium.org>
 S:	Supported
@@ -23168,7 +23174,7 @@ F:	drivers/block/ublk_drv.c
 F:	include/uapi/linux/ublk_cmd.h
 
 UBSAN
-M:	Kees Cook <keescook@chromium.org>
+M:	Kees Cook <kees@kernel.org>
 R:	Marco Elver <elver@google.com>
 R:	Andrey Konovalov <andreyknvl@gmail.com>
 R:	Andrey Ryabinin <ryabinin.a.a@gmail.com>
@@ -25019,7 +25025,7 @@ F:	drivers/net/hamradio/yam*
 F:	include/linux/yam.h
 
 YAMA SECURITY MODULE
-M:	Kees Cook <keescook@chromium.org>
+M:	Kees Cook <kees@kernel.org>
 S:	Supported
 T:	git git://git.kernel.org/pub/scm/linux/kernel/git/kees/linux.git for-next/hardening
 F:	Documentation/admin-guide/LSM/Yama.rst
@@ -25156,6 +25162,12 @@ F:	include/linux/zswap.h
 F:	mm/zpool.c
 F:	mm/zswap.c
 F:	tools/testing/selftests/cgroup/test_zswap.c
+
+SENARYTECH AUDIO CODEC DRIVER
+M:	bo liu <bo.liu@senarytech.com>
+S:	Maintained
+T:	git git://git.kernel.org/pub/scm/linux/kernel/git/tiwai/sound.git
+F:	sound/pci/hda/patch_senarytech.c
 
 THE REST
 M:	Linus Torvalds <torvalds@linux-foundation.org>

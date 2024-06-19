@@ -941,16 +941,15 @@ enum pagetype {
 	 * allow owners that set a type to reuse the lower 16 bit for their own
 	 * purposes.
 	 */
-	PG_buddy	= 0x40000000,
-	PG_offline	= 0x20000000,
-	PG_table	= 0x10000000,
-	PG_guard	= 0x08000000,
-	PG_hugetlb	= 0x04000000,
-	PG_slab		= 0x02000000,
-	PG_zsmalloc	= 0x01000000,
+	PG_buddy	= 0x00000080,
+	PG_offline	= 0x00000100,
+	PG_table	= 0x00000200,
+	PG_guard	= 0x00000400,
+	PG_hugetlb	= 0x00000800,
+	PG_slab		= 0x00001000,
 
-	PAGE_TYPE_BASE	= 0x80000000,
-	PAGE_MAPCOUNT_RESERVE	= ~0x0000ffff,
+	PAGE_TYPE_BASE	= 0xf0000000,
+	PAGE_MAPCOUNT_RESERVE	= -128,
 };
 
 #define PageType(page, flag)						\

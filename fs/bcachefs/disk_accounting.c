@@ -68,12 +68,12 @@ static const char * const disk_accounting_type_strs[] = {
 	NULL
 };
 
-static inline void accounting_key_init(struct bkey_i *k, struct disk_accounting_pos pos,
+static inline void accounting_key_init(struct bkey_i *k, struct disk_accounting_pos *pos,
 				       s64 *d, unsigned nr)
 {
 	struct bkey_i_accounting *acc = bkey_accounting_init(k);
 
-	acc->k.p = disk_accounting_pos_to_bpos(&pos);
+	acc->k.p = disk_accounting_pos_to_bpos(pos);
 	set_bkey_val_u64s(&acc->k, sizeof(struct bch_accounting) / sizeof(u64) + nr);
 
 	memcpy_u64s_small(acc->v.d, d, nr);
@@ -94,7 +94,7 @@ int bch2_disk_accounting_mod(struct btree_trans *trans,
 
 	struct { __BKEY_PADDED(k, BCH_ACCOUNTING_MAX_COUNTERS); } k_i;
 
-	accounting_key_init(&k_i.k, *k, d, nr);
+	accounting_key_init(&k_i.k, k, d, nr);
 
 	return likely(!gc)
 		? bch2_trans_update_buffered(trans, BTREE_ID_accounting, &k_i.k)
@@ -330,7 +330,9 @@ int bch2_fs_replicas_usage_read(struct bch_fs *c, darray_char *usage)
 		if (!accounting_to_replicas(&u.r.r, i->pos))
 			continue;
 
-		bch2_accounting_mem_read_counters(acc, i - acc->k.data, &u.r.sectors, 1, false);
+		u64 sectors;
+		bch2_accounting_mem_read_counters(acc, i - acc->k.data, &sectors, 1, false);
+		u.r.sectors = sectors;
 
 		ret = darray_make_room(usage, replicas_usage_bytes(&u.r));
 		if (ret)
@@ -498,7 +500,7 @@ int bch2_gc_accounting_done(struct bch_fs *c)
 					memset(&trans->fs_usage_delta, 0, sizeof(trans->fs_usage_delta));
 					struct { __BKEY_PADDED(k, BCH_ACCOUNTING_MAX_COUNTERS); } k_i;
 
-					accounting_key_init(&k_i.k, acc_k, src_v, nr);
+					accounting_key_init(&k_i.k, &acc_k, src_v, nr);
 					bch2_accounting_mem_mod_locked(trans, bkey_i_to_s_c_accounting(&k_i.k), false);
 
 					preempt_disable();

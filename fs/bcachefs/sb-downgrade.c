@@ -59,13 +59,17 @@
 	  BCH_FSCK_ERR_btree_bitmap_not_marked)			\
 	x(disk_accounting_v2,					\
 	  BIT_ULL(BCH_RECOVERY_PASS_check_allocations),		\
+	  BCH_FSCK_ERR_bkey_version_in_future,			\
+	  BCH_FSCK_ERR_dev_usage_buckets_wrong,			\
+	  BCH_FSCK_ERR_dev_usage_sectors_wrong,			\
+	  BCH_FSCK_ERR_dev_usage_fragmented_wrong,		\
 	  BCH_FSCK_ERR_accounting_mismatch)
 
 #define DOWNGRADE_TABLE()					\
 	x(bucket_stripe_sectors,				\
 	  0)							\
 	x(disk_accounting_v2,					\
-	  BIT_ULL(BCH_RECOVERY_PASS_check_alloc_info),		\
+	  BIT_ULL(BCH_RECOVERY_PASS_check_allocations),		\
 	  BCH_FSCK_ERR_dev_usage_buckets_wrong,			\
 	  BCH_FSCK_ERR_dev_usage_sectors_wrong,			\
 	  BCH_FSCK_ERR_dev_usage_fragmented_wrong,		\
@@ -189,7 +193,11 @@ static int downgrade_table_extra(struct bch_fs *c, darray_char *table)
 			if (ret)
 				return ret;
 
-			__set_bit_le64(BCH_RECOVERY_PASS_STABLE_check_allocations, dst->recovery_passes);
+			/* open coded __set_bit_le64, as dst is packed and
+			 * dst->recovery_passes is misaligned */
+			unsigned b = BCH_RECOVERY_PASS_STABLE_check_allocations;
+			dst->recovery_passes[b / 64] |= cpu_to_le64(BIT_ULL(b % 64));
+
 			dst->errors[nr_errors++] = cpu_to_le16(BCH_FSCK_ERR_alloc_key_dirty_sectors_wrong);
 		}
 		break;
@@ -305,7 +313,7 @@ int bch2_sb_downgrade_update(struct bch_fs *c)
 
 		dst = (void *) &darray_top(table);
 		dst->version = cpu_to_le16(src->version);
-		dst->recovery_passes[0]	= cpu_to_le64(src->recovery_passes);
+		dst->recovery_passes[0]	= cpu_to_le64(bch2_recovery_passes_to_stable(src->recovery_passes));
 		dst->recovery_passes[1]	= 0;
 		dst->nr_errors		= cpu_to_le16(src->nr_errors);
 		for (unsigned i = 0; i < src->nr_errors; i++)

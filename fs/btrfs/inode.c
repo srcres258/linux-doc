@@ -3577,7 +3577,7 @@ int btrfs_orphan_cleanup(struct btrfs_root *root)
 		found_key.objectid = found_key.offset;
 		found_key.type = BTRFS_INODE_ITEM_KEY;
 		found_key.offset = 0;
-		inode = btrfs_iget(fs_info->sb, last_objectid, root);
+		inode = btrfs_iget(last_objectid, root);
 		if (IS_ERR(inode)) {
 			ret = PTR_ERR(inode);
 			inode = NULL;
@@ -5573,8 +5573,7 @@ static int btrfs_find_actor(struct inode *inode, void *opaque)
 		args->root == BTRFS_I(inode)->root;
 }
 
-static struct inode *btrfs_iget_locked(struct super_block *s, u64 ino,
-				       struct btrfs_root *root)
+static struct inode *btrfs_iget_locked(u64 ino, struct btrfs_root *root)
 {
 	struct inode *inode;
 	struct btrfs_iget_args args;
@@ -5583,7 +5582,7 @@ static struct inode *btrfs_iget_locked(struct super_block *s, u64 ino,
 	args.ino = ino;
 	args.root = root;
 
-	inode = iget5_locked_rcu(s, hashval, btrfs_find_actor,
+	inode = iget5_locked_rcu(root->fs_info->sb, hashval, btrfs_find_actor,
 			     btrfs_init_locked_inode,
 			     (void *)&args);
 	return inode;
@@ -5595,13 +5594,13 @@ static struct inode *btrfs_iget_locked(struct super_block *s, u64 ino,
  * allocator. NULL is also valid but may require an additional allocation
  * later.
  */
-struct inode *btrfs_iget_path(struct super_block *s, u64 ino,
-			      struct btrfs_root *root, struct btrfs_path *path)
+struct inode *btrfs_iget_path(u64 ino, struct btrfs_root *root,
+			      struct btrfs_path *path)
 {
 	struct inode *inode;
 	int ret;
 
-	inode = btrfs_iget_locked(s, ino, root);
+	inode = btrfs_iget_locked(ino, root);
 	if (!inode)
 		return ERR_PTR(-ENOMEM);
 
@@ -5630,9 +5629,9 @@ error:
 	return ERR_PTR(ret);
 }
 
-struct inode *btrfs_iget(struct super_block *s, u64 ino, struct btrfs_root *root)
+struct inode *btrfs_iget(u64 ino, struct btrfs_root *root)
 {
-	return btrfs_iget_path(s, ino, root, NULL);
+	return btrfs_iget_path(ino, root, NULL);
 }
 
 static struct inode *new_simple_dir(struct inode *dir,
@@ -5705,7 +5704,7 @@ struct inode *btrfs_lookup_dentry(struct inode *dir, struct dentry *dentry)
 		return ERR_PTR(ret);
 
 	if (location.type == BTRFS_INODE_ITEM_KEY) {
-		inode = btrfs_iget(dir->i_sb, location.objectid, root);
+		inode = btrfs_iget(location.objectid, root);
 		if (IS_ERR(inode))
 			return inode;
 
@@ -5729,7 +5728,7 @@ struct inode *btrfs_lookup_dentry(struct inode *dir, struct dentry *dentry)
 		else
 			inode = new_simple_dir(dir, &location, root);
 	} else {
-		inode = btrfs_iget(dir->i_sb, location.objectid, sub_root);
+		inode = btrfs_iget(location.objectid, sub_root);
 		btrfs_put_root(sub_root);
 
 		if (IS_ERR(inode))
@@ -6405,8 +6404,7 @@ int btrfs_create_new_inode(struct btrfs_trans_handle *trans,
 		 * Subvolumes inherit properties from their parent subvolume,
 		 * not the directory they were created in.
 		 */
-		parent = btrfs_iget(fs_info->sb, BTRFS_FIRST_FREE_OBJECTID,
-				    BTRFS_I(dir)->root);
+		parent = btrfs_iget(BTRFS_FIRST_FREE_OBJECTID, BTRFS_I(dir)->root);
 		if (IS_ERR(parent)) {
 			ret = PTR_ERR(parent);
 		} else {
