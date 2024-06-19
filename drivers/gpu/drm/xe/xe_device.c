@@ -44,6 +44,7 @@
 #include "xe_module.h"
 #include "xe_pat.h"
 #include "xe_pcode.h"
+#include "xe_perf.h"
 #include "xe_pm.h"
 #include "xe_query.h"
 #include "xe_sriov.h"
@@ -141,6 +142,7 @@ static const struct drm_ioctl_desc xe_ioctls[] = {
 			  DRM_RENDER_ALLOW),
 	DRM_IOCTL_DEF_DRV(XE_WAIT_USER_FENCE, xe_wait_user_fence_ioctl,
 			  DRM_RENDER_ALLOW),
+	DRM_IOCTL_DEF_DRV(XE_PERF, xe_perf_ioctl, DRM_RENDER_ALLOW),
 };
 
 static long xe_drm_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
@@ -654,15 +656,21 @@ int xe_device_probe(struct xe_device *xe)
 
 	xe_heci_gsc_init(xe);
 
-	err = xe_display_init(xe);
+	err = xe_oa_init(xe);
 	if (err)
 		goto err_fini_gt;
+
+	err = xe_display_init(xe);
+	if (err)
+		goto err_fini_oa;
 
 	err = drm_dev_register(&xe->drm, 0);
 	if (err)
 		goto err_fini_display;
 
 	xe_display_register(xe);
+
+	xe_oa_register(xe);
 
 	xe_debugfs_register(xe);
 
@@ -672,6 +680,9 @@ int xe_device_probe(struct xe_device *xe)
 
 err_fini_display:
 	xe_display_driver_remove(xe);
+
+err_fini_oa:
+	xe_oa_fini(xe);
 
 err_fini_gt:
 	for_each_gt(gt, xe, id) {
@@ -701,9 +712,13 @@ void xe_device_remove(struct xe_device *xe)
 	struct xe_gt *gt;
 	u8 id;
 
+	xe_oa_unregister(xe);
+
 	xe_device_remove_display(xe);
 
 	xe_display_fini(xe);
+
+	xe_oa_fini(xe);
 
 	xe_heci_gsc_fini(xe);
 

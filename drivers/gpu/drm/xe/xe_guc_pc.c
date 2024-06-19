@@ -9,7 +9,6 @@
 
 #include <drm/drm_managed.h>
 
-#include "abi/guc_actions_abi.h"
 #include "abi/guc_actions_slpc_abi.h"
 #include "regs/xe_gt_regs.h"
 #include "regs/xe_regs.h"
@@ -18,12 +17,14 @@
 #include "xe_force_wake.h"
 #include "xe_gt.h"
 #include "xe_gt_idle.h"
-#include "xe_gt_sysfs.h"
+#include "xe_gt_printk.h"
 #include "xe_gt_types.h"
+#include "xe_guc.h"
 #include "xe_guc_ct.h"
 #include "xe_map.h"
 #include "xe_mmio.h"
 #include "xe_pcode.h"
+#include "xe_pm.h"
 
 #define MCHBAR_MIRROR_BASE_SNB	0x140000
 
@@ -67,29 +68,27 @@
  *
  */
 
-static struct xe_guc *
-pc_to_guc(struct xe_guc_pc *pc)
+static struct xe_guc *pc_to_guc(struct xe_guc_pc *pc)
 {
 	return container_of(pc, struct xe_guc, pc);
 }
 
-static struct xe_device *
-pc_to_xe(struct xe_guc_pc *pc)
+static struct xe_guc_ct *pc_to_ct(struct xe_guc_pc *pc)
 {
-	struct xe_guc *guc = pc_to_guc(pc);
-	struct xe_gt *gt = container_of(guc, struct xe_gt, uc.guc);
-
-	return gt_to_xe(gt);
+	return &pc_to_guc(pc)->ct;
 }
 
-static struct xe_gt *
-pc_to_gt(struct xe_guc_pc *pc)
+static struct xe_gt *pc_to_gt(struct xe_guc_pc *pc)
 {
-	return container_of(pc, struct xe_gt, uc.guc.pc);
+	return guc_to_gt(pc_to_guc(pc));
 }
 
-static struct iosys_map *
-pc_to_maps(struct xe_guc_pc *pc)
+static struct xe_device *pc_to_xe(struct xe_guc_pc *pc)
+{
+	return guc_to_xe(pc_to_guc(pc));
+}
+
+static struct iosys_map *pc_to_maps(struct xe_guc_pc *pc)
 {
 	return &pc->bo->vmap;
 }
@@ -130,32 +129,33 @@ static int wait_for_pc_state(struct xe_guc_pc *pc,
 
 static int pc_action_reset(struct xe_guc_pc *pc)
 {
-	struct  xe_guc_ct *ct = &pc_to_guc(pc)->ct;
-	int ret;
+	struct xe_guc_ct *ct = pc_to_ct(pc);
 	u32 action[] = {
 		GUC_ACTION_HOST2GUC_PC_SLPC_REQUEST,
 		SLPC_EVENT(SLPC_EVENT_RESET, 2),
 		xe_bo_ggtt_addr(pc->bo),
 		0,
 	};
+	int ret;
 
 	ret = xe_guc_ct_send(ct, action, ARRAY_SIZE(action), 0, 0);
 	if (ret)
-		drm_err(&pc_to_xe(pc)->drm, "GuC PC reset: %pe", ERR_PTR(ret));
+		xe_gt_err(pc_to_gt(pc), "GuC PC reset failed: %pe\n",
+			  ERR_PTR(ret));
 
 	return ret;
 }
 
 static int pc_action_query_task_state(struct xe_guc_pc *pc)
 {
-	struct xe_guc_ct *ct = &pc_to_guc(pc)->ct;
-	int ret;
+	struct xe_guc_ct *ct = pc_to_ct(pc);
 	u32 action[] = {
 		GUC_ACTION_HOST2GUC_PC_SLPC_REQUEST,
 		SLPC_EVENT(SLPC_EVENT_QUERY_TASK_STATE, 2),
 		xe_bo_ggtt_addr(pc->bo),
 		0,
 	};
+	int ret;
 
 	if (wait_for_pc_state(pc, SLPC_GLOBAL_STATE_RUNNING))
 		return -EAGAIN;
@@ -163,47 +163,68 @@ static int pc_action_query_task_state(struct xe_guc_pc *pc)
 	/* Blocking here to ensure the results are ready before reading them */
 	ret = xe_guc_ct_send_block(ct, action, ARRAY_SIZE(action));
 	if (ret)
-		drm_err(&pc_to_xe(pc)->drm,
-			"GuC PC query task state failed: %pe", ERR_PTR(ret));
+		xe_gt_err(pc_to_gt(pc), "GuC PC query task state failed: %pe\n",
+			  ERR_PTR(ret));
 
 	return ret;
 }
 
 static int pc_action_set_param(struct xe_guc_pc *pc, u8 id, u32 value)
 {
-	struct xe_guc_ct *ct = &pc_to_guc(pc)->ct;
-	int ret;
+	struct xe_guc_ct *ct = pc_to_ct(pc);
 	u32 action[] = {
 		GUC_ACTION_HOST2GUC_PC_SLPC_REQUEST,
 		SLPC_EVENT(SLPC_EVENT_PARAMETER_SET, 2),
 		id,
 		value,
 	};
+	int ret;
 
 	if (wait_for_pc_state(pc, SLPC_GLOBAL_STATE_RUNNING))
 		return -EAGAIN;
 
 	ret = xe_guc_ct_send(ct, action, ARRAY_SIZE(action), 0, 0);
 	if (ret)
-		drm_err(&pc_to_xe(pc)->drm, "GuC PC set param failed: %pe",
-			ERR_PTR(ret));
+		xe_gt_err(pc_to_gt(pc), "GuC PC set param[%u]=%u failed: %pe\n",
+			  id, value, ERR_PTR(ret));
+
+	return ret;
+}
+
+static int pc_action_unset_param(struct xe_guc_pc *pc, u8 id)
+{
+	u32 action[] = {
+		GUC_ACTION_HOST2GUC_PC_SLPC_REQUEST,
+		SLPC_EVENT(SLPC_EVENT_PARAMETER_UNSET, 1),
+		id,
+	};
+	struct xe_guc_ct *ct = &pc_to_guc(pc)->ct;
+	int ret;
+
+	if (wait_for_pc_state(pc, SLPC_GLOBAL_STATE_RUNNING))
+		return -EAGAIN;
+
+	ret = xe_guc_ct_send(ct, action, ARRAY_SIZE(action), 0, 0);
+	if (ret)
+		xe_gt_err(pc_to_gt(pc), "GuC PC unset param failed: %pe",
+			  ERR_PTR(ret));
 
 	return ret;
 }
 
 static int pc_action_setup_gucrc(struct xe_guc_pc *pc, u32 mode)
 {
-	struct xe_guc_ct *ct = &pc_to_guc(pc)->ct;
+	struct xe_guc_ct *ct = pc_to_ct(pc);
 	u32 action[] = {
-		XE_GUC_ACTION_SETUP_PC_GUCRC,
+		GUC_ACTION_HOST2GUC_SETUP_PC_GUCRC,
 		mode,
 	};
 	int ret;
 
 	ret = xe_guc_ct_send(ct, action, ARRAY_SIZE(action), 0, 0);
 	if (ret)
-		drm_err(&pc_to_xe(pc)->drm, "GuC RC enable failed: %pe",
-			ERR_PTR(ret));
+		xe_gt_err(pc_to_gt(pc), "GuC RC enable mode=%u failed: %pe\n",
+			  mode, ERR_PTR(ret));
 	return ret;
 }
 
@@ -758,7 +779,7 @@ int xe_guc_pc_gucrc_disable(struct xe_guc_pc *pc)
 	if (xe->info.skip_guc_pc)
 		return 0;
 
-	ret = pc_action_setup_gucrc(pc, XE_GUCRC_HOST_CONTROL);
+	ret = pc_action_setup_gucrc(pc, GUCRC_HOST_CONTROL);
 	if (ret)
 		return ret;
 
@@ -771,6 +792,41 @@ int xe_guc_pc_gucrc_disable(struct xe_guc_pc *pc)
 	XE_WARN_ON(xe_force_wake_put(gt_to_fw(gt), XE_FORCEWAKE_ALL));
 
 	return 0;
+}
+
+/**
+ * xe_guc_pc_override_gucrc_mode - override GUCRC mode
+ * @pc: Xe_GuC_PC instance
+ * @mode: new value of the mode.
+ *
+ * Return: 0 on success, negative error code on error
+ */
+int xe_guc_pc_override_gucrc_mode(struct xe_guc_pc *pc, enum slpc_gucrc_mode mode)
+{
+	int ret;
+
+	xe_pm_runtime_get(pc_to_xe(pc));
+	ret = pc_action_set_param(pc, SLPC_PARAM_PWRGATE_RC_MODE, mode);
+	xe_pm_runtime_put(pc_to_xe(pc));
+
+	return ret;
+}
+
+/**
+ * xe_guc_pc_unset_gucrc_mode - unset GUCRC mode override
+ * @pc: Xe_GuC_PC instance
+ *
+ * Return: 0 on success, negative error code on error
+ */
+int xe_guc_pc_unset_gucrc_mode(struct xe_guc_pc *pc)
+{
+	int ret;
+
+	xe_pm_runtime_get(pc_to_xe(pc));
+	ret = pc_action_unset_param(pc, SLPC_PARAM_PWRGATE_RC_MODE);
+	xe_pm_runtime_put(pc_to_xe(pc));
+
+	return ret;
 }
 
 static void pc_init_pcode_freq(struct xe_guc_pc *pc)
@@ -846,7 +902,7 @@ int xe_guc_pc_start(struct xe_guc_pc *pc)
 		goto out;
 
 	if (wait_for_pc_state(pc, SLPC_GLOBAL_STATE_RUNNING)) {
-		drm_err(&pc_to_xe(pc)->drm, "GuC PC Start failed\n");
+		xe_gt_err(gt, "GuC PC Start failed\n");
 		ret = -EIO;
 		goto out;
 	}
@@ -861,7 +917,7 @@ int xe_guc_pc_start(struct xe_guc_pc *pc)
 		goto out;
 	}
 
-	ret = pc_action_setup_gucrc(pc, XE_GUCRC_FIRMWARE_CONTROL);
+	ret = pc_action_setup_gucrc(pc, GUCRC_FIRMWARE_CONTROL);
 
 out:
 	XE_WARN_ON(xe_force_wake_put(gt_to_fw(gt), XE_FORCEWAKE_ALL));

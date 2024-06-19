@@ -854,8 +854,6 @@ int xe_guc_enable_communication(struct xe_guc *guc)
 	struct xe_device *xe = guc_to_xe(guc);
 	int err;
 
-	guc_enable_irq(guc);
-
 	if (IS_SRIOV_VF(xe) && xe_device_has_memirq(xe)) {
 		struct xe_gt *gt = guc_to_gt(guc);
 		struct xe_tile *tile = gt_to_tile(gt);
@@ -863,6 +861,8 @@ int xe_guc_enable_communication(struct xe_guc *guc)
 		err = xe_memirq_init_guc(&tile->sriov.vf.memirq, guc);
 		if (err)
 			return err;
+	} else {
+		guc_enable_irq(guc);
 	}
 
 	xe_mmio_rmw32(guc_to_gt(guc), PMINTRMSK,
@@ -1094,7 +1094,7 @@ void xe_guc_irq_handler(struct xe_guc *guc, const u16 iir)
 
 void xe_guc_sanitize(struct xe_guc *guc)
 {
-	xe_uc_fw_change_status(&guc->fw, XE_UC_FIRMWARE_LOADABLE);
+	xe_uc_fw_sanitize(&guc->fw);
 	xe_guc_ct_disable(&guc->ct);
 	guc->submission_state.enabled = false;
 }
