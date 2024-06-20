@@ -888,6 +888,12 @@ static int bch2_getattr(struct mnt_idmap *idmap,
 	stat->subvol	= inode->ei_subvol;
 	stat->result_mask |= STATX_SUBVOL;
 
+	if ((request_mask & STATX_DIOALIGN) && S_ISREG(inode->v.i_mode)) {
+		stat->result_mask |= STATX_DIOALIGN;
+		stat->dio_mem_align = 1;
+		stat->dio_offset_align = SECTOR_SIZE;
+	}
+
 	if (request_mask & STATX_BTIME) {
 		stat->result_mask |= STATX_BTIME;
 		stat->btime = bch2_time_to_timespec(c, inode->ei_inode.bi_otime);
