@@ -4074,7 +4074,7 @@ static void kvm_gmap_notifier(struct gmap *gmap, unsigned long start,
 bool kvm_arch_no_poll(struct kvm_vcpu *vcpu)
 {
 	/* do not poll with more than halt_poll_max_steal percent of steal time */
-	if (S390_lowcore.avg_steal_timer * 100 / (TICK_USEC << 12) >=
+	if (get_lowcore()->avg_steal_timer * 100 / (TICK_USEC << 12) >=
 	    READ_ONCE(halt_poll_max_steal)) {
 		vcpu->stat.halt_no_poll_steal++;
 		return true;
@@ -5026,7 +5026,7 @@ int kvm_arch_vcpu_ioctl_run(struct kvm_vcpu *vcpu)
 	if (vcpu->kvm->arch.pv.dumping)
 		return -EINVAL;
 
-	if (kvm_run->immediate_exit)
+	if (!vcpu->wants_to_run)
 		return -EINTR;
 
 	if (kvm_run->kvm_valid_regs & ~KVM_SYNC_S390_VALID_FIELDS ||

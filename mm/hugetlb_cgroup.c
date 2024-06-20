@@ -836,6 +836,10 @@ hugetlb_cgroup_cfttypes_init(struct hstate *h, struct cftype *cft,
 			cft->file_offset = MEMFILE_OFFSET0(offset) +
 					   MEMFILE_FIELD_SIZE(offset) * idx;
 		}
+
+#ifdef CONFIG_DEBUG_LOCK_ALLOC
+		lockdep_register_key(&cft->lockdep_key);
+#endif
 	}
 }
 

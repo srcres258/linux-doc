@@ -668,7 +668,10 @@ void cleanup_srcu_struct(struct srcu_struct *ssp)
 		pr_info("%s: Active srcu_struct %p read state: %d gp state: %lu/%lu\n",
 			__func__, ssp, rcu_seq_state(READ_ONCE(sup->srcu_gp_seq)),
 			rcu_seq_current(&sup->srcu_gp_seq), sup->srcu_gp_seq_needed);
-		return; /* Caller forgot to stop doing call_srcu()? */
+		return; // Caller forgot to stop doing call_srcu()?
+			// Or caller invoked start_poll_synchronize_srcu()
+			// and then cleanup_srcu_struct() before that grace
+			// period ended?
 	}
 	kfree(sup->node);
 	sup->node = NULL;
@@ -1540,7 +1543,8 @@ EXPORT_SYMBOL_GPL(start_poll_synchronize_srcu);
  */
 bool poll_state_synchronize_srcu(struct srcu_struct *ssp, unsigned long cookie)
 {
-	if (!rcu_seq_done(&ssp->srcu_sup->srcu_gp_seq, cookie))
+	if (cookie != SRCU_GET_STATE_COMPLETED &&
+	    !rcu_seq_done(&ssp->srcu_sup->srcu_gp_seq, cookie))
 		return false;
 	// Ensure that the end of the SRCU grace period happens before
 	// any subsequent code that the caller might execute.

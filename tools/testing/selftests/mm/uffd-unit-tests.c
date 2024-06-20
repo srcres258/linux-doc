@@ -5,7 +5,7 @@
  *  Copyright (C) 2015-2023  Red Hat, Inc.
  */
 
-#include <linux/unistd.h>
+#include <asm-generic/unistd.h>
 #include "uffd-common.h"
 
 #include "../../../../mm/gup_test.h"

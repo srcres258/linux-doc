@@ -17,7 +17,7 @@
 
 #include <stdlib.h>
 #include <string.h>
-#include <linux/unistd.h>
+#include <asm-generic/unistd.h>
 #include <errno.h>
 #include <stdio.h>
 #include <fcntl.h>

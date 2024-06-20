@@ -9,7 +9,7 @@
  */
 #include <fcntl.h>
 #include <signal.h>
-#include <linux/unistd.h>
+#include <asm-generic/unistd.h>
 #include <string.h>
 #include <errno.h>
 #include <stdlib.h>

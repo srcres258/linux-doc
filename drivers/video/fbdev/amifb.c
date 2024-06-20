@@ -3781,5 +3781,6 @@ static struct platform_driver amifb_driver __refdata = {
 };
 module_platform_driver(amifb_driver);
 
+MODULE_DESCRIPTION("Amiga builtin chipset frame buffer driver");
 MODULE_LICENSE("GPL");
 MODULE_ALIAS("platform:amiga-video");

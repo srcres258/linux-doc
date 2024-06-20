@@ -936,11 +936,6 @@ PAGEFLAG_FALSE(HasHWPoisoned, has_hwpoisoned)
  */
 
 enum pagetype {
-	/*
-	 * Reserve 0xffff0000 - 0xfffffffe to catch _mapcount underflows and
-	 * allow owners that set a type to reuse the lower 16 bit for their own
-	 * purposes.
-	 */
 	PG_buddy	= 0x00000080,
 	PG_offline	= 0x00000100,
 	PG_table	= 0x00000200,
@@ -949,6 +944,7 @@ enum pagetype {
 	PG_slab		= 0x00001000,
 
 	PAGE_TYPE_BASE	= 0xf0000000,
+	/* Reserve 0x0000007f to catch underflows of _mapcount */
 	PAGE_MAPCOUNT_RESERVE	= -128,
 };
 

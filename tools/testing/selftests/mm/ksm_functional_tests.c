@@ -11,7 +11,7 @@
 #include <string.h>
 #include <stdbool.h>
 #include <stdint.h>
-#include <linux/unistd.h>
+#include <asm-generic/unistd.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <sys/mman.h>

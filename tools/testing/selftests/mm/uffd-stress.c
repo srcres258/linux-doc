@@ -33,7 +33,7 @@
  * pthread_mutex_lock will also verify the atomicity of the memory
  * transfer (UFFDIO_COPY).
  */
-#include <linux/unistd.h>
+#include <asm-generic/unistd.h>
 #include "uffd-common.h"
 
 #define BOUNCE_RANDOM		(1<<0)

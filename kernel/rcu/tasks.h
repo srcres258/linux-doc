@@ -1737,7 +1737,7 @@ static void rcu_tasks_trace_pregp_step(struct list_head *hop)
 		// an smp_mb__after_spinlock().  This ensures that either
 		// the grace-period kthread will see that task's read-side
 		// critical section or the task will see the updater's pre-GP
-		// accesses.  The trailing smp_mb() in cpu_curr_snapshot() 
+		// accesses.  The trailing smp_mb() in cpu_curr_snapshot()
 		// does not currently play a role other than simplify
 		// that function's ordering semantics.  If these simplified
 		// ordering semantics continue to be redundant, that smp_mb()

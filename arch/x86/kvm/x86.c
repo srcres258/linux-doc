@@ -6689,7 +6689,9 @@ split_irqchip_unlock:
 			break;
 
 		mutex_lock(&kvm->lock);
-		if (kvm->arch.max_vcpu_ids == cap->args[0]) {
+		if (kvm->arch.bsp_vcpu_id > cap->args[0]) {
+			;
+		} else if (kvm->arch.max_vcpu_ids == cap->args[0]) {
 			r = 0;
 		} else if (!kvm->arch.max_vcpu_ids) {
 			kvm->arch.max_vcpu_ids = cap->args[0];
@@ -7234,6 +7236,9 @@ set_pit2_out:
 		mutex_lock(&kvm->lock);
 		if (kvm->created_vcpus)
 			r = -EBUSY;
+		else if (arg > KVM_MAX_VCPU_IDS ||
+			 (kvm->arch.max_vcpu_ids && arg > kvm->arch.max_vcpu_ids))
+			r = -EINVAL;
 		else
 			kvm->arch.bsp_vcpu_id = arg;
 		mutex_unlock(&kvm->lock);
@@ -11438,7 +11443,7 @@ int kvm_arch_vcpu_ioctl_run(struct kvm_vcpu *vcpu)
 
 	kvm_vcpu_srcu_read_lock(vcpu);
 	if (unlikely(vcpu->arch.mp_state == KVM_MP_STATE_UNINITIALIZED)) {
-		if (kvm_run->immediate_exit) {
+		if (!vcpu->wants_to_run) {
 			r = -EINTR;
 			goto out;
 		}
@@ -11516,7 +11521,7 @@ int kvm_arch_vcpu_ioctl_run(struct kvm_vcpu *vcpu)
 		WARN_ON_ONCE(vcpu->mmio_needed);
 	}
 
-	if (kvm_run->immediate_exit) {
+	if (!vcpu->wants_to_run) {
 		r = -EINTR;
 		goto out;
 	}
