@@ -8,7 +8,6 @@ title: Freescale i.MX Platforms
 
 maintainers:
   - Shawn Guo <shawnguo@kernel.org>
-  - Li Yang <leoyang.li@nxp.com>
 
 properties:
   $nodename:
@@ -946,6 +945,13 @@ properties:
               - prt,prt8mm                # i.MX8MM Protonic PRT8MM Board
           - const: fsl,imx8mm
 
+      - description: Compulab i.MX8MM UCM SoM based boards
+        items:
+          - enum:
+              - compulab,imx8mm-iot-gateway     # i.MX8MM Compulab IoT-Gateway
+          - const: compulab,imx8mm-ucm-som      # i.MX8MM Compulab UCM SoM
+          - const: fsl,imx8mm
+
       - description: Emtop i.MX8MM based Boards
         items:
           - const: ees,imx8mm-emtop-baseboard      # i.MX8MM Emtop SoM on i.MX8M Mini Baseboard V1
@@ -1272,8 +1278,15 @@ properties:
       - description: i.MX93 based Boards
         items:
           - enum:
+              - fsl,imx93-9x9-qsb         # i.MX93 9x9 QSB Board
               - fsl,imx93-11x11-evk       # i.MX93 11x11 EVK Board
           - const: fsl,imx93
+
+      - description: i.MX95 based Boards
+        items:
+          - enum:
+              - fsl,imx95-19x19-evk       # i.MX95 19x19 EVK Board
+          - const: fsl,imx95
 
       - description: i.MXRT1050 based Boards
         items:
