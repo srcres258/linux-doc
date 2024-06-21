@@ -125,6 +125,7 @@ enum wq_internal_consts {
 	HIGHPRI_NICE_LEVEL	= MIN_NICE,
 
 	WQ_NAME_LEN		= 32,
+	WORKER_ID_LEN		= 10 + WQ_NAME_LEN, /* "kworker/R-" + WQ_NAME_LEN */
 };
 
 /*
@@ -1683,33 +1684,6 @@ static void __pwq_activate_work(struct pool_workqueue *pwq,
 	__clear_bit(WORK_STRUCT_INACTIVE_BIT, wdb);
 }
 
-/**
- * pwq_activate_work - Activate a work item if inactive
- * @pwq: pool_workqueue @work belongs to
- * @work: work item to activate
- *
- * Returns %true if activated. %false if already active.
- */
-static bool pwq_activate_work(struct pool_workqueue *pwq,
-			      struct work_struct *work)
-{
-	struct worker_pool *pool = pwq->pool;
-	struct wq_node_nr_active *nna;
-
-	lockdep_assert_held(&pool->lock);
-
-	if (!(*work_data_bits(work) & WORK_STRUCT_INACTIVE))
-		return false;
-
-	nna = wq_node_nr_active(pwq->wq, pool->node);
-	if (nna)
-		atomic_inc(&nna->nr);
-
-	pwq->nr_active++;
-	__pwq_activate_work(pwq, work);
-	return true;
-}
-
 static bool tryinc_node_nr_active(struct wq_node_nr_active *nna)
 {
 	int max = READ_ONCE(nna->max);
@@ -2116,7 +2090,7 @@ static int try_to_grab_pending(struct work_struct *work, u32 cflags,
 	 */
 	pwq = get_work_pwq(work);
 	if (pwq && pwq->pool == pool) {
-		unsigned long work_data;
+		unsigned long work_data = *work_data_bits(work);
 
 		debug_work_deactivate(work);
 
@@ -2125,13 +2099,17 @@ static int try_to_grab_pending(struct work_struct *work, u32 cflags,
 		 * pwq->inactive_works since a queued barrier can't be
 		 * canceled (see the comments in insert_wq_barrier()).
 		 *
-		 * An inactive work item cannot be grabbed directly because
+		 * An inactive work item cannot be deleted directly because
 		 * it might have linked barrier work items which, if left
 		 * on the inactive_works list, will confuse pwq->nr_active
-		 * management later on and cause stall.  Make sure the work
-		 * item is activated before grabbing.
+		 * management later on and cause stall.  Move the linked
+		 * barrier work items to the worklist when deleting the grabbed
+		 * item. Also keep WORK_STRUCT_INACTIVE in work_data, so that
+		 * it doesn't participate in nr_active management in later
+		 * pwq_dec_nr_in_flight().
 		 */
-		pwq_activate_work(pwq, work);
+		if (work_data & WORK_STRUCT_INACTIVE)
+			move_linked_works(work, &pwq->pool->worklist, NULL);
 
 		list_del_init(&work->entry);
 
@@ -2139,7 +2117,6 @@ static int try_to_grab_pending(struct work_struct *work, u32 cflags,
 		 * work->data points to pwq iff queued. Let's point to pool. As
 		 * this destroys work->data needed by the next step, stash it.
 		 */
-		work_data = *work_data_bits(work);
 		set_work_pool_and_keep_pending(work, pool->id,
 					       pool_offq_flags(pool));
 
@@ -2742,6 +2719,26 @@ static void worker_detach_from_pool(struct worker *worker)
 		complete(detach_completion);
 }
 
+static int format_worker_id(char *buf, size_t size, struct worker *worker,
+			    struct worker_pool *pool)
+{
+	if (worker->rescue_wq)
+		return scnprintf(buf, size, "kworker/R-%s",
+				 worker->rescue_wq->name);
+
+	if (pool) {
+		if (pool->cpu >= 0)
+			return scnprintf(buf, size, "kworker/%d:%d%s",
+					 pool->cpu, worker->id,
+					 pool->attrs->nice < 0  ? "H" : "");
+		else
+			return scnprintf(buf, size, "kworker/u%d:%d",
+					 pool->id, worker->id);
+	} else {
+		return scnprintf(buf, size, "kworker/dying");
+	}
+}
+
 /**
  * create_worker - create a new workqueue worker
  * @pool: pool the new worker will belong to
@@ -2758,7 +2755,6 @@ static struct worker *create_worker(struct worker_pool *pool)
 {
 	struct worker *worker;
 	int id;
-	char id_buf[23];
 
 	/* ID is needed to determine kthread name */
 	id = ida_alloc(&pool->worker_ida, GFP_KERNEL);
@@ -2777,17 +2773,14 @@ static struct worker *create_worker(struct worker_pool *pool)
 	worker->id = id;
 
 	if (!(pool->flags & POOL_BH)) {
-		if (pool->cpu >= 0)
-			snprintf(id_buf, sizeof(id_buf), "%d:%d%s", pool->cpu, id,
-				 pool->attrs->nice < 0  ? "H" : "");
-		else
-			snprintf(id_buf, sizeof(id_buf), "u%d:%d", pool->id, id);
+		char id_buf[WORKER_ID_LEN];
 
+		format_worker_id(id_buf, sizeof(id_buf), worker, pool);
 		worker->task = kthread_create_on_node(worker_thread, worker,
-					pool->node, "kworker/%s", id_buf);
+						      pool->node, "%s", id_buf);
 		if (IS_ERR(worker->task)) {
 			if (PTR_ERR(worker->task) == -EINTR) {
-				pr_err("workqueue: Interrupted when creating a worker thread \"kworker/%s\"\n",
+				pr_err("workqueue: Interrupted when creating a worker thread \"%s\"\n",
 				       id_buf);
 			} else {
 				pr_err_once("workqueue: Failed to create a worker thread: %pe",
@@ -3350,7 +3343,6 @@ woke_up:
 		raw_spin_unlock_irq(&pool->lock);
 		set_pf_worker(false);
 
-		set_task_comm(worker->task, "kworker/dying");
 		ida_free(&pool->worker_ida, worker->id);
 		worker_detach_from_pool(worker);
 		WARN_ON_ONCE(!list_empty(&worker->entry));
@@ -5022,12 +5014,6 @@ fail:
 	return NULL;
 }
 
-static void rcu_free_pwq(struct rcu_head *rcu)
-{
-	kmem_cache_free(pwq_cache,
-			container_of(rcu, struct pool_workqueue, rcu));
-}
-
 /*
  * Scheduled on pwq_release_worker by put_pwq() when an unbound pwq hits zero
  * refcnt and needs to be destroyed.
@@ -5073,7 +5059,7 @@ static void pwq_release_workfn(struct kthread_work *work)
 		raw_spin_unlock_irq(&nna->lock);
 	}
 
-	call_rcu(&pwq->rcu, rcu_free_pwq);
+	kfree_rcu(pwq, rcu);
 
 	/*
 	 * If we're the last pwq going away, @wq is already dead and no one
@@ -5461,15 +5447,16 @@ static int alloc_and_link_pwqs(struct workqueue_struct *wq)
 		goto enomem;
 
 	if (!(wq->flags & WQ_UNBOUND)) {
+		struct worker_pool __percpu *pools;
+
+		if (wq->flags & WQ_BH)
+			pools = bh_worker_pools;
+		else
+			pools = cpu_worker_pools;
+
 		for_each_possible_cpu(cpu) {
 			struct pool_workqueue **pwq_p;
-			struct worker_pool __percpu *pools;
 			struct worker_pool *pool;
-
-			if (wq->flags & WQ_BH)
-				pools = bh_worker_pools;
-			else
-				pools = cpu_worker_pools;
 
 			pool = &(per_cpu_ptr(pools, cpu)[highpri]);
 			pwq_p = per_cpu_ptr(wq->cpu_pwq, cpu);
@@ -5542,6 +5529,7 @@ static int wq_clamp_max_active(int max_active, unsigned int flags,
 static int init_rescuer(struct workqueue_struct *wq)
 {
 	struct worker *rescuer;
+	char id_buf[WORKER_ID_LEN];
 	int ret;
 
 	if (!(wq->flags & WQ_MEM_RECLAIM))
@@ -5555,7 +5543,9 @@ static int init_rescuer(struct workqueue_struct *wq)
 	}
 
 	rescuer->rescue_wq = wq;
-	rescuer->task = kthread_create(rescuer_thread, rescuer, "kworker/R-%s", wq->name);
+	format_worker_id(id_buf, sizeof(id_buf), rescuer, NULL);
+
+	rescuer->task = kthread_create(rescuer_thread, rescuer, "%s", id_buf);
 	if (IS_ERR(rescuer->task)) {
 		ret = PTR_ERR(rescuer->task);
 		pr_err("workqueue: Failed to create a rescuer kthread for wq \"%s\": %pe",
@@ -6384,19 +6374,15 @@ void show_freezable_workqueues(void)
 /* used to show worker information through /proc/PID/{comm,stat,status} */
 void wq_worker_comm(char *buf, size_t size, struct task_struct *task)
 {
-	int off;
-
-	/* always show the actual comm */
-	off = strscpy(buf, task->comm, size);
-	if (off < 0)
-		return;
-
 	/* stabilize PF_WQ_WORKER and worker pool association */
 	mutex_lock(&wq_pool_attach_mutex);
 
 	if (task->flags & PF_WQ_WORKER) {
 		struct worker *worker = kthread_data(task);
 		struct worker_pool *pool = worker->pool;
+		int off;
+
+		off = format_worker_id(buf, size, worker, pool);
 
 		if (pool) {
 			raw_spin_lock_irq(&pool->lock);
@@ -6415,6 +6401,8 @@ void wq_worker_comm(char *buf, size_t size, struct task_struct *task)
 			}
 			raw_spin_unlock_irq(&pool->lock);
 		}
+	} else {
+		strscpy(buf, task->comm, size);
 	}
 
 	mutex_unlock(&wq_pool_attach_mutex);
