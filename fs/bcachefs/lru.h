@@ -2,9 +2,6 @@
 #ifndef _BCACHEFS_LRU_H
 #define _BCACHEFS_LRU_H
 
-#define LRU_TIME_BITS	48
-#define LRU_TIME_MAX	((1ULL << LRU_TIME_BITS) - 1)
-
 static inline u64 lru_pos_id(struct bpos pos)
 {
 	return pos.inode >> LRU_TIME_BITS;
@@ -26,18 +23,6 @@ static inline struct bpos lru_pos(u16 lru_id, u64 dev_bucket, u64 time)
 
 	return pos;
 }
-
-#define BCH_LRU_TYPES()		\
-	x(read)			\
-	x(fragmentation)
-
-enum bch_lru_type {
-#define x(n) BCH_LRU_##n,
-	BCH_LRU_TYPES()
-#undef x
-};
-
-#define BCH_LRU_FRAGMENTATION_START	((1U << 16) - 1)
 
 static inline enum bch_lru_type lru_type(struct bkey_s_c l)
 {
