@@ -476,6 +476,9 @@ static void guc_prepare_xfer(struct xe_guc *guc)
 	xe_mmio_write32(gt, GUC_SHIM_CONTROL, shim_flags);
 
 	xe_mmio_write32(gt, GT_PM_CONFIG, GT_DOORBELL_ENABLE);
+
+	/* Make sure GuC receives ARAT interrupts */
+	xe_mmio_rmw32(gt, PMINTRMSK, ARAT_EXPIRED_INTRMSK, 0);
 }
 
 /*
@@ -865,9 +868,6 @@ int xe_guc_enable_communication(struct xe_guc *guc)
 		guc_enable_irq(guc);
 	}
 
-	xe_mmio_rmw32(guc_to_gt(guc), PMINTRMSK,
-		      ARAT_EXPIRED_INTRMSK, 0);
-
 	err = xe_guc_ct_enable(&guc->ct);
 	if (err)
 		return err;
@@ -1094,7 +1094,7 @@ void xe_guc_irq_handler(struct xe_guc *guc, const u16 iir)
 
 void xe_guc_sanitize(struct xe_guc *guc)
 {
-	xe_uc_fw_change_status(&guc->fw, XE_UC_FIRMWARE_LOADABLE);
+	xe_uc_fw_sanitize(&guc->fw);
 	xe_guc_ct_disable(&guc->ct);
 	guc->submission_state.enabled = false;
 }

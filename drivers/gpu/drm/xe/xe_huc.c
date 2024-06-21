@@ -21,6 +21,7 @@
 #include "xe_guc.h"
 #include "xe_map.h"
 #include "xe_mmio.h"
+#include "xe_sriov.h"
 #include "xe_uc_fw.h"
 
 static struct xe_gt *
@@ -90,6 +91,9 @@ int xe_huc_init(struct xe_huc *huc)
 		goto out;
 
 	if (!xe_uc_fw_is_enabled(&huc->fw))
+		return 0;
+
+	if (IS_SRIOV_VF(xe))
 		return 0;
 
 	if (huc->fw.has_gsc_headers) {
@@ -295,9 +299,7 @@ fail:
 
 void xe_huc_sanitize(struct xe_huc *huc)
 {
-	if (!xe_uc_fw_is_loadable(&huc->fw))
-		return;
-	xe_uc_fw_change_status(&huc->fw, XE_UC_FIRMWARE_LOADABLE);
+	xe_uc_fw_sanitize(&huc->fw);
 }
 
 void xe_huc_print_info(struct xe_huc *huc, struct drm_printer *p)
