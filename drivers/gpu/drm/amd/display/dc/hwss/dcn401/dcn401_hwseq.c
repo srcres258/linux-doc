@@ -259,7 +259,7 @@ void dcn401_init_hw(struct dc *dc)
 		res_pool->ref_clocks.xtalin_clock_inKhz =
 				dc->ctx->dc_bios->fw_info.pll_info.crystal_frequency;
 
-		if (res_pool->dccg && res_pool->hubbub) {
+		if (res_pool->hubbub) {
 			(res_pool->dccg->funcs->get_dccg_ref_freq)(res_pool->dccg,
 					dc->ctx->dc_bios->fw_info.pll_info.crystal_frequency,
 					&res_pool->ref_clocks.dccg_ref_clock_inKhz);
@@ -1209,34 +1209,7 @@ void dcn401_set_cursor_position(struct pipe_ctx *pipe_ctx)
 	if (pos_cpy.enable && dcn401_can_pipe_disable_cursor(pipe_ctx))
 		pos_cpy.enable = false;
 
-	if (param.rotation == ROTATION_ANGLE_0) {
-		int recout_width =
-			pipe_ctx->plane_res.scl_data.recout.width;
-		int recout_x =
-			pipe_ctx->plane_res.scl_data.recout.x;
-
-		if (param.mirror) {
-			if (pipe_split_on || odm_combine_on) {
-				if (pos_cpy.x >= recout_width + recout_x) {
-					pos_cpy.x = 2 * recout_width
-						- pos_cpy.x + 2 * recout_x;
-				} else {
-					uint32_t temp_x = pos_cpy.x;
-
-					pos_cpy.x = 2 * recout_x - pos_cpy.x;
-					if (temp_x >= recout_x +
-						(int)hubp->curs_attr.width || pos_cpy.x
-						<= (int)hubp->curs_attr.width +
-						pipe_ctx->plane_state->src_rect.x) {
-						pos_cpy.x = 2 * recout_width - temp_x;
-					}
-				}
-			} else {
-				pos_cpy.x = recout_width - pos_cpy.x + 2 * recout_x;
-			}
-		}
-	} else if (param.rotation == ROTATION_ANGLE_90) {
-	} else if (param.rotation == ROTATION_ANGLE_270) {
+	if (param.rotation == ROTATION_ANGLE_270) {
 		// Swap axis and mirror vertically
 		uint32_t temp_x = pos_cpy.x;
 
@@ -1285,7 +1258,6 @@ void dcn401_set_cursor_position(struct pipe_ctx *pipe_ctx)
 				pos_cpy.x = pipe_ctx->plane_res.scl_data.recout.width + next_odm_width + next_odm_offset - pos_cpy.y;
 				pos_cpy.y = temp_x;
 			}
-		} else {
 		}
 	} else if (param.rotation == ROTATION_ANGLE_180) {
 		// Mirror horizontally and vertically
@@ -1589,16 +1561,28 @@ static void update_dsc_for_odm_change(struct dc *dc, struct dc_state *context,
 	struct pipe_ctx *new_pipe;
 	struct pipe_ctx *old_opp_heads[MAX_PIPES];
 	struct dccg *dccg = dc->res_pool->dccg;
-	struct pipe_ctx *old_otg_master =
-			&dc->current_state->res_ctx.pipe_ctx[otg_master->pipe_idx];
-	int old_opp_head_count = resource_get_opp_heads_for_otg_master(
-			old_otg_master, &dc->current_state->res_ctx,
-			old_opp_heads);
+	struct pipe_ctx *old_otg_master;
+	int old_opp_head_count = 0;
+
+	old_otg_master = &dc->current_state->res_ctx.pipe_ctx[otg_master->pipe_idx];
+
+	if (resource_is_pipe_type(old_otg_master, OTG_MASTER)) {
+		old_opp_head_count = resource_get_opp_heads_for_otg_master(old_otg_master,
+									   &dc->current_state->res_ctx,
+									   old_opp_heads);
+	} else {
+		// DC cannot assume that the current state and the new state
+		// share the same OTG pipe since this is not true when called
+		// in the context of a commit stream not checked. Hence, set
+		// old_otg_master to NULL to skip the DSC configuration.
+		old_otg_master = NULL;
+	}
+
 
 	if (otg_master->stream_res.dsc)
 		dcn32_update_dsc_on_stream(otg_master,
 				otg_master->stream->timing.flags.DSC);
-	if (old_otg_master->stream_res.dsc) {
+	if (old_otg_master && old_otg_master->stream_res.dsc) {
 		for (i = 0; i < old_opp_head_count; i++) {
 			old_pipe = old_opp_heads[i];
 			new_pipe = &context->res_ctx.pipe_ctx[old_pipe->pipe_idx];

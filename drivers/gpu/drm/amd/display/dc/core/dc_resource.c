@@ -1936,9 +1936,15 @@ int resource_get_opp_heads_for_otg_master(const struct pipe_ctx *otg_master,
 		struct pipe_ctx *opp_heads[MAX_PIPES])
 {
 	struct pipe_ctx *opp_head = &res_ctx->pipe_ctx[otg_master->pipe_idx];
+	struct dc *dc = otg_master->stream->ctx->dc;
 	int i = 0;
 
+	DC_LOGGER_INIT(dc->ctx->logger);
+
 	if (!resource_is_pipe_type(otg_master, OTG_MASTER)) {
+		DC_LOG_WARNING("%s called from a non OTG master, something "
+			       "is wrong in the pipe configuration",
+			       __func__);
 		ASSERT(0);
 		return 0;
 	}
@@ -2112,7 +2118,7 @@ int resource_get_odm_slice_dst_width(struct pipe_ctx *otg_master,
 			timing->h_border_right;
 	width = h_active / count;
 
-	if (otg_master->stream_res.tg && otg_master->stream)
+	if (otg_master->stream_res.tg)
 		two_pixel_alignment_required =
 				otg_master->stream_res.tg->funcs->is_two_pixels_per_container(timing) ||
 				/*
@@ -3146,8 +3152,13 @@ bool resource_update_pipes_for_stream_with_slice_count(
 	int i;
 	struct pipe_ctx *otg_master = resource_get_otg_master_for_stream(
 			&new_ctx->res_ctx, stream);
-	int cur_slice_count = resource_get_odm_slice_count(otg_master);
+	int cur_slice_count;
 	bool result = true;
+
+	if (!otg_master)
+		return false;
+
+	cur_slice_count = resource_get_odm_slice_count(otg_master);
 
 	if (new_slice_count == cur_slice_count)
 		return result;

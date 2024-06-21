@@ -8278,7 +8278,9 @@ S:	Supported
 T:	git git://git.kernel.org/pub/scm/linux/kernel/git/kees/linux.git for-next/execve
 F:	Documentation/userspace-api/ELF.rst
 F:	fs/*binfmt_*.c
+F:	fs/Kconfig.binfmt
 F:	fs/exec.c
+F:	fs/exec_test.c
 F:	include/linux/binfmts.h
 F:	include/linux/elf.h
 F:	include/uapi/linux/binfmts.h
@@ -8549,6 +8551,7 @@ R:	Darrick J. Wong <djwong@kernel.org>
 L:	linux-xfs@vger.kernel.org
 L:	linux-fsdevel@vger.kernel.org
 S:	Supported
+F:	Documentation/filesystems/iomap/*
 F:	fs/iomap/
 F:	include/linux/iomap.h
 

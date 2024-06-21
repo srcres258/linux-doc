@@ -874,13 +874,14 @@ static unsigned int get_target_odm_factor(
 		default:
 			break;
 		}
-	}
-	else if (ctx->architecture == dml2_architecture_21) {
+	} else if (ctx->architecture == dml2_architecture_21) {
 		if (ctx->config.svp_pstate.callbacks.get_stream_subvp_type(state, stream) == SUBVP_PHANTOM) {
 			struct dc_stream_state *main_stream;
 
 			/* get stream id of main stream */
 			main_stream = ctx->config.svp_pstate.callbacks.get_paired_subvp_stream(state, stream);
+			if (!main_stream)
+				goto failed;
 
 			/* get cfg idx for associated main stream */
 			cfg_idx = find_disp_cfg_idx_by_stream_id(
@@ -893,6 +894,7 @@ static unsigned int get_target_odm_factor(
 		return ctx->v21.mode_programming.programming->stream_programming[cfg_idx].num_odms_required;
 	}
 
+failed:
 	ASSERT(false);
 	return 1;
 }
@@ -902,6 +904,9 @@ static unsigned int get_source_odm_factor(const struct dml2_context *ctx,
 		const struct dc_stream_state *stream)
 {
 	struct pipe_ctx *otg_master = ctx->config.callbacks.get_otg_master_for_stream(&state->res_ctx, stream);
+
+	if (!otg_master)
+		return 0;
 
 	return ctx->config.callbacks.get_odm_slice_count(otg_master);
 }

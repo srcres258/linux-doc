@@ -1088,12 +1088,14 @@ int vfs_open(const struct path *path, struct file *file)
 
 	file->f_path = *path;
 	ret = do_dentry_open(file, NULL);
-	if (!ret)
+	if (!ret) {
 		/*
 		 * Once we return a file with FMODE_OPENED, __fput() will call
-		 * fsnotify_close(), so we need fsnotify_open() here for symmetry.
+		 * fsnotify_close(), so we need fsnotify_open() here for
+		 * symmetry.
 		 */
 		fsnotify_open(file);
+	}
 	return ret;
 }
 
