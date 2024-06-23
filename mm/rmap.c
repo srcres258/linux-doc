@@ -1306,8 +1306,6 @@ static __always_inline void __folio_add_anon_rmap(struct folio *folio,
 
 	__folio_mod_stat(folio, nr, nr_pmdmapped);
 
-	__folio_mod_stat(folio, nr, nr_pmdmapped);
-
 	if (flags & RMAP_EXCLUSIVE) {
 		switch (level) {
 		case RMAP_LEVEL_PTE:
@@ -1392,6 +1390,7 @@ void folio_add_anon_rmap_pmd(struct folio *folio, struct page *page,
  * @folio:	The folio to add the mapping to.
  * @vma:	the vm area in which the mapping is added
  * @address:	the user virtual address mapped
+ * @flags:	The rmap flags
  *
  * Like folio_add_anon_rmap_*() but must only be called on *new* folios.
  * This means the inc-and-test can be bypassed.

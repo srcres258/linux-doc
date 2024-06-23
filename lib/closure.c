@@ -17,11 +17,17 @@ static inline void closure_put_after_sub(struct closure *cl, int flags)
 {
 	int r = flags & CLOSURE_REMAINING_MASK;
 
-	BUG_ON(flags & CLOSURE_GUARD_MASK);
-	BUG_ON(!r && (flags & ~CLOSURE_DESTRUCTOR));
+	if (WARN(flags & CLOSURE_GUARD_MASK,
+		 "closure has guard bits set: %x (%lu)",
+		 flags & CLOSURE_GUARD_MASK, __fls(r)))
+		r &= ~CLOSURE_GUARD_MASK;
 
 	if (!r) {
 		smp_acquire__after_ctrl_dep();
+
+		WARN(flags & ~CLOSURE_DESTRUCTOR,
+		     "closure ref hit 0 with incorrect flags set: %x (%lu)",
+		     flags & ~CLOSURE_DESTRUCTOR, __fls(flags));
 
 		cl->closure_get_happened = false;
 

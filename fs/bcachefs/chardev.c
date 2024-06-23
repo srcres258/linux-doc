@@ -579,7 +579,6 @@ static long bch2_ioctl_query_accounting(struct bch_fs *c,
 
 	ret = copy_to_user_errcode(user_arg, &arg, sizeof(arg));
 err:
-	bch_err_fn(c, ret);
 	darray_exit(&accounting);
 	return ret;
 }

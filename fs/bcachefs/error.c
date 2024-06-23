@@ -16,6 +16,7 @@ bool bch2_inconsistent_error(struct bch_fs *c)
 	switch (c->opts.errors) {
 	case BCH_ON_ERROR_continue:
 		return false;
+	case BCH_ON_ERROR_fix_safe:
 	case BCH_ON_ERROR_ro:
 		if (bch2_fs_emergency_read_only(c))
 			bch_err(c, "inconsistency detected - emergency read only at journal seq %llu",
@@ -211,6 +212,12 @@ static void prt_actioning(struct printbuf *out, const char *action)
 	prt_str(out, "ing");
 }
 
+static const u8 fsck_flags_extra[] = {
+#define x(t, n, flags)		[BCH_FSCK_ERR_##t] = flags,
+	BCH_SB_ERRS()
+#undef x
+};
+
 int __bch2_fsck_err(struct bch_fs *c,
 		  struct btree_trans *trans,
 		  enum bch_fsck_flags flags,
@@ -225,6 +232,9 @@ int __bch2_fsck_err(struct bch_fs *c,
 	const char *action_orig = "fix?", *action = action_orig;
 
 	might_sleep();
+
+	if (!WARN_ON(err >= ARRAY_SIZE(fsck_flags_extra)))
+		flags |= fsck_flags_extra[err];
 
 	if (!c)
 		c = trans->c;
@@ -293,7 +303,14 @@ int __bch2_fsck_err(struct bch_fs *c,
 		prt_printf(out, bch2_log_msg(c, ""));
 #endif
 
-	if (!test_bit(BCH_FS_fsck_running, &c->flags)) {
+	if ((flags & FSCK_CAN_FIX) &&
+	    (flags & FSCK_AUTOFIX) &&
+	    (c->opts.errors == BCH_ON_ERROR_continue ||
+	     c->opts.errors == BCH_ON_ERROR_fix_safe)) {
+		prt_str(out, ", ");
+		prt_actioning(out, action);
+		ret = -BCH_ERR_fsck_fix;
+	} else if (!test_bit(BCH_FS_fsck_running, &c->flags)) {
 		if (c->opts.errors != BCH_ON_ERROR_continue ||
 		    !(flags & (FSCK_CAN_FIX|FSCK_CAN_IGNORE))) {
 			prt_str(out, ", shutting down");

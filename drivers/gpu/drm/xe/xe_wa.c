@@ -21,6 +21,7 @@
 #include "xe_mmio.h"
 #include "xe_platform_types.h"
 #include "xe_rtp.h"
+#include "xe_sriov.h"
 #include "xe_step.h"
 
 /**
@@ -629,7 +630,7 @@ static const struct xe_rtp_entry_sr lrc_was[] = {
 	  XE_RTP_ACTIONS(SET(CACHE_MODE_1, MSAA_OPTIMIZATION_REDUC_DISABLE))
 	},
 	{ XE_RTP_NAME("14019877138"),
-	  XE_RTP_RULES(GRAPHICS_VERSION_RANGE(1270, 1271), ENGINE_CLASS(RENDER)),
+	  XE_RTP_RULES(GRAPHICS_VERSION_RANGE(1270, 1274), ENGINE_CLASS(RENDER)),
 	  XE_RTP_ACTIONS(SET(XEHP_PSS_CHICKEN, FD_END_COLLECT))
 	},
 
@@ -864,6 +865,9 @@ void xe_wa_dump(struct xe_gt *gt, struct drm_printer *p)
 void xe_wa_apply_tile_workarounds(struct xe_tile *tile)
 {
 	struct xe_gt *mmio = tile->primary_gt;
+
+	if (IS_SRIOV_VF(tile->xe))
+		return;
 
 	if (XE_WA(mmio, 22010954014))
 		xe_mmio_rmw32(mmio, XEHP_CLOCK_GATE_DIS, 0, SGSI_SIDECLK_DIS);

@@ -35,6 +35,7 @@
 #include "xe_perf.h"
 #include "xe_pm.h"
 #include "xe_sched_job.h"
+#include "xe_sriov.h"
 
 #define DEFAULT_POLL_FREQUENCY_HZ 200
 #define DEFAULT_POLL_PERIOD_NS (NSEC_PER_SEC / DEFAULT_POLL_FREQUENCY_HZ)
@@ -887,9 +888,9 @@ err_free:
 	return ERR_CAST(bb);
 }
 
-static struct xe_oa_config_bo *xe_oa_alloc_config_buffer(struct xe_oa_stream *stream)
+static struct xe_oa_config_bo *
+xe_oa_alloc_config_buffer(struct xe_oa_stream *stream, struct xe_oa_config *oa_config)
 {
-	struct xe_oa_config *oa_config = stream->oa_config;
 	struct xe_oa_config_bo *oa_bo;
 
 	/* Look for the buffer in the already allocated BOs attached to the stream */
@@ -905,13 +906,13 @@ out:
 	return oa_bo;
 }
 
-static int xe_oa_emit_oa_config(struct xe_oa_stream *stream)
+static int xe_oa_emit_oa_config(struct xe_oa_stream *stream, struct xe_oa_config *config)
 {
 #define NOA_PROGRAM_ADDITIONAL_DELAY_US 500
 	struct xe_oa_config_bo *oa_bo;
 	int err, us = NOA_PROGRAM_ADDITIONAL_DELAY_US;
 
-	oa_bo = xe_oa_alloc_config_buffer(stream);
+	oa_bo = xe_oa_alloc_config_buffer(stream, config);
 	if (IS_ERR(oa_bo)) {
 		err = PTR_ERR(oa_bo);
 		goto exit;
@@ -989,7 +990,7 @@ static int xe_oa_enable_metric_set(struct xe_oa_stream *stream)
 			return ret;
 	}
 
-	return xe_oa_emit_oa_config(stream);
+	return xe_oa_emit_oa_config(stream, stream->oa_config);
 }
 
 static void xe_oa_stream_enable(struct xe_oa_stream *stream)
@@ -1054,7 +1055,7 @@ static long xe_oa_config_locked(struct xe_oa_stream *stream, u64 arg)
 		return -ENODEV;
 
 	if (config != stream->oa_config) {
-		err = xe_oa_emit_oa_config(stream);
+		err = xe_oa_emit_oa_config(stream, config);
 		if (!err)
 			config = xchg(&stream->oa_config, config);
 		else
@@ -1725,7 +1726,8 @@ static int xe_oa_user_extensions(struct xe_oa *oa, u64 extension, int ext_number
  */
 int xe_oa_stream_open_ioctl(struct drm_device *dev, u64 data, struct drm_file *file)
 {
-	struct xe_oa *oa = &to_xe_device(dev)->oa;
+	struct xe_device *xe = to_xe_device(dev);
+	struct xe_oa *oa = &xe->oa;
 	struct xe_file *xef = to_xe_file(file);
 	struct xe_oa_open_param param = {};
 	const struct xe_oa_format *f;
@@ -1733,7 +1735,7 @@ int xe_oa_stream_open_ioctl(struct drm_device *dev, u64 data, struct drm_file *f
 	int ret;
 
 	if (!oa->xe) {
-		drm_dbg(&oa->xe->drm, "xe oa interface not available for this system\n");
+		drm_dbg(&xe->drm, "xe oa interface not available for this system\n");
 		return -ENODEV;
 	}
 
@@ -2005,7 +2007,8 @@ static int create_dynamic_oa_sysfs_entry(struct xe_oa *oa,
  */
 int xe_oa_add_config_ioctl(struct drm_device *dev, u64 data, struct drm_file *file)
 {
-	struct xe_oa *oa = &to_xe_device(dev)->oa;
+	struct xe_device *xe = to_xe_device(dev);
+	struct xe_oa *oa = &xe->oa;
 	struct drm_xe_oa_config param;
 	struct drm_xe_oa_config *arg = &param;
 	struct xe_oa_config *oa_config, *tmp;
@@ -2013,7 +2016,7 @@ int xe_oa_add_config_ioctl(struct drm_device *dev, u64 data, struct drm_file *fi
 	int err, id;
 
 	if (!oa->xe) {
-		drm_dbg(&oa->xe->drm, "xe oa interface not available for this system\n");
+		drm_dbg(&xe->drm, "xe oa interface not available for this system\n");
 		return -ENODEV;
 	}
 
@@ -2106,13 +2109,14 @@ reg_err:
  */
 int xe_oa_remove_config_ioctl(struct drm_device *dev, u64 data, struct drm_file *file)
 {
-	struct xe_oa *oa = &to_xe_device(dev)->oa;
+	struct xe_device *xe = to_xe_device(dev);
+	struct xe_oa *oa = &xe->oa;
 	struct xe_oa_config *oa_config;
 	u64 arg, *ptr = u64_to_user_ptr(data);
 	int ret;
 
 	if (!oa->xe) {
-		drm_dbg(&oa->xe->drm, "xe oa interface not available for this system\n");
+		drm_dbg(&xe->drm, "xe oa interface not available for this system\n");
 		return -ENODEV;
 	}
 
@@ -2382,7 +2386,10 @@ int xe_oa_init(struct xe_device *xe)
 	int ret;
 
 	/* Support OA only with GuC submission and Gen12+ */
-	if (XE_WARN_ON(!xe_device_uc_enabled(xe)) || XE_WARN_ON(GRAPHICS_VER(xe) < 12))
+	if (!xe_device_uc_enabled(xe) || GRAPHICS_VER(xe) < 12)
+		return 0;
+
+	if (IS_SRIOV_VF(xe))
 		return 0;
 
 	oa->xe = xe;

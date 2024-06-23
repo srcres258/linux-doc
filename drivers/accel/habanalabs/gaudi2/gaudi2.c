@@ -3312,10 +3312,8 @@ static int gaudi2_late_init(struct hl_device *hdev)
 
 	rc = hl_fw_send_pci_access_msg(hdev, CPUCP_PACKET_ENABLE_PCI_ACCESS,
 					gaudi2->virt_msix_db_dma_addr);
-	if (rc) {
-		dev_err(hdev->dev, "Failed to enable PCI access from CPU\n");
+	if (rc)
 		return rc;
-	}
 
 	rc = gaudi2_fetch_psoc_frequency(hdev);
 	if (rc) {
@@ -3797,6 +3795,8 @@ static int gaudi2_sw_init(struct hl_device *hdev)
 	rc = gaudi2_test_queues_msgs_alloc(hdev);
 	if (rc)
 		goto special_blocks_free;
+
+	hdev->heartbeat_debug_info.cpu_queue_id = GAUDI2_QUEUE_ID_CPU_PQ;
 
 	return 0;
 
@@ -6467,13 +6467,7 @@ skip_reset:
 
 static int gaudi2_suspend(struct hl_device *hdev)
 {
-	int rc;
-
-	rc = hl_fw_send_pci_access_msg(hdev, CPUCP_PACKET_DISABLE_PCI_ACCESS, 0x0);
-	if (rc)
-		dev_err(hdev->dev, "Failed to disable PCI access from CPU\n");
-
-	return rc;
+	return hl_fw_send_pci_access_msg(hdev, CPUCP_PACKET_DISABLE_PCI_ACCESS, 0x0);
 }
 
 static int gaudi2_resume(struct hl_device *hdev)
@@ -9269,8 +9263,8 @@ static int gaudi2_handle_mmu_spi_sei_err(struct hl_device *hdev, u16 event_type,
 static bool gaudi2_hbm_sei_handle_read_err(struct hl_device *hdev,
 			struct hl_eq_hbm_sei_read_err_intr_info *rd_err_data, u32 err_cnt)
 {
+	bool require_hard_reset = false;
 	u32 addr, beat, beat_shift;
-	bool rc = false;
 
 	dev_err_ratelimited(hdev->dev,
 			"READ ERROR count: ECC SERR: %d, ECC DERR: %d, RD_PARITY: %d\n",
@@ -9302,7 +9296,7 @@ static bool gaudi2_hbm_sei_handle_read_err(struct hl_device *hdev,
 						beat,
 						le32_to_cpu(rd_err_data->dbg_rd_err_dm),
 						le32_to_cpu(rd_err_data->dbg_rd_err_syndrome));
-			rc |= true;
+			require_hard_reset = true;
 		}
 
 		beat_shift = beat * HBM_RD_ERR_BEAT_SHIFT;
@@ -9315,7 +9309,7 @@ static bool gaudi2_hbm_sei_handle_read_err(struct hl_device *hdev,
 					(le32_to_cpu(rd_err_data->dbg_rd_err_misc) &
 						(HBM_RD_ERR_PAR_DATA_BEAT0_MASK << beat_shift)) >>
 						(HBM_RD_ERR_PAR_DATA_BEAT0_SHIFT + beat_shift));
-			rc |= true;
+			require_hard_reset = true;
 		}
 
 		dev_err_ratelimited(hdev->dev, "Beat%d DQ data:\n", beat);
@@ -9325,7 +9319,7 @@ static bool gaudi2_hbm_sei_handle_read_err(struct hl_device *hdev,
 					le32_to_cpu(rd_err_data->dbg_rd_err_data[beat * 2 + 1]));
 	}
 
-	return rc;
+	return require_hard_reset;
 }
 
 static void gaudi2_hbm_sei_print_wr_par_info(struct hl_device *hdev,
@@ -9783,11 +9777,6 @@ static u16 event_id_to_engine_id(struct hl_device *hdev, u16 event_type)
 	return U16_MAX;
 }
 
-static void hl_eq_heartbeat_event_handle(struct hl_device *hdev)
-{
-	hdev->eq_heartbeat_received = true;
-}
-
 static void gaudi2_handle_eqe(struct hl_device *hdev, struct hl_eq_entry *eq_entry)
 {
 	struct gaudi2_device *gaudi2 = hdev->asic_specific;
@@ -10009,6 +9998,7 @@ static void gaudi2_handle_eqe(struct hl_device *hdev, struct hl_eq_entry *eq_ent
 		if (gaudi2_handle_hbm_mc_sei_err(hdev, event_type, &eq_entry->sei_data)) {
 			reset_flags |= HL_DRV_RESET_FW_FATAL_ERR;
 			reset_required = true;
+			is_critical = eq_entry->sei_data.hdr.is_critical;
 		}
 		error_count++;
 		break;
@@ -10240,8 +10230,7 @@ static void gaudi2_handle_eqe(struct hl_device *hdev, struct hl_eq_entry *eq_ent
 		gaudi2_print_event(hdev, event_type, true,
 				"No error cause for H/W event %u", event_type);
 
-	if ((gaudi2_irq_map_table[event_type].reset != EVENT_RESET_TYPE_NONE) ||
-				reset_required) {
+	if ((gaudi2_irq_map_table[event_type].reset != EVENT_RESET_TYPE_NONE) || reset_required) {
 		if (reset_required ||
 				(gaudi2_irq_map_table[event_type].reset == EVENT_RESET_TYPE_HARD))
 			reset_flags |= HL_DRV_RESET_HARD;

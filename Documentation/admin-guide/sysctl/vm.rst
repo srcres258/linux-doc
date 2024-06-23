@@ -294,12 +294,11 @@ memory pages.  When setting to 1, kernel attempts to soft offline the pages
 whenever it thinks needed.  When setting to 0, kernel returns EOPNOTSUPP to
 the request to soft offline the pages.  Its default value is 1.
 
-It is worth mentioning that after setting enable_soft_offline to 0:
-- If RAS Correctable Errors Collector is running, its request to soft offline
-  pages will fail.
-- On ARM, the request to soft offline pages from GHES driver will fail.
-- On PARISC, the request to soft offline pages from Page Deallocation Table
-  will fail.
+It is worth mentioning that after setting enable_soft_offline to 0, the
+following requests to soft offline pages will not be performed:
+- Request to soft offline pages from RAS Correctable Errors Collector.
+- On ARM, the request to soft offline pages from GHES driver.
+- On PARISC, the request to soft offline pages from Page Deallocation Table.
 
 extfrag_threshold
 =================

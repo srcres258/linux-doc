@@ -836,7 +836,7 @@ int kvm_arch_vcpu_run_pid_change(struct kvm_vcpu *vcpu)
 	 * This needs to happen after NV has imposed its own restrictions on
 	 * the feature set
 	 */
-	kvm_init_sysreg(vcpu);
+	kvm_calculate_traps(vcpu);
 
 	ret = kvm_timer_enable(vcpu);
 	if (ret)
@@ -1456,11 +1456,6 @@ static int kvm_vcpu_init_check_features(struct kvm_vcpu *vcpu,
 	 */
 	if (test_bit(KVM_ARM_VCPU_PTRAUTH_ADDRESS, &features) !=
 	    test_bit(KVM_ARM_VCPU_PTRAUTH_GENERIC, &features))
-		return -EINVAL;
-
-	/* Disallow NV+SVE for the time being */
-	if (test_bit(KVM_ARM_VCPU_HAS_EL2, &features) &&
-	    test_bit(KVM_ARM_VCPU_SVE, &features))
 		return -EINVAL;
 
 	if (!test_bit(KVM_ARM_VCPU_EL1_32BIT, &features))

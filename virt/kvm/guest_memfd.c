@@ -567,8 +567,9 @@ static int __kvm_gmem_get_pfn(struct file *file, struct kvm_memory_slot *slot,
 		return PTR_ERR(folio);
 
 	if (folio_test_hwpoison(folio)) {
-		r = -EHWPOISON;
-		goto out_unlock;
+		folio_unlock(folio);
+		folio_put(folio);
+		return -EHWPOISON;
 	}
 
 	page = folio_file_page(folio, index);
@@ -579,7 +580,6 @@ static int __kvm_gmem_get_pfn(struct file *file, struct kvm_memory_slot *slot,
 
 	r = 0;
 
-out_unlock:
 	folio_unlock(folio);
 
 	return r;
@@ -628,6 +628,11 @@ long kvm_gmem_populate(struct kvm *kvm, gfn_t start_gfn, void __user *src, long 
 	for (i = 0; i < npages; i += (1 << max_order)) {
 		gfn_t gfn = start_gfn + i;
 		kvm_pfn_t pfn;
+
+		if (signal_pending(current)) {
+			ret = -EINTR;
+			break;
+		}
 
 		ret = __kvm_gmem_get_pfn(file, slot, gfn, &pfn, &max_order, false);
 		if (ret)

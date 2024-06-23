@@ -18,6 +18,7 @@
 #include <asm/extable.h>
 #include <asm/facility.h>
 #include <asm-generic/access_ok.h>
+#include <linux/instrumented.h>
 
 void debug_user_asce(int exit);
 
@@ -79,14 +80,14 @@ union oac {
 int __noreturn __put_user_bad(void);
 
 #ifdef CONFIG_KMSAN
-#define GET_PUT_USER_NOINSTR_ATTRIBUTES \
+#define get_put_user_noinstr_attributes \
 	noinline __maybe_unused __no_sanitize_memory
 #else
-#define GET_PUT_USER_NOINSTR_ATTRIBUTES __always_inline
+#define get_put_user_noinstr_attributes __always_inline
 #endif
 
 #define DEFINE_PUT_USER(type)						\
-static GET_PUT_USER_NOINSTR_ATTRIBUTES int				\
+static get_put_user_noinstr_attributes int				\
 __put_user_##type##_noinstr(unsigned type __user *to,			\
 			    unsigned type *from,			\
 			    unsigned long size)				\
@@ -162,7 +163,7 @@ static __always_inline int __put_user_fn(void *x, void __user *ptr, unsigned lon
 int __noreturn __get_user_bad(void);
 
 #define DEFINE_GET_USER(type)						\
-static GET_PUT_USER_NOINSTR_ATTRIBUTES int				\
+static get_put_user_noinstr_attributes int				\
 __get_user_##type##_noinstr(unsigned type *to,				\
 			    unsigned type __user *from,			\
 			    unsigned long size)				\

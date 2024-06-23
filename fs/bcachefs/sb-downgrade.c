@@ -79,6 +79,7 @@
 	  BCH_FSCK_ERR_fs_usage_cached_wrong,			\
 	  BCH_FSCK_ERR_fs_usage_reserved_wrong,			\
 	  BCH_FSCK_ERR_fs_usage_nr_inodes_wrong,		\
+	  BCH_FSCK_ERR_fs_usage_persistent_reserved_wrong,	\
 	  BCH_FSCK_ERR_fs_usage_replicas_wrong,			\
 	  BCH_FSCK_ERR_bkey_version_in_future)
 

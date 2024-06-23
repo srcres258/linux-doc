@@ -1877,20 +1877,24 @@ static bool shmem_should_replace_folio(struct folio *folio, gfp_t gfp)
 static int shmem_replace_folio(struct folio **foliop, gfp_t gfp,
 				struct shmem_inode_info *info, pgoff_t index)
 {
-	struct folio *new, *old = *foliop;
-	swp_entry_t entry = old->swap;
-	struct address_space *swap_mapping = swap_address_space(entry);
-	pgoff_t swap_index = swap_cache_index(entry);
-	XA_STATE(xas, &swap_mapping->i_pages, swap_index);
-	int nr_pages = folio_nr_pages(old);
-	int error = 0, i;
+	struct folio *old, *new;
+	struct address_space *swap_mapping;
+	swp_entry_t entry;
+	pgoff_t swap_index;
+	int error;
+
+	old = *foliop;
+	entry = old->swap;
+	swap_index = swap_cache_index(entry);
+	swap_mapping = swap_address_space(entry);
 
 	/*
 	 * We have arrived here because our zones are constrained, so don't
 	 * limit chance of success by further cpuset and node constraints.
 	 */
 	gfp &= ~GFP_CONSTRAINT_MASK;
-	new = shmem_alloc_folio(gfp, folio_order(old), info, index);
+	VM_BUG_ON_FOLIO(folio_test_large(old), old);
+	new = shmem_alloc_folio(gfp, 0, info, index);
 	if (!new)
 		return -ENOMEM;
 
