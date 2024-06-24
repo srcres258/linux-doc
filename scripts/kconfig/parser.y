@@ -28,9 +28,7 @@ static void zconf_error(const char *err, ...);
 static bool zconf_endtoken(const char *tokenname,
 			   const char *expected_tokenname);
 
-struct menu *current_menu, *current_entry;
-
-static bool inside_choice = false;
+struct menu *current_menu, *current_entry, *current_choice;
 
 %}
 
@@ -90,7 +88,7 @@ static bool inside_choice = false;
 
 %type <symbol> nonconst_symbol
 %type <symbol> symbol
-%type <type> type logic_type default
+%type <type> type default
 %type <expr> expr
 %type <expr> if_expr
 %type <string> end
@@ -147,9 +145,15 @@ config_entry_start: T_CONFIG nonconst_symbol T_EOL
 
 config_stmt: config_entry_start config_option_list
 {
-	if (inside_choice) {
+	if (current_choice) {
 		if (!current_entry->prompt) {
 			fprintf(stderr, "%s:%d: error: choice member must have a prompt\n",
+				current_entry->filename, current_entry->lineno);
+			yynerrs++;
+		}
+
+		if (current_entry->sym->type != S_BOOLEAN) {
+			fprintf(stderr, "%s:%d: error: choice member must be bool\n",
 				current_entry->filename, current_entry->lineno);
 			yynerrs++;
 		}
@@ -235,6 +239,8 @@ choice: T_CHOICE T_EOL
 
 	menu_add_entry(sym);
 	menu_add_expr(P_CHOICE, NULL, NULL);
+	menu_set_type(S_BOOLEAN);
+
 	printd(DEBUG_PARSE, "%s:%d:choice\n", cur_filename, cur_lineno);
 };
 
@@ -248,12 +254,12 @@ choice_entry: choice choice_option_list
 
 	$$ = menu_add_menu();
 
-	inside_choice = true;
+	current_choice = current_entry;
 };
 
 choice_end: end
 {
-	inside_choice = false;
+	current_choice = NULL;
 
 	if (zconf_endtoken($1, "choice")) {
 		menu_end_menu();
@@ -277,10 +283,10 @@ choice_option: T_PROMPT T_WORD_QUOTE if_expr T_EOL
 	printd(DEBUG_PARSE, "%s:%d:prompt\n", cur_filename, cur_lineno);
 };
 
-choice_option: logic_type prompt_stmt_opt T_EOL
+choice_option: T_BOOL T_WORD_QUOTE if_expr T_EOL
 {
-	menu_set_type($1);
-	printd(DEBUG_PARSE, "%s:%d:type(%u)\n", cur_filename, cur_lineno, $1);
+	menu_add_prompt(P_PROMPT, $2, $3);
+	printd(DEBUG_PARSE, "%s:%d:bool\n", cur_filename, cur_lineno);
 };
 
 choice_option: T_DEFAULT nonconst_symbol if_expr T_EOL
@@ -290,14 +296,11 @@ choice_option: T_DEFAULT nonconst_symbol if_expr T_EOL
 };
 
 type:
-	  logic_type
+	  T_BOOL		{ $$ = S_BOOLEAN; }
+	| T_TRISTATE		{ $$ = S_TRISTATE; }
 	| T_INT			{ $$ = S_INT; }
 	| T_HEX			{ $$ = S_HEX; }
 	| T_STRING		{ $$ = S_STRING; }
-
-logic_type:
-	  T_BOOL		{ $$ = S_BOOLEAN; }
-	| T_TRISTATE		{ $$ = S_TRISTATE; }
 
 default:
 	  T_DEFAULT		{ $$ = S_UNKNOWN; }
