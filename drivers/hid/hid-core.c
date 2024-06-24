@@ -95,9 +95,9 @@ static struct hid_field *hid_register_field(struct hid_report *report, unsigned 
 		return NULL;
 	}
 
-	field = kzalloc((sizeof(struct hid_field) +
-			 usages * sizeof(struct hid_usage) +
-			 3 * usages * sizeof(unsigned int)), GFP_KERNEL);
+	field = kvzalloc((sizeof(struct hid_field) +
+			  usages * sizeof(struct hid_usage) +
+			  3 * usages * sizeof(unsigned int)), GFP_KERNEL);
 	if (!field)
 		return NULL;
 
@@ -661,7 +661,7 @@ static void hid_free_report(struct hid_report *report)
 	kfree(report->field_entries);
 
 	for (n = 0; n < report->maxfield; n++)
-		kfree(report->field[n]);
+		kvfree(report->field[n]);
 	kfree(report);
 }
 
@@ -2970,7 +2970,7 @@ int hid_check_keys_pressed(struct hid_device *hid)
 EXPORT_SYMBOL_GPL(hid_check_keys_pressed);
 
 #ifdef CONFIG_HID_BPF
-static struct hid_bpf_ops hid_ops = {
+static struct hid_ops __hid_ops = {
 	.hid_get_report = hid_get_report,
 	.hid_hw_raw_request = hid_hw_raw_request,
 	.hid_hw_output_report = hid_hw_output_report,
@@ -2991,7 +2991,7 @@ static int __init hid_init(void)
 	}
 
 #ifdef CONFIG_HID_BPF
-	hid_bpf_ops = &hid_ops;
+	hid_ops = &__hid_ops;
 #endif
 
 	ret = hidraw_init();
@@ -3010,7 +3010,7 @@ err:
 static void __exit hid_exit(void)
 {
 #ifdef CONFIG_HID_BPF
-	hid_bpf_ops = NULL;
+	hid_ops = NULL;
 #endif
 	hid_debug_exit();
 	hidraw_exit();
@@ -3024,4 +3024,5 @@ module_exit(hid_exit);
 MODULE_AUTHOR("Andreas Gal");
 MODULE_AUTHOR("Vojtech Pavlik");
 MODULE_AUTHOR("Jiri Kosina");
+MODULE_DESCRIPTION("HID support for Linux");
 MODULE_LICENSE("GPL");
