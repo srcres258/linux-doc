@@ -15,7 +15,6 @@
  */
 
 #include <linux/acpi.h>
-#include <linux/cleanup.h>
 #include <linux/module.h>
 #include <linux/moduleparam.h>
 #include <linux/ioport.h>
@@ -41,8 +40,6 @@
 #endif
 
 #include <asm/irq.h>
-
-#include "../serial_base.h"	/* For serial_base_add_isa_preferred_console() */
 
 #include "8250.h"
 
@@ -563,8 +560,6 @@ static void __init serial8250_isa_init_ports(void)
 		port->irqflags |= irqflag;
 		if (serial8250_isa_config != NULL)
 			serial8250_isa_config(i, &up->port, &up->capabilities);
-
-		serial_base_add_isa_preferred_console(serial8250_reg.dev_name, i);
 	}
 }
 
@@ -629,11 +624,11 @@ static int univ8250_console_setup(struct console *co, char *options)
 
 	port = &serial8250_ports[co->index].port;
 	/* link port to console */
-	port->cons = co;
+	uart_port_set_cons(port, co);
 
 	retval = serial8250_console_setup(port, options, false);
 	if (retval != 0)
-		port->cons = NULL;
+		uart_port_set_cons(port, NULL);
 	return retval;
 }
 
@@ -691,7 +686,7 @@ static int univ8250_console_match(struct console *co, char *name, int idx,
 			continue;
 
 		co->index = i;
-		port->cons = co;
+		uart_port_set_cons(port, co);
 		return serial8250_console_setup(port, options, true);
 	}
 

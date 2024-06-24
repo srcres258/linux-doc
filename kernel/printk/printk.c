@@ -282,6 +282,7 @@ EXPORT_SYMBOL(console_list_unlock);
  * Return: A cookie to pass to console_srcu_read_unlock().
  */
 int console_srcu_read_lock(void)
+	__acquires(&console_srcu)
 {
 	return srcu_read_lock_nmisafe(&console_srcu);
 }
@@ -295,6 +296,7 @@ EXPORT_SYMBOL(console_srcu_read_lock);
  * Counterpart to console_srcu_read_lock()
  */
 void console_srcu_read_unlock(int cookie)
+	__releases(&console_srcu)
 {
 	srcu_read_unlock_nmisafe(&console_srcu, cookie);
 }
@@ -383,6 +385,9 @@ static int console_locked;
 /*
  *	Array of consoles built from command line options (console=)
  */
+
+#define MAX_CMDLINECONSOLES 8
+
 static struct console_cmdline console_cmdline[MAX_CMDLINECONSOLES];
 
 static int preferred_console = -1;
@@ -457,6 +462,28 @@ static int console_msg_format = MSG_FORMAT_DEFAULT;
 
 /* syslog_lock protects syslog_* variables and write access to clear_seq. */
 static DEFINE_MUTEX(syslog_lock);
+
+/*
+ * Specifies if a legacy console is registered. If legacy consoles are
+ * present, it is necessary to perform the console lock/unlock dance
+ * whenever console flushing should occur.
+ */
+bool have_legacy_console;
+
+/*
+ * Specifies if an nbcon console is registered. If nbcon consoles are present,
+ * synchronous printing of legacy consoles will not occur during panic until
+ * the backtrace has been stored to the ringbuffer.
+ */
+static bool have_nbcon_console;
+
+/*
+ * Specifies if a boot console is registered. If boot consoles are present,
+ * nbcon consoles cannot print simultaneously and must be synchronized by
+ * the console lock. This is because boot consoles and nbcon consoles may
+ * have mapped the same hardware.
+ */
+bool have_boot_console;
 
 #ifdef CONFIG_PRINTK
 DECLARE_WAIT_QUEUE_HEAD(log_wait);
@@ -1847,7 +1874,7 @@ static bool console_waiter;
  * there may be a waiter spinning (like a spinlock). Also it must be
  * ready to hand over the lock at the end of the section.
  */
-static void console_lock_spinning_enable(void)
+void console_lock_spinning_enable(void)
 {
 	/*
 	 * Do not use spinning in panic(). The panic CPU wants to keep the lock.
@@ -1886,7 +1913,7 @@ lockdep:
  *
  * Return: 1 if the lock rights were passed, 0 otherwise.
  */
-static int console_lock_spinning_disable_and_check(int cookie)
+int console_lock_spinning_disable_and_check(int cookie)
 {
 	int waiter;
 
@@ -2297,12 +2324,29 @@ out:
 	return ret;
 }
 
+static bool legacy_allow_panic_sync;
+
+/*
+ * This acts as a one-way switch to allow legacy consoles to print from
+ * the printk() caller context on a panic CPU. It also attempts to flush
+ * the legacy consoles in this context.
+ */
+void printk_legacy_allow_panic_sync(void)
+{
+	legacy_allow_panic_sync = true;
+
+	if (printing_via_unlock && !in_nmi()) {
+		if (console_trylock())
+			console_unlock();
+	}
+}
+
 asmlinkage int vprintk_emit(int facility, int level,
 			    const struct dev_printk_info *dev_info,
 			    const char *fmt, va_list args)
 {
+	bool do_trylock_unlock = printing_via_unlock;
 	int printed_len;
-	bool in_sched = false;
 
 	/* Suppress unimportant messages after panic happens */
 	if (unlikely(suppress_printk))
@@ -2318,38 +2362,74 @@ asmlinkage int vprintk_emit(int facility, int level,
 
 	if (level == LOGLEVEL_SCHED) {
 		level = LOGLEVEL_DEFAULT;
-		in_sched = true;
+		/* If called from the scheduler, we can not call up(). */
+		do_trylock_unlock = false;
 	}
 
 	printk_delay(level);
 
 	printed_len = vprintk_store(facility, level, dev_info, fmt, args);
 
-	/* If called from the scheduler, we can not call up(). */
-	if (!in_sched) {
+	if (have_nbcon_console && !have_boot_console) {
+		bool is_panic_context = this_cpu_in_panic();
+
+		/*
+		 * In panic, the legacy consoles are not allowed to print from
+		 * the printk calling context unless explicitly allowed. This
+		 * gives the safe nbcon consoles a chance to print out all the
+		 * panic messages first. This restriction only applies if
+		 * there are nbcon consoles registered.
+		 */
+		if (is_panic_context)
+			do_trylock_unlock &= legacy_allow_panic_sync;
+
+		/*
+		 * There are situations where nbcon atomic printing should
+		 * happen in the printk() caller context:
+		 *
+		 * - When this CPU is in panic.
+		 *
+		 * Note that if boot consoles are registered, the console
+		 * lock/unlock dance must be relied upon instead because nbcon
+		 * consoles cannot print simultaneously with boot consoles.
+		 */
+		if (is_panic_context)
+			nbcon_atomic_flush_pending();
+	}
+
+	if (do_trylock_unlock) {
 		/*
 		 * The caller may be holding system-critical or
 		 * timing-sensitive locks. Disable preemption during
 		 * printing of all remaining records to all consoles so that
 		 * this context can return as soon as possible. Hopefully
 		 * another printk() caller will take over the printing.
+		 *
+		 * Also, nbcon_get_default_prio() requires migration disabled.
 		 */
 		preempt_disable();
+
 		/*
 		 * Try to acquire and then immediately release the console
 		 * semaphore. The release will print out buffers. With the
 		 * spinning variant, this context tries to take over the
 		 * printing from another printing context.
+		 *
+		 * Skip it in EMERGENCY priority. The console will be
+		 * explicitly flushed when exiting the emergency section.
 		 */
-		if (console_trylock_spinning())
-			console_unlock();
+		if (nbcon_get_default_prio() != NBCON_PRIO_EMERGENCY) {
+			if (console_trylock_spinning())
+				console_unlock();
+		}
+
 		preempt_enable();
 	}
 
-	if (in_sched)
-		defer_console_output();
-	else
+	if (do_trylock_unlock)
 		wake_up_klogd();
+	else
+		defer_console_output();
 
 	return printed_len;
 }
@@ -2426,18 +2506,23 @@ static void set_user_specified(struct console_cmdline *c, bool user_specified)
 	console_set_on_cmdline = 1;
 }
 
-static int __add_preferred_console(const char *name, const short idx, char *options,
+static int __add_preferred_console(const char *name, const short idx,
+				   const char *devname, char *options,
 				   char *brl_options, bool user_specified)
 {
 	struct console_cmdline *c;
 	int i;
 
+	if (!name && !devname)
+		return -EINVAL;
+
 	/*
 	 * We use a signed short index for struct console for device drivers to
 	 * indicate a not yet assigned index or port. However, a negative index
-	 * value is not valid for preferred console.
+	 * value is not valid when the console name and index are defined on
+	 * the command line.
 	 */
-	if (idx < 0)
+	if (name && idx < 0)
 		return -EINVAL;
 
 	/*
@@ -2445,9 +2530,10 @@ static int __add_preferred_console(const char *name, const short idx, char *opti
 	 *	if we have a slot free.
 	 */
 	for (i = 0, c = console_cmdline;
-	     i < MAX_CMDLINECONSOLES && c->name[0];
+	     i < MAX_CMDLINECONSOLES && (c->name[0] || c->devname[0]);
 	     i++, c++) {
-		if (strcmp(c->name, name) == 0 && c->index == idx) {
+		if ((name && strcmp(c->name, name) == 0 && c->index == idx) ||
+		    (devname && strcmp(c->devname, devname) == 0)) {
 			if (!brl_options)
 				preferred_console = i;
 			set_user_specified(c, user_specified);
@@ -2458,7 +2544,10 @@ static int __add_preferred_console(const char *name, const short idx, char *opti
 		return -E2BIG;
 	if (!brl_options)
 		preferred_console = i;
-	strscpy(c->name, name, sizeof(c->name));
+	if (name)
+		strscpy(c->name, name);
+	if (devname)
+		strscpy(c->devname, devname);
 	c->options = options;
 	set_user_specified(c, user_specified);
 	braille_set_options(c, brl_options);
@@ -2483,8 +2572,13 @@ __setup("console_msg_format=", console_msg_format_setup);
  */
 static int __init console_setup(char *str)
 {
-	char buf[sizeof(console_cmdline[0].name) + 4]; /* 4 for "ttyS" */
-	char *s, *options, *brl_options = NULL;
+	static_assert(sizeof(console_cmdline[0].devname) >= sizeof(console_cmdline[0].name) + 4);
+	char buf[sizeof(console_cmdline[0].devname)];
+	char *brl_options = NULL;
+	char *ttyname = NULL;
+	char *devname = NULL;
+	char *options;
+	char *s;
 	int idx;
 
 	/*
@@ -2493,28 +2587,23 @@ static int __init console_setup(char *str)
 	 * for exactly this purpose.
 	 */
 	if (str[0] == 0 || strcmp(str, "null") == 0) {
-		__add_preferred_console("ttynull", 0, NULL, NULL, true);
+		__add_preferred_console("ttynull", 0, NULL, NULL, NULL, true);
 		return 1;
 	}
 
 	if (_braille_console_setup(&str, &brl_options))
 		return 1;
 
-	/* Save the console for driver subsystem use */
-	if (console_opt_save(str, brl_options))
-		return 1;
-
-	/* Flag register_console() to not call try_enable_default_console() */
-	console_set_on_cmdline = 1;
-
-	/* Don't attempt to parse a DEVNAME:0.0 style console */
+	/* For a DEVNAME:0.0 style console the character device is unknown early */
 	if (strchr(str, ':'))
-		return 1;
+		devname = buf;
+	else
+		ttyname = buf;
 
 	/*
 	 * Decode str into name, index, options.
 	 */
-	if (isdigit(str[0]))
+	if (ttyname && isdigit(str[0]))
 		scnprintf(buf, sizeof(buf), "ttyS%s", str);
 	else
 		strscpy(buf, str);
@@ -2531,22 +2620,21 @@ static int __init console_setup(char *str)
 #endif
 
 	for (s = buf; *s; s++)
-		if (isdigit(*s) || *s == ',')
+		if ((ttyname && isdigit(*s)) || *s == ',')
 			break;
-	idx = simple_strtoul(s, NULL, 10);
+
+	/* @idx will get defined when devname matches. */
+	if (devname)
+		idx = -1;
+	else
+		idx = simple_strtoul(s, NULL, 10);
+
 	*s = 0;
 
-	__add_preferred_console(buf, idx, options, brl_options, true);
+	__add_preferred_console(ttyname, idx, devname, options, brl_options, true);
 	return 1;
 }
 __setup("console=", console_setup);
-
-/* Only called from add_preferred_console_match() */
-int console_opt_add_preferred_console(const char *name, const short idx,
-				      char *options, char *brl_options)
-{
-	return __add_preferred_console(name, idx, options, brl_options, true);
-}
 
 /**
  * add_preferred_console - add a device to the list of preferred consoles.
@@ -2563,7 +2651,51 @@ int console_opt_add_preferred_console(const char *name, const short idx,
  */
 int add_preferred_console(const char *name, const short idx, char *options)
 {
-	return __add_preferred_console(name, idx, options, NULL, false);
+	return __add_preferred_console(name, idx, NULL, options, NULL, false);
+}
+
+/**
+ * match_devname_and_update_preferred_console - Update a preferred console
+ *	when matching devname is found.
+ * @devname: DEVNAME:0.0 style device name
+ * @name: Name of the corresponding console driver, e.g. "ttyS"
+ * @idx: Console index, e.g. port number.
+ *
+ * The function checks whether a device with the given @devname is
+ * preferred via the console=DEVNAME:0.0 command line option.
+ * It fills the missing console driver name and console index
+ * so that a later register_console() call could find (match)
+ * and enable this device.
+ *
+ * It might be used when a driver subsystem initializes particular
+ * devices with already known DEVNAME:0.0 style names. And it
+ * could predict which console driver name and index this device
+ * would later get associated with.
+ *
+ * Return: 0 on success, negative error code on failure.
+ */
+int match_devname_and_update_preferred_console(const char *devname,
+					       const char *name,
+					       const short idx)
+{
+	struct console_cmdline *c = console_cmdline;
+	int i;
+
+	if (!devname || !strlen(devname) || !name || !strlen(name) || idx < 0)
+		return -EINVAL;
+
+	for (i = 0; i < MAX_CMDLINECONSOLES && (c->name[0] || c->devname[0]);
+	     i++, c++) {
+		if (!strcmp(devname, c->devname)) {
+			pr_info("associate the preferred console \"%s\" with \"%s%d\"\n",
+				devname, name, idx);
+			strscpy(c->name, name);
+			c->index = idx;
+			return 0;
+		}
+	}
+
+	return -ENOENT;
 }
 
 bool console_suspend_enabled = true;
@@ -2653,7 +2785,7 @@ void resume_console(void)
  */
 static int console_cpu_notify(unsigned int cpu)
 {
-	if (!cpuhp_tasks_frozen) {
+	if (!cpuhp_tasks_frozen && printing_via_unlock) {
 		/* If trylock fails, someone else is doing the printing */
 		if (console_trylock())
 			console_unlock();
@@ -2709,36 +2841,6 @@ int is_console_locked(void)
 	return console_locked;
 }
 EXPORT_SYMBOL(is_console_locked);
-
-/*
- * Check if the given console is currently capable and allowed to print
- * records.
- *
- * Requires the console_srcu_read_lock.
- */
-static inline bool console_is_usable(struct console *con)
-{
-	short flags = console_srcu_read_flags(con);
-
-	if (!(flags & CON_ENABLED))
-		return false;
-
-	if ((flags & CON_SUSPENDED))
-		return false;
-
-	if (!con->write)
-		return false;
-
-	/*
-	 * Console drivers may assume that per-cpu resources have been
-	 * allocated. So unless they're explicitly marked as being able to
-	 * cope (CON_ANYTIME) don't call them until this CPU is officially up.
-	 */
-	if (!cpu_online(raw_smp_processor_id()) && !(flags & CON_ANYTIME))
-		return false;
-
-	return true;
-}
 
 static void __console_unlock(void)
 {
@@ -2985,13 +3087,21 @@ static bool console_flush_all(bool do_cond_resched, u64 *next_seq, bool *handove
 
 		cookie = console_srcu_read_lock();
 		for_each_console_srcu(con) {
+			short flags = console_srcu_read_flags(con);
+			u64 printk_seq;
 			bool progress;
 
-			if (!console_is_usable(con))
+			if (!console_is_usable(con, flags))
 				continue;
 			any_usable = true;
 
-			progress = console_emit_next_record(con, handover, cookie);
+			if (flags & CON_NBCON) {
+				progress = nbcon_legacy_emit_next_record(con, handover, cookie);
+				printk_seq = nbcon_seq_read(con);
+			} else {
+				progress = console_emit_next_record(con, handover, cookie);
+				printk_seq = con->seq;
+			}
 
 			/*
 			 * If a handover has occurred, the SRCU read lock
@@ -3001,8 +3111,8 @@ static bool console_flush_all(bool do_cond_resched, u64 *next_seq, bool *handove
 				return false;
 
 			/* Track the next of the highest seq flushed. */
-			if (con->seq > *next_seq)
-				*next_seq = con->seq;
+			if (printk_seq > *next_seq)
+				*next_seq = printk_seq;
 
 			if (!progress)
 				continue;
@@ -3226,7 +3336,10 @@ void console_flush_on_panic(enum con_flush_mode mode)
 	if (mode == CONSOLE_REPLAY_ALL)
 		__console_rewind_all();
 
-	console_flush_all(false, &next_seq, &handover);
+	nbcon_atomic_flush_pending();
+
+	if (printing_via_unlock)
+		console_flush_all(false, &next_seq, &handover);
 }
 
 /*
@@ -3333,8 +3446,11 @@ static int try_enable_preferred_console(struct console *newcon,
 	int i, err;
 
 	for (i = 0, c = console_cmdline;
-	     i < MAX_CMDLINECONSOLES && c->name[0];
+	     i < MAX_CMDLINECONSOLES && (c->name[0] || c->devname[0]);
 	     i++, c++) {
+		/* Console not yet initialized? */
+		if (!c->name[0])
+			continue;
 		if (c->user_specified != user_specified)
 			continue;
 		if (!newcon->match ||
@@ -3388,19 +3504,21 @@ static void try_enable_default_console(struct console *newcon)
 		newcon->flags |= CON_CONSDEV;
 }
 
-static void console_init_seq(struct console *newcon, bool bootcon_registered)
+/* Return the starting sequence number for a newly registered console. */
+static u64 get_init_console_seq(struct console *newcon, bool bootcon_registered)
 {
 	struct console *con;
 	bool handover;
+	u64 init_seq;
 
 	if (newcon->flags & (CON_PRINTBUFFER | CON_BOOT)) {
 		/* Get a consistent copy of @syslog_seq. */
 		mutex_lock(&syslog_lock);
-		newcon->seq = syslog_seq;
+		init_seq = syslog_seq;
 		mutex_unlock(&syslog_lock);
 	} else {
 		/* Begin with next message added to ringbuffer. */
-		newcon->seq = prb_next_seq(prb);
+		init_seq = prb_next_seq(prb);
 
 		/*
 		 * If any enabled boot consoles are due to be unregistered
@@ -3421,7 +3539,7 @@ static void console_init_seq(struct console *newcon, bool bootcon_registered)
 			 * Flush all consoles and set the console to start at
 			 * the next unprinted sequence number.
 			 */
-			if (!console_flush_all(true, &newcon->seq, &handover)) {
+			if (!console_flush_all(true, &init_seq, &handover)) {
 				/*
 				 * Flushing failed. Just choose the lowest
 				 * sequence of the enabled boot consoles.
@@ -3434,19 +3552,30 @@ static void console_init_seq(struct console *newcon, bool bootcon_registered)
 				if (handover)
 					console_lock();
 
-				newcon->seq = prb_next_seq(prb);
+				init_seq = prb_next_seq(prb);
 				for_each_console(con) {
-					if ((con->flags & CON_BOOT) &&
-					    (con->flags & CON_ENABLED) &&
-					    con->seq < newcon->seq) {
-						newcon->seq = con->seq;
+					u64 seq;
+
+					if (!(con->flags & CON_BOOT) ||
+					    !(con->flags & CON_ENABLED)) {
+						continue;
 					}
+
+					if (con->flags & CON_NBCON)
+						seq = nbcon_seq_read(con);
+					else
+						seq = con->seq;
+
+					if (seq < init_seq)
+						init_seq = seq;
 				}
 			}
 
 			console_unlock();
 		}
 	}
+
+	return init_seq;
 }
 
 #define console_first()				\
@@ -3475,9 +3604,12 @@ static int unregister_console_locked(struct console *console);
  */
 void register_console(struct console *newcon)
 {
-	struct console *con;
+	bool use_device_lock = (newcon->flags & CON_NBCON) && newcon->write_atomic;
 	bool bootcon_registered = false;
 	bool realcon_registered = false;
+	struct console *con;
+	unsigned long flags;
+	u64 init_seq;
 	int err;
 
 	console_list_lock();
@@ -3522,7 +3654,7 @@ void register_console(struct console *newcon)
 	 * Note that a console with tty binding will have CON_CONSDEV
 	 * flag set and will be first in the list.
 	 */
-	if (preferred_console < 0 && !console_set_on_cmdline) {
+	if (preferred_console < 0) {
 		if (hlist_empty(&console_list) || !console_first()->device ||
 		    console_first()->flags & CON_BOOT) {
 			try_enable_default_console(newcon);
@@ -3555,10 +3687,31 @@ void register_console(struct console *newcon)
 	}
 
 	newcon->dropped = 0;
-	console_init_seq(newcon, bootcon_registered);
+	init_seq = get_init_console_seq(newcon, bootcon_registered);
 
-	if (newcon->flags & CON_NBCON)
-		nbcon_init(newcon);
+	if (newcon->flags & CON_NBCON) {
+		have_nbcon_console = true;
+		nbcon_init(newcon, init_seq);
+	} else {
+		have_legacy_console = true;
+		newcon->seq = init_seq;
+	}
+
+	if (newcon->flags & CON_BOOT)
+		have_boot_console = true;
+
+	/*
+	 * If another context is actively using the hardware of this new
+	 * console, it will not be aware of the nbcon synchronization. This
+	 * is a risk that two contexts could access the hardware
+	 * simultaneously if this new console is used for atomic printing
+	 * and the other context is still using the hardware.
+	 *
+	 * Use the driver synchronization to ensure that the hardware is not
+	 * in use while this new console transitions to being registered.
+	 */
+	if (use_device_lock)
+		newcon->device_lock(newcon, &flags);
 
 	/*
 	 * Put this console in the list - keep the
@@ -3583,6 +3736,10 @@ void register_console(struct console *newcon)
 	 * on all contexts being able to see the new console before
 	 * register_console() completes.
 	 */
+
+	/* This new console is now registered. */
+	if (use_device_lock)
+		newcon->device_unlock(newcon, flags);
 
 	console_sysfs_notify();
 
@@ -3612,6 +3769,12 @@ EXPORT_SYMBOL(register_console);
 /* Must be called under console_list_lock(). */
 static int unregister_console_locked(struct console *console)
 {
+	bool use_device_lock = (console->flags & CON_NBCON) && console->write_atomic;
+	bool found_legacy_con = false;
+	bool found_nbcon_con = false;
+	bool found_boot_con = false;
+	unsigned long flags;
+	struct console *c;
 	int res;
 
 	lockdep_assert_console_list_lock_held();
@@ -3630,7 +3793,17 @@ static int unregister_console_locked(struct console *console)
 	if (!console_is_registered_locked(console))
 		return -ENODEV;
 
+	/*
+	 * Use the driver synchronization to ensure that the hardware is not
+	 * in use while this console transitions to being unregistered.
+	 */
+	if (use_device_lock)
+		console->device_lock(console, &flags);
+
 	hlist_del_init_rcu(&console->node);
+
+	if (use_device_lock)
+		console->device_unlock(console, flags);
 
 	/*
 	 * <HISTORICAL>
@@ -3658,6 +3831,26 @@ static int unregister_console_locked(struct console *console)
 
 	if (console->exit)
 		res = console->exit(console);
+
+	/*
+	 * With this console gone, the global flags tracking registered
+	 * console types may have changed. Update them.
+	 */
+	for_each_console(c) {
+		if (c->flags & CON_BOOT)
+			found_boot_con = true;
+
+		if (c->flags & CON_NBCON)
+			found_nbcon_con = true;
+		else
+			found_legacy_con = true;
+	}
+	if (!found_boot_con)
+		have_boot_console = found_boot_con;
+	if (!found_legacy_con)
+		have_legacy_console = found_legacy_con;
+	if (!found_nbcon_con)
+		have_nbcon_console = found_nbcon_con;
 
 	return res;
 }
@@ -3818,22 +4011,34 @@ static bool __pr_flush(struct console *con, int timeout_ms, bool reset_on_progre
 	seq = prb_next_reserve_seq(prb);
 
 	/* Flush the consoles so that records up to @seq are printed. */
-	console_lock();
-	console_unlock();
+	if (printing_via_unlock) {
+		console_lock();
+		console_unlock();
+	}
 
 	for (;;) {
 		unsigned long begin_jiffies;
 		unsigned long slept_jiffies;
+		bool use_console_lock = printing_via_unlock;
+
+		/*
+		 * Ensure the compiler does not optimize @use_console_lock to
+		 * be @printing_via_unlock since the latter can change at any
+		 * time.
+		 */
+		barrier();
 
 		diff = 0;
 
-		/*
-		 * Hold the console_lock to guarantee safe access to
-		 * console->seq. Releasing console_lock flushes more
-		 * records in case @seq is still not printed on all
-		 * usable consoles.
-		 */
-		console_lock();
+		if (use_console_lock) {
+			/*
+			 * Hold the console_lock to guarantee safe access to
+			 * console->seq. Releasing console_lock flushes more
+			 * records in case @seq is still not printed on all
+			 * usable consoles.
+			 */
+			console_lock();
+		}
 
 		cookie = console_srcu_read_lock();
 		for_each_console_srcu(c) {
@@ -3847,12 +4052,13 @@ static bool __pr_flush(struct console *con, int timeout_ms, bool reset_on_progre
 			 * that they make forward progress, so only increment
 			 * @diff for usable consoles.
 			 */
-			if (!console_is_usable(c))
+			if (!console_is_usable(c, flags))
 				continue;
 
 			if (flags & CON_NBCON) {
 				printk_seq = nbcon_seq_read(c);
 			} else {
+				WARN_ON_ONCE(!use_console_lock);
 				printk_seq = c->seq;
 			}
 
@@ -3864,7 +4070,8 @@ static bool __pr_flush(struct console *con, int timeout_ms, bool reset_on_progre
 		if (diff != last_diff && reset_on_progress)
 			remaining_jiffies = timeout_jiffies;
 
-		console_unlock();
+		if (use_console_lock)
+			console_unlock();
 
 		/* Note: @diff is 0 if there are no usable consoles. */
 		if (diff == 0 || remaining_jiffies == 0)
@@ -3934,6 +4141,7 @@ static void __wake_up_klogd(int val)
 		return;
 
 	preempt_disable();
+
 	/*
 	 * Guarantee any new records can be seen by tasks preparing to wait
 	 * before this context checks if the wait queue is empty.
@@ -3945,11 +4153,22 @@ static void __wake_up_klogd(int val)
 	 *
 	 * This pairs with devkmsg_read:A and syslog_print:A.
 	 */
-	if (wq_has_sleeper(&log_wait) || /* LMM(__wake_up_klogd:A) */
-	    (val & PRINTK_PENDING_OUTPUT)) {
+	if (!wq_has_sleeper(&log_wait)) /* LMM(__wake_up_klogd:A) */
+		val &= ~PRINTK_PENDING_WAKEUP;
+
+	/*
+	 * Simple read is safe. register_console() would flush a newly
+	 * registered legacy console when writing the message about it
+	 * being enabled.
+	 */
+	if (!printing_via_unlock)
+		val &= ~PRINTK_PENDING_OUTPUT;
+
+	if (val) {
 		this_cpu_or(printk_pending, val);
 		irq_work_queue(this_cpu_ptr(&wake_up_klogd_work));
 	}
+
 	preempt_enable();
 }
 
@@ -4314,15 +4533,15 @@ void kmsg_dump_rewind(struct kmsg_dump_iter *iter)
 EXPORT_SYMBOL_GPL(kmsg_dump_rewind);
 
 /**
- * console_replay_all - replay kernel log on consoles
+ * console_try_replay_all - try to replay kernel log on consoles
  *
  * Try to obtain lock on console subsystem and replay all
  * available records in printk buffer on the consoles.
  * Does nothing if lock is not obtained.
  *
- * Context: Any context.
+ * Context: Any, except for NMI.
  */
-void console_replay_all(void)
+void console_try_replay_all(void)
 {
 	if (console_trylock()) {
 		__console_rewind_all();
