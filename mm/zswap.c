@@ -270,7 +270,7 @@ static struct zswap_pool *zswap_pool_create(char *type, char *compressor)
 	pool->zpool = zpool_create_pool(type, name, gfp);
 	if (!pool->zpool) {
 		pr_err("%s zpool not available\n", type);
-		goto error;
+		return NULL;
 	}
 	pr_debug("using %s zpool\n", zpool_get_type(pool->zpool));
 
@@ -1485,6 +1485,17 @@ bool zswap_load(struct folio *folio)
 
 	if (zswap_never_enabled())
 		return false;
+
+	/*
+	 * Large folios should not be swapped in while zswap is being used, as
+	 * they are not properly handled. Zswap does not properly load large
+	 * folios, and a large folio may only be partially in zswap.
+	 *
+	 * Return true without marking the folio uptodate so that an IO error is
+	 * emitted (e.g. do_swap_page() will sigbus).
+	 */
+	if (WARN_ON_ONCE(folio_test_large(folio)))
+		return true;
 
 	/*
 	 * Large folios should not be swapped in while zswap is being used, as

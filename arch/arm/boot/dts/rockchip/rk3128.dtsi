@@ -399,15 +399,6 @@
 		status = "disabled";
 	};
 
-	sfc: spi@1020c000 {
-		compatible = "rockchip,sfc";
-		reg = <0x1020c000 0x8000>;
-		interrupts = <GIC_SPI 50 IRQ_TYPE_LEVEL_HIGH>;
-		clocks = <&cru SCLK_SFC>, <&cru HCLK_SFC>;
-		clock-names = "clk_sfc", "hclk_sfc";
-		status = "disabled";
-	};
-
 	i2s_8ch: i2s@10200000 {
 		compatible = "rockchip,rk3128-i2s", "rockchip,rk3066-i2s";
 		reg = <0x10200000 0x1000>;
@@ -431,6 +422,15 @@
 		pinctrl-names = "default";
 		pinctrl-0 = <&spdif_tx>;
 		#sound-dai-cells = <0>;
+		status = "disabled";
+	};
+
+	sfc: spi@1020c000 {
+		compatible = "rockchip,sfc";
+		reg = <0x1020c000 0x8000>;
+		interrupts = <GIC_SPI 50 IRQ_TYPE_LEVEL_HIGH>;
+		clocks = <&cru SCLK_SFC>, <&cru 479>;
+		clock-names = "clk_sfc", "hclk_sfc";
 		status = "disabled";
 	};
 

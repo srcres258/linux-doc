@@ -26,7 +26,7 @@ static inline void *arch_kmsan_get_meta_or_null(void *addr, bool is_origin)
 		 */
 		addr += (void *)lowcore_ptr[raw_smp_processor_id()] -
 			(void *)&S390_lowcore;
-		if (WARN_ON_ONCE(is_lowcore_addr(addr)))
+		if (KMSAN_WARN_ON(is_lowcore_addr(addr)))
 			return NULL;
 		return kmsan_get_metadata(addr, is_origin);
 	}

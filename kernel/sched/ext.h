@@ -33,8 +33,6 @@ static inline bool task_on_scx(const struct task_struct *p)
 	return scx_enabled() && p->sched_class == &ext_sched_class;
 }
 
-void scx_next_task_picked(struct rq *rq, struct task_struct *p,
-			  const struct sched_class *active);
 void scx_tick(struct rq *rq);
 void init_scx_entity(struct sched_ext_entity *scx);
 void scx_pre_fork(struct task_struct *p);
@@ -47,6 +45,14 @@ void scx_rq_deactivate(struct rq *rq);
 int scx_check_setscheduler(struct task_struct *p, int policy);
 bool task_should_scx(struct task_struct *p);
 void init_sched_ext_class(void);
+
+static inline u32 scx_cpuperf_target(s32 cpu)
+{
+	if (scx_enabled())
+		return cpu_rq(cpu)->scx.cpuperf_target;
+	else
+		return 0;
+}
 
 static inline const struct sched_class *next_active_class(const struct sched_class *class)
 {
@@ -82,13 +88,12 @@ bool scx_prio_less(const struct task_struct *a, const struct task_struct *b,
 #define scx_enabled()		false
 #define scx_switched_all()	false
 
-static inline void scx_next_task_picked(struct rq *rq, struct task_struct *p,
-					const struct sched_class *active) {}
 static inline void scx_tick(struct rq *rq) {}
 static inline void scx_pre_fork(struct task_struct *p) {}
 static inline int scx_fork(struct task_struct *p) { return 0; }
 static inline void scx_post_fork(struct task_struct *p) {}
 static inline void scx_cancel_fork(struct task_struct *p) {}
+static inline u32 scx_cpuperf_target(s32 cpu) { return 0; }
 static inline bool scx_can_stop_tick(struct rq *rq) { return true; }
 static inline void scx_rq_activate(struct rq *rq) {}
 static inline void scx_rq_deactivate(struct rq *rq) {}

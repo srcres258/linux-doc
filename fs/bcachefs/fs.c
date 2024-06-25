@@ -889,8 +889,12 @@ static int bch2_getattr(struct mnt_idmap *idmap,
 
 	if ((request_mask & STATX_DIOALIGN) && S_ISREG(inode->v.i_mode)) {
 		stat->result_mask |= STATX_DIOALIGN;
-		stat->dio_mem_align = 1;
-		stat->dio_offset_align = SECTOR_SIZE;
+		/*
+		 * this is incorrect; we should be tracking this in superblock,
+		 * and checking the alignment of open devices
+		 */
+		stat->dio_mem_align = SECTOR_SIZE;
+		stat->dio_offset_align = block_bytes(c);
 	}
 
 	if (request_mask & STATX_BTIME) {

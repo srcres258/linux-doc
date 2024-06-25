@@ -14,9 +14,13 @@
 #	SRCU,	a Sleepable-Read-Copy-Update event
 #
 #	po,	a Program-Order link
-#	rmw,	a Read-Modify-Write link
+#	rmw,	a Read-Modify-Write link - every rmw link is a po link
 #
 # By convention, a blank line in a cell means "same as the preceding line".
+#
+# Disclaimer.  The table includes representations of "add" and "and" operations;
+# corresponding/identical representations of "sub", "inc", "dec" and "or", "xor",
+# "andnot" operations are omitted.
 #
     ------------------------------------------------------------------------------
     |                        C macro | Events                                    |

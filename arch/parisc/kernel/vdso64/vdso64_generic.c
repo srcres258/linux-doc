@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0
 
-/* need to save GR4 across syscall */
-#define PIC
 #include "asm/unistd.h"
 #include <linux/types.h>
 

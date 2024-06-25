@@ -1632,9 +1632,7 @@ static void rcu_sr_normal_gp_cleanup_work(struct work_struct *work)
 	 * the done tail list manipulations are protected here.
 	 */
 	done = smp_load_acquire(&rcu_state.srs_done_tail);
-	if (!done) {
-		/* See comments below. */
-		atomic_dec_return_release(&rcu_state.srs_cleanups_pending);
+	if (WARN_ON_ONCE(!done))
 		return;
 	}
 

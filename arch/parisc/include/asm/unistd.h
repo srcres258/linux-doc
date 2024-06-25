@@ -20,7 +20,7 @@
  * sysdeps/unix/sysv/linux/hppa/sysdep.h
  */
 
-#ifdef PIC
+#ifndef DONT_USE_PIC
 /* WARNING: CANNOT BE USED IN A NOP! */
 # define K_STW_ASM_PIC	"       copy %%r19, %%r4\n"
 # define K_LDW_ASM_PIC	"       copy %%r4, %%r19\n"
