@@ -2594,12 +2594,6 @@ static int __init console_setup(char *str)
 	if (_braille_console_setup(&str, &brl_options))
 		return 1;
 
-	/* For a DEVNAME:0.0 style console the character device is unknown early */
-	if (strchr(str, ':'))
-		devname = buf;
-	else
-		ttyname = buf;
-
 	/*
 	 * Decode str into name, index, options.
 	 */

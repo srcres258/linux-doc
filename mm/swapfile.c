@@ -1840,6 +1840,7 @@ static int unuse_pte(struct vm_area_struct *vma, pmd_t *pmd,
 		 */
 		if (!folio_test_anon(folio)) {
 			VM_WARN_ON_ONCE(folio_test_large(folio));
+			VM_WARN_ON_FOLIO(!folio_test_locked(folio), folio);
 			folio_add_new_anon_rmap(folio, vma, addr, rmap_flags);
 		} else {
 			folio_add_anon_rmap_pte(folio, page, vma, addr, rmap_flags);
@@ -2569,7 +2570,7 @@ SYSCALL_DEFINE1(swapoff, const char __user *, specialfile)
 	free_percpu(p->cluster_next_cpu);
 	p->cluster_next_cpu = NULL;
 	vfree(swap_map);
-	bitmap_free(p->zeromap);
+	kvfree(p->zeromap);
 	kvfree(cluster_info);
 	/* Destroy swap account information */
 	swap_cgroup_swapoff(p->type);
@@ -3100,7 +3101,7 @@ SYSCALL_DEFINE2(swapon, const char __user *, specialfile, int, swap_flags)
 		goto bad_swap_unlock_inode;
 	}
 
-	p->zeromap = bitmap_zalloc(maxpages, GFP_KERNEL);
+	p->zeromap = kvzalloc(DIV_ROUND_UP(maxpages, 8), GFP_KERNEL);
 	if (!p->zeromap) {
 		error = -ENOMEM;
 		goto bad_swap_unlock_inode;

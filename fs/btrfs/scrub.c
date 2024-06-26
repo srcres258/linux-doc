@@ -1629,13 +1629,12 @@ static void scrub_submit_extent_sector_read(struct scrub_ctx *sctx,
 			 * follow the RST boundary.
 			 */
 			err = btrfs_map_block(fs_info, BTRFS_MAP_READ, logical,
-					&stripe_len, &bioc, &io_stripe, &mirror);
+					      &stripe_len, &bioc, &io_stripe, &mirror);
 			btrfs_put_bioc(bioc);
 			if (err < 0) {
-				/* Mark the remaining sectors as error. */
-				bitmap_set(&stripe->io_error_bitmap, i, nr_sectors - i);
-				bitmap_set(&stripe->error_bitmap, i, nr_sectors - i);
-				goto out;
+				set_bit(i, &stripe->io_error_bitmap);
+				set_bit(i, &stripe->error_bitmap);
+				continue;
 			}
 
 			bbio = btrfs_bio_alloc(stripe->nr_sectors, REQ_OP_READ,
