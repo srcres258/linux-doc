@@ -1144,8 +1144,10 @@ static long btrfs_scan_inode(struct btrfs_inode *inode, long *scanned, long nr_t
 	while (node) {
 		struct rb_node *next = rb_next(node);
 		struct extent_map *em;
+		u64 next_min_offset;
 
 		em = rb_entry(node, struct extent_map, rb_node);
+		next_min_offset = extent_map_end(em);
 		(*scanned)++;
 
 		if (em->flags & EXTENT_FLAG_PINNED)
@@ -1171,14 +1173,24 @@ next:
 			break;
 
 		/*
-		 * Restart if we had to reschedule, and any extent maps that were
-		 * pinned before may have become unpinned after we released the
-		 * lock and took it again.
+		 * If we had to reschedule start from where we were before. We
+		 * could start from the first extent map in the tree in case we
+		 * passed through pinned extent maps that may have become
+		 * unpinned in the meanwhile, but it might be the case that they
+		 * haven't been unpinned yet, so if we have many still unpinned
+		 * extent maps, we could be wasting a lot of time and cpu. So
+		 * don't consider previously pinned extent maps, we'll consider
+		 * them in future calls of the extent map shrinker.
 		 */
-		if (cond_resched_rwlock_write(&tree->lock))
-			node = rb_first(&tree->root);
-		else
+		if (cond_resched_rwlock_write(&tree->lock)) {
+			em = search_extent_mapping(tree, next_min_offset, 0);
+			if (em)
+				node = &em->rb_node;
+			else
+				node = NULL;
+		} else {
 			node = next;
+		}
 	}
 	write_unlock(&tree->lock);
 	up_read(&inode->i_mmap_lock);
