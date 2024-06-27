@@ -8,10 +8,12 @@
 #include <linux/magic.h>
 #include <linux/ktime.h>
 #include <linux/seq_file.h>
+#include <linux/pid_namespace.h>
 #include <linux/user_namespace.h>
 #include <linux/nsfs.h>
 #include <linux/uaccess.h>
 
+#include "mount.h"
 #include "internal.h"
 
 static struct vfsmount *nsfs_mnt;
@@ -123,9 +125,12 @@ static long ns_ioctl(struct file *filp, unsigned int ioctl,
 			unsigned long arg)
 {
 	struct user_namespace *user_ns;
+	struct pid_namespace *pid_ns;
+	struct task_struct *tsk;
 	struct ns_common *ns = get_proc_ns(file_inode(filp));
 	uid_t __user *argp;
 	uid_t uid;
+	int ret;
 
 	switch (ioctl) {
 	case NS_GET_USERNS:
@@ -143,9 +148,69 @@ static long ns_ioctl(struct file *filp, unsigned int ioctl,
 		argp = (uid_t __user *) arg;
 		uid = from_kuid_munged(current_user_ns(), user_ns->owner);
 		return put_user(uid, argp);
-	default:
-		return -ENOTTY;
+	case NS_GET_MNTNS_ID: {
+		struct mnt_namespace *mnt_ns;
+		__u64 __user *idp;
+		__u64 id;
+
+		if (ns->ops->type != CLONE_NEWNS)
+			return -EINVAL;
+
+		mnt_ns = container_of(ns, struct mnt_namespace, ns);
+		idp = (__u64 __user *)arg;
+		id = mnt_ns->seq;
+		return put_user(id, idp);
 	}
+	case NS_GET_PID_FROM_PIDNS:
+		fallthrough;
+	case NS_GET_TGID_FROM_PIDNS:
+		fallthrough;
+	case NS_GET_PID_IN_PIDNS:
+		fallthrough;
+	case NS_GET_TGID_IN_PIDNS:
+		if (ns->ops->type != CLONE_NEWPID)
+			return -EINVAL;
+
+		ret = -ESRCH;
+		pid_ns = container_of(ns, struct pid_namespace, ns);
+
+		rcu_read_lock();
+
+		if (ioctl == NS_GET_PID_IN_PIDNS ||
+		    ioctl == NS_GET_TGID_IN_PIDNS)
+			tsk = find_task_by_vpid(arg);
+		else
+			tsk = find_task_by_pid_ns(arg, pid_ns);
+		if (!tsk)
+			break;
+
+		switch (ioctl) {
+		case NS_GET_PID_FROM_PIDNS:
+			ret = task_pid_vnr(tsk);
+			break;
+		case NS_GET_TGID_FROM_PIDNS:
+			ret = task_tgid_vnr(tsk);
+			break;
+		case NS_GET_PID_IN_PIDNS:
+			ret = task_pid_nr_ns(tsk, pid_ns);
+			break;
+		case NS_GET_TGID_IN_PIDNS:
+			ret = task_tgid_nr_ns(tsk, pid_ns);
+			break;
+		default:
+			ret = 0;
+			break;
+		}
+		rcu_read_unlock();
+
+		if (!ret)
+			ret = -ESRCH;
+		break;
+	default:
+		ret = -ENOTTY;
+	}
+
+	return ret;
 }
 
 int ns_get_name(char *buf, size_t size, struct task_struct *task,
