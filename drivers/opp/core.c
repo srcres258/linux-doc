@@ -1096,8 +1096,7 @@ static int _set_required_opps(struct device *dev, struct opp_table *opp_table,
 	return 0;
 }
 
-static int _set_opp_level(struct device *dev, struct opp_table *opp_table,
-			  struct dev_pm_opp *opp)
+static int _set_opp_level(struct device *dev, struct dev_pm_opp *opp)
 {
 	unsigned int level = 0;
 	int ret = 0;
@@ -1165,7 +1164,7 @@ static int _disable_opp_table(struct device *dev, struct opp_table *opp_table)
 	if (opp_table->regulators)
 		regulator_disable(opp_table->regulators[0]);
 
-	ret = _set_opp_level(dev, opp_table, NULL);
+	ret = _set_opp_level(dev, NULL);
 	if (ret)
 		goto out;
 
@@ -1214,7 +1213,7 @@ static int _set_opp(struct device *dev, struct opp_table *opp_table,
 			return ret;
 		}
 
-		ret = _set_opp_level(dev, opp_table, opp);
+		ret = _set_opp_level(dev, opp);
 		if (ret)
 			return ret;
 
@@ -1261,7 +1260,7 @@ static int _set_opp(struct device *dev, struct opp_table *opp_table,
 			return ret;
 		}
 
-		ret = _set_opp_level(dev, opp_table, opp);
+		ret = _set_opp_level(dev, opp);
 		if (ret)
 			return ret;
 

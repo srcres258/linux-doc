@@ -877,12 +877,12 @@ retry_same_fence:
 	}
 
 	if (g2h_fence.retry) {
-		xe_gt_warn(gt, "H2G retry, action 0x%04x, reason %u",
-			   action[0], g2h_fence.reason);
+		xe_gt_dbg(gt, "H2G action %#x retrying: reason %#x\n",
+			  action[0], g2h_fence.reason);
 		goto retry;
 	}
 	if (g2h_fence.fail) {
-		xe_gt_err(gt, "H2G send failed, action 0x%04x, error %d, hint %u",
+		xe_gt_err(gt, "H2G request %#x failed: error %#x hint %#x\n",
 			  action[0], g2h_fence.error, g2h_fence.hint);
 		ret = -EIO;
 	}
