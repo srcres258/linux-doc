@@ -3786,9 +3786,9 @@ long memfd_pin_folios(struct file *memfd, loff_t start, loff_t end,
 	struct folio *folio = NULL;
 	struct folio_batch fbatch;
 	struct hstate *h;
-	long ret;
+	long ret = -EINVAL;
 
-	if (start > end || !max_folios)
+	if (start < 0 || start > end || !max_folios)
 		return -EINVAL;
 
 	if (!memfd)
@@ -3846,6 +3846,7 @@ long memfd_pin_folios(struct file *memfd, loff_t start, loff_t end,
 						       1, FOLL_PIN);
 				if (!folio) {
 					folio_batch_release(&fbatch);
+					ret = -EINVAL;
 					goto err;
 				}
 

@@ -441,10 +441,9 @@ end_enum:
 		 * Usually a hard links to directories are disabled.
 		 */
 		inode->i_op = &ntfs_dir_inode_operations;
-		if (is_legacy_ntfs(inode->i_sb))
-			inode->i_fop = &ntfs_legacy_dir_operations;
-		else
-			inode->i_fop = &ntfs_dir_operations;
+		inode->i_fop = unlikely(is_legacy_ntfs(sb)) ?
+				       &ntfs_legacy_dir_operations :
+				       &ntfs_dir_operations;
 		ni->i_valid = 0;
 	} else if (S_ISLNK(mode)) {
 		ni->std_fa &= ~FILE_ATTRIBUTE_DIRECTORY;
@@ -454,10 +453,9 @@ end_enum:
 	} else if (S_ISREG(mode)) {
 		ni->std_fa &= ~FILE_ATTRIBUTE_DIRECTORY;
 		inode->i_op = &ntfs_file_inode_operations;
-		if (is_legacy_ntfs(inode->i_sb))
-			inode->i_fop = &ntfs_legacy_file_operations;
-		else
-			inode->i_fop = &ntfs_file_operations;
+		inode->i_fop = unlikely(is_legacy_ntfs(sb)) ?
+				       &ntfs_legacy_file_operations :
+				       &ntfs_file_operations;
 		inode->i_mapping->a_ops = is_compressed(ni) ? &ntfs_aops_cmpr :
 							      &ntfs_aops;
 		if (ino != MFT_REC_MFT)
@@ -580,10 +578,11 @@ static noinline int ntfs_get_block_vbo(struct inode *inode, u64 vbo,
 		bh->b_blocknr = RESIDENT_LCN;
 		bh->b_size = block_size;
 		if (!folio) {
+			/* direct io (read) or bmap call */
 			err = 0;
 		} else {
 			ni_lock(ni);
-			err = attr_data_read_resident(ni, &folio->page);
+			err = attr_data_read_resident(ni, folio);
 			ni_unlock(ni);
 
 			if (!err)
@@ -710,25 +709,24 @@ static sector_t ntfs_bmap(struct address_space *mapping, sector_t block)
 
 static int ntfs_read_folio(struct file *file, struct folio *folio)
 {
-	struct page *page = &folio->page;
 	int err;
-	struct address_space *mapping = page->mapping;
+	struct address_space *mapping = folio->mapping;
 	struct inode *inode = mapping->host;
 	struct ntfs_inode *ni = ntfs_i(inode);
 
 	if (is_resident(ni)) {
 		ni_lock(ni);
-		err = attr_data_read_resident(ni, page);
+		err = attr_data_read_resident(ni, folio);
 		ni_unlock(ni);
 		if (err != E_NTFS_NONRESIDENT) {
-			unlock_page(page);
+			folio_unlock(folio);
 			return err;
 		}
 	}
 
 	if (is_compressed(ni)) {
 		ni_lock(ni);
-		err = ni_readpage_cmpr(ni, page);
+		err = ni_readpage_cmpr(ni, folio);
 		ni_unlock(ni);
 		return err;
 	}
@@ -872,7 +870,7 @@ static int ntfs_resident_writepage(struct folio *folio,
 		return -EIO;
 
 	ni_lock(ni);
-	ret = attr_data_write_resident(ni, &folio->page);
+	ret = attr_data_write_resident(ni, folio);
 	ni_unlock(ni);
 
 	if (ret != E_NTFS_NONRESIDENT)
@@ -914,24 +912,25 @@ int ntfs_write_begin(struct file *file, struct address_space *mapping,
 
 	*pagep = NULL;
 	if (is_resident(ni)) {
-		struct page *page =
-			grab_cache_page_write_begin(mapping, pos >> PAGE_SHIFT);
+		struct folio *folio = __filemap_get_folio(
+			mapping, pos >> PAGE_SHIFT, FGP_WRITEBEGIN,
+			mapping_gfp_mask(mapping));
 
-		if (!page) {
-			err = -ENOMEM;
+		if (IS_ERR(folio)) {
+			err = PTR_ERR(folio);
 			goto out;
 		}
 
 		ni_lock(ni);
-		err = attr_data_read_resident(ni, page);
+		err = attr_data_read_resident(ni, folio);
 		ni_unlock(ni);
 
 		if (!err) {
-			*pagep = page;
+			*pagep = &folio->page;
 			goto out;
 		}
-		unlock_page(page);
-		put_page(page);
+		folio_unlock(folio);
+		folio_put(folio);
 
 		if (err != E_NTFS_NONRESIDENT)
 			goto out;
@@ -950,6 +949,7 @@ out:
 int ntfs_write_end(struct file *file, struct address_space *mapping, loff_t pos,
 		   u32 len, u32 copied, struct page *page, void *fsdata)
 {
+	struct folio *folio = page_folio(page);
 	struct inode *inode = mapping->host;
 	struct ntfs_inode *ni = ntfs_i(inode);
 	u64 valid = ni->i_valid;
@@ -958,26 +958,26 @@ int ntfs_write_end(struct file *file, struct address_space *mapping, loff_t pos,
 
 	if (is_resident(ni)) {
 		ni_lock(ni);
-		err = attr_data_write_resident(ni, page);
+		err = attr_data_write_resident(ni, folio);
 		ni_unlock(ni);
 		if (!err) {
+			struct buffer_head *head = folio_buffers(folio);
 			dirty = true;
-			/* Clear any buffers in page. */
-			if (page_has_buffers(page)) {
-				struct buffer_head *head, *bh;
+			/* Clear any buffers in folio. */
+			if (head) {
+				struct buffer_head *bh = head;
 
-				bh = head = page_buffers(page);
 				do {
 					clear_buffer_dirty(bh);
 					clear_buffer_mapped(bh);
 					set_buffer_uptodate(bh);
 				} while (head != (bh = bh->b_this_page));
 			}
-			SetPageUptodate(page);
+			folio_mark_uptodate(folio);
 			err = copied;
 		}
-		unlock_page(page);
-		put_page(page);
+		folio_unlock(folio);
+		folio_put(folio);
 	} else {
 		err = generic_write_end(file, mapping, pos, len, copied, page,
 					fsdata);
@@ -1626,10 +1626,9 @@ int ntfs_create_inode(struct mnt_idmap *idmap, struct inode *dir,
 
 	if (S_ISDIR(mode)) {
 		inode->i_op = &ntfs_dir_inode_operations;
-		if (is_legacy_ntfs(inode->i_sb))
-			inode->i_fop = &ntfs_legacy_dir_operations;
-		else
-			inode->i_fop = &ntfs_dir_operations;
+		inode->i_fop = unlikely(is_legacy_ntfs(sb)) ?
+				       &ntfs_legacy_dir_operations :
+				       &ntfs_dir_operations;
 	} else if (S_ISLNK(mode)) {
 		inode->i_op = &ntfs_link_inode_operations;
 		inode->i_fop = NULL;
@@ -1638,10 +1637,9 @@ int ntfs_create_inode(struct mnt_idmap *idmap, struct inode *dir,
 		inode_nohighmem(inode);
 	} else if (S_ISREG(mode)) {
 		inode->i_op = &ntfs_file_inode_operations;
-		if (is_legacy_ntfs(inode->i_sb))
-			inode->i_fop = &ntfs_legacy_file_operations;
-		else
-			inode->i_fop = &ntfs_file_operations;
+		inode->i_fop = unlikely(is_legacy_ntfs(sb)) ?
+				       &ntfs_legacy_file_operations :
+				       &ntfs_file_operations;
 		inode->i_mapping->a_ops = is_compressed(ni) ? &ntfs_aops_cmpr :
 							      &ntfs_aops;
 		init_rwsem(&ni->file.run_lock);

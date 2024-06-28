@@ -2,7 +2,7 @@
 /*
  * Test soft offline behavior for HugeTLB pages:
  * - if enable_soft_offline = 0, hugepages should stay intact and soft
- *   offlining failed with EINVAL.
+ *   offlining failed with EOPNOTSUPP.
  * - if enable_soft_offline = 1, a hugepage should be dissolved and
  *   nr_hugepages/free_hugepages should be reduced by 1.
  *
@@ -166,22 +166,20 @@ static void test_soft_offline_common(int enable_soft_offline)
 		       enable_soft_offline);
 
 	fd = create_hugetlbfs_file(&file_stat);
-	if (fd < 0) {
+	if (fd < 0)
 		ksft_exit_fail_msg("Failed to create hugetlbfs file\n");
-		return;
-	}
 
 	hugepagesize_kb = file_stat.f_bsize / 1024;
 	ksft_print_msg("Hugepagesize is %ldkB\n", hugepagesize_kb);
 
 	if (set_enable_soft_offline(enable_soft_offline)) {
+		close(fd);
 		ksft_exit_fail_msg("Failed to set enable_soft_offline\n");
-		return;
 	}
 
 	if (read_nr_hugepages(hugepagesize_kb, &nr_hugepages_before) != 0) {
+		close(fd);
 		ksft_exit_fail_msg("Failed to read nr_hugepages\n");
-		return;
 	}
 
 	ksft_print_msg("Before MADV_SOFT_OFFLINE nr_hugepages=%ld\n",
@@ -190,12 +188,15 @@ static void test_soft_offline_common(int enable_soft_offline)
 	ret = do_soft_offline(fd, 2 * file_stat.f_bsize, expect_errno);
 
 	if (read_nr_hugepages(hugepagesize_kb, &nr_hugepages_after) != 0) {
+		close(fd);
 		ksft_exit_fail_msg("Failed to read nr_hugepages\n");
-		return;
 	}
 
 	ksft_print_msg("After MADV_SOFT_OFFLINE nr_hugepages=%ld\n",
 		nr_hugepages_after);
+
+	// No need for the hugetlbfs file from now on.
+	close(fd);
 
 	if (enable_soft_offline) {
 		if (nr_hugepages_before != nr_hugepages_after + 1) {

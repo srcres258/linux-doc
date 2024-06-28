@@ -4123,236 +4123,26 @@ static void mas_wr_bnode(struct ma_wr_state *wr_mas)
 static inline void mas_wr_store_entry(struct ma_wr_state *wr_mas)
 {
 	struct ma_state *mas = wr_mas->mas;
-	unsigned char new_end = mas_wr_new_end(wr_mas);
-
-	switch (mas->store_type) {
-	case wr_invalid:
-		MT_BUG_ON(mas->tree, 1);
-		return;
-	case wr_new_root:
-		mas_new_root(mas, wr_mas->entry);
-		break;
-	case wr_store_root:
-		mas_store_root(mas, wr_mas->entry);
-		break;
-	case wr_exact_fit:
-		rcu_assign_pointer(wr_mas->slots[mas->offset], wr_mas->entry);
-		if (!!wr_mas->entry ^ !!wr_mas->content)
-			mas_update_gap(mas);
-		break;
-	case wr_append:
-		mas_wr_append(wr_mas, new_end);
-		break;
-	case wr_slot_store:
-		mas_wr_slot_store(wr_mas);
-		break;
-	case wr_node_store:
-		mas_wr_node_store(wr_mas, new_end);
-		break;
-	case wr_spanning_store:
-		mas_wr_spanning_store(wr_mas);
-		break;
-	case wr_split_store:
-	case wr_rebalance:
-	case wr_bnode:
-		mas_wr_bnode(wr_mas);
-		break;
-	}
-
-	return;
-}
-
-static void mas_wr_store_setup(struct ma_wr_state *wr_mas)
-{
-	if (!mas_is_active(wr_mas->mas)) {
-		if (mas_is_start(wr_mas->mas))
-			return;
-
-		if (unlikely(mas_is_paused(wr_mas->mas)))
-			goto reset;
-
-		if (unlikely(mas_is_none(wr_mas->mas)))
-			goto reset;
-
-		if (unlikely(mas_is_overflow(wr_mas->mas)))
-			goto reset;
-
-		if (unlikely(mas_is_underflow(wr_mas->mas)))
-			goto reset;
-	}
-
-	/*
-	 * A less strict version of mas_is_span_wr() where we allow spanning
-	 * writes within this node.  This is to stop partial walks in
-	 * mas_prealloc() from being reset.
-	 */
-	if (wr_mas->mas->last > wr_mas->mas->max)
-		goto reset;
-
-	if (wr_mas->entry)
-		return;
-
-	if (mte_is_leaf(wr_mas->mas->node) &&
-	    wr_mas->mas->last == wr_mas->mas->max)
-		goto reset;
-
-	return;
-
-reset:
-	mas_reset(wr_mas->mas);
-}
-
-static inline void mas_wr_prealloc_setup(struct ma_wr_state *wr_mas)
-{
-	struct ma_state *mas = wr_mas->mas;
 
 	mas_wr_store_setup(wr_mas);
 	wr_mas->content = mas_start(mas);
-}
-
-/**
- * mas_prealloc_calc() - Calculate number of nodes needed for a
- * given store oepration
- * @mas: The maple state
- * @entry: The entry to store into the tree
- *
- * Return: Number of nodes required for preallocation.
- */
-static inline int mas_prealloc_calc(struct ma_state *mas, void *entry)
-{
-	int ret = mas_mt_height(mas) * 3 + 1;
-
-	switch (mas->store_type) {
-	case wr_invalid:
-		WARN_ON_ONCE(1);
-		break;
-	case wr_new_root:
-		ret = 1;
-		break;
-	case wr_store_root:
-		if (likely((mas->last != 0) || (mas->index != 0)))
-			ret = 1;
-		else if (((unsigned long) (entry) & 3) == 2)
-			ret = 1;
-		else
-			ret = 0;
-		break;
-	case wr_spanning_store:
-		ret =  mas_mt_height(mas) * 3 + 1;
-		break;
-	case wr_split_store:
-		ret =  mas_mt_height(mas) * 2 + 1;
-		break;
-	case wr_rebalance:
-		ret =  mas_mt_height(mas) * 2 - 1;
-		break;
-	case wr_node_store:
-	case wr_bnode:
-		ret = mt_in_rcu(mas->tree) ? 1 : 0;
-		break;
-	case wr_append:
-	case wr_exact_fit:
-	case wr_slot_store:
-		ret = 0;
-	}
-
-	return ret;
-}
-
-/*
- * mas_wr_store_type() - Set the store type for a given
- * store operation.
- * @wr_mas: The maple write state
- */
-static inline void mas_wr_store_type(struct ma_wr_state *wr_mas)
-{
-	struct ma_state *mas = wr_mas->mas;
-	unsigned char new_end;
-
-	if (unlikely(mas_is_none(mas) || mas_is_ptr(mas))) {
-		mas->store_type = wr_store_root;
+	if (mas_is_none(mas) || mas_is_ptr(mas)) {
+		mas_store_root(mas, wr_mas->entry);
 		return;
 	}
 
 	if (unlikely(!mas_wr_walk(wr_mas))) {
-		mas->store_type = wr_spanning_store;
+		mas_wr_spanning_store(wr_mas);
 		return;
 	}
 
 	/* At this point, we are at the leaf node that needs to be altered. */
 	mas_wr_end_piv(wr_mas);
-	if (!wr_mas->entry)
-		mas_wr_extend_null(wr_mas);
-
-	new_end = mas_wr_new_end(wr_mas);
-	if ((wr_mas->r_min == mas->index) && (wr_mas->r_max == mas->last)) {
-		mas->store_type = wr_exact_fit;
-		return;
-	}
-
-	if (unlikely(!mas->index && mas->last == ULONG_MAX)) {
-		mas->store_type = wr_new_root;
-		return;
-	}
-
-	/* Potential spanning rebalance collapsing a node */
-	if (new_end < mt_min_slots[wr_mas->type]) {
-		if (!mte_is_root(mas->node)) {
-			mas->store_type = wr_rebalance;
-			return;
-		}
-		mas->store_type = wr_node_store;
-		return;
-	}
-
-	if (new_end >= mt_slots[wr_mas->type]) {
-		mas->store_type = wr_split_store;
-		return;
-	}
-
-	if (!mt_in_rcu(mas->tree) && (mas->offset == mas->end)) {
-		mas->store_type = wr_append;
-		return;
-	}
-
-	if ((new_end == mas->end) && (!mt_in_rcu(mas->tree) ||
-		(wr_mas->offset_end - mas->offset == 1))) {
-		mas->store_type = wr_slot_store;
-		return;
-	}
-
-	if (mte_is_root(mas->node) || !(new_end <= mt_min_slots[wr_mas->type]) ||
-		(mas->mas_flags & MA_STATE_BULK)) {
-		mas->store_type = wr_node_store;
-		return;
-	}
-
-	mas->store_type = wr_bnode;
-}
-
-/**
- * mas_wr_preallocate() - Preallocate enough nodes for a store operation
- * @wr_mas: The maple write state
- * @entry: The entry that will be stored
- * @gfp: The GFP_FLAGS to use for allocations.
- *
- */
-static inline void mas_wr_preallocate(struct ma_wr_state *wr_mas, void *entry, gfp_t gfp)
-{
-	struct ma_state *mas = wr_mas->mas;
-	int request;
-
-	mas_wr_prealloc_setup(wr_mas);
-	mas_wr_store_type(wr_mas);
-	request = mas_prealloc_calc(mas, entry);
-	if (!request)
-		return;
-
-	mas_node_count_gfp(mas, request, gfp);
-	if (likely(!mas_is_err(mas)))
-		return;
-
-	mas_set_alloc_req(mas, 0);
+	/* New root for a single pointer */
+	if (unlikely(!mas->index && mas->last == ULONG_MAX))
+		mas_new_root(mas, wr_mas->entry);
+	else
+		mas_wr_modify(wr_mas);
 }
 
 /**

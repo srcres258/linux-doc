@@ -276,7 +276,7 @@ solution for memory pages having (excessive) corrected memory errors.
 For different types of page, soft-offline has different behaviors / costs.
 - For a raw error page, soft-offline migrates the in-use page's content to
   a new raw page.
-- For a page that is part of a transparent hugepage,  soft-offline splits the
+- For a page that is part of a transparent hugepage, soft-offline splits the
   transparent hugepage into raw pages, then migrates only the raw error page.
   As a result, user is transparently backed by 1 less hugepage, impacting
   memory access performance.
@@ -290,8 +290,8 @@ physical memory) vs performance / capacity implications in transparent and
 HugeTLB cases.
 
 For all architectures, enable_soft_offline controls whether to soft offline
-memory pages.  When setting to 1, kernel attempts to soft offline the pages
-whenever it thinks needed.  When setting to 0, kernel returns EOPNOTSUPP to
+memory pages.  When set to 1, kernel attempts to soft offline the pages
+whenever it thinks needed.  When set to 0, kernel returns EOPNOTSUPP to
 the request to soft offline the pages.  Its default value is 1.
 
 It is worth mentioning that after setting enable_soft_offline to 0, the

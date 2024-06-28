@@ -18,7 +18,7 @@ enum mtk_dvfsrc_cmd {
 	MTK_DVFSRC_CMD_MAX,
 };
 
-#ifdef CONFIG_MTK_DVFSRC
+#if IS_ENABLED(CONFIG_MTK_DVFSRC)
 
 int mtk_dvfsrc_send_request(const struct device *dev, u32 cmd, u64 data);
 int mtk_dvfsrc_query_info(const struct device *dev, u32 cmd, int *data);

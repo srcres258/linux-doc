@@ -157,6 +157,9 @@ config_stmt: config_entry_start config_option_list
 				current_entry->filename, current_entry->lineno);
 			yynerrs++;
 		}
+
+		list_add_tail(&current_entry->sym->choice_link,
+			      &current_choice->choice_members);
 	}
 
 	printd(DEBUG_PARSE, "%s:%d:endconfig\n", cur_filename, cur_lineno);
@@ -238,8 +241,8 @@ choice: T_CHOICE T_EOL
 	struct symbol *sym = sym_lookup(NULL, 0);
 
 	menu_add_entry(sym);
-	menu_add_expr(P_CHOICE, NULL, NULL);
 	menu_set_type(S_BOOLEAN);
+	INIT_LIST_HEAD(&current_entry->choice_members);
 
 	printd(DEBUG_PARSE, "%s:%d:choice\n", cur_filename, cur_lineno);
 };
@@ -691,9 +694,6 @@ static void print_symbol(FILE *out, struct menu *menu)
 				expr_fprint(prop->visible.expr, out);
 			}
 			fputc('\n', out);
-			break;
-		case P_CHOICE:
-			fputs("  #choice value\n", out);
 			break;
 		case P_SELECT:
 			fputs( "  select ", out);

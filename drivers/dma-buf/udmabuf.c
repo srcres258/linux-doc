@@ -352,8 +352,10 @@ static long udmabuf_create(struct miscdevice *device,
 		end = list[i].offset + (pgcnt << PAGE_SHIFT) - 1;
 		ret = memfd_pin_folios(memfd, list[i].offset, end,
 				       folios, pgcnt, &pgoff);
-		if (ret < 0) {
+		if (ret <= 0) {
 			kfree(folios);
+			if (!ret)
+				ret = -EINVAL;
 			goto err;
 		}
 

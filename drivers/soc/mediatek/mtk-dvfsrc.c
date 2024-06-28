@@ -30,8 +30,6 @@
 /* DVFSRC_VCORE */
 #define DVFSRC_V2_VCORE_REQ_VSCP_LEVEL	GENMASK(14, 12)
 
-#define KBPS_TO_MBPS(x)			((x) / 1000)
-
 #define DVFSRC_POLL_TIMEOUT_US		1000
 #define STARTUP_TIME_US			1
 
@@ -92,10 +90,6 @@ static void dvfsrc_writel(struct mtk_dvfsrc *dvfs, u32 offset, u32 val)
 {
 	writel(val, dvfs->regs + dvfs->dvd->regs[offset]);
 }
-
-#define dvfsrc_rmw(dvfs, offset, val, mask, shift) \
-	dvfsrc_writel(dvfs, offset, \
-		(dvfsrc_readl(dvfs, offset) & ~(mask << shift)) | (val << shift))
 
 enum dvfsrc_regs {
 	DVFSRC_SW_REQ,
@@ -276,7 +270,7 @@ static void dvfsrc_set_vscp_level_v2(struct mtk_dvfsrc *dvfsrc, u32 level)
 static void __dvfsrc_set_dram_bw_v1(struct mtk_dvfsrc *dvfsrc, u32 reg,
 				    u16 max_bw, u16 min_bw, u64 bw)
 {
-	u32 new_bw = (u32)div_u64(KBPS_TO_MBPS(bw), 100);
+	u32 new_bw = (u32)div_u64(bw, 100 * 1000);
 
 	/* If bw constraints (in mbps) are defined make sure to respect them */
 	if (max_bw)

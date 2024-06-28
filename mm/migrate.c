@@ -405,12 +405,13 @@ static int __folio_migrate_mapping(struct address_space *mapping,
 {
 	XA_STATE(xas, &mapping->i_pages, folio_index(folio));
 	struct zone *oldzone, *newzone;
+	int dirty;
 	long nr = folio_nr_pages(folio);
 	long entries, i;
 	int dirty;
 
 	if (!mapping) {
-		/* Anonymous folio without mapping */
+		/* Anonymous folio without mapping, no turning back from here */
 		newfolio->index = folio->index;
 		newfolio->mapping = folio->mapping;
 		if (folio_test_swapbacked(folio))
@@ -457,8 +458,8 @@ static int __folio_migrate_mapping(struct address_space *mapping,
 	}
 
 	/*
-	 * Since old folio's refcount freezed, now drop cache reference from
-	 * old folio by unfreezing to one less reference.
+	 * Drop cache reference from old folio by unfreezing
+	 * to one less reference.
 	 * We know this isn't the last reference.
 	 */
 	folio_ref_unfreeze(folio, expected_cnt - nr);
@@ -528,8 +529,8 @@ int folio_migrate_mapping(struct address_space *mapping, struct folio *newfolio,
 	return MIGRATEPAGE_SUCCESS;
 }
 
-int folio_migrate_mapping(struct address_space *mapping, struct folio *newfolio,
-			  struct folio *folio, int extra_count)
+int folio_migrate_mapping(struct address_space *mapping,
+		struct folio *newfolio, struct folio *folio, int extra_count)
 {
 	int expected_count = folio_expected_refs(mapping, folio) + extra_count;
 
@@ -548,14 +549,14 @@ int migrate_huge_page_move_mapping(struct address_space *mapping,
 				   struct folio *dst, struct folio *src)
 {
 	XA_STATE(xas, &mapping->i_pages, folio_index(src));
-	int ret, expected_count = folio_expected_refs(mapping, src);
+	int rc, expected_count = folio_expected_refs(mapping, src);
 
 	if (folio_ref_count(src) != expected_count)
 		return -EAGAIN;
 
-	ret = folio_mc_copy(dst, src);
-	if (unlikely(ret))
-		return ret;
+	rc = folio_mc_copy(dst, src);
+	if (unlikely(rc))
+		return rc;
 
 	xas_lock_irq(&xas);
 	if (!folio_ref_freeze(src, expected_count)) {
@@ -678,18 +679,19 @@ static int __migrate_folio(struct address_space *mapping, struct folio *dst,
 			   struct folio *src, void *src_private,
 			   enum migrate_mode mode)
 {
-	int ret, expected_count = folio_expected_refs(mapping, src);
+	int rc, expected_count = folio_expected_refs(mapping, src);
 
+	/* Check whether src does not have extra refs before we do more work */
 	if (folio_ref_count(src) != expected_count)
 		return -EAGAIN;
 
-	ret = folio_mc_copy(dst, src);
-	if (unlikely(ret))
-		return ret;
+	rc = folio_mc_copy(dst, src);
+	if (unlikely(rc))
+		return rc;
 
-	ret = __folio_migrate_mapping(mapping, dst, src, expected_count);
-	if (ret != MIGRATEPAGE_SUCCESS)
-		return ret;
+	rc = __folio_migrate_mapping(mapping, dst, src, expected_count);
+	if (rc != MIGRATEPAGE_SUCCESS)
+		return rc;
 
 	if (src_private)
 		folio_attach_private(dst, folio_detach_private(src));
@@ -2579,7 +2581,7 @@ int migrate_misplaced_folio_prepare(struct folio *folio,
 		int z;
 
 		if (!(sysctl_numa_balancing_mode & NUMA_BALANCING_MEMORY_TIERING))
-			return 0;
+			return -EAGAIN;
 		for (z = pgdat->nr_zones - 1; z >= 0; z--) {
 			if (managed_zone(pgdat->node_zones + z))
 				break;

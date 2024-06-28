@@ -20,7 +20,6 @@
  *
  * @ec: Pointer to EC device
  * @use_pwm_type: Use PWM types instead of generic channels
- * @channel: array with per-channel data
  */
 struct cros_ec_pwm_device {
 	struct cros_ec_device *ec;
