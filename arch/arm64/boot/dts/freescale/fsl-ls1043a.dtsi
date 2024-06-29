@@ -505,11 +505,11 @@
 			memory-region = <&bman_fbpr>;
 		};
 
-		bportals: bman-portals@508000000 {
+		bportals: bman-portals-bus@508000000 {
 			ranges = <0x0 0x5 0x08000000 0x8000000>;
 		};
 
-		qportals: qman-portals@500000000 {
+		qportals: qman-portals-bus@500000000 {
 			ranges = <0x0 0x5 0x00000000 0x8000000>;
 		};
 
@@ -783,7 +783,6 @@
 			interrupts = <GIC_SPI 83 IRQ_TYPE_LEVEL_HIGH>;
 			clocks = <&clockgen QORIQ_CLK_PLATFORM_PLL
 					    QORIQ_CLK_PLL_DIV(1)>;
-			clock-names = "wdog";
 			big-endian;
 		};
 
@@ -805,7 +804,7 @@
 					    QORIQ_CLK_PLL_DIV(1)>;
 		};
 
-		aux_bus: aux_bus {
+		aux_bus: aux-bus {
 			#address-cells = <2>;
 			#size-cells = <2>;
 			compatible = "simple-bus";
@@ -974,6 +973,7 @@
 				     <GIC_SPI 42 IRQ_TYPE_LEVEL_HIGH>;
 			interrupt-names = "qdma-error", "qdma-queue0",
 				"qdma-queue1", "qdma-queue2", "qdma-queue3";
+			#dma-cells = <1>;
 			dma-channels = <8>;
 			block-number = <1>;
 			block-offset = <0x10000>;
@@ -989,7 +989,7 @@
 			#fsl,rcpm-wakeup-cells = <1>;
 		};
 
-		ftm_alarm0: timer@29d0000 {
+		ftm_alarm0: rtc@29d0000 {
 			compatible = "fsl,ls1043a-ftm-alarm";
 			reg = <0x0 0x29d0000 0x0 0x10000>;
 			fsl,rcpm-wakeup = <&rcpm 0x20000>;

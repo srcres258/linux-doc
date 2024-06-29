@@ -9,6 +9,7 @@
 #include <linux/array_size.h>
 #include <linux/module.h>
 #include <linux/moduleparam.h>
+#include <linux/once.h>
 #include <linux/platform_device.h>
 
 #include <linux/serial_8250.h>
@@ -52,14 +53,9 @@ void serial8250_set_isa_configurator(serial8250_isa_config_fn v)
 }
 EXPORT_SYMBOL(serial8250_set_isa_configurator);
 
-void __init serial8250_isa_init_ports(void)
+static void __init __serial8250_isa_init_ports(void)
 {
-	static int first = 1;
 	int i, irqflag = 0;
-
-	if (!first)
-		return;
-	first = 0;
 
 	if (nr_uarts > UART_NR)
 		nr_uarts = UART_NR;
@@ -97,6 +93,11 @@ void __init serial8250_isa_init_ports(void)
 		if (serial8250_isa_config != NULL)
 			serial8250_isa_config(i, &up->port, &up->capabilities);
 	}
+}
+
+void __init serial8250_isa_init_ports(void)
+{
+	DO_ONCE(__serial8250_isa_init_ports);
 }
 
 /*

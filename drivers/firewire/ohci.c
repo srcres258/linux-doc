@@ -45,6 +45,9 @@
 
 #include <trace/events/firewire.h>
 
+#define CREATE_TRACE_POINTS
+#include <trace/events/firewire_ohci.h>
+
 #define ohci_info(ohci, f, args...)	dev_info(ohci->card.device, f, ##args)
 #define ohci_notice(ohci, f, args...)	dev_notice(ohci->card.device, f, ##args)
 #define ohci_err(ohci, f, args...)	dev_err(ohci->card.device, f, ##args)
@@ -2182,6 +2185,7 @@ static irqreturn_t irq_handler(int irq, void *data)
 	 */
 	reg_write(ohci, OHCI1394_IntEventClear,
 		  event & ~(OHCI1394_busReset | OHCI1394_postedWriteErr));
+	trace_irqs(ohci->card.index, event);
 	log_irqs(ohci, event);
 	// The flag is masked again at bus_reset_work() scheduled by selfID event.
 	if (event & OHCI1394_busReset)

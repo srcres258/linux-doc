@@ -407,7 +407,7 @@
 		};
 
 		gpio0: gpio@2300000 {
-			compatible = "fsl,qoriq-gpio";
+			compatible = "fsl,ls1021a-gpio", "fsl,qoriq-gpio";
 			reg = <0x0 0x2300000 0x0 0x10000>;
 			interrupts = <GIC_SPI 66 IRQ_TYPE_LEVEL_HIGH>;
 			gpio-controller;
@@ -417,7 +417,7 @@
 		};
 
 		gpio1: gpio@2310000 {
-			compatible = "fsl,qoriq-gpio";
+			compatible = "fsl,ls1021a-gpio", "fsl,qoriq-gpio";
 			reg = <0x0 0x2310000 0x0 0x10000>;
 			interrupts = <GIC_SPI 67 IRQ_TYPE_LEVEL_HIGH>;
 			gpio-controller;
@@ -501,7 +501,6 @@
 			snps,quirk-frame-length-adjustment = <0x20>;
 			snps,dis_rxdet_inp3_quirk;
 			snps,incr-burst-type-adjustment = <1>, <4>, <8>, <16>;
-			snps,host-vbus-glitches;
 		};
 
 		sata: sata@3200000 {
@@ -536,9 +535,9 @@
 			reg = <0x00 0x03400000 0x0 0x00100000>, /* controller registers */
 			      <0x40 0x00000000 0x0 0x00002000>; /* configuration space */
 			reg-names = "regs", "config";
-			interrupts = <GIC_SPI 118 IRQ_TYPE_LEVEL_HIGH>, /* controller interrupt */
-				     <GIC_SPI 117 IRQ_TYPE_LEVEL_HIGH>; /* PME interrupt */
-			interrupt-names = "aer", "pme";
+			interrupts = <GIC_SPI 117 IRQ_TYPE_LEVEL_HIGH>, /* PME interrupt */
+				     <GIC_SPI 118 IRQ_TYPE_LEVEL_HIGH>; /* controller interrupt */
+			interrupt-names = "pme", "aer";
 			#address-cells = <3>;
 			#size-cells = <2>;
 			device_type = "pci";
@@ -563,7 +562,7 @@
 			#fsl,rcpm-wakeup-cells = <1>;
 		};
 
-		ftm_alarm0: timer@29d0000 {
+		ftm_alarm0: rtc@29d0000 {
 			compatible = "fsl,ls1012a-ftm-alarm";
 			reg = <0x0 0x29d0000 0x0 0x10000>;
 			fsl,rcpm-wakeup = <&rcpm 0x20000>;

@@ -362,6 +362,12 @@ properties:
           - const: gw,ventana
           - const: fsl,imx6q
 
+      - description: i.MX6Q Kontron SMARC-sAMX6i on SMARC Eval Carrier 2.0
+        items:
+          - const: kontron,imx6q-samx6i-ads2
+          - const: kontron,imx6q-samx6i
+          - const: fsl,imx6q
+
       - description: i.MX6Q PHYTEC phyBOARD-Mira
         items:
           - enum:
@@ -541,6 +547,12 @@ properties:
               - gw,imx6dl-gw5912
               - gw,imx6dl-gw5913
           - const: gw,ventana
+          - const: fsl,imx6dl
+
+      - description: i.MX6DL Kontron SMARC-sAMX6i on SMARC Eval Carrier 2.0
+        items:
+          - const: kontron,imx6dl-samx6i-ads2
+          - const: kontron,imx6dl-samx6i
           - const: fsl,imx6dl
 
       - description: i.MX6DL PHYTEC phyBOARD-Mira
@@ -1151,8 +1163,9 @@ properties:
           version as an industrial computing device.
         items:
           - enum:
-              - tq,imx8mp-tqma8mpql-mba8mpxl # TQ-Systems GmbH i.MX8MP TQMa8MPQL SOM on MBa8MPxL
-          - const: tq,imx8mp-tqma8mpql       # TQ-Systems GmbH i.MX8MP TQMa8MPQL SOM
+              - tq,imx8mp-tqma8mpql-mba8mpxl      # TQ-Systems GmbH i.MX8MP TQMa8MPQL SOM on MBa8MPxL
+              - tq,imx8mp-tqma8mpql-mba8mp-ras314 # TQ-Systems GmbH i.MX8MP TQMa8MPQL SOM on MBa8MP-RAS314
+          - const: tq,imx8mp-tqma8mpql            # TQ-Systems GmbH i.MX8MP TQMa8MPQL SOM
           - const: fsl,imx8mp
 
       - description: i.MX8MQ based Boards

@@ -245,7 +245,6 @@ static void conf_set_all_new_symbols(enum conf_def_mode mode)
 				randomize_choice_values(menu);
 			continue;
 		}
-		sym->def[S_DEF_USER].tri = val;
 
 		switch (mode) {
 		case def_yes:

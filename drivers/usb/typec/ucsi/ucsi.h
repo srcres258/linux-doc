@@ -116,6 +116,9 @@ void ucsi_connector_change(struct ucsi *ucsi, u8 num);
 #define UCSI_CONNECTOR_NUMBER(_num_)		((u64)(_num_) << 16)
 #define UCSI_COMMAND(_cmd_)			((_cmd_) & 0xff)
 
+#define UCSI_GET_ALTMODE_GET_CONNECTOR_NUMBER(_cmd_)	(((_cmd_) >> 24) & GENMASK(6, 0))
+#define UCSI_DEFAULT_GET_CONNECTOR_NUMBER(_cmd_)	(((_cmd_) >> 16) & GENMASK(6, 0))
+
 /* CONNECTOR_RESET command bits */
 #define UCSI_CONNECTOR_RESET_HARD		BIT(23) /* Deprecated in v1.1 */
 
@@ -198,6 +201,8 @@ void ucsi_connector_change(struct ucsi *ucsi, u8 num);
 #define UCSI_ERROR_HARD_RESET			BIT(10)
 #define UCSI_ERROR_PPM_POLICY_CONFLICT		BIT(11)
 #define UCSI_ERROR_SWAP_REJECTED		BIT(12)
+#define UCSI_ERROR_REVERSE_CURRENT_PROTECTION	BIT(13)
+#define UCSI_ERROR_SET_SINK_PATH_REJECTED	BIT(14)
 
 #define UCSI_SET_NEW_CAM_ENTER(x)		(((x) >> 23) & 0x1)
 #define UCSI_SET_NEW_CAM_GET_AM(x)		(((x) >> 24) & 0xff)

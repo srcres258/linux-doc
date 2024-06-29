@@ -65,8 +65,9 @@ static int ucsi_acknowledge(struct ucsi *ucsi, bool conn_ack)
 
 static int ucsi_exec_command(struct ucsi *ucsi, u64 command);
 
-static int ucsi_read_error(struct ucsi *ucsi)
+static int ucsi_read_error(struct ucsi *ucsi, u8 connector_num)
 {
+	u64 command;
 	u16 error;
 	int ret;
 
@@ -75,7 +76,8 @@ static int ucsi_read_error(struct ucsi *ucsi)
 	if (ret)
 		return ret;
 
-	ret = ucsi_exec_command(ucsi, UCSI_GET_ERROR_STATUS);
+	command = UCSI_GET_ERROR_STATUS | UCSI_CONNECTOR_NUMBER(connector_num);
+	ret = ucsi_exec_command(ucsi, command);
 	if (ret < 0)
 		return ret;
 
@@ -117,6 +119,12 @@ static int ucsi_read_error(struct ucsi *ucsi)
 	case UCSI_ERROR_SWAP_REJECTED:
 		dev_warn(ucsi->dev, "Swap rejected\n");
 		break;
+	case UCSI_ERROR_REVERSE_CURRENT_PROTECTION:
+		dev_warn(ucsi->dev, "Reverse Current Protection detected\n");
+		break;
+	case UCSI_ERROR_SET_SINK_PATH_REJECTED:
+		dev_warn(ucsi->dev, "Set Sink Path rejected\n");
+		break;
 	case UCSI_ERROR_UNDEFINED:
 	default:
 		dev_err(ucsi->dev, "unknown error %u\n", error);
@@ -128,8 +136,29 @@ static int ucsi_read_error(struct ucsi *ucsi)
 
 static int ucsi_exec_command(struct ucsi *ucsi, u64 cmd)
 {
+	u8 connector_num;
 	u32 cci;
 	int ret;
+
+	if (ucsi->version > UCSI_VERSION_1_2) {
+		switch (UCSI_COMMAND(cmd)) {
+		case UCSI_GET_ALTERNATE_MODES:
+			connector_num = UCSI_GET_ALTMODE_GET_CONNECTOR_NUMBER(cmd);
+			break;
+		case UCSI_PPM_RESET:
+		case UCSI_CANCEL:
+		case UCSI_ACK_CC_CI:
+		case UCSI_SET_NOTIFICATION_ENABLE:
+		case UCSI_GET_CAPABILITY:
+			connector_num = 0;
+			break;
+		default:
+			connector_num = UCSI_DEFAULT_GET_CONNECTOR_NUMBER(cmd);
+			break;
+		}
+	} else {
+		connector_num = 0;
+	}
 
 	ret = ucsi->ops->sync_write(ucsi, UCSI_CONTROL, &cmd, sizeof(cmd));
 	if (ret)
@@ -160,7 +189,7 @@ static int ucsi_exec_command(struct ucsi *ucsi, u64 cmd)
 
 			return -EIO;
 		}
-		return ucsi_read_error(ucsi);
+		return ucsi_read_error(ucsi, connector_num);
 	}
 
 	if (cmd == UCSI_CANCEL && cci & UCSI_CCI_CANCEL_COMPLETE) {
@@ -1180,13 +1209,13 @@ static int ucsi_check_cable(struct ucsi_connector *con)
 		ret = ucsi_register_altmodes(con, UCSI_RECIPIENT_SOP_P);
 		if (ret < 0)
 			return ret;
-	}
 
-	if (con->plug_altmode[0]) {
-		num_plug_am = ucsi_get_num_altmode(con->plug_altmode);
-		typec_plug_set_num_altmodes(con->plug, num_plug_am);
-	} else {
-		typec_plug_set_num_altmodes(con->plug, 0);
+		if (con->plug_altmode[0]) {
+			num_plug_am = ucsi_get_num_altmode(con->plug_altmode);
+			typec_plug_set_num_altmodes(con->plug, num_plug_am);
+		} else {
+			typec_plug_set_num_altmodes(con->plug, 0);
+		}
 	}
 
 	return 0;

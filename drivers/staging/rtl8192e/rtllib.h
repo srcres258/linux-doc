@@ -105,26 +105,26 @@ struct cb_desc {
 	u8 bCmdOrInit:1;
 	u8 tx_dis_rate_fallback:1;
 	u8 tx_use_drv_assinged_rate:1;
-	u8 bHwSec:1;
+	u8 hw_sec:1;
 
 	u8 nStuckCount;
 
 	/* Tx Firmware Related flags (10-11)*/
-	u8 bCTSEnable:1;
-	u8 bRTSEnable:1;
-	u8 bUseShortGI:1;
-	u8 bUseShortPreamble:1;
+	u8 cts_enable:1;
+	u8 rts_enable:1;
+	u8 use_short_gi:1;
+	u8 use_short_preamble:1;
 	u8 tx_enable_fw_calc_dur:1;
 	u8 ampdu_enable:1;
-	u8 bRTSSTBC:1;
+	u8 rtsstbc:1;
 	u8 RTSSC:1;
 
-	u8 bRTSBW:1;
-	u8 bPacketBW:1;
+	u8 rts_bw:1;
+	u8 packet_bw:1;
 	u8 rts_use_short_preamble:1;
-	u8 bRTSUseShortGI:1;
+	u8 rts_use_short_gi:1;
 	u8 multicast:1;
-	u8 bBroadcast:1;
+	u8 broadcast:1;
 	u8 drv_agg_enable:1;
 	u8 reserved2:1;
 
@@ -1018,7 +1018,7 @@ struct tx_pending {
 struct bandwidth_autoswitch {
 	long threshold_20Mhzto40Mhz;
 	long	threshold_40Mhzto20Mhz;
-	bool bforced_tx20Mhz;
+	bool forced_tx_20MHz;
 	bool bautoswitch_enable;
 };
 
@@ -1168,7 +1168,7 @@ struct rtllib_device {
 	bool disable_mgnt_queue;
 
 	unsigned long status;
-	u8	CntAfterLink;
+	u8	cnt_after_link;
 
 	enum rt_op_mode op_mode;
 
@@ -1198,7 +1198,7 @@ struct rtllib_device {
 	u8	reg_dot11tx_ht_oper_rate_set[16];
 	u8	dot11ht_oper_rate_set[16];
 	u8	reg_ht_supp_rate_set[16];
-	u8	HTCurrentOperaRate;
+	u8	ht_curr_op_rate;
 	u8	HTHighestOperaRate;
 	u8	tx_dis_rate_fallback;
 	u8	tx_use_drv_assinged_rate;
@@ -1770,7 +1770,7 @@ void rtllib_reset_ba_entry(struct ba_record *ba);
 bool rtllib_get_ts(struct rtllib_device *ieee, struct ts_common_info **ppTS, u8 *addr,
 	   u8 TID, enum tr_select tx_rx_select, bool bAddNewTs);
 void rtllib_ts_init(struct rtllib_device *ieee);
-void TsStartAddBaProcess(struct rtllib_device *ieee,
+void rtllib_ts_start_add_ba_process(struct rtllib_device *ieee,
 			 struct tx_ts_record *pTxTS);
 void remove_peer_ts(struct rtllib_device *ieee, u8 *addr);
 void remove_all_ts(struct rtllib_device *ieee);

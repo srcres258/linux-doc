@@ -3497,20 +3497,6 @@ static inline int kiocb_set_rw_flags(struct kiocb *ki, rwf_t flags,
 	return 0;
 }
 
-static inline ino_t parent_ino(struct dentry *dentry)
-{
-	ino_t res;
-
-	/*
-	 * Don't strictly need d_lock here? If the parent ino could change
-	 * then surely we'd have a deeper race in the caller?
-	 */
-	spin_lock(&dentry->d_lock);
-	res = dentry->d_parent->d_inode->i_ino;
-	spin_unlock(&dentry->d_lock);
-	return res;
-}
-
 /* Transaction based IO helpers */
 
 /*
@@ -3635,7 +3621,7 @@ static inline bool dir_emit_dot(struct file *file, struct dir_context *ctx)
 static inline bool dir_emit_dotdot(struct file *file, struct dir_context *ctx)
 {
 	return ctx->actor(ctx, "..", 2, ctx->pos,
-			  parent_ino(file->f_path.dentry), DT_DIR);
+			  d_parent_ino(file->f_path.dentry), DT_DIR);
 }
 static inline bool dir_emit_dots(struct file *file, struct dir_context *ctx)
 {
@@ -3673,6 +3659,23 @@ extern int vfs_fadvise(struct file *file, loff_t offset, loff_t len,
 		       int advice);
 extern int generic_fadvise(struct file *file, loff_t offset, loff_t len,
 			   int advice);
+
+static inline bool vfs_empty_path(int dfd, const char __user *path)
+{
+	char c;
+
+	if (dfd < 0)
+		return false;
+
+	/* We now allow NULL to be used for empty path. */
+	if (!path)
+		return true;
+
+	if (unlikely(get_user(c, path)))
+		return false;
+
+	return !c;
+}
 
 bool generic_atomic_write_valid(struct iov_iter *iter, loff_t pos);
 
