@@ -595,14 +595,14 @@ static int do_procmap_query(struct proc_maps_private *priv, void __user *uarg)
 	query_vma_teardown(mm, vma);
 	mmput(mm);
 
-	if (karg.vma_name_size && copy_to_user((void __user *)karg.vma_name_addr,
+	if (karg.vma_name_size && copy_to_user((void __user *)(uintptr_t)karg.vma_name_addr,
 					       name, karg.vma_name_size)) {
 		kfree(name_buf);
 		return -EFAULT;
 	}
 	kfree(name_buf);
 
-	if (karg.build_id_size && copy_to_user((void __user *)karg.build_id_addr,
+	if (karg.build_id_size && copy_to_user((void __user *)(uintptr_t)karg.build_id_addr,
 					       build_id_buf, karg.build_id_size))
 		return -EFAULT;
 
