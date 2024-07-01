@@ -1961,6 +1961,15 @@ out_kfree:
 	return ret;
 }
 
+void memcg1_memcg_init(struct mem_cgroup *memcg)
+{
+	INIT_LIST_HEAD(&memcg->oom_notify);
+	mutex_init(&memcg->thresholds_lock);
+	spin_lock_init(&memcg->move_lock);
+	INIT_LIST_HEAD(&memcg->event_list);
+	spin_lock_init(&memcg->event_list_lock);
+}
+
 void memcg1_css_offline(struct mem_cgroup *memcg)
 {
 	struct mem_cgroup_event *event, *tmp;
@@ -2912,6 +2921,35 @@ struct cftype memsw_files[] = {
 	},
 	{ },	/* terminate */
 };
+
+#ifdef CONFIG_MEMCG_KMEM
+void memcg1_account_kmem(struct mem_cgroup *memcg, int nr_pages)
+{
+	if (!cgroup_subsys_on_dfl(memory_cgrp_subsys)) {
+		if (nr_pages > 0)
+			page_counter_charge(&memcg->kmem, nr_pages);
+		else
+			page_counter_uncharge(&memcg->kmem, -nr_pages);
+	}
+}
+#endif /* CONFIG_MEMCG_KMEM */
+
+bool memcg1_charge_skmem(struct mem_cgroup *memcg, unsigned int nr_pages,
+			 gfp_t gfp_mask)
+{
+	struct page_counter *fail;
+
+	if (page_counter_try_charge(&memcg->tcpmem, nr_pages, &fail)) {
+		memcg->tcpmem_pressure = 0;
+		return true;
+	}
+	memcg->tcpmem_pressure = 1;
+	if (gfp_mask & __GFP_NOFAIL) {
+		page_counter_charge(&memcg->tcpmem, nr_pages);
+		return true;
+	}
+	return false;
+}
 
 static int __init memcg1_init(void)
 {

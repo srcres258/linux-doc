@@ -692,14 +692,14 @@ static int do_procmap_query(struct proc_maps_private *priv, void __user *uarg)
 	query_vma_teardown(mm, vma);
 	mmput(mm);
 
-	if (karg.vma_name_size && copy_to_user((void __user *)karg.vma_name_addr,
+	if (karg.vma_name_size && copy_to_user((void __user *)(uintptr_t)karg.vma_name_addr,
 					       name, karg.vma_name_size)) {
 		kfree(name_buf);
 		return -EFAULT;
 	}
 	kfree(name_buf);
 
-	if (karg.build_id_size && copy_to_user((void __user *)karg.build_id_addr,
+	if (karg.build_id_size && copy_to_user((void __user *)(uintptr_t)karg.build_id_addr,
 					       build_id_buf, karg.build_id_size))
 		return -EFAULT;
 
@@ -1250,6 +1250,7 @@ static int show_smap(struct seq_file *m, void *v)
 {
 	struct vm_area_struct *vma = v;
 	struct mem_size_stats mss = {};
+	bool thp_eligible;
 
 	smap_gather_stats(vma, &mss, 0);
 
@@ -1262,9 +1263,12 @@ static int show_smap(struct seq_file *m, void *v)
 
 	__show_smap(m, &mss, false);
 
-	seq_printf(m, "THPeligible:    %8u\n",
-		   !!thp_vma_allowable_orders(vma, vma->vm_flags,
-			   TVA_SMAPS | TVA_ENFORCE_SYSFS, THP_ORDERS_ALL));
+	thp_eligible = !!thp_vma_allowable_orders(vma, vma->vm_flags,
+						TVA_SMAPS | TVA_ENFORCE_SYSFS, THP_ORDERS_ALL);
+	if (vma_is_anon_shmem(vma))
+		thp_eligible = !!shmem_allowable_huge_orders(file_inode(vma->vm_file),
+							vma, vma->vm_pgoff, thp_eligible);
+	seq_printf(m, "THPeligible:    %8u\n", thp_eligible);
 
 	if (arch_pkeys_enabled())
 		seq_printf(m, "ProtectionKey:  %8u\n", vma_pkey(vma));

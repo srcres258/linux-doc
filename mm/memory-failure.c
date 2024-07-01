@@ -2809,8 +2809,7 @@ int soft_offline_page(unsigned long pfn, int flags)
 	}
 
 	if (!sysctl_enable_soft_offline) {
-		pr_info_once("%#lx: disabled by /proc/sys/vm/enable_soft_offline\n",
-			pfn);
+		pr_info_once("disabled by /proc/sys/vm/enable_soft_offline\n");
 		put_ref_page(pfn, flags);
 		return -EOPNOTSUPP;
 	}

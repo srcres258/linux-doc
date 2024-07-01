@@ -2321,6 +2321,19 @@ static int ptrace_stop(int exit_code, int why, unsigned long message,
 		do_notify_parent_cldstop(current, false, why);
 
 	/*
+	 * If tracer is frozen, it won't ack until it gets unfrozen and if the
+	 * tracee is exiting this means its resources do not get freed until
+	 * the tracer is thawed. Skip waiting for the tracer. Per ptrace(2)
+	 * manual, the tracer cannot assume that the ptrace-stopped tracee
+	 * exists, so exiting now should not be an issue.
+	 */
+	if (current->ptrace && (exit_code >> 8) == PTRACE_EVENT_EXIT &&
+	    cgroup_task_frozen(current->parent)) {
+		read_unlock(&tasklist_lock);
+		goto skip_wait;
+	}
+
+	/*
 	 * The previous do_notify_parent_cldstop() invocation woke ptracer.
 	 * One a PREEMPTION kernel this can result in preemption requirement
 	 * which will be fulfilled after read_unlock() and the ptracer will be
@@ -2356,6 +2369,7 @@ static int ptrace_stop(int exit_code, int why, unsigned long message,
 	schedule();
 	cgroup_leave_frozen(true);
 
+skip_wait:
 	/*
 	 * We are back.  Now reacquire the siglock before touching
 	 * last_siginfo, so that we are sure to have synchronized with

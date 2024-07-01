@@ -172,7 +172,7 @@ static void test_soft_offline_common(int enable_soft_offline)
 	hugepagesize_kb = file_stat.f_bsize / 1024;
 	ksft_print_msg("Hugepagesize is %ldkB\n", hugepagesize_kb);
 
-	if (set_enable_soft_offline(enable_soft_offline)) {
+	if (set_enable_soft_offline(enable_soft_offline) != 0) {
 		close(fd);
 		ksft_exit_fail_msg("Failed to set enable_soft_offline\n");
 	}

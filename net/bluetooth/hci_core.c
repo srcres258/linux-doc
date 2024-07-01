@@ -2718,6 +2718,8 @@ void hci_unregister_dev(struct hci_dev *hdev)
 	cancel_work_sync(&hdev->power_on);
 	cancel_work_sync(&hdev->error_reset);
 
+	hci_cmd_sync_clear(hdev);
+
 	hci_unregister_suspend_notifier(hdev);
 
 	hci_dev_do_close(hdev);
