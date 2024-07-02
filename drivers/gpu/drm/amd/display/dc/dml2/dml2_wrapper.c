@@ -442,7 +442,6 @@ static bool optimize_pstate_with_svp_and_drr(struct dml2_context *dml2, struct d
 	bool result = false;
 	int drr_display_index = 0, non_svp_streams = 0;
 	bool force_svp = dml2->config.svp_pstate.force_enable_subvp;
-	bool advanced_pstate_switching = false;
 
 	display_state->bw_ctx.bw.dcn.clk.fw_based_mclk_switching = false;
 	display_state->bw_ctx.bw.dcn.legacy_svp_drr_stream_index_valid = false;
@@ -451,8 +450,7 @@ static bool optimize_pstate_with_svp_and_drr(struct dml2_context *dml2, struct d
 
 	if (!result) {
 		pstate_optimization_done = true;
-	} else if (!advanced_pstate_switching ||
-		(s->mode_support_info.DRAMClockChangeSupport[0] != dml_dram_clock_change_unsupported && !force_svp)) {
+	} else if (s->mode_support_info.DRAMClockChangeSupport[0] != dml_dram_clock_change_unsupported && !force_svp) {
 		pstate_optimization_success = true;
 		pstate_optimization_done = true;
 	}
@@ -672,11 +670,13 @@ static bool dml2_validate_and_build_resource(const struct dc *in_dc, struct dc_s
 
 static bool dml2_validate_only(struct dc_state *context)
 {
-	struct dml2_context *dml2 = context->bw_ctx.dml2;
+	struct dml2_context *dml2;
 	unsigned int result = 0;
 
 	if (!context || context->stream_count == 0)
 		return true;
+
+	dml2 = context->bw_ctx.dml2;
 
 	/* Zero out before each call before proceeding */
 	memset(&dml2->v20.scratch, 0, sizeof(struct dml2_wrapper_scratch));
@@ -804,6 +804,12 @@ void dml2_extract_dram_and_fclk_change_support(struct dml2_context *dml2,
 {
 	*fclk_change_support = (unsigned int) dml2->v20.dml_core_ctx.ms.support.FCLKChangeSupport[0];
 	*dram_clk_change_support = (unsigned int) dml2->v20.dml_core_ctx.ms.support.DRAMClockChangeSupport[0];
+}
+
+void dml2_prepare_mcache_programming(struct dc *in_dc, struct dc_state *context, struct dml2_context *dml2)
+{
+	if (dml2->architecture == dml2_architecture_21)
+		dml21_prepare_mcache_programming(in_dc, context, dml2);
 }
 
 void dml2_copy(struct dml2_context *dst_dml2,
