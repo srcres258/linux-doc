@@ -939,6 +939,8 @@ __SYSCALL(__NR_getxattrat, sys_getxattrat)
 __SYSCALL(__NR_listxattrat, sys_listxattrat)
 #define __NR_removexattrat 466
 __SYSCALL(__NR_removexattrat, sys_removexattrat)
+#define __NR_vgetrandom_alloc 468
+__SYSCALL(__NR_vgetrandom_alloc, sys_vgetrandom_alloc)
 
 /*
  * Please add new compat syscalls above this comment and update

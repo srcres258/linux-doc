@@ -857,8 +857,11 @@ __SYSCALL(__NR_removexattrat, sys_removexattrat)
 #define __NR_uretprobe 467
 __SYSCALL(__NR_uretprobe, sys_uretprobe)
 
+#define __NR_vgetrandom_alloc 468
+__SYSCALL(__NR_vgetrandom_alloc, sys_vgetrandom_alloc)
+
 #undef __NR_syscalls
-#define __NR_syscalls 468
+#define __NR_syscalls 469
 
 /*
  * 32 bit systems traditionally used different
