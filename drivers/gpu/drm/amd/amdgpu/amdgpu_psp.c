@@ -219,6 +219,7 @@ static int psp_early_init(void *handle)
 	case IP_VERSION(13, 0, 11):
 	case IP_VERSION(14, 0, 0):
 	case IP_VERSION(14, 0, 1):
+	case IP_VERSION(14, 0, 4):
 		psp_v13_0_set_psp_funcs(psp);
 		psp->boot_time_tmr = false;
 		break;
@@ -2558,6 +2559,9 @@ static int psp_get_fw_type(struct amdgpu_firmware_info *ucode,
 		break;
 	case AMDGPU_UCODE_ID_JPEG_RAM:
 		*type = GFX_FW_TYPE_JPEG_RAM;
+		break;
+	case AMDGPU_UCODE_ID_ISP:
+		*type = GFX_FW_TYPE_ISP;
 		break;
 	case AMDGPU_UCODE_ID_MAXIMUM:
 	default:

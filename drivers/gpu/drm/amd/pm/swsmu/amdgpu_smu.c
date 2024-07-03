@@ -237,7 +237,6 @@ static int smu_dpm_set_vcn_enable(struct smu_context *smu,
 {
 	struct smu_power_context *smu_power = &smu->smu_power;
 	struct smu_power_gate *power_gate = &smu_power->power_gate;
-	struct amdgpu_device *adev = smu->adev;
 	int ret = 0;
 
 	/*
@@ -253,7 +252,7 @@ static int smu_dpm_set_vcn_enable(struct smu_context *smu,
 		return 0;
 
 	ret = smu->ppt_funcs->dpm_set_vcn_enable(smu, enable);
-	if (!ret && !adev->enable_jpeg_test)
+	if (!ret)
 		atomic_set(&power_gate->vcn_gated, !enable);
 
 	return ret;
@@ -728,6 +727,7 @@ static int smu_set_funcs(struct amdgpu_device *adev)
 		break;
 	case IP_VERSION(14, 0, 0):
 	case IP_VERSION(14, 0, 1):
+	case IP_VERSION(14, 0, 4):
 		smu_v14_0_0_set_ppt_funcs(smu);
 		break;
 	case IP_VERSION(14, 0, 2):
