@@ -23,7 +23,7 @@ int ice_check_reset(struct ice_hw *hw);
 int ice_reset(struct ice_hw *hw, enum ice_reset_req req);
 int ice_create_all_ctrlq(struct ice_hw *hw);
 int ice_init_all_ctrlq(struct ice_hw *hw);
-void ice_shutdown_all_ctrlq(struct ice_hw *hw);
+void ice_shutdown_all_ctrlq(struct ice_hw *hw, bool unloading);
 void ice_destroy_all_ctrlq(struct ice_hw *hw);
 int
 ice_clean_rq_elem(struct ice_hw *hw, struct ice_ctl_q_info *cq,
@@ -249,6 +249,7 @@ void
 ice_stat_update32(struct ice_hw *hw, u32 reg, bool prev_stat_loaded,
 		  u64 *prev_stat, u64 *cur_stat);
 bool ice_is_e810t(struct ice_hw *hw);
+bool ice_is_e822(struct ice_hw *hw);
 bool ice_is_e823(struct ice_hw *hw);
 bool ice_is_e825c(struct ice_hw *hw);
 int
@@ -261,6 +262,7 @@ int
 ice_aq_get_gpio(struct ice_hw *hw, u16 gpio_ctrl_handle, u8 pin_idx,
 		bool *value, struct ice_sq_cd *cd);
 bool ice_is_100m_speed_supported(struct ice_hw *hw);
+u16 ice_get_link_speed_based_on_phy_type(u64 phy_type_low, u64 phy_type_high);
 int
 ice_aq_set_lldp_mib(struct ice_hw *hw, u8 mib_type, void *buf, u16 buf_size,
 		    struct ice_sq_cd *cd);
