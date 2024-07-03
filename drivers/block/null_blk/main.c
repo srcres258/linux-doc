@@ -227,7 +227,7 @@ MODULE_PARM_DESC(mbps, "Cache size in MiB for memory-backed device. Default: 0 (
 
 static bool g_fua = true;
 module_param_named(fua, g_fua, bool, 0444);
-MODULE_PARM_DESC(zoned, "Enable/disable FUA support when cache_size is used. Default: true");
+MODULE_PARM_DESC(fua, "Enable/disable FUA support when cache_size is used. Default: true");
 
 static unsigned int g_mbps;
 module_param_named(mbps, g_mbps, uint, 0444);
@@ -1928,6 +1928,13 @@ static int null_add_dev(struct nullb_device *dev)
 			goto out_cleanup_tags;
 	}
 
+	if (dev->cache_size > 0) {
+		set_bit(NULLB_DEV_FL_CACHE, &nullb->dev->flags);
+		lim.features |= BLK_FEAT_WRITE_CACHE;
+		if (dev->fua)
+			lim.features |= BLK_FEAT_FUA;
+	}
+
 	nullb->disk = blk_mq_alloc_disk(nullb->tag_set, &lim, nullb);
 	if (IS_ERR(nullb->disk)) {
 		rv = PTR_ERR(nullb->disk);
@@ -1940,13 +1947,7 @@ static int null_add_dev(struct nullb_device *dev)
 		nullb_setup_bwtimer(nullb);
 	}
 
-	if (dev->cache_size > 0) {
-		set_bit(NULLB_DEV_FL_CACHE, &nullb->dev->flags);
-		blk_queue_write_cache(nullb->q, true, dev->fua);
-	}
-
 	nullb->q->queuedata = nullb;
-	blk_queue_flag_set(QUEUE_FLAG_NONROT, nullb->q);
 
 	rv = ida_alloc(&nullb_indexes, GFP_KERNEL);
 	if (rv < 0)
