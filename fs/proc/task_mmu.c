@@ -692,14 +692,14 @@ static int do_procmap_query(struct proc_maps_private *priv, void __user *uarg)
 	query_vma_teardown(mm, vma);
 	mmput(mm);
 
-	if (karg.vma_name_size && copy_to_user((void __user *)(uintptr_t)karg.vma_name_addr,
+	if (karg.vma_name_size && copy_to_user(u64_to_user_ptr(karg.vma_name_addr),
 					       name, karg.vma_name_size)) {
 		kfree(name_buf);
 		return -EFAULT;
 	}
 	kfree(name_buf);
 
-	if (karg.build_id_size && copy_to_user((void __user *)(uintptr_t)karg.build_id_addr,
+	if (karg.build_id_size && copy_to_user(u64_to_user_ptr(karg.build_id_addr),
 					       build_id_buf, karg.build_id_size))
 		return -EFAULT;
 
@@ -734,7 +734,7 @@ const struct file_operations proc_pid_maps_operations = {
 	.llseek		= seq_lseek,
 	.release	= proc_map_release,
 	.unlocked_ioctl = procfs_procmap_ioctl,
-	.compat_ioctl	= procfs_procmap_ioctl,
+	.compat_ioctl	= compat_ptr_ioctl,
 };
 
 /*
@@ -1094,6 +1094,9 @@ static void show_smap_vma_flags(struct seq_file *m, struct vm_area_struct *vma)
 #ifdef CONFIG_64BIT
 		[ilog2(VM_SEALED)] = "sl",
 #endif
+#ifdef CONFIG_NEED_VM_DROPPABLE
+		[ilog2(VM_DROPPABLE)]	= "dp",
+#endif
 	};
 	size_t i;
 
@@ -1117,7 +1120,7 @@ static int smaps_hugetlb_range(pte_t *pte, unsigned long hmask,
 {
 	struct mem_size_stats *mss = walk->private;
 	struct vm_area_struct *vma = walk->vma;
-	pte_t ptent = huge_ptep_get(pte);
+	pte_t ptent = huge_ptep_get(walk->mm, addr, pte);
 	struct folio *folio = NULL;
 	bool present = false;
 
@@ -1987,7 +1990,7 @@ static int pagemap_hugetlb_range(pte_t *ptep, unsigned long hmask,
 	if (vma->vm_flags & VM_SOFTDIRTY)
 		flags |= PM_SOFT_DIRTY;
 
-	pte = huge_ptep_get(ptep);
+	pte = huge_ptep_get(walk->mm, addr, ptep);
 	if (pte_present(pte)) {
 		struct folio *folio = page_folio(pte_page(pte));
 
@@ -2676,7 +2679,7 @@ static int pagemap_scan_hugetlb_entry(pte_t *ptep, unsigned long hmask,
 	if (~p->arg.flags & PM_SCAN_WP_MATCHING) {
 		/* Go the short route when not write-protecting pages. */
 
-		pte = huge_ptep_get(ptep);
+		pte = huge_ptep_get(walk->mm, start, ptep);
 		categories = p->cur_vma_category | pagemap_hugetlb_category(pte);
 
 		if (!pagemap_scan_is_interesting_page(categories, p))
@@ -2688,7 +2691,7 @@ static int pagemap_scan_hugetlb_entry(pte_t *ptep, unsigned long hmask,
 	i_mmap_lock_write(vma->vm_file->f_mapping);
 	ptl = huge_pte_lock(hstate_vma(vma), vma->vm_mm, ptep);
 
-	pte = huge_ptep_get(ptep);
+	pte = huge_ptep_get(walk->mm, start, ptep);
 	categories = p->cur_vma_category | pagemap_hugetlb_category(pte);
 
 	if (!pagemap_scan_is_interesting_page(categories, p))
@@ -3084,7 +3087,7 @@ static int gather_pte_stats(pmd_t *pmd, unsigned long addr,
 static int gather_hugetlb_stats(pte_t *pte, unsigned long hmask,
 		unsigned long addr, unsigned long end, struct mm_walk *walk)
 {
-	pte_t huge_pte = huge_ptep_get(pte);
+	pte_t huge_pte = huge_ptep_get(walk->mm, addr, pte);
 	struct numa_maps *md;
 	struct page *page;
 

@@ -38,9 +38,10 @@
 /* Battery power unit: 0 means mW, 1 means mA */
 #define ACPI_BATTERY_POWER_UNIT_MA	1
 
-#define ACPI_BATTERY_STATE_DISCHARGING	0x1
-#define ACPI_BATTERY_STATE_CHARGING	0x2
-#define ACPI_BATTERY_STATE_CRITICAL	0x4
+#define ACPI_BATTERY_STATE_DISCHARGING		0x1
+#define ACPI_BATTERY_STATE_CHARGING		0x2
+#define ACPI_BATTERY_STATE_CRITICAL		0x4
+#define ACPI_BATTERY_STATE_CHARGE_LIMITING	0x8
 
 #define MAX_STRING_LENGTH	64
 
@@ -155,7 +156,7 @@ static int acpi_battery_get_state(struct acpi_battery *battery);
 
 static int acpi_battery_is_charged(struct acpi_battery *battery)
 {
-	/* charging, discharging or critical low */
+	/* charging, discharging, critical low or charge limited */
 	if (battery->state != 0)
 		return 0;
 
@@ -215,6 +216,8 @@ static int acpi_battery_get_property(struct power_supply *psy,
 			val->intval = acpi_battery_handle_discharging(battery);
 		else if (battery->state & ACPI_BATTERY_STATE_CHARGING)
 			val->intval = POWER_SUPPLY_STATUS_CHARGING;
+		else if (battery->state & ACPI_BATTERY_STATE_CHARGE_LIMITING)
+			val->intval = POWER_SUPPLY_STATUS_NOT_CHARGING;
 		else if (acpi_battery_is_charged(battery))
 			val->intval = POWER_SUPPLY_STATUS_FULL;
 		else
@@ -761,6 +764,21 @@ end:
 	mutex_unlock(&hook_mutex);
 }
 EXPORT_SYMBOL_GPL(battery_hook_register);
+
+static void devm_battery_hook_unregister(void *data)
+{
+	struct acpi_battery_hook *hook = data;
+
+	battery_hook_unregister(hook);
+}
+
+int devm_battery_hook_register(struct device *dev, struct acpi_battery_hook *hook)
+{
+	battery_hook_register(hook);
+
+	return devm_add_action_or_reset(dev, devm_battery_hook_unregister, hook);
+}
+EXPORT_SYMBOL_GPL(devm_battery_hook_register);
 
 /*
  * This function gets called right after the battery sysfs

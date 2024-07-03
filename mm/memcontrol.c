@@ -118,7 +118,6 @@ struct mem_cgroup *vmpressure_to_memcg(struct vmpressure *vmpr)
 #define CURRENT_OBJCG_UPDATE_BIT 0
 #define CURRENT_OBJCG_UPDATE_FLAG (1UL << CURRENT_OBJCG_UPDATE_BIT)
 
-#ifdef CONFIG_MEMCG_KMEM
 static DEFINE_SPINLOCK(objcg_lock);
 
 bool mem_cgroup_kmem_disabled(void)
@@ -223,7 +222,6 @@ EXPORT_SYMBOL(memcg_kmem_online_key);
 
 DEFINE_STATIC_KEY_FALSE(memcg_bpf_enabled_key);
 EXPORT_SYMBOL(memcg_bpf_enabled_key);
-#endif
 
 /**
  * mem_cgroup_css_from_folio - css of the memcg associated with a folio
@@ -423,7 +421,7 @@ static const unsigned int memcg_vm_event_stat[] = {
 	PGDEACTIVATE,
 	PGLAZYFREE,
 	PGLAZYFREED,
-#if defined(CONFIG_MEMCG_KMEM) && defined(CONFIG_ZSWAP)
+#ifdef CONFIG_ZSWAP
 	ZSWPIN,
 	ZSWPOUT,
 	ZSWPWB,
@@ -1382,7 +1380,7 @@ static const struct memory_stat memory_stats[] = {
 	{ "sock",			MEMCG_SOCK			},
 	{ "vmalloc",			MEMCG_VMALLOC			},
 	{ "shmem",			NR_SHMEM			},
-#if defined(CONFIG_MEMCG_KMEM) && defined(CONFIG_ZSWAP)
+#ifdef CONFIG_ZSWAP
 	{ "zswap",			MEMCG_ZSWAP_B			},
 	{ "zswapped",			MEMCG_ZSWAPPED			},
 #endif
@@ -1738,13 +1736,11 @@ struct memcg_stock_pcp {
 	struct mem_cgroup *cached; /* this never be root cgroup */
 	unsigned int nr_pages;
 
-#ifdef CONFIG_MEMCG_KMEM
 	struct obj_cgroup *cached_objcg;
 	struct pglist_data *cached_pgdat;
 	unsigned int nr_bytes;
 	int nr_slab_reclaimable_b;
 	int nr_slab_unreclaimable_b;
-#endif
 
 	struct work_struct work;
 	unsigned long flags;
@@ -1755,22 +1751,9 @@ static DEFINE_PER_CPU(struct memcg_stock_pcp, memcg_stock) = {
 };
 static DEFINE_MUTEX(percpu_charge_mutex);
 
-#ifdef CONFIG_MEMCG_KMEM
 static struct obj_cgroup *drain_obj_stock(struct memcg_stock_pcp *stock);
 static bool obj_stock_flush_required(struct memcg_stock_pcp *stock,
 				     struct mem_cgroup *root_memcg);
-
-#else
-static inline struct obj_cgroup *drain_obj_stock(struct memcg_stock_pcp *stock)
-{
-	return NULL;
-}
-static bool obj_stock_flush_required(struct memcg_stock_pcp *stock,
-				     struct mem_cgroup *root_memcg)
-{
-	return false;
-}
-#endif
 
 /**
  * consume_stock: Try to consume stocked charge on this cpu.
@@ -2450,8 +2433,6 @@ void mem_cgroup_commit_charge(struct folio *folio, struct mem_cgroup *memcg)
 	local_irq_enable();
 }
 
-#ifdef CONFIG_MEMCG_KMEM
-
 static inline void __mod_objcg_mlstate(struct obj_cgroup *objcg,
 				       struct pglist_data *pgdat,
 				       enum node_stat_item idx, int nr)
@@ -3107,7 +3088,6 @@ void __memcg_slab_free_hook(struct kmem_cache *s, struct slab *slab,
 		obj_cgroup_put(objcg);
 	}
 }
-#endif /* CONFIG_MEMCG_KMEM */
 
 /*
  * Because folio_memcg(head) is not set on tails, set it now.
@@ -3154,7 +3134,6 @@ unsigned long mem_cgroup_usage(struct mem_cgroup *memcg, bool swap)
 	return val;
 }
 
-#ifdef CONFIG_MEMCG_KMEM
 static int memcg_online_kmem(struct mem_cgroup *memcg)
 {
 	struct obj_cgroup *objcg;
@@ -3205,15 +3184,6 @@ static void memcg_offline_kmem(struct mem_cgroup *memcg)
 	 */
 	memcg_reparent_list_lrus(memcg, parent);
 }
-#else
-static int memcg_online_kmem(struct mem_cgroup *memcg)
-{
-	return 0;
-}
-static void memcg_offline_kmem(struct mem_cgroup *memcg)
-{
-}
-#endif /* CONFIG_MEMCG_KMEM */
 
 unsigned long mem_cgroup_node_nr_lru_pages(struct mem_cgroup *memcg,
 					   int nid, unsigned int lru_mask,
@@ -3666,10 +3636,8 @@ static struct mem_cgroup *mem_cgroup_alloc(struct mem_cgroup *parent)
 	vmpressure_init(&memcg->vmpressure);
 	memcg->socket_pressure = jiffies;
 	memcg1_memcg_init(memcg);
-#ifdef CONFIG_MEMCG_KMEM
 	memcg->kmemcg_id = -1;
 	INIT_LIST_HEAD(&memcg->objcg_list);
-#endif
 #ifdef CONFIG_CGROUP_WRITEBACK
 	INIT_LIST_HEAD(&memcg->cgwb_list);
 	for (i = 0; i < MEMCG_CGWB_FRN_CNT; i++)
@@ -3703,7 +3671,7 @@ mem_cgroup_css_alloc(struct cgroup_subsys_state *parent_css)
 
 	page_counter_set_high(&memcg->memory, PAGE_COUNTER_MAX);
 	memcg1_soft_limit_reset(memcg);
-#if defined(CONFIG_MEMCG_KMEM) && defined(CONFIG_ZSWAP)
+#ifdef CONFIG_ZSWAP
 	memcg->zswap_max = PAGE_COUNTER_MAX;
 	WRITE_ONCE(memcg->zswap_writeback,
 		!parent || READ_ONCE(parent->zswap_writeback));
@@ -3735,10 +3703,8 @@ mem_cgroup_css_alloc(struct cgroup_subsys_state *parent_css)
 	if (cgroup_subsys_on_dfl(memory_cgrp_subsys) && !cgroup_memory_nosocket)
 		static_branch_inc(&memcg_sockets_enabled_key);
 
-#if defined(CONFIG_MEMCG_KMEM)
 	if (!cgroup_memory_nobpf)
 		static_branch_inc(&memcg_bpf_enabled_key);
-#endif
 
 	return &memcg->css;
 }
@@ -3831,10 +3797,8 @@ static void mem_cgroup_css_free(struct cgroup_subsys_state *css)
 	if (!cgroup_subsys_on_dfl(memory_cgrp_subsys) && memcg1_tcpmem_active(memcg))
 		static_branch_dec(&memcg_sockets_enabled_key);
 
-#if defined(CONFIG_MEMCG_KMEM)
 	if (!cgroup_memory_nobpf)
 		static_branch_dec(&memcg_bpf_enabled_key);
-#endif
 
 	vmpressure_cleanup(&memcg->vmpressure);
 	cancel_work_sync(&memcg->high_work);
@@ -3977,7 +3941,6 @@ static void mem_cgroup_css_rstat_flush(struct cgroup_subsys_state *css, int cpu)
 		atomic64_set(&memcg->vmstats->stats_updates, 0);
 }
 
-#ifdef CONFIG_MEMCG_KMEM
 static void mem_cgroup_fork(struct task_struct *task)
 {
 	/*
@@ -4005,7 +3968,6 @@ static void mem_cgroup_exit(struct task_struct *task)
 	 */
 	task->objcg = NULL;
 }
-#endif
 
 #ifdef CONFIG_LRU_GEN
 static void mem_cgroup_lru_gen_attach(struct cgroup_taskset *tset)
@@ -4029,7 +3991,6 @@ static void mem_cgroup_lru_gen_attach(struct cgroup_taskset *tset)
 static void mem_cgroup_lru_gen_attach(struct cgroup_taskset *tset) {}
 #endif /* CONFIG_LRU_GEN */
 
-#ifdef CONFIG_MEMCG_KMEM
 static void mem_cgroup_kmem_attach(struct cgroup_taskset *tset)
 {
 	struct task_struct *task;
@@ -4040,17 +4001,12 @@ static void mem_cgroup_kmem_attach(struct cgroup_taskset *tset)
 		set_bit(CURRENT_OBJCG_UPDATE_BIT, (unsigned long *)&task->objcg);
 	}
 }
-#else
-static void mem_cgroup_kmem_attach(struct cgroup_taskset *tset) {}
-#endif /* CONFIG_MEMCG_KMEM */
 
-#if defined(CONFIG_LRU_GEN) || defined(CONFIG_MEMCG_KMEM)
 static void mem_cgroup_attach(struct cgroup_taskset *tset)
 {
 	mem_cgroup_lru_gen_attach(tset);
 	mem_cgroup_kmem_attach(tset);
 }
-#endif
 
 static int seq_puts_memcg_tunable(struct seq_file *m, unsigned long value)
 {
@@ -4500,13 +4456,9 @@ struct cgroup_subsys memory_cgrp_subsys = {
 	.css_free = mem_cgroup_css_free,
 	.css_reset = mem_cgroup_css_reset,
 	.css_rstat_flush = mem_cgroup_css_rstat_flush,
-#if defined(CONFIG_LRU_GEN) || defined(CONFIG_MEMCG_KMEM)
 	.attach = mem_cgroup_attach,
-#endif
-#ifdef CONFIG_MEMCG_KMEM
 	.fork = mem_cgroup_fork,
 	.exit = mem_cgroup_exit,
-#endif
 	.dfl_cftypes = memory_files,
 #ifdef CONFIG_MEMCG_V1
 	.can_attach = memcg1_can_attach,
@@ -5492,7 +5444,7 @@ static struct cftype swap_files[] = {
 	{ }	/* terminate */
 };
 
-#if defined(CONFIG_MEMCG_KMEM) && defined(CONFIG_ZSWAP)
+#ifdef CONFIG_ZSWAP
 /**
  * obj_cgroup_may_zswap - check if this cgroup can zswap
  * @objcg: the object cgroup
@@ -5674,7 +5626,7 @@ static struct cftype zswap_files[] = {
 	},
 	{ }	/* terminate */
 };
-#endif /* CONFIG_MEMCG_KMEM && CONFIG_ZSWAP */
+#endif /* CONFIG_ZSWAP */
 
 static int __init mem_cgroup_swap_init(void)
 {
@@ -5685,7 +5637,7 @@ static int __init mem_cgroup_swap_init(void)
 #ifdef CONFIG_MEMCG_V1
 	WARN_ON(cgroup_add_legacy_cftypes(&memory_cgrp_subsys, memsw_files));
 #endif
-#if defined(CONFIG_MEMCG_KMEM) && defined(CONFIG_ZSWAP)
+#ifdef CONFIG_ZSWAP
 	WARN_ON(cgroup_add_dfl_cftypes(&memory_cgrp_subsys, zswap_files));
 #endif
 	return 0;

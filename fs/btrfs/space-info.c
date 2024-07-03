@@ -389,7 +389,23 @@ static u64 calc_available_free_space(struct btrfs_fs_info *fs_info,
 	if (avail == 0)
 		return 0;
 
-	data_chunk_size = calc_effective_data_chunk_size(fs_info);
+	/*
+	 * Calculate the data_chunk_size, space_info->chunk_size is the
+	 * "optimal" chunk size based on the fs size.  However when we actually
+	 * allocate the chunk we will strip this down further, making it no more
+	 * than 10% of the disk or 1G, whichever is smaller.
+	 *
+	 * On the zoned mode, we need to use zone_size (=
+	 * data_sinfo->chunk_size) as it is.
+	 */
+	data_sinfo = btrfs_find_space_info(fs_info, BTRFS_BLOCK_GROUP_DATA);
+	if (!btrfs_is_zoned(fs_info)) {
+		data_chunk_size = min(data_sinfo->chunk_size,
+				      mult_perc(fs_info->fs_devices->total_rw_bytes, 10));
+		data_chunk_size = min_t(u64, data_chunk_size, SZ_1G);
+	} else {
+		data_chunk_size = data_sinfo->chunk_size;
+	}
 
 	/*
 	 * Since data allocations immediately use block groups as part of the
@@ -417,6 +433,17 @@ static u64 calc_available_free_space(struct btrfs_fs_info *fs_info,
 		avail >>= 3;
 	else
 		avail >>= 1;
+
+	/*
+	 * On the zoned mode, we always allocate one zone as one chunk.
+	 * Returning non-zone size alingned bytes here will result in
+	 * less pressure for the async metadata reclaim process, and it
+	 * will over-commit too much leading to ENOSPC. Align down to the
+	 * zone size to avoid that.
+	 */
+	if (btrfs_is_zoned(fs_info))
+		avail = ALIGN_DOWN(avail, fs_info->zone_size);
+
 	return avail;
 }
 

@@ -290,6 +290,11 @@ static int usercopy_test_init(struct kunit *test)
 	struct usercopy_test_priv *priv;
 	unsigned long user_addr;
 
+	if (!IS_ENABLED(CONFIG_MMU)) {
+		kunit_skip(test, "Userspace allocation testing not available on non-MMU systems");
+		return 0;
+	}
+
 	priv = kunit_kzalloc(test, sizeof(*priv), GFP_KERNEL);
 	KUNIT_ASSERT_NOT_ERR_OR_NULL(test, priv);
 	test->priv = priv;
@@ -326,4 +331,5 @@ static struct kunit_suite usercopy_test_suite = {
 
 kunit_test_suites(&usercopy_test_suite);
 MODULE_AUTHOR("Kees Cook <kees@kernel.org>");
+MODULE_DESCRIPTION("Kernel module for testing copy_to/from_user infrastructure");
 MODULE_LICENSE("GPL");

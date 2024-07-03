@@ -138,14 +138,13 @@ static void gup_put_folio(struct folio *folio, int refs, unsigned int flags)
  * It is called when we have a stable reference for the folio, typically in
  * GUP slow path.
  */
-int __must_check try_grab_folio(struct folio *folio, int refs, unsigned int flags)
+int __must_check try_grab_folio(struct folio *folio, int refs,
+				unsigned int flags)
 {
-	struct page *page = &folio->page;
-
 	if (WARN_ON_ONCE(folio_ref_count(folio) <= 0))
 		return -ENOMEM;
 
-	if (unlikely(!(flags & FOLL_PCI_P2PDMA) && is_pci_p2pdma_page(page)))
+	if (unlikely(!(flags & FOLL_PCI_P2PDMA) && is_pci_p2pdma_page(&folio->page)))
 		return -EREMOTEIO;
 
 	if (flags & FOLL_GET)
@@ -155,7 +154,7 @@ int __must_check try_grab_folio(struct folio *folio, int refs, unsigned int flag
 		 * Don't take a pin on the zero page - it's not going anywhere
 		 * and it is used in a *lot* of places.
 		 */
-		if (is_zero_page(page))
+		if (is_zero_folio(folio))
 			return 0;
 
 		/*
@@ -166,8 +165,7 @@ int __must_check try_grab_folio(struct folio *folio, int refs, unsigned int flag
 			folio_ref_add(folio, refs);
 			atomic_add(refs, &folio->_pincount);
 		} else {
-			folio_ref_add(folio,
-					refs * GUP_PIN_COUNTING_BIAS);
+			folio_ref_add(folio, refs * GUP_PIN_COUNTING_BIAS);
 		}
 
 		node_stat_mod_folio(folio, NR_FOLL_PIN_ACQUIRED, refs);
@@ -464,7 +462,7 @@ static inline void mm_set_has_pinned_flag(unsigned long *mm_flags)
 
 #ifdef CONFIG_MMU
 
-#if defined(CONFIG_ARCH_HAS_HUGEPD) || defined(CONFIG_HAVE_GUP_FAST)
+#ifdef CONFIG_HAVE_GUP_FAST
 static int record_subpages(struct page *page, unsigned long sz,
 			   unsigned long addr, unsigned long end,
 			   struct page **pages)
@@ -478,153 +476,103 @@ static int record_subpages(struct page *page, unsigned long sz,
 
 	return nr;
 }
-#endif	/* CONFIG_ARCH_HAS_HUGEPD || CONFIG_HAVE_GUP_FAST */
 
-#ifdef CONFIG_ARCH_HAS_HUGEPD
-static unsigned long hugepte_addr_end(unsigned long addr, unsigned long end,
-				      unsigned long sz)
-{
-	unsigned long __boundary = (addr + sz) & ~(sz-1);
-	return (__boundary - 1 < end - 1) ? __boundary : end;
-}
-
-/*
- * Returns 1 if succeeded, 0 if failed, -EMLINK if unshare needed.
+/**
+ * try_grab_folio_fast() - Attempt to get or pin a folio in fast path.
+ * @page:  pointer to page to be grabbed
+ * @refs:  the value to (effectively) add to the folio's refcount
+ * @flags: gup flags: these are the FOLL_* flag values.
  *
- * NOTE: for the same entry, gup-fast and gup-slow can return different
- * results (0 v.s. -EMLINK) depending on whether vma is available.  This is
- * the expected behavior, where we simply want gup-fast to fallback to
- * gup-slow to take the vma reference first.
+ * "grab" names in this file mean, "look at flags to decide whether to use
+ * FOLL_PIN or FOLL_GET behavior, when incrementing the folio's refcount.
+ *
+ * Either FOLL_PIN or FOLL_GET (or neither) must be set, but not both at the
+ * same time. (That's true throughout the get_user_pages*() and
+ * pin_user_pages*() APIs.) Cases:
+ *
+ *    FOLL_GET: folio's refcount will be incremented by @refs.
+ *
+ *    FOLL_PIN on large folios: folio's refcount will be incremented by
+ *    @refs, and its pincount will be incremented by @refs.
+ *
+ *    FOLL_PIN on single-page folios: folio's refcount will be incremented by
+ *    @refs * GUP_PIN_COUNTING_BIAS.
+ *
+ * Return: The folio containing @page (with refcount appropriately
+ * incremented) for success, or NULL upon failure. If neither FOLL_GET
+ * nor FOLL_PIN was set, that's considered failure, and furthermore,
+ * a likely bug in the caller, so a warning is also emitted.
+ *
+ * It uses add ref unless zero to elevate the folio refcount and must be called
+ * in fast path only.
  */
-static int gup_hugepte(struct vm_area_struct *vma, pte_t *ptep, unsigned long sz,
-		       unsigned long addr, unsigned long end, unsigned int flags,
-		       struct page **pages, int *nr, bool fast)
+static struct folio *try_grab_folio_fast(struct page *page, int refs,
+					 unsigned int flags)
 {
-	unsigned long pte_end;
-	struct page *page;
 	struct folio *folio;
-	pte_t pte;
-	int refs;
 
-	pte_end = (addr + sz) & ~(sz-1);
-	if (pte_end < end)
-		end = pte_end;
+	/* Raise warn if it is not called in fast GUP */
+	VM_WARN_ON_ONCE(!irqs_disabled());
 
-	pte = huge_ptep_get(ptep);
+	if (WARN_ON_ONCE((flags & (FOLL_GET | FOLL_PIN)) == 0))
+		return NULL;
 
-	if (!pte_access_permitted(pte, flags & FOLL_WRITE))
-		return 0;
+	if (unlikely(!(flags & FOLL_PCI_P2PDMA) && is_pci_p2pdma_page(page)))
+		return NULL;
 
-	/* hugepages are never "special" */
-	VM_BUG_ON(!pfn_valid(pte_pfn(pte)));
+	if (flags & FOLL_GET)
+		return try_get_folio(page, refs);
 
-	page = pte_page(pte);
-	refs = record_subpages(page, sz, addr, end, pages + *nr);
+	/* FOLL_PIN is set */
 
-	if (fast) {
-		folio = try_grab_folio_fast(page, refs, flags);
-		if (!folio)
-			return 0;
-	} else {
-		folio = page_folio(page);
-		if (try_grab_folio(folio, refs, flags))
-			return 0;
+	/*
+	 * Don't take a pin on the zero page - it's not going anywhere
+	 * and it is used in a *lot* of places.
+	 */
+	if (is_zero_page(page))
+		return page_folio(page);
+
+	folio = try_get_folio(page, refs);
+	if (!folio)
+		return NULL;
+
+	/*
+	 * Can't do FOLL_LONGTERM + FOLL_PIN gup fast path if not in a
+	 * right zone, so fail and let the caller fall back to the slow
+	 * path.
+	 */
+	if (unlikely((flags & FOLL_LONGTERM) &&
+		     !folio_is_longterm_pinnable(folio))) {
+		if (!put_devmap_managed_folio_refs(folio, refs))
+			folio_put_refs(folio, refs);
+		return NULL;
 	}
 
-	if (unlikely(pte_val(pte) != pte_val(ptep_get(ptep)))) {
-		gup_put_folio(folio, refs, flags);
-		return 0;
-	}
+	/*
+	 * When pinning a large folio, use an exact count to track it.
+	 *
+	 * However, be sure to *also* increment the normal folio
+	 * refcount field at least once, so that the folio really
+	 * is pinned.  That's why the refcount from the earlier
+	 * try_get_folio() is left intact.
+	 */
+	if (folio_test_large(folio))
+		atomic_add(refs, &folio->_pincount);
+	else
+		folio_ref_add(folio,
+				refs * (GUP_PIN_COUNTING_BIAS - 1));
+	/*
+	 * Adjust the pincount before re-checking the PTE for changes.
+	 * This is essentially a smp_mb() and is paired with a memory
+	 * barrier in folio_try_share_anon_rmap_*().
+	 */
+	smp_mb__after_atomic();
 
-	if (!pte_write(pte) && gup_must_unshare(vma, flags, &folio->page)) {
-		gup_put_folio(folio, refs, flags);
-		return -EMLINK;
-	}
+	node_stat_mod_folio(folio, NR_FOLL_PIN_ACQUIRED, refs);
 
-	*nr += refs;
-	folio_set_referenced(folio);
-	return 1;
+	return folio;
 }
-
-/*
- * NOTE: currently GUP for a hugepd is only possible on hugetlbfs file
- * systems on Power, which does not have issue with folio writeback against
- * GUP updates.  When hugepd will be extended to support non-hugetlbfs or
- * even anonymous memory, we need to do extra check as what we do with most
- * of the other folios. See writable_file_mapping_allowed() and
- * gup_fast_folio_allowed() for more information.
- */
-static int gup_hugepd(struct vm_area_struct *vma, hugepd_t hugepd,
-		      unsigned long addr, unsigned int pdshift,
-		      unsigned long end, unsigned int flags,
-		      struct page **pages, int *nr, bool fast)
-{
-	pte_t *ptep;
-	unsigned long sz = 1UL << hugepd_shift(hugepd);
-	unsigned long next;
-	int ret;
-
-	ptep = hugepte_offset(hugepd, addr, pdshift);
-	do {
-		next = hugepte_addr_end(addr, end, sz);
-		ret = gup_hugepte(vma, ptep, sz, addr, end, flags, pages, nr, fast);
-		if (ret != 1)
-			return ret;
-	} while (ptep++, addr = next, addr != end);
-
-	return 1;
-}
-
-static struct page *follow_hugepd(struct vm_area_struct *vma, hugepd_t hugepd,
-				  unsigned long addr, unsigned int pdshift,
-				  unsigned int flags,
-				  struct follow_page_context *ctx)
-{
-	struct page *page;
-	struct hstate *h;
-	spinlock_t *ptl;
-	int nr = 0, ret;
-	pte_t *ptep;
-
-	/* Only hugetlb supports hugepd */
-	if (WARN_ON_ONCE(!is_vm_hugetlb_page(vma)))
-		return ERR_PTR(-EFAULT);
-
-	h = hstate_vma(vma);
-	ptep = hugepte_offset(hugepd, addr, pdshift);
-	ptl = huge_pte_lock(h, vma->vm_mm, ptep);
-	ret = gup_hugepd(vma, hugepd, addr, pdshift, addr + PAGE_SIZE,
-			 flags, &page, &nr, false);
-	spin_unlock(ptl);
-
-	if (ret == 1) {
-		/* GUP succeeded */
-		WARN_ON_ONCE(nr != 1);
-		ctx->page_mask = (1U << huge_page_order(h)) - 1;
-		return page;
-	}
-
-	/* ret can be either 0 (translates to NULL) or negative */
-	return ERR_PTR(ret);
-}
-#else /* CONFIG_ARCH_HAS_HUGEPD */
-static inline int gup_hugepd(struct vm_area_struct *vma, hugepd_t hugepd,
-			     unsigned long addr, unsigned int pdshift,
-			     unsigned long end, unsigned int flags,
-			     struct page **pages, int *nr, bool fast)
-{
-	return 0;
-}
-
-static struct page *follow_hugepd(struct vm_area_struct *vma, hugepd_t hugepd,
-				  unsigned long addr, unsigned int pdshift,
-				  unsigned int flags,
-				  struct follow_page_context *ctx)
-{
-	return NULL;
-}
-#endif /* CONFIG_ARCH_HAS_HUGEPD */
-
+#endif	/* CONFIG_HAVE_GUP_FAST */
 
 static struct page *no_page_table(struct vm_area_struct *vma,
 				  unsigned int flags, unsigned long address)
@@ -994,9 +942,6 @@ static struct page *follow_pmd_mask(struct vm_area_struct *vma,
 		return no_page_table(vma, flags, address);
 	if (!pmd_present(pmdval))
 		return no_page_table(vma, flags, address);
-	if (unlikely(is_hugepd(__hugepd(pmd_val(pmdval)))))
-		return follow_hugepd(vma, __hugepd(pmd_val(pmdval)),
-				     address, PMD_SHIFT, flags, ctx);
 	if (pmd_devmap(pmdval)) {
 		ptl = pmd_lock(mm, pmd);
 		page = follow_devmap_pmd(vma, address, pmd, flags, &ctx->pgmap);
@@ -1047,9 +992,6 @@ static struct page *follow_pud_mask(struct vm_area_struct *vma,
 	pud = READ_ONCE(*pudp);
 	if (!pud_present(pud))
 		return no_page_table(vma, flags, address);
-	if (unlikely(is_hugepd(__hugepd(pud_val(pud)))))
-		return follow_hugepd(vma, __hugepd(pud_val(pud)),
-				     address, PUD_SHIFT, flags, ctx);
 	if (pud_leaf(pud)) {
 		ptl = pud_lock(mm, pudp);
 		page = follow_huge_pud(vma, address, pudp, flags, ctx);
@@ -1074,10 +1016,6 @@ static struct page *follow_p4d_mask(struct vm_area_struct *vma,
 	p4dp = p4d_offset(pgdp, address);
 	p4d = READ_ONCE(*p4dp);
 	BUILD_BUG_ON(p4d_leaf(p4d));
-
-	if (unlikely(is_hugepd(__hugepd(p4d_val(p4d)))))
-		return follow_hugepd(vma, __hugepd(p4d_val(p4d)),
-				     address, P4D_SHIFT, flags, ctx);
 
 	if (!p4d_present(p4d) || p4d_bad(p4d))
 		return no_page_table(vma, flags, address);
@@ -1122,10 +1060,7 @@ static struct page *follow_page_mask(struct vm_area_struct *vma,
 	ctx->page_mask = 0;
 	pgd = pgd_offset(mm, address);
 
-	if (unlikely(is_hugepd(__hugepd(pgd_val(*pgd)))))
-		page = follow_hugepd(vma, __hugepd(pgd_val(*pgd)),
-				     address, PGDIR_SHIFT, flags, ctx);
-	else if (pgd_none(*pgd) || unlikely(pgd_bad(*pgd)))
+	if (pgd_none(*pgd) || unlikely(pgd_bad(*pgd)))
 		page = no_page_table(vma, flags, address);
 	else
 		page = follow_p4d_mask(vma, address, pgd, flags, ctx);
@@ -2795,102 +2730,6 @@ EXPORT_SYMBOL(get_user_pages_unlocked);
  * This code is based heavily on the PowerPC implementation by Nick Piggin.
  */
 #ifdef CONFIG_HAVE_GUP_FAST
-/**
- * try_grab_folio_fast() - Attempt to get or pin a folio in fast path.
- * @page:  pointer to page to be grabbed
- * @refs:  the value to (effectively) add to the folio's refcount
- * @flags: gup flags: these are the FOLL_* flag values.
- *
- * "grab" names in this file mean, "look at flags to decide whether to use
- * FOLL_PIN or FOLL_GET behavior, when incrementing the folio's refcount.
- *
- * Either FOLL_PIN or FOLL_GET (or neither) must be set, but not both at the
- * same time. (That's true throughout the get_user_pages*() and
- * pin_user_pages*() APIs.) Cases:
- *
- *    FOLL_GET: folio's refcount will be incremented by @refs.
- *
- *    FOLL_PIN on large folios: folio's refcount will be incremented by
- *    @refs, and its pincount will be incremented by @refs.
- *
- *    FOLL_PIN on single-page folios: folio's refcount will be incremented by
- *    @refs * GUP_PIN_COUNTING_BIAS.
- *
- * Return: The folio containing @page (with refcount appropriately
- * incremented) for success, or NULL upon failure. If neither FOLL_GET
- * nor FOLL_PIN was set, that's considered failure, and furthermore,
- * a likely bug in the caller, so a warning is also emitted.
- *
- * It uses add ref unless zero to elevate the folio refcount and must be called
- * in fast path only.
- */
-static struct folio *try_grab_folio_fast(struct page *page, int refs,
-					 unsigned int flags)
-{
-	struct folio *folio;
-
-	/* Raise warn if it is not called in fast GUP */
-	VM_WARN_ON_ONCE(!irqs_disabled());
-
-	if (WARN_ON_ONCE((flags & (FOLL_GET | FOLL_PIN)) == 0))
-		return NULL;
-
-	if (unlikely(!(flags & FOLL_PCI_P2PDMA) && is_pci_p2pdma_page(page)))
-		return NULL;
-
-	if (flags & FOLL_GET)
-		return try_get_folio(page, refs);
-
-	/* FOLL_PIN is set */
-
-	/*
-	 * Don't take a pin on the zero page - it's not going anywhere
-	 * and it is used in a *lot* of places.
-	 */
-	if (is_zero_page(page))
-		return page_folio(page);
-
-	folio = try_get_folio(page, refs);
-	if (!folio)
-		return NULL;
-
-	/*
-	 * Can't do FOLL_LONGTERM + FOLL_PIN gup fast path if not in a
-	 * right zone, so fail and let the caller fall back to the slow
-	 * path.
-	 */
-	if (unlikely((flags & FOLL_LONGTERM) &&
-		     !folio_is_longterm_pinnable(folio))) {
-		if (!put_devmap_managed_folio_refs(folio, refs))
-			folio_put_refs(folio, refs);
-		return NULL;
-	}
-
-	/*
-	 * When pinning a large folio, use an exact count to track it.
-	 *
-	 * However, be sure to *also* increment the normal folio
-	 * refcount field at least once, so that the folio really
-	 * is pinned.  That's why the refcount from the earlier
-	 * try_get_folio() is left intact.
-	 */
-	if (folio_test_large(folio))
-		atomic_add(refs, &folio->_pincount);
-	else
-		folio_ref_add(folio,
-				refs * (GUP_PIN_COUNTING_BIAS - 1));
-	/*
-	 * Adjust the pincount before re-checking the PTE for changes.
-	 * This is essentially a smp_mb() and is paired with a memory
-	 * barrier in folio_try_share_anon_rmap_*().
-	 */
-	smp_mb__after_atomic();
-
-	node_stat_mod_folio(folio, NR_FOLL_PIN_ACQUIRED, refs);
-
-	return folio;
-}
-
 /*
  * Used in the GUP-fast path to determine whether GUP is permitted to work on
  * a specific folio.
@@ -3363,14 +3202,6 @@ static int gup_fast_pmd_range(pud_t *pudp, pud_t pud, unsigned long addr,
 				pages, nr))
 				return 0;
 
-		} else if (unlikely(is_hugepd(__hugepd(pmd_val(pmd))))) {
-			/*
-			 * architecture have different format for hugetlbfs
-			 * pmd format and THP pmd format
-			 */
-			if (gup_hugepd(NULL, __hugepd(pmd_val(pmd)), addr,
-				       PMD_SHIFT, next, flags, pages, nr, true) != 1)
-				return 0;
 		} else if (!gup_fast_pte_range(pmd, pmdp, addr, next, flags,
 					       pages, nr))
 			return 0;
@@ -3397,10 +3228,6 @@ static int gup_fast_pud_range(p4d_t *p4dp, p4d_t p4d, unsigned long addr,
 			if (!gup_fast_pud_leaf(pud, pudp, addr, next, flags,
 					       pages, nr))
 				return 0;
-		} else if (unlikely(is_hugepd(__hugepd(pud_val(pud))))) {
-			if (gup_hugepd(NULL, __hugepd(pud_val(pud)), addr,
-				       PUD_SHIFT, next, flags, pages, nr, true) != 1)
-				return 0;
 		} else if (!gup_fast_pmd_range(pudp, pud, addr, next, flags,
 					       pages, nr))
 			return 0;
@@ -3424,12 +3251,8 @@ static int gup_fast_p4d_range(pgd_t *pgdp, pgd_t pgd, unsigned long addr,
 		if (!p4d_present(p4d))
 			return 0;
 		BUILD_BUG_ON(p4d_leaf(p4d));
-		if (unlikely(is_hugepd(__hugepd(p4d_val(p4d))))) {
-			if (gup_hugepd(NULL, __hugepd(p4d_val(p4d)), addr,
-				       P4D_SHIFT, next, flags, pages, nr, true) != 1)
-				return 0;
-		} else if (!gup_fast_pud_range(p4dp, p4d, addr, next, flags,
-					       pages, nr))
+		if (!gup_fast_pud_range(p4dp, p4d, addr, next, flags,
+					pages, nr))
 			return 0;
 	} while (p4dp++, addr = next, addr != end);
 
@@ -3452,10 +3275,6 @@ static void gup_fast_pgd_range(unsigned long addr, unsigned long end,
 		if (unlikely(pgd_leaf(pgd))) {
 			if (!gup_fast_pgd_leaf(pgd, pgdp, addr, next, flags,
 					       pages, nr))
-				return;
-		} else if (unlikely(is_hugepd(__hugepd(pgd_val(pgd))))) {
-			if (gup_hugepd(NULL, __hugepd(pgd_val(pgd)), addr,
-				       PGDIR_SHIFT, next, flags, pages, nr, true) != 1)
 				return;
 		} else if (!gup_fast_p4d_range(pgdp, pgd, addr, next, flags,
 					       pages, nr))
@@ -3856,13 +3675,14 @@ long memfd_pin_folios(struct file *memfd, loff_t start, loff_t end,
 				    next_idx != folio_index(fbatch.folios[i]))
 					continue;
 
-				folio = try_grab_folio(&fbatch.folios[i]->page,
-						       1, FOLL_PIN);
-				if (!folio) {
+				if (try_grab_folio(fbatch.folios[i],
+						       1, FOLL_PIN)) {
 					folio_batch_release(&fbatch);
 					ret = -EINVAL;
 					goto err;
 				}
+
+				folio = fbatch.folios[i];
 
 				if (nr_folios == 0)
 					*offset = offset_in_folio(folio, start);
@@ -3897,4 +3717,3 @@ err:
 	return ret;
 }
 EXPORT_SYMBOL_GPL(memfd_pin_folios);
-

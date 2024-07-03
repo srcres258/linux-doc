@@ -274,12 +274,15 @@ Correctable memory errors are very common on servers. Soft-offline is kernel's
 solution for memory pages having (excessive) corrected memory errors.
 
 For different types of page, soft-offline has different behaviors / costs.
+
 - For a raw error page, soft-offline migrates the in-use page's content to
   a new raw page.
+
 - For a page that is part of a transparent hugepage, soft-offline splits the
   transparent hugepage into raw pages, then migrates only the raw error page.
   As a result, user is transparently backed by 1 less hugepage, impacting
   memory access performance.
+
 - For a page that is part of a HugeTLB hugepage, soft-offline first migrates
   the entire HugeTLB hugepage, during which a free hugepage will be consumed
   as migration target.  Then the original hugepage is dissolved into raw

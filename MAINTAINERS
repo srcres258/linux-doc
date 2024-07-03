@@ -1231,7 +1231,7 @@ F:	Documentation/devicetree/bindings/iio/adc/adi,ad7091r*
 F:	drivers/iio/adc/ad7091r*
 
 ANALOG DEVICES INC AD7192 DRIVER
-M:	Alexandru Tachici <alexandru.tachici@analog.com>
+M:	Alisa-Dariana Roman <alisa.roman@analog.com>
 L:	linux-iio@vger.kernel.org
 S:	Supported
 W:	https://ez.analog.com/linux-software-drivers
@@ -2257,10 +2257,12 @@ M:	Marek Behún <kabel@kernel.org>
 S:	Maintained
 W:	https://www.turris.cz/
 F:	Documentation/ABI/testing/debugfs-moxtet
+F:	Documentation/ABI/testing/sysfs-bus-i2c-devices-turris-omnia-mcu
 F:	Documentation/ABI/testing/sysfs-bus-moxtet-devices
 F:	Documentation/ABI/testing/sysfs-firmware-turris-mox-rwtm
 F:	Documentation/devicetree/bindings/bus/moxtet.txt
 F:	Documentation/devicetree/bindings/firmware/cznic,turris-mox-rwtm.txt
+F:	Documentation/devicetree/bindings/firmware/cznic,turris-omnia-mcu.yaml
 F:	Documentation/devicetree/bindings/gpio/gpio-moxtet.txt
 F:	Documentation/devicetree/bindings/interrupt-controller/marvell,mpic.yaml
 F:	Documentation/devicetree/bindings/leds/cznic,turris-omnia-leds.yaml
@@ -2270,10 +2272,12 @@ F:	drivers/firmware/turris-mox-rwtm.c
 F:	drivers/gpio/gpio-moxtet.c
 F:	drivers/leds/leds-turris-omnia.c
 F:	drivers/mailbox/armada-37xx-rwtm-mailbox.c
+F:	drivers/platform/cznic/
 F:	drivers/watchdog/armada_37xx_wdt.c
 F:	include/dt-bindings/bus/moxtet.h
 F:	include/linux/armada-37xx-rwtm-mailbox.h
 F:	include/linux/moxtet.h
+F:	include/linux/turris-omnia-mcu-interface.h
 
 ARM/FARADAY FA526 PORT
 M:	Hans Ulli Kroll <ulli.kroll@googlemail.com>
@@ -3593,6 +3597,13 @@ F:	drivers/auxdisplay/
 F:	include/linux/cfag12864b.h
 F:	include/uapi/linux/map_to_14segment.h
 F:	include/uapi/linux/map_to_7segment.h
+
+AVAGO APDS9306 AMBIENT LIGHT SENSOR DRIVER
+M:	Subhajit Ghosh <subhajit.ghosh@tweaklogic.com>
+L:	linux-iio@vger.kernel.org
+S:	Maintained
+F:	Documentation/devicetree/bindings/iio/light/avago,apds9300.yaml
+F:	drivers/iio/light/apds9306.c
 
 AVIA HX711 ANALOG DIGITAL CONVERTER IIO DRIVER
 M:	Andreas Klinger <ak@it-klinger.de>
@@ -5233,6 +5244,11 @@ S:	Maintained
 F:	Documentation/devicetree/bindings/sound/google,cros-ec-codec.yaml
 F:	sound/soc/codecs/cros_ec_codec.*
 
+CHROMEOS EC CHARGE CONTROL
+M:	Thomas Weißschuh <thomas@weissschuh.net>
+S:	Maintained
+F:	drivers/power/supply/cros_charge-control.c
+
 CHROMEOS EC HARDWARE MONITORING
 M:	Thomas Weißschuh <thomas@weissschuh.net>
 L:	chrome-platform@lists.linux.dev
@@ -5251,6 +5267,7 @@ M:	Benson Leung <bleung@chromium.org>
 R:	Guenter Roeck <groeck@chromium.org>
 L:	chrome-platform@lists.linux.dev
 S:	Maintained
+F:	drivers/power/supply/cros_charge-control.c
 F:	drivers/power/supply/cros_usbpd-charger.c
 N:	cros_ec
 N:	cros-ec
@@ -8852,7 +8869,7 @@ FREESCALE DSPI DRIVER
 M:	Vladimir Oltean <olteanv@gmail.com>
 L:	linux-spi@vger.kernel.org
 S:	Maintained
-F:	Documentation/devicetree/bindings/spi/spi-fsl-dspi.txt
+F:	Documentation/devicetree/bindings/spi/fsl,dspi*.yaml
 F:	drivers/spi/spi-fsl-dspi.c
 F:	include/linux/spi/spi-fsl-dspi.h
 
@@ -11205,8 +11222,8 @@ F:	include/drm/intel/
 F:	include/uapi/drm/xe_drm.h
 
 INTEL ETHERNET DRIVERS
-M:	Jesse Brandeburg <jesse.brandeburg@intel.com>
 M:	Tony Nguyen <anthony.l.nguyen@intel.com>
+M:	Przemek Kitszel <przemyslaw.kitszel@intel.com>
 L:	intel-wired-lan@lists.osuosl.org (moderated for non-subscribers)
 S:	Supported
 W:	https://www.intel.com/content/www/us/en/support.html
@@ -11726,7 +11743,7 @@ F:	include/linux/iosys-map.h
 
 IO_URING
 M:	Jens Axboe <axboe@kernel.dk>
-R:	Pavel Begunkov <asml.silence@gmail.com>
+M:	Pavel Begunkov <asml.silence@gmail.com>
 L:	io-uring@vger.kernel.org
 S:	Maintained
 T:	git git://git.kernel.dk/linux-block
@@ -12911,7 +12928,6 @@ F:	arch/powerpc/platforms/52xx/
 LINUX FOR POWERPC EMBEDDED PPC4XX
 L:	linuxppc-dev@lists.ozlabs.org
 S:	Orphan
-F:	arch/powerpc/platforms/40x/
 F:	arch/powerpc/platforms/44x/
 
 LINUX FOR POWERPC EMBEDDED PPC85XX
@@ -19000,6 +19016,10 @@ T:	git https://git.kernel.org/pub/scm/linux/kernel/git/crng/random.git
 F:	Documentation/devicetree/bindings/rng/microsoft,vmgenid.yaml
 F:	drivers/char/random.c
 F:	drivers/virt/vmgenid.c
+F:	include/vdso/getrandom.h
+F:	lib/vdso/getrandom.c
+F:	arch/x86/entry/vdso/vgetrandom*
+F:	arch/x86/include/asm/vdso/getrandom*
 
 RAPIDIO SUBSYSTEM
 M:	Matt Porter <mporter@kernel.crashing.org>

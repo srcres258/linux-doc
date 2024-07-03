@@ -16,18 +16,6 @@
 #include <linux/pci-epf.h>
 
 /**
- * dw_pcie_ep_init_notify - Notify EPF drivers about EPC initialization complete
- * @ep: DWC EP device
- */
-void dw_pcie_ep_init_notify(struct dw_pcie_ep *ep)
-{
-	struct pci_epc *epc = ep->epc;
-
-	pci_epc_init_notify(epc);
-}
-EXPORT_SYMBOL_GPL(dw_pcie_ep_init_notify);
-
-/**
  * dw_pcie_ep_get_func_from_ep - Get the struct dw_pcie_ep_func corresponding to
  *				 the endpoint function
  * @ep: DWC EP device
@@ -226,6 +214,13 @@ static int dw_pcie_ep_set_bar(struct pci_epc *epc, u8 func_no, u8 vfunc_no,
 	int flags = epf_bar->flags;
 	int ret, type;
 	u32 reg;
+
+	/*
+	 * DWC does not allow BAR pairs to overlap, e.g. you cannot combine BARs
+	 * 1 and 2 to form a 64-bit BAR.
+	 */
+	if ((flags & PCI_BASE_ADDRESS_MEM_TYPE_64) && (bar & 1))
+		return -EINVAL;
 
 	reg = PCI_BASE_ADDRESS_0 + (4 * bar);
 
