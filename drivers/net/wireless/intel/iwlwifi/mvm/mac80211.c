@@ -59,13 +59,13 @@ static const struct ieee80211_iface_combination iwl_mvm_iface_combinations[] = {
 		.num_different_channels = 2,
 		.max_interfaces = 3,
 		.limits = iwl_mvm_limits,
-		.n_limits = ARRAY_SIZE(iwl_mvm_limits) - 1,
+		.n_limits = ARRAY_SIZE(iwl_mvm_limits),
 	},
 	{
 		.num_different_channels = 1,
 		.max_interfaces = 3,
 		.limits = iwl_mvm_limits_ap,
-		.n_limits = ARRAY_SIZE(iwl_mvm_limits_ap) - 1,
+		.n_limits = ARRAY_SIZE(iwl_mvm_limits_ap),
 	},
 };
 
@@ -372,7 +372,7 @@ int iwl_mvm_mac_setup_register(struct iwl_mvm *mvm)
 	if (mvm->mld_api_is_used && mvm->nvm_data->sku_cap_11be_enable &&
 	    !iwlwifi_mod_params.disable_11ax &&
 	    !iwlwifi_mod_params.disable_11be) {
-		hw->wiphy->flags |= WIPHY_FLAG_DISABLE_WEXT;
+		hw->wiphy->flags |= WIPHY_FLAG_SUPPORTS_MLO;
 		/* we handle this already earlier, but need it for MLO */
 		ieee80211_hw_set(hw, HANDLES_QUIET_CSA);
 	}
@@ -660,7 +660,7 @@ int iwl_mvm_mac_setup_register(struct iwl_mvm *mvm)
 		hw->wiphy->features |= NL80211_FEATURE_WFA_TPC_IE_IN_PROBES;
 
 	if (iwl_fw_lookup_cmd_ver(mvm->fw, WOWLAN_KEK_KCK_MATERIAL,
-				  IWL_FW_CMD_VER_UNKNOWN) == 3)
+				  IWL_FW_CMD_VER_UNKNOWN) >= 3)
 		hw->wiphy->flags |= WIPHY_FLAG_SUPPORTS_EXT_KEK_KCK;
 
 	if (fw_has_api(&mvm->fw->ucode_capa,
@@ -1692,7 +1692,8 @@ static void iwl_mvm_prevent_esr_done_wk(struct wiphy *wiphy,
 	struct iwl_mvm_vif *mvmvif =
 		container_of(wk, struct iwl_mvm_vif, prevent_esr_done_wk.work);
 	struct iwl_mvm *mvm = mvmvif->mvm;
-	struct ieee80211_vif *vif = iwl_mvm_get_bss_vif(mvm);
+	struct ieee80211_vif *vif =
+		container_of((void *)mvmvif, struct ieee80211_vif, drv_priv);
 
 	guard(mvm)(mvm);
 	iwl_mvm_unblock_esr(mvm, vif, IWL_MVM_ESR_BLOCKED_PREVENTION);
@@ -1714,7 +1715,8 @@ static void iwl_mvm_unblock_esr_tpt(struct wiphy *wiphy, struct wiphy_work *wk)
 	struct iwl_mvm_vif *mvmvif =
 		container_of(wk, struct iwl_mvm_vif, unblock_esr_tpt_wk);
 	struct iwl_mvm *mvm = mvmvif->mvm;
-	struct ieee80211_vif *vif = iwl_mvm_get_bss_vif(mvm);
+	struct ieee80211_vif *vif =
+		container_of((void *)mvmvif, struct ieee80211_vif, drv_priv);
 
 	guard(mvm)(mvm);
 	iwl_mvm_unblock_esr(mvm, vif, IWL_MVM_ESR_BLOCKED_TPT);
@@ -6406,11 +6408,9 @@ void iwl_mvm_sync_rx_queues_internal(struct iwl_mvm *mvm,
 	if (sync) {
 		lockdep_assert_held(&mvm->mutex);
 		ret = wait_event_timeout(mvm->rx_sync_waitq,
-					 READ_ONCE(mvm->queue_sync_state) == 0 ||
-					 iwl_mvm_is_radio_hw_killed(mvm),
+					 READ_ONCE(mvm->queue_sync_state) == 0,
 					 SYNC_RX_QUEUE_TIMEOUT);
-		WARN_ONCE(!ret && !iwl_mvm_is_radio_hw_killed(mvm),
-			  "queue sync: failed to sync, state is 0x%lx, cookie %d\n",
+		WARN_ONCE(!ret, "queue sync: failed to sync, state is 0x%lx, cookie %d\n",
 			  mvm->queue_sync_state,
 			  mvm->queue_sync_cookie);
 	}

@@ -391,7 +391,7 @@ static const struct attribute_group *nvmem_dev_groups[] = {
 	NULL,
 };
 
-static const struct bin_attribute bin_attr_nvmem_eeprom_compat = {
+static struct bin_attribute bin_attr_nvmem_eeprom_compat = {
 	.attr	= {
 		.name	= "eeprom",
 	},

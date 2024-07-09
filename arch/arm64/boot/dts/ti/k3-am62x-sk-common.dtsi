@@ -51,8 +51,8 @@
 		/* global cma region */
 		linux,cma {
 			compatible = "shared-dma-pool";
-			size = <0x00 0x8000000>;
 			reusable;
+			size = <0x00 0x8000000>;
 			linux,cma-default;
 		};
 

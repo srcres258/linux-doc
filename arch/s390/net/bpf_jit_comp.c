@@ -31,11 +31,12 @@
 #include <asm/nospec-branch.h>
 #include <asm/set_memory.h>
 #include <asm/text-patching.h>
+#include <asm/unwind.h>
 #include "bpf_jit.h"
 
 struct bpf_jit {
 	u32 seen;		/* Flags to remember seen eBPF instructions */
-	u32 seen_reg[16];	/* Array to remember which registers are used */
+	u16 seen_regs;		/* Mask to remember which registers are used */
 	u32 *addrs;		/* Array with relative instruction addresses */
 	u8 *prg_buf;		/* Start of program */
 	int size;		/* Size of program and literal pool */
@@ -61,6 +62,8 @@ struct bpf_jit {
 #define SEEN_LITERAL	BIT(1)		/* code uses literals */
 #define SEEN_FUNC	BIT(2)		/* calls C functions */
 #define SEEN_STACK	(SEEN_FUNC | SEEN_MEM)
+
+#define NVREGS		0xffc0		/* %r6-%r15 */
 
 /*
  * s390 registers
@@ -120,16 +123,14 @@ static inline void reg_set_seen(struct bpf_jit *jit, u32 b1)
 {
 	u32 r1 = reg2hex[b1];
 
-	if (r1 >= 6 && r1 <= 15 && !jit->seen_reg[r1])
-		jit->seen_reg[r1] = 1;
+	if (r1 >= 6 && r1 <= 15)
+		jit->seen_regs |= (1 << r1);
 }
 
 #define REG_SET_SEEN(b1)					\
 ({								\
 	reg_set_seen(jit, b1);					\
 })
-
-#define REG_SEEN(b1) jit->seen_reg[reg2hex[(b1)]]
 
 /*
  * EMIT macros for code generation
@@ -438,12 +439,12 @@ static void restore_regs(struct bpf_jit *jit, u32 rs, u32 re, u32 stack_depth)
 /*
  * Return first seen register (from start)
  */
-static int get_start(struct bpf_jit *jit, int start)
+static int get_start(u16 seen_regs, int start)
 {
 	int i;
 
 	for (i = start; i <= 15; i++) {
-		if (jit->seen_reg[i])
+		if (seen_regs & (1 << i))
 			return i;
 	}
 	return 0;
@@ -452,15 +453,15 @@ static int get_start(struct bpf_jit *jit, int start)
 /*
  * Return last seen register (from start) (gap >= 2)
  */
-static int get_end(struct bpf_jit *jit, int start)
+static int get_end(u16 seen_regs, int start)
 {
 	int i;
 
 	for (i = start; i < 15; i++) {
-		if (!jit->seen_reg[i] && !jit->seen_reg[i + 1])
+		if (!(seen_regs & (3 << i)))
 			return i - 1;
 	}
-	return jit->seen_reg[15] ? 15 : 14;
+	return (seen_regs & (1 << 15)) ? 15 : 14;
 }
 
 #define REGS_SAVE	1
@@ -469,8 +470,10 @@ static int get_end(struct bpf_jit *jit, int start)
  * Save and restore clobbered registers (6-15) on stack.
  * We save/restore registers in chunks with gap >= 2 registers.
  */
-static void save_restore_regs(struct bpf_jit *jit, int op, u32 stack_depth)
+static void save_restore_regs(struct bpf_jit *jit, int op, u32 stack_depth,
+			      u16 extra_regs)
 {
+	u16 seen_regs = jit->seen_regs | extra_regs;
 	const int last = 15, save_restore_size = 6;
 	int re = 6, rs;
 
@@ -484,10 +487,10 @@ static void save_restore_regs(struct bpf_jit *jit, int op, u32 stack_depth)
 	}
 
 	do {
-		rs = get_start(jit, re);
+		rs = get_start(seen_regs, re);
 		if (!rs)
 			break;
-		re = get_end(jit, rs + 1);
+		re = get_end(seen_regs, rs + 1);
 		if (op == REGS_SAVE)
 			save_regs(jit, rs, re);
 		else
@@ -572,8 +575,21 @@ static void bpf_jit_prologue(struct bpf_jit *jit, struct bpf_prog *fp,
 	}
 	/* Tail calls have to skip above initialization */
 	jit->tail_call_start = jit->prg;
-	/* Save registers */
-	save_restore_regs(jit, REGS_SAVE, stack_depth);
+	if (fp->aux->exception_cb) {
+		/*
+		 * Switch stack, the new address is in the 2nd parameter.
+		 *
+		 * Arrange the restoration of %r6-%r15 in the epilogue.
+		 * Do not restore them now, the prog does not need them.
+		 */
+		/* lgr %r15,%r3 */
+		EMIT4(0xb9040000, REG_15, REG_3);
+		jit->seen_regs |= NVREGS;
+	} else {
+		/* Save registers */
+		save_restore_regs(jit, REGS_SAVE, stack_depth,
+				  fp->aux->exception_boundary ? NVREGS : 0);
+	}
 	/* Setup literal pool */
 	if (is_first_pass(jit) || (jit->seen & SEEN_LITERAL)) {
 		if (!is_first_pass(jit) &&
@@ -649,7 +665,7 @@ static void bpf_jit_epilogue(struct bpf_jit *jit, u32 stack_depth)
 	/* Load exit code: lgr %r2,%b0 */
 	EMIT4(0xb9040000, REG_2, BPF_REG_0);
 	/* Restore registers */
-	save_restore_regs(jit, REGS_RESTORE, stack_depth);
+	save_restore_regs(jit, REGS_RESTORE, stack_depth, 0);
 	if (nospec_uses_trampoline()) {
 		jit->r14_thunk_ip = jit->prg;
 		/* Generate __s390_indirect_jump_r14 thunk */
@@ -1847,7 +1863,7 @@ static noinline int bpf_jit_insn(struct bpf_jit *jit, struct bpf_prog *fp,
 		/*
 		 * Restore registers before calling function
 		 */
-		save_restore_regs(jit, REGS_RESTORE, stack_depth);
+		save_restore_regs(jit, REGS_RESTORE, stack_depth, 0);
 
 		/*
 		 * goto *(prog->bpf_func + tail_call_start);
@@ -2908,4 +2924,39 @@ bool bpf_jit_supports_insn(struct bpf_insn *insn, bool in_arena)
 	 * atomic stores to arena are supported, and they all are.
 	 */
 	return true;
+}
+
+bool bpf_jit_supports_exceptions(void)
+{
+	/*
+	 * Exceptions require unwinding support, which is always available,
+	 * because the kernel is always built with backchain.
+	 */
+	return true;
+}
+
+void arch_bpf_stack_walk(bool (*consume_fn)(void *, u64, u64, u64),
+			 void *cookie)
+{
+	unsigned long addr, prev_addr = 0;
+	struct unwind_state state;
+
+	unwind_for_each_frame(&state, NULL, NULL, 0) {
+		addr = unwind_get_return_address(&state);
+		if (!addr)
+			break;
+		/*
+		 * addr is a return address and state.sp is the value of %r15
+		 * at this address. exception_cb needs %r15 at entry to the
+		 * function containing addr, so take the next state.sp.
+		 *
+		 * There is no bp, and the exception_cb prog does not need one
+		 * to perform a quasi-longjmp. The common code requires a
+		 * non-zero bp, so pass sp there as well.
+		 */
+		if (prev_addr && !consume_fn(cookie, prev_addr, state.sp,
+					     state.sp))
+			break;
+		prev_addr = addr;
+	}
 }

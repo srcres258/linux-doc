@@ -43,9 +43,9 @@
 		/* global cma region */
 		linux,cma {
 			compatible = "shared-dma-pool";
+			reusable;
 			size = <0x00 0x24000000>;
 			alloc-ranges = <0x00 0xc0000000 0x00 0x24000000>;
-			reusable;
 			linux,cma-default;
 		};
 

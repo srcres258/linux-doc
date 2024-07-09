@@ -18,6 +18,7 @@
 #include <linux/pagemap.h>
 #include <linux/bio.h>
 #include <linux/refcount.h>
+#include "btrfs_inode.h"
 #include "compression.h"
 #include "btrfs_inode.h"
 #include "fs.h"
@@ -122,8 +123,7 @@ int zlib_compress_folios(struct list_head *ws, struct address_space *mapping,
 
 		btrfs_err(inode->root->fs_info,
 	"zlib compression init failed, error %d root %llu inode %llu offset %llu",
-			  ret, inode->root->root_key.objectid, btrfs_ino(inode),
-			  start);
+			  ret, btrfs_root_id(inode->root), btrfs_ino(inode), start);
 		ret = -EIO;
 		goto out;
 	}
@@ -207,7 +207,7 @@ int zlib_compress_folios(struct list_head *ws, struct address_space *mapping,
 
 			btrfs_warn(inode->root->fs_info,
 		"zlib compression failed, error %d root %llu inode %llu offset %llu",
-				   ret, inode->root->root_key.objectid, btrfs_ino(inode),
+				   ret, btrfs_root_id(inode->root), btrfs_ino(inode),
 				   start);
 			zlib_deflateEnd(&workspace->strm);
 			ret = -EIO;
@@ -338,8 +338,7 @@ int zlib_decompress_bio(struct list_head *ws, struct compressed_bio *cb)
 		kunmap_local(data_in);
 		btrfs_err(inode->root->fs_info,
 	"zlib decompression init failed, error %d root %llu inode %llu offset %llu",
-			  ret, inode->root->root_key.objectid, btrfs_ino(inode),
-			  cb->start);
+			  ret, btrfs_root_id(inode->root), btrfs_ino(inode), cb->start);
 		return -EIO;
 	}
 	while (workspace->strm.total_in < srclen) {
@@ -381,7 +380,7 @@ int zlib_decompress_bio(struct list_head *ws, struct compressed_bio *cb)
 	if (unlikely(ret != Z_STREAM_END)) {
 		btrfs_err(cb->bbio.inode->root->fs_info,
 		"zlib decompression failed, error %d root %llu inode %llu offset %llu",
-			  ret, cb->bbio.inode->root->root_key.objectid,
+			  ret, btrfs_root_id(cb->bbio.inode->root),
 			  btrfs_ino(cb->bbio.inode), cb->start);
 		ret = -EIO;
 	} else {
@@ -427,7 +426,7 @@ int zlib_decompress(struct list_head *ws, const u8 *data_in,
 
 		btrfs_err(inode->root->fs_info,
 		"zlib decompression init failed, error %d root %llu inode %llu offset %llu",
-			  ret, inode->root->root_key.objectid, btrfs_ino(inode),
+			  ret, btrfs_root_id(inode->root), btrfs_ino(inode),
 			  page_offset(dest_page));
 		return -EIO;
 	}
@@ -444,12 +443,12 @@ int zlib_decompress(struct list_head *ws, const u8 *data_in,
 	memcpy_to_page(dest_page, dest_pgoff, workspace->buf, to_copy);
 
 out:
-	if (unlikely(ret != Z_OK || to_copy != destlen)) {
+	if (unlikely(to_copy != destlen)) {
 		struct btrfs_inode *inode = BTRFS_I(dest_page->mapping->host);
 
 		btrfs_err(inode->root->fs_info,
 "zlib decompression failed, error %d root %llu inode %llu offset %llu decompressed %lu expected %zu",
-			  ret, inode->root->root_key.objectid, btrfs_ino(inode),
+			  ret, btrfs_root_id(inode->root), btrfs_ino(inode),
 			  page_offset(dest_page), to_copy, destlen);
 		ret = -EIO;
 	} else {

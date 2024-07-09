@@ -11,6 +11,7 @@
 #include <asm/vdso/getrandom.h>
 #include <asm/vdso/vsyscall.h>
 #include <asm/unaligned.h>
+#include <uapi/linux/mman.h>
 
 #define MEMCPY_AND_ZERO_SRC(type, dst, src, len) do {				\
 	while (len >= sizeof(type)) {						\
@@ -47,8 +48,13 @@ static void memcpy_and_zero_src(void *dst, void *src, size_t len)
  * schedule that the kernel's RNG is reseeded. If the kernel's RNG is not ready, then this always
  * calls into the syscall.
  *
- * @opaque_state *must* be allocated using the vgetrandom_alloc() syscall.  Unless external locking
- * is used, one state must be allocated per thread, as it is not safe to call this function
+ * If @buffer, @len, and @flags are 0, and @opaque_len is ~0UL, then @opaque_state is populated
+ * with a struct vgetrandom_opaque_params and the function returns 0; if it does not return 0,
+ * this function should not be used.
+ *
+ * @opaque_state *must* be allocated by calling mmap(2) using the mmap_prot and mmap_flags fields
+ * from the struct vgetrandom_opaque_params, and states must not straddle pages. Unless external
+ * locking is used, one state must be allocated per thread, as it is not safe to call this function
  * concurrently with the same @opaque_state. However, it is safe to call this using the same
  * @opaque_state that is shared between main code and signal handling code, within the same thread.
  *
@@ -65,6 +71,15 @@ __cvdso_getrandom_data(const struct vdso_rng_data *rng_info, void *buffer, size_
 	unsigned long current_generation;
 	void *orig_buffer = buffer;
 	u32 counter[2] = { 0 };
+
+	if (unlikely(opaque_len == ~0UL && !buffer && !len && !flags)) {
+		*(struct vgetrandom_opaque_params *)opaque_state = (struct vgetrandom_opaque_params) {
+			.size_of_opaque_state = sizeof(*state),
+			.mmap_prot = PROT_READ | PROT_WRITE,
+			.mmap_flags = MAP_DROPPABLE | MAP_ANONYMOUS
+		};
+		return 0;
+	}
 
 	/* The state must not straddle a page, since pages can be zeroed at any time. */
 	if (unlikely(((unsigned long)opaque_state & ~PAGE_MASK) + sizeof(*state) > PAGE_SIZE))

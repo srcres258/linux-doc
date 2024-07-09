@@ -34,6 +34,9 @@ properties:
       - items:
           - const: fsl,ls2080a-dspi
           - const: fsl,ls2085a-dspi
+      - items:
+          - const: fsl,lx2160a-dspi
+          - const: fsl,ls2085a-dspi
 
   reg:
     maxItems: 1
@@ -47,6 +50,16 @@ properties:
   clock-names:
     items:
       - const: dspi
+
+  dmas:
+    items:
+      - description: DMA controller phandle and request line for TX
+      - description: DMA controller phandle and request line for RX
+
+  dma-names:
+    items:
+      - const: tx
+      - const: rx
 
   spi-num-chipselects:
     $ref: /schemas/types.yaml#/definitions/uint32

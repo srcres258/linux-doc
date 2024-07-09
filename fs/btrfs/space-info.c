@@ -349,17 +349,22 @@ static u64 calc_effective_data_chunk_size(struct btrfs_fs_info *fs_info)
 {
 	struct btrfs_space_info *data_sinfo;
 	u64 data_chunk_size;
+
 	/*
 	 * Calculate the data_chunk_size, space_info->chunk_size is the
 	 * "optimal" chunk size based on the fs size.  However when we actually
-	 * allocate the chunk we will strip this down further, making it no more
-	 * than 10% of the disk or 1G, whichever is smaller.
+	 * allocate the chunk we will strip this down further, making it no
+	 * more than 10% of the disk or 1G, whichever is smaller.
+	 *
+	 * On the zoned mode, we need to use zone_size (= data_sinfo->chunk_size)
+	 * as it is.
 	 */
 	data_sinfo = btrfs_find_space_info(fs_info, BTRFS_BLOCK_GROUP_DATA);
+	if (btrfs_is_zoned(fs_info))
+		return data_sinfo->chunk_size;
 	data_chunk_size = min(data_sinfo->chunk_size,
 			      mult_perc(fs_info->fs_devices->total_rw_bytes, 10));
 	return min_t(u64, data_chunk_size, SZ_1G);
-
 }
 
 static u64 calc_available_free_space(struct btrfs_fs_info *fs_info,
@@ -389,23 +394,7 @@ static u64 calc_available_free_space(struct btrfs_fs_info *fs_info,
 	if (avail == 0)
 		return 0;
 
-	/*
-	 * Calculate the data_chunk_size, space_info->chunk_size is the
-	 * "optimal" chunk size based on the fs size.  However when we actually
-	 * allocate the chunk we will strip this down further, making it no more
-	 * than 10% of the disk or 1G, whichever is smaller.
-	 *
-	 * On the zoned mode, we need to use zone_size (=
-	 * data_sinfo->chunk_size) as it is.
-	 */
-	data_sinfo = btrfs_find_space_info(fs_info, BTRFS_BLOCK_GROUP_DATA);
-	if (!btrfs_is_zoned(fs_info)) {
-		data_chunk_size = min(data_sinfo->chunk_size,
-				      mult_perc(fs_info->fs_devices->total_rw_bytes, 10));
-		data_chunk_size = min_t(u64, data_chunk_size, SZ_1G);
-	} else {
-		data_chunk_size = data_sinfo->chunk_size;
-	}
+	data_chunk_size = calc_effective_data_chunk_size(fs_info);
 
 	/*
 	 * Since data allocations immediately use block groups as part of the
@@ -2050,7 +2039,7 @@ void btrfs_space_info_update_reclaimable(struct btrfs_space_info *space_info, s6
 {
 	u64 chunk_sz = calc_effective_data_chunk_size(space_info->fs_info);
 
-	assert_spin_locked(&space_info->lock);
+	lockdep_assert_held(&space_info->lock);
 	space_info->reclaimable_bytes += bytes;
 
 	if (space_info->reclaimable_bytes >= chunk_sz)
@@ -2059,7 +2048,7 @@ void btrfs_space_info_update_reclaimable(struct btrfs_space_info *space_info, s6
 
 void btrfs_set_periodic_reclaim_ready(struct btrfs_space_info *space_info, bool ready)
 {
-	assert_spin_locked(&space_info->lock);
+	lockdep_assert_held(&space_info->lock);
 	if (!READ_ONCE(space_info->periodic_reclaim))
 		return;
 	if (ready != space_info->periodic_reclaim_ready) {

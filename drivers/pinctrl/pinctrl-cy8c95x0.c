@@ -9,6 +9,7 @@
 
 #include <linux/acpi.h>
 #include <linux/bitmap.h>
+#include <linux/cleanup.h>
 #include <linux/dmi.h>
 #include <linux/gpio/driver.h>
 #include <linux/gpio/consumer.h>
@@ -474,13 +475,11 @@ static inline int cy8c95x0_regmap_update_bits_base(struct cy8c95x0_pinctrl *chip
 						   bool *change, bool async,
 						   bool force)
 {
-	int ret, off, i, read_val;
+	int ret, off, i;
 
 	/* Caller should never modify PORTSEL directly */
 	if (reg == CY8C95X0_PORTSEL)
 		return -EINVAL;
-
-	mutex_lock(&chip->i2c_lock);
 
 	/* Registers behind the PORTSEL mux have their own range in regmap */
 	if (cy8c95x0_muxed_register(reg)) {
@@ -492,32 +491,27 @@ static inline int cy8c95x0_regmap_update_bits_base(struct cy8c95x0_pinctrl *chip
 		else
 			off = reg;
 	}
+	guard(mutex)(&chip->i2c_lock);
 
 	ret = regmap_update_bits_base(chip->regmap, off, mask, val, change, async, force);
 	if (ret < 0)
-		goto out;
+		return ret;
 
-	/* Update the cache when a WC bit is written */
+	/* Mimic what hardware does and update the cache when a WC bit is written.
+	 * Allows to mark the registers as non-volatile and reduces I/O cycles.
+	 */
 	if (cy8c95x0_wc_register(reg) && (mask & val)) {
+		/* Writing a 1 clears set bits in the other drive mode registers */
+		regcache_cache_only(chip->regmap, true);
 		for (i = CY8C95X0_DRV_PU; i <= CY8C95X0_DRV_HIZ; i++) {
 			if (i == reg)
 				continue;
+
 			off = CY8C95X0_MUX_REGMAP_TO_OFFSET(i, port);
-
-			ret = regmap_read(chip->regmap, off, &read_val);
-			if (ret < 0)
-				continue;
-
-			if (!(read_val & mask & val))
-				continue;
-
-			regcache_cache_only(chip->regmap, true);
-			regmap_update_bits(chip->regmap, off, mask & val, 0);
-			regcache_cache_only(chip->regmap, false);
+			regmap_clear_bits(chip->regmap, off, mask & val);
 		}
+		regcache_cache_only(chip->regmap, false);
 	}
-out:
-	mutex_unlock(&chip->i2c_lock);
 
 	return ret;
 }
@@ -591,8 +585,6 @@ static int cy8c95x0_regmap_read(struct cy8c95x0_pinctrl *chip, unsigned int reg,
 {
 	int off, ret;
 
-	mutex_lock(&chip->i2c_lock);
-
 	/* Registers behind the PORTSEL mux have their own range in regmap */
 	if (cy8c95x0_muxed_register(reg)) {
 		off = CY8C95X0_MUX_REGMAP_TO_OFFSET(reg, port);
@@ -603,10 +595,9 @@ static int cy8c95x0_regmap_read(struct cy8c95x0_pinctrl *chip, unsigned int reg,
 		else
 			off = reg;
 	}
+	guard(mutex)(&chip->i2c_lock);
 
 	ret = regmap_read(chip->regmap, off, read_val);
-
-	mutex_unlock(&chip->i2c_lock);
 
 	return ret;
 }

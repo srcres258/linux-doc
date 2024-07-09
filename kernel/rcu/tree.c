@@ -176,9 +176,9 @@ static int gp_init_delay;
 module_param(gp_init_delay, int, 0444);
 static int gp_cleanup_delay;
 module_param(gp_cleanup_delay, int, 0444);
-static int nocb_patience_delay;
-module_param(nocb_patience_delay, int, 0444);
-static int nocb_patience_delay_jiffies;
+static int nohz_full_patience_delay;
+module_param(nohz_full_patience_delay, int, 0444);
+static int nohz_full_patience_delay_jiffies;
 
 // Add delay to rcu_read_unlock() for strict grace periods.
 static int rcu_unlock_delay;
@@ -4329,7 +4329,8 @@ static int rcu_pending(int user)
 	gp_in_progress = rcu_gp_in_progress();
 	if ((user || rcu_is_cpu_rrupt_from_idle() ||
 	     (gp_in_progress &&
-	      time_before(jiffies, READ_ONCE(rcu_state.gp_start) + nocb_patience_delay_jiffies))) &&
+	      time_before(jiffies, READ_ONCE(rcu_state.gp_start) +
+			  nohz_full_patience_delay_jiffies))) &&
 	    rcu_nohz_full_cpu())
 		return 0;
 

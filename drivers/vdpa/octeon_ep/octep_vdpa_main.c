@@ -752,7 +752,8 @@ static int octep_vdpa_pf_setup(struct octep_pf *octpf)
 	u8 __iomem *addr = octpf->base[OCTEP_HW_MBOX_BAR];
 	struct pci_dev *pdev = octpf->pdev;
 	int totalvfs;
-	u64 val, len;
+	size_t len;
+	u64 val;
 
 	totalvfs = pci_sriov_get_totalvfs(pdev);
 	if (unlikely(!totalvfs)) {

@@ -61,11 +61,6 @@ bool mem_cgroup_event_ratelimit(struct mem_cgroup *memcg,
 unsigned long mem_cgroup_usage(struct mem_cgroup *memcg, bool swap);
 
 void drain_all_stock(struct mem_cgroup *root_memcg);
-unsigned long mem_cgroup_nr_lru_pages(struct mem_cgroup *memcg,
-				      unsigned int lru_mask, bool tree);
-unsigned long mem_cgroup_node_nr_lru_pages(struct mem_cgroup *memcg,
-					   int nid, unsigned int lru_mask,
-					   bool tree);
 
 unsigned long memcg_events(struct mem_cgroup *memcg, int event);
 unsigned long memcg_events_local(struct mem_cgroup *memcg, int event);

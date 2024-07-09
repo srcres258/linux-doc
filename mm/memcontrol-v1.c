@@ -2503,43 +2503,43 @@ static ssize_t mem_cgroup_reset(struct kernfs_open_file *of, char *buf,
 #define LRU_ALL_ANON (BIT(LRU_INACTIVE_ANON) | BIT(LRU_ACTIVE_ANON))
 #define LRU_ALL	     ((1 << NR_LRU_LISTS) - 1)
 
-/* static unsigned long mem_cgroup_node_nr_lru_pages(struct mem_cgroup *memcg, */
-/* 				int nid, unsigned int lru_mask, bool tree) */
-/* { */
-/* 	struct lruvec *lruvec = mem_cgroup_lruvec(memcg, NODE_DATA(nid)); */
-/* 	unsigned long nr = 0; */
-/* 	enum lru_list lru; */
+static unsigned long mem_cgroup_node_nr_lru_pages(struct mem_cgroup *memcg,
+				int nid, unsigned int lru_mask, bool tree)
+{
+	struct lruvec *lruvec = mem_cgroup_lruvec(memcg, NODE_DATA(nid));
+	unsigned long nr = 0;
+	enum lru_list lru;
 
-/* 	VM_BUG_ON((unsigned)nid >= nr_node_ids); */
+	VM_BUG_ON((unsigned)nid >= nr_node_ids);
 
-/* 	for_each_lru(lru) { */
-/* 		if (!(BIT(lru) & lru_mask)) */
-/* 			continue; */
-/* 		if (tree) */
-/* 			nr += lruvec_page_state(lruvec, NR_LRU_BASE + lru); */
-/* 		else */
-/* 			nr += lruvec_page_state_local(lruvec, NR_LRU_BASE + lru); */
-/* 	} */
-/* 	return nr; */
-/* } */
+	for_each_lru(lru) {
+		if (!(BIT(lru) & lru_mask))
+			continue;
+		if (tree)
+			nr += lruvec_page_state(lruvec, NR_LRU_BASE + lru);
+		else
+			nr += lruvec_page_state_local(lruvec, NR_LRU_BASE + lru);
+	}
+	return nr;
+}
 
-/* static unsigned long mem_cgroup_nr_lru_pages(struct mem_cgroup *memcg, */
-/* 					     unsigned int lru_mask, */
-/* 					     bool tree) */
-/* { */
-/* 	unsigned long nr = 0; */
-/* 	enum lru_list lru; */
+static unsigned long mem_cgroup_nr_lru_pages(struct mem_cgroup *memcg,
+					     unsigned int lru_mask,
+					     bool tree)
+{
+	unsigned long nr = 0;
+	enum lru_list lru;
 
-/* 	for_each_lru(lru) { */
-/* 		if (!(BIT(lru) & lru_mask)) */
-/* 			continue; */
-/* 		if (tree) */
-/* 			nr += memcg_page_state(memcg, NR_LRU_BASE + lru); */
-/* 		else */
-/* 			nr += memcg_page_state_local(memcg, NR_LRU_BASE + lru); */
-/* 	} */
-/* 	return nr; */
-/* } */
+	for_each_lru(lru) {
+		if (!(BIT(lru) & lru_mask))
+			continue;
+		if (tree)
+			nr += memcg_page_state(memcg, NR_LRU_BASE + lru);
+		else
+			nr += memcg_page_state_local(memcg, NR_LRU_BASE + lru);
+	}
+	return nr;
+}
 
 static int memcg_numa_stat_show(struct seq_file *m, void *v)
 {

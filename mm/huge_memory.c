@@ -151,10 +151,15 @@ unsigned long __thp_vma_allowable_orders(struct vm_area_struct *vma,
 	 * Must be done before hugepage flags check since shmem has its
 	 * own flags.
 	 */
-	if (!in_pf && shmem_file(vma->vm_file))
-		return shmem_is_huge(file_inode(vma->vm_file), vma->vm_pgoff,
-				     !enforce_sysfs, vma->vm_mm, vm_flags)
-			? orders : 0;
+	if (!in_pf && shmem_file(vma->vm_file)) {
+		bool global_huge = shmem_is_huge(file_inode(vma->vm_file), vma->vm_pgoff,
+							!enforce_sysfs, vma->vm_mm, vm_flags);
+
+		if (!vma_is_anon_shmem(vma))
+			return global_huge ? orders : 0;
+		return shmem_allowable_huge_orders(file_inode(vma->vm_file),
+							vma, vma->vm_pgoff, global_huge);
+	}
 
 	if (!vma_is_anonymous(vma)) {
 		/*
@@ -570,6 +575,13 @@ static ssize_t thpsize_enabled_store(struct kobject *kobj,
 	} else
 		ret = -EINVAL;
 
+	if (ret > 0) {
+		int err;
+
+		err = start_stop_khugepaged();
+		if (err)
+			ret = err;
+	}
 	return ret;
 }
 
@@ -3424,7 +3436,7 @@ out_unlock:
 		i_mmap_unlock_read(mapping);
 out:
 	xas_destroy(&xas);
-	if (order >= HPAGE_PMD_ORDER)
+	if (order == HPAGE_PMD_ORDER)
 		count_vm_event(!ret ? THP_SPLIT_PAGE : THP_SPLIT_PAGE_FAILED);
 	count_mthp_stat(order, !ret ? MTHP_STAT_SPLIT : MTHP_STAT_SPLIT_FAILED);
 	return ret;
@@ -3480,7 +3492,7 @@ void deferred_split_folio(struct folio *folio)
 	if (list_empty(&folio->_deferred_list)) {
 		if (order >= HPAGE_PMD_ORDER)
 			count_vm_event(THP_DEFERRED_SPLIT_PAGE);
-		count_mthp_stat(order, MTHP_STAT_SPLIT_DEFERRED);
+		count_mthp_stat(folio_order(folio), MTHP_STAT_SPLIT_DEFERRED);
 		list_add_tail(&folio->_deferred_list, &ds_queue->split_queue);
 		ds_queue->split_queue_len++;
 #ifdef CONFIG_MEMCG

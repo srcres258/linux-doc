@@ -45,6 +45,8 @@
 
 #include <trace/events/firewire.h>
 
+static u32 cond_le32_to_cpu(__le32 value, bool has_be_header_quirk);
+
 #define CREATE_TRACE_POINTS
 #include <trace/events/firewire_ohci.h>
 
@@ -875,10 +877,25 @@ static void ar_sync_buffers_for_cpu(struct ar_context *ctx,
 }
 
 #if defined(CONFIG_PPC_PMAC) && defined(CONFIG_PPC32)
-#define cond_le32_to_cpu(v) \
-	(ohci->quirks & QUIRK_BE_HEADERS ? (__force __u32)(v) : le32_to_cpu(v))
+static u32 cond_le32_to_cpu(__le32 value, bool has_be_header_quirk)
+{
+	return has_be_header_quirk ? (__force __u32)value : le32_to_cpu(value);
+}
+
+static bool has_be_header_quirk(const struct fw_ohci *ohci)
+{
+	return !!(ohci->quirks & QUIRK_BE_HEADERS);
+}
 #else
-#define cond_le32_to_cpu(v) le32_to_cpu(v)
+static u32 cond_le32_to_cpu(__le32 value, bool has_be_header_quirk __maybe_unused)
+{
+	return le32_to_cpu(value);
+}
+
+static bool has_be_header_quirk(const struct fw_ohci *ohci)
+{
+	return false;
+}
 #endif
 
 static __le32 *handle_ar_packet(struct ar_context *ctx, __le32 *buffer)
@@ -888,9 +905,9 @@ static __le32 *handle_ar_packet(struct ar_context *ctx, __le32 *buffer)
 	u32 status, length, tcode;
 	int evt;
 
-	p.header[0] = cond_le32_to_cpu(buffer[0]);
-	p.header[1] = cond_le32_to_cpu(buffer[1]);
-	p.header[2] = cond_le32_to_cpu(buffer[2]);
+	p.header[0] = cond_le32_to_cpu(buffer[0], has_be_header_quirk(ohci));
+	p.header[1] = cond_le32_to_cpu(buffer[1], has_be_header_quirk(ohci));
+	p.header[2] = cond_le32_to_cpu(buffer[2], has_be_header_quirk(ohci));
 
 	tcode = async_header_get_tcode(p.header);
 	switch (tcode) {
@@ -902,7 +919,7 @@ static __le32 *handle_ar_packet(struct ar_context *ctx, __le32 *buffer)
 		break;
 
 	case TCODE_READ_BLOCK_REQUEST :
-		p.header[3] = cond_le32_to_cpu(buffer[3]);
+		p.header[3] = cond_le32_to_cpu(buffer[3], has_be_header_quirk(ohci));
 		p.header_length = 16;
 		p.payload_length = 0;
 		break;
@@ -911,7 +928,7 @@ static __le32 *handle_ar_packet(struct ar_context *ctx, __le32 *buffer)
 	case TCODE_READ_BLOCK_RESPONSE:
 	case TCODE_LOCK_REQUEST:
 	case TCODE_LOCK_RESPONSE:
-		p.header[3] = cond_le32_to_cpu(buffer[3]);
+		p.header[3] = cond_le32_to_cpu(buffer[3], has_be_header_quirk(ohci));
 		p.header_length = 16;
 		p.payload_length = async_header_get_data_length(p.header);
 		if (p.payload_length > MAX_ASYNC_PAYLOAD) {
@@ -936,7 +953,7 @@ static __le32 *handle_ar_packet(struct ar_context *ctx, __le32 *buffer)
 
 	/* FIXME: What to do about evt_* errors? */
 	length = (p.header_length + p.payload_length + 3) / 4;
-	status = cond_le32_to_cpu(buffer[length]);
+	status = cond_le32_to_cpu(buffer[length], has_be_header_quirk(ohci));
 	evt    = (status >> 16) & 0x1f;
 
 	p.ack        = evt - 16;
@@ -1988,7 +2005,7 @@ static void bus_reset_work(struct work_struct *work)
 	struct fw_ohci *ohci =
 		container_of(work, struct fw_ohci, bus_reset_work);
 	int self_id_count, generation, new_generation, i, j;
-	u32 reg;
+	u32 reg, quadlet;
 	void *free_rom = NULL;
 	dma_addr_t free_rom_bus = 0;
 	bool is_new_root;
@@ -2013,7 +2030,7 @@ static void bus_reset_work(struct work_struct *work)
 	ohci->is_root = is_new_root;
 
 	reg = reg_read(ohci, OHCI1394_SelfIDCount);
-	if (reg & OHCI1394_SelfIDCount_selfIDError) {
+	if (ohci1394_self_id_count_is_error(reg)) {
 		ohci_notice(ohci, "self ID receive error\n");
 		return;
 	}
@@ -2023,19 +2040,20 @@ static void bus_reset_work(struct work_struct *work)
 	 * the inverted quadlets and a header quadlet, we shift one
 	 * bit extra to get the actual number of self IDs.
 	 */
-	self_id_count = (reg >> 3) & 0xff;
+	self_id_count = ohci1394_self_id_count_get_size(reg) >> 1;
 
 	if (self_id_count > 252) {
 		ohci_notice(ohci, "bad selfIDSize (%08x)\n", reg);
 		return;
 	}
 
-	generation = (cond_le32_to_cpu(ohci->self_id[0]) >> 16) & 0xff;
+	quadlet = cond_le32_to_cpu(ohci->self_id[0], has_be_header_quirk(ohci));
+	generation = ohci1394_self_id_receive_q0_get_generation(quadlet);
 	rmb();
 
 	for (i = 1, j = 0; j < self_id_count; i += 2, j++) {
-		u32 id  = cond_le32_to_cpu(ohci->self_id[i]);
-		u32 id2 = cond_le32_to_cpu(ohci->self_id[i + 1]);
+		u32 id  = cond_le32_to_cpu(ohci->self_id[i], has_be_header_quirk(ohci));
+		u32 id2 = cond_le32_to_cpu(ohci->self_id[i + 1], has_be_header_quirk(ohci));
 
 		if (id != ~id2) {
 			/*
@@ -2087,7 +2105,8 @@ static void bus_reset_work(struct work_struct *work)
 	 * of self IDs.
 	 */
 
-	new_generation = (reg_read(ohci, OHCI1394_SelfIDCount) >> 16) & 0xff;
+	reg = reg_read(ohci, OHCI1394_SelfIDCount);
+	new_generation = ohci1394_self_id_count_get_generation(reg);
 	if (new_generation != generation) {
 		ohci_notice(ohci, "new bus reset, discarding self ids\n");
 		return;
@@ -2191,8 +2210,15 @@ static irqreturn_t irq_handler(int irq, void *data)
 	if (event & OHCI1394_busReset)
 		reg_write(ohci, OHCI1394_IntMaskClear, OHCI1394_busReset);
 
-	if (event & OHCI1394_selfIDComplete)
+	if (event & OHCI1394_selfIDComplete) {
+		if (trace_self_id_complete_enabled()) {
+			u32 reg = reg_read(ohci, OHCI1394_SelfIDCount);
+
+			trace_self_id_complete(ohci->card.index, reg, ohci->self_id,
+					       has_be_header_quirk(ohci));
+		}
 		queue_work(selfid_workqueue, &ohci->bus_reset_work);
+	}
 
 	if (event & OHCI1394_RQPkt)
 		tasklet_schedule(&ohci->ar_request_ctx.tasklet);

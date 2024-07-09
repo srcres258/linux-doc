@@ -869,7 +869,7 @@ const char *sym_get_string_value(struct symbol *sym)
 
 bool sym_is_changeable(struct symbol *sym)
 {
-	return sym->visible > sym->rev_dep.tri;
+	return !sym_is_choice(sym) && sym->visible > sym->rev_dep.tri;
 }
 
 HASHTABLE_DEFINE(sym_hashtable, SYMBOL_HASHSIZE);
@@ -1107,43 +1107,38 @@ static void sym_check_print_recursive(struct symbol *last_sym)
 			fprintf(stderr, "%s:%d:error: recursive dependency detected!\n",
 				prop->filename, prop->lineno);
 
-		if (sym_is_choice(sym)) {
-			fprintf(stderr, "%s:%d:\tchoice %s contains symbol %s\n",
+		if (sym_is_choice(next_sym)) {
+			choice = list_first_entry(&next_sym->menus, struct menu, link);
+
+			fprintf(stderr, "%s:%d:\tsymbol %s is part of choice block at %s:%d\n",
 				menu->filename, menu->lineno,
 				sym->name ? sym->name : "<choice>",
-				next_sym->name ? next_sym->name : "<choice>");
-		} else if (sym_is_choice_value(sym)) {
-			fprintf(stderr, "%s:%d:\tsymbol %s is part of choice %s\n",
-				menu->filename, menu->lineno,
-				sym->name ? sym->name : "<choice>",
-				next_sym->name ? next_sym->name : "<choice>");
+				choice->filename, choice->lineno);
 		} else if (stack->expr == &sym->dir_dep.expr) {
 			fprintf(stderr, "%s:%d:\tsymbol %s depends on %s\n",
 				prop->filename, prop->lineno,
 				sym->name ? sym->name : "<choice>",
-				next_sym->name ? next_sym->name : "<choice>");
+				next_sym->name);
 		} else if (stack->expr == &sym->rev_dep.expr) {
 			fprintf(stderr, "%s:%d:\tsymbol %s is selected by %s\n",
 				prop->filename, prop->lineno,
-				sym->name ? sym->name : "<choice>",
-				next_sym->name ? next_sym->name : "<choice>");
+				sym->name, next_sym->name);
 		} else if (stack->expr == &sym->implied.expr) {
 			fprintf(stderr, "%s:%d:\tsymbol %s is implied by %s\n",
 				prop->filename, prop->lineno,
-				sym->name ? sym->name : "<choice>",
-				next_sym->name ? next_sym->name : "<choice>");
+				sym->name, next_sym->name);
 		} else if (stack->expr) {
 			fprintf(stderr, "%s:%d:\tsymbol %s %s value contains %s\n",
 				prop->filename, prop->lineno,
 				sym->name ? sym->name : "<choice>",
 				prop_get_type_name(prop->type),
-				next_sym->name ? next_sym->name : "<choice>");
+				next_sym->name);
 		} else {
 			fprintf(stderr, "%s:%d:\tsymbol %s %s is visible depending on %s\n",
 				prop->filename, prop->lineno,
 				sym->name ? sym->name : "<choice>",
 				prop_get_type_name(prop->type),
-				next_sym->name ? next_sym->name : "<choice>");
+				next_sym->name);
 		}
 	}
 

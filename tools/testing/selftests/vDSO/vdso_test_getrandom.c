@@ -3,8 +3,6 @@
  * Copyright (C) 2022-2024 Jason A. Donenfeld <Jason@zx2c4.com>. All Rights Reserved.
  */
 
-#include <asm-generic/unistd.h>
-#include <linux/random.h>
 #include <assert.h>
 #include <pthread.h>
 #include <stdint.h>
@@ -19,6 +17,7 @@
 #include <sys/random.h>
 #include <sys/syscall.h>
 #include <sys/types.h>
+#include <linux/random.h>
 
 #include "../kselftest.h"
 #include "parse_vdso.h"
@@ -35,24 +34,21 @@
 	} while (0)
 #endif
 
-static void *vgetrandom_alloc(size_t *num, size_t *size_per_each, size_t *bytes_allocated)
-{
-	struct vgetrandom_alloc_args args = { .num = *num };
-	void *ret = (void *)syscall(__NR_vgetrandom_alloc, &args, VGETRANDOM_ALLOC_ARGS_SIZE_VER0);
-	if (ret != MAP_FAILED) {
-		*num = args.num;
-		*size_per_each = args.size_per_each;
-		*bytes_allocated = args.bytes_allocated;
-	}
-	return ret;
-}
-
 static struct {
 	pthread_mutex_t lock;
 	void **states;
-	size_t len, cap, size_per_each;
+	size_t len, cap;
 } grnd_allocator = {
 	.lock = PTHREAD_MUTEX_INITIALIZER
+};
+
+static struct {
+	ssize_t(*fn)(void *, size_t, unsigned long, void *, size_t);
+	pthread_key_t key;
+	pthread_once_t initialized;
+	struct vgetrandom_opaque_params params;
+} grnd_ctx = {
+	.initialized = PTHREAD_ONCE_INIT
 };
 
 static void *vgetrandom_get_state(void)
@@ -63,15 +59,15 @@ static void *vgetrandom_get_state(void)
 	if (!grnd_allocator.len) {
 		size_t page_size = getpagesize();
 		size_t new_cap;
-		size_t bytes_allocated, size_per_each, num = sysconf(_SC_NPROCESSORS_ONLN); /* Just a decent heuristic. */
-		void *new_block = vgetrandom_alloc(&num, &size_per_each, &bytes_allocated);
-		void *new_states;
+		size_t alloc_size, num = sysconf(_SC_NPROCESSORS_ONLN); /* Just a decent heuristic. */
+		void *new_block, *new_states;
 
+		alloc_size = (num * grnd_ctx.params.size_of_opaque_state + page_size - 1) & (~(page_size - 1));
+		num = (page_size / grnd_ctx.params.size_of_opaque_state) * (alloc_size / page_size);
+		new_block = mmap(0, alloc_size, grnd_ctx.params.mmap_prot, grnd_ctx.params.mmap_flags, -1, 0);
 		if (new_block == MAP_FAILED)
 			goto out;
-		if (grnd_allocator.size_per_each && grnd_allocator.size_per_each != size_per_each)
-			goto unmap;
-		grnd_allocator.size_per_each = size_per_each;
+
 		new_cap = grnd_allocator.cap + num;
 		new_states = reallocarray(grnd_allocator.states, new_cap, sizeof(*grnd_allocator.states));
 		if (!new_states)
@@ -80,16 +76,16 @@ static void *vgetrandom_get_state(void)
 		grnd_allocator.states = new_states;
 
 		for (size_t i = 0; i < num; ++i) {
-			if (((uintptr_t)new_block & (page_size - 1)) + size_per_each > page_size)
+			if (((uintptr_t)new_block & (page_size - 1)) + grnd_ctx.params.size_of_opaque_state > page_size)
 				new_block = (void *)(((uintptr_t)new_block + page_size - 1) & (~(page_size - 1)));
 			grnd_allocator.states[i] = new_block;
-			new_block += size_per_each;
+			new_block += grnd_ctx.params.size_of_opaque_state;
 		}
 		grnd_allocator.len = num;
 		goto success;
 
 	unmap:
-		munmap(new_block, bytes_allocated);
+		munmap(new_block, alloc_size);
 		goto out;
 	}
 success:
@@ -109,14 +105,6 @@ static void vgetrandom_put_state(void *state)
 	pthread_mutex_unlock(&grnd_allocator.lock);
 }
 
-static struct {
-	ssize_t(*fn)(void *, size_t, unsigned long, void *, size_t);
-	pthread_key_t key;
-	pthread_once_t initialized;
-} grnd_ctx = {
-	.initialized = PTHREAD_ONCE_INIT
-};
-
 static void vgetrandom_init(void)
 {
 	if (pthread_key_create(&grnd_ctx.key, vgetrandom_put_state) != 0)
@@ -130,6 +118,10 @@ static void vgetrandom_init(void)
 	grnd_ctx.fn = (__typeof__(grnd_ctx.fn))vdso_sym("LINUX_2.6", "__vdso_getrandom");
 	if (!grnd_ctx.fn) {
 		printf("__vdso_getrandom is missing!\n");
+		exit(KSFT_FAIL);
+	}
+	if (grnd_ctx.fn(NULL, 0, 0, &grnd_ctx.params, ~0UL) != 0) {
+		printf("failed to fetch vgetrandom params!\n");
 		exit(KSFT_FAIL);
 	}
 }
@@ -151,7 +143,7 @@ static ssize_t vgetrandom(void *buf, size_t len, unsigned long flags)
 			exit(KSFT_FAIL);
 		}
 	}
-	return grnd_ctx.fn(buf, len, flags, state, grnd_allocator.size_per_each);
+	return grnd_ctx.fn(buf, len, flags, state, grnd_ctx.params.size_of_opaque_state);
 }
 
 enum { TRIALS = 25000000, THREADS = 256 };
@@ -249,38 +241,6 @@ static void fill(void)
 		vgetrandom(weird_size, sizeof(weird_size), 0);
 }
 
-static void verify_droppable(void)
-{
-	size_t bytes_allocated, size_per_each, num = 1048576;
-	size_t page_size = getpagesize();
-	void *alloc;
-	pid_t child;
-
-	alloc = vgetrandom_alloc(&num, &size_per_each, &bytes_allocated);
-	assert(alloc != MAP_FAILED);
-	memset(alloc, 'A', bytes_allocated);
-	for (size_t i = 0; i < bytes_allocated; i += page_size)
-		assert(*(uint8_t *)(alloc + i));
-
-	child = fork();
-	assert(child >= 0);
-	if (!child) {
-		for (;;)
-			memset(malloc(page_size), 'A', page_size);
-	}
-
-	for (bool done = false; !done;) {
-		for (size_t i = 0; i < bytes_allocated; i += page_size) {
-			if (!*(uint8_t *)(alloc + i)) {
-				done = true;
-				break;
-			}
-		}
-	}
-	kill(child, SIGTERM);
-	printf("Reaper zeroed bytes of VM_DROPPABLE memory\n");
-}
-
 static void kselftest(void)
 {
 	uint8_t weird_size[1263];
@@ -300,7 +260,7 @@ static void kselftest(void)
 
 static void usage(const char *argv0)
 {
-	fprintf(stderr, "Usage: %s [bench-single|bench-multi|fill|verify-droppable]\n", argv0);
+	fprintf(stderr, "Usage: %s [bench-single|bench-multi|fill]\n", argv0);
 }
 
 int main(int argc, char *argv[])
@@ -320,8 +280,6 @@ int main(int argc, char *argv[])
 		bench_multi();
 	else if (!strcmp(argv[1], "fill"))
 		fill();
-	else if (!strcmp(argv[1], "verify-droppable"))
-		verify_droppable();
 	else {
 		usage(argv[0]);
 		return 1;

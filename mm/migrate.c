@@ -411,7 +411,16 @@ static int __folio_migrate_mapping(struct address_space *mapping,
 	int dirty;
 
 	if (!mapping) {
-		/* Anonymous folio without mapping, no turning back from here */
+		/* Take off deferred split queue while frozen and memcg set */
+		if (folio_test_large(folio) &&
+		    folio_test_large_rmappable(folio)) {
+			if (!folio_ref_freeze(folio, expected_count))
+				return -EAGAIN;
+			folio_undo_large_rmappable(folio);
+			folio_ref_unfreeze(folio, expected_count);
+		}
+
+		/* No turning back from here */
 		newfolio->index = folio->index;
 		newfolio->mapping = folio->mapping;
 		if (folio_test_swapbacked(folio))
@@ -428,7 +437,14 @@ static int __folio_migrate_mapping(struct address_space *mapping,
 		return -EAGAIN;
 	}
 
-	/* Now we know that no one else is looking at the folio */
+	/* Take off deferred split queue while frozen and memcg set */
+	if (folio_test_large(folio) && folio_test_large_rmappable(folio))
+		folio_undo_large_rmappable(folio);
+
+	/*
+	 * Now we know that no one else is looking at the folio:
+	 * no turning back from here.
+	 */
 	newfolio->index = folio->index;
 	newfolio->mapping = folio->mapping;
 	folio_ref_add(newfolio, nr); /* add cache reference */

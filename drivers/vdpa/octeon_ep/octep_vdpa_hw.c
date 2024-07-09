@@ -361,7 +361,7 @@ static u32 octep_get_config_size(struct octep_hw *oct_hw)
 	return sizeof(struct virtio_net_config);
 }
 
-static void __iomem *get_cap_addr(struct octep_hw *oct_hw, struct virtio_pci_cap *cap)
+static void __iomem *octep_get_cap_addr(struct octep_hw *oct_hw, struct virtio_pci_cap *cap)
 {
 	struct device *dev = &oct_hw->pdev->dev;
 	u32 length = le32_to_cpu(cap->length);
@@ -387,11 +387,11 @@ static void __iomem *get_cap_addr(struct octep_hw *oct_hw, struct virtio_pci_cap
 	return oct_hw->base[bar] + offset;
 }
 
-/* In Octeon DPU device, the virtio config space completely
+/* In Octeon DPU device, the virtio config space is completely
  * emulated by the device's firmware. So, the standard pci config
- * read apis can't be used for reading the virtio capabilities.
+ * read apis can't be used for reading the virtio capability.
  */
-static void pci_caps_read(struct octep_hw *oct_hw, void *buf, size_t len, off_t offset)
+static void octep_pci_caps_read(struct octep_hw *oct_hw, void *buf, size_t len, off_t offset)
 {
 	u8 __iomem *bar = oct_hw->base[OCTEP_HW_CAPS_BAR];
 	u8 *p = buf;
@@ -401,11 +401,11 @@ static void pci_caps_read(struct octep_hw *oct_hw, void *buf, size_t len, off_t 
 		*p++ = ioread8(bar + offset + i);
 }
 
-static int pci_signature_verify(struct octep_hw *oct_hw)
+static int octep_pci_signature_verify(struct octep_hw *oct_hw)
 {
 	u32 signature[2];
 
-	pci_caps_read(oct_hw, &signature, sizeof(signature), 0);
+	octep_pci_caps_read(oct_hw, &signature, sizeof(signature), 0);
 
 	if (signature[0] != OCTEP_FW_READY_SIGNATURE0)
 		return -1;
@@ -426,45 +426,45 @@ int octep_hw_caps_read(struct octep_hw *oct_hw, struct pci_dev *pdev)
 	u8 pos;
 
 	oct_hw->pdev = pdev;
-	ret = pci_signature_verify(oct_hw);
+	ret = octep_pci_signature_verify(oct_hw);
 	if (ret) {
 		dev_err(dev, "Octeon Virtio FW is not initialized\n");
 		return -EIO;
 	}
 
-	pci_caps_read(oct_hw, &pos, 1, PCI_CAPABILITY_LIST);
+	octep_pci_caps_read(oct_hw, &pos, 1, PCI_CAPABILITY_LIST);
 
 	while (pos) {
-		pci_caps_read(oct_hw, &cap, 2, pos);
+		octep_pci_caps_read(oct_hw, &cap, 2, pos);
 
 		if (cap.cap_vndr != PCI_CAP_ID_VNDR) {
 			dev_err(dev, "Found invalid capability vndr id: %d\n", cap.cap_vndr);
 			break;
 		}
 
-		pci_caps_read(oct_hw, &cap, sizeof(cap), pos);
+		octep_pci_caps_read(oct_hw, &cap, sizeof(cap), pos);
 
 		dev_info(dev, "[%2x] cfg type: %u, bar: %u, offset: %04x, len: %u\n",
 			 pos, cap.cfg_type, cap.bar, cap.offset, cap.length);
 
 		switch (cap.cfg_type) {
 		case VIRTIO_PCI_CAP_COMMON_CFG:
-			oct_hw->common_cfg = get_cap_addr(oct_hw, &cap);
+			oct_hw->common_cfg = octep_get_cap_addr(oct_hw, &cap);
 			break;
 		case VIRTIO_PCI_CAP_NOTIFY_CFG:
-			pci_caps_read(oct_hw, &oct_hw->notify_off_multiplier,
-				      4, pos + sizeof(cap));
+			octep_pci_caps_read(oct_hw, &oct_hw->notify_off_multiplier,
+					    4, pos + sizeof(cap));
 
-			oct_hw->notify_base = get_cap_addr(oct_hw, &cap);
+			oct_hw->notify_base = octep_get_cap_addr(oct_hw, &cap);
 			oct_hw->notify_bar = cap.bar;
 			oct_hw->notify_base_pa = pci_resource_start(pdev, cap.bar) +
 						 le32_to_cpu(cap.offset);
 			break;
 		case VIRTIO_PCI_CAP_DEVICE_CFG:
-			oct_hw->dev_cfg = get_cap_addr(oct_hw, &cap);
+			oct_hw->dev_cfg = octep_get_cap_addr(oct_hw, &cap);
 			break;
 		case VIRTIO_PCI_CAP_ISR_CFG:
-			oct_hw->isr = get_cap_addr(oct_hw, &cap);
+			oct_hw->isr = octep_get_cap_addr(oct_hw, &cap);
 			break;
 		}
 

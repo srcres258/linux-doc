@@ -408,7 +408,7 @@ int zstd_compress_folios(struct list_head *ws, struct address_space *mapping,
 
 		btrfs_err(inode->root->fs_info,
 	"zstd compression init level %d failed, root %llu inode %llu offset %llu",
-			  workspace->req_level, inode->root->root_key.objectid,
+			  workspace->req_level, btrfs_root_id(inode->root),
 			  btrfs_ino(inode), start);
 		ret = -EIO;
 		goto out;
@@ -446,7 +446,7 @@ int zstd_compress_folios(struct list_head *ws, struct address_space *mapping,
 			btrfs_warn(inode->root->fs_info,
 "zstd compression level %d failed, error %d root %llu inode %llu offset %llu",
 				   workspace->req_level, zstd_get_error_code(ret2),
-				   inode->root->root_key.objectid, btrfs_ino(inode),
+				   btrfs_root_id(inode->root), btrfs_ino(inode),
 				   start);
 			ret = -EIO;
 			goto out;
@@ -521,7 +521,7 @@ int zstd_compress_folios(struct list_head *ws, struct address_space *mapping,
 			btrfs_err(inode->root->fs_info,
 "zstd compression end level %d failed, error %d root %llu inode %llu offset %llu",
 				  workspace->req_level, zstd_get_error_code(ret2),
-				  inode->root->root_key.objectid, btrfs_ino(inode),
+				  btrfs_root_id(inode->root), btrfs_ino(inode),
 				  start);
 			ret = -EIO;
 			goto out;
@@ -589,8 +589,7 @@ int zstd_decompress_bio(struct list_head *ws, struct compressed_bio *cb)
 
 		btrfs_err(inode->root->fs_info,
 		"zstd decompression init failed, root %llu inode %llu offset %llu",
-			  inode->root->root_key.objectid, btrfs_ino(inode),
-			  cb->start);
+			  btrfs_root_id(inode->root), btrfs_ino(inode), cb->start);
 		ret = -EIO;
 		goto done;
 	}
@@ -613,9 +612,8 @@ int zstd_decompress_bio(struct list_head *ws, struct compressed_bio *cb)
 
 			btrfs_err(inode->root->fs_info,
 		"zstd decompression failed, error %d root %llu inode %llu offset %llu",
-				  zstd_get_error_code(ret2),
-				  inode->root->root_key.objectid, btrfs_ino(inode),
-				  cb->start);
+				  zstd_get_error_code(ret2), btrfs_root_id(inode->root),
+				  btrfs_ino(inode), cb->start);
 			ret = -EIO;
 			goto done;
 		}
@@ -675,7 +673,7 @@ int zstd_decompress(struct list_head *ws, const u8 *data_in,
 
 		btrfs_err(inode->root->fs_info,
 		"zstd decompression init failed, root %llu inode %llu offset %llu",
-			  inode->root->root_key.objectid, btrfs_ino(inode),
+			  btrfs_root_id(inode->root), btrfs_ino(inode),
 			  page_offset(dest_page));
 		ret = -EIO;
 		goto finish;
@@ -699,9 +697,8 @@ int zstd_decompress(struct list_head *ws, const u8 *data_in,
 
 		btrfs_err(inode->root->fs_info,
 		"zstd decompression failed, error %d root %llu inode %llu offset %llu",
-			  zstd_get_error_code(ret),
-			  inode->root->root_key.objectid, btrfs_ino(inode),
-			  page_offset(dest_page));
+			  zstd_get_error_code(ret), btrfs_root_id(inode->root),
+			  btrfs_ino(inode), page_offset(dest_page));
 		goto finish;
 	}
 	to_copy = workspace->out_buf.pos;

@@ -360,7 +360,7 @@ int lzo_decompress_bio(struct list_head *ws, struct compressed_bio *cb)
 
 		btrfs_err(fs_info,
 "lzo header invalid, root %llu inode %llu offset %llu lzo len %u compressed len %u",
-			  inode->root->root_key.objectid, btrfs_ino(inode),
+			  btrfs_root_id(inode->root), btrfs_ino(inode),
 			  cb->start, len_in, cb->compressed_len);
 		return -EUCLEAN;
 	}
@@ -395,7 +395,7 @@ int lzo_decompress_bio(struct list_head *ws, struct compressed_bio *cb)
 			 */
 			btrfs_err(fs_info,
 			"lzo segment too big, root %llu inode %llu offset %llu len %u",
-				  inode->root->root_key.objectid, btrfs_ino(inode),
+				  btrfs_root_id(inode->root), btrfs_ino(inode),
 				  cb->start, seg_len);
 			return -EIO;
 		}
@@ -411,8 +411,8 @@ int lzo_decompress_bio(struct list_head *ws, struct compressed_bio *cb)
 
 			btrfs_err(fs_info,
 		"lzo decompression failed, error %d root %llu inode %llu offset %llu",
-				  ret, inode->root->root_key.objectid,
-				  btrfs_ino(inode), cb->start);
+				  ret, btrfs_root_id(inode->root), btrfs_ino(inode),
+				  cb->start);
 			return -EIO;
 		}
 
@@ -471,8 +471,8 @@ int lzo_decompress(struct list_head *ws, const u8 *data_in,
 
 		btrfs_err(fs_info,
 		"lzo decompression failed, error %d root %llu inode %llu offset %llu",
-			  ret, inode->root->root_key.objectid,
-			  btrfs_ino(inode), page_offset(dest_page));
+			  ret, btrfs_root_id(inode->root), btrfs_ino(inode),
+			  page_offset(dest_page));
 		ret = -EIO;
 		goto out;
 	}

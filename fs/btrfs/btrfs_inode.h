@@ -441,9 +441,9 @@ static inline bool btrfs_is_free_space_inode(const struct btrfs_inode *inode)
 	return test_bit(BTRFS_INODE_FREE_SPACE_INODE, &inode->runtime_flags);
 }
 
-static inline bool is_data_inode(const struct inode *inode)
+static inline bool is_data_inode(const struct btrfs_inode *inode)
 {
-	return btrfs_ino(BTRFS_I(inode)) != BTRFS_BTREE_INODE_OBJECTID;
+	return btrfs_ino(inode) != BTRFS_BTREE_INODE_OBJECTID;
 }
 
 static inline void btrfs_mod_outstanding_extents(struct btrfs_inode *inode,
@@ -633,10 +633,6 @@ ssize_t btrfs_encoded_read(struct kiocb *iocb, struct iov_iter *iter,
 ssize_t btrfs_do_encoded_write(struct kiocb *iocb, struct iov_iter *from,
 			       const struct btrfs_ioctl_encoded_io_args *encoded);
 
-ssize_t btrfs_dio_read(struct kiocb *iocb, struct iov_iter *iter,
-		       size_t done_before);
-struct iomap_dio *btrfs_dio_write(struct kiocb *iocb, struct iov_iter *iter,
-				  size_t done_before);
 struct btrfs_inode *btrfs_find_first_inode(struct btrfs_root *root, u64 min_ino);
 
 extern const struct dentry_operations btrfs_dentry_operations;
@@ -653,5 +649,10 @@ void btrfs_inode_unlock(struct btrfs_inode *inode, unsigned int ilock_flags);
 void btrfs_update_inode_bytes(struct btrfs_inode *inode, const u64 add_bytes,
 			      const u64 del_bytes);
 void btrfs_assert_inode_range_clean(struct btrfs_inode *inode, u64 start, u64 end);
+u64 btrfs_get_extent_allocation_hint(struct btrfs_inode *inode, u64 start,
+				     u64 num_bytes);
+struct extent_map *btrfs_create_io_em(struct btrfs_inode *inode, u64 start,
+				      const struct btrfs_file_extent *file_extent,
+				      int type);
 
 #endif

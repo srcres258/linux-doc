@@ -683,11 +683,8 @@ static int __init memory_tier_late_init(void)
 
 	get_online_mems();
 	guard(mutex)(&memory_tier_lock);
-	/*
-	 * Look at all the existing and uninitialized N_MEMORY nodes and
-	 * add them to default memory tier or to a tier if we already have
-	 * memory types assigned.
-	 */
+
+	/* Assign each uninitialized N_MEMORY node to a memory tier. */
 	for_each_node_state(nid, N_MEMORY) {
 		/*
 		 * Some device drivers may have initialized
@@ -700,8 +697,7 @@ static int __init memory_tier_late_init(void)
 
 		memtier = set_node_memory_tier(nid);
 		if (IS_ERR(memtier))
-			/* Continue with memtiers we are able to setup. */
-			break;
+			continue;
 	}
 	establish_demotion_targets();
 	put_online_mems();

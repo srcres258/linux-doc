@@ -116,6 +116,7 @@ void dwc3_enable_susphy(struct dwc3 *dwc, bool enable)
 			reg |= DWC3_GUSB3PIPECTL_SUSPHY;
 		else
 			reg &= ~DWC3_GUSB3PIPECTL_SUSPHY;
+
 		dwc3_writel(dwc->regs, DWC3_GUSB3PIPECTL(i), reg);
 	}
 
@@ -125,6 +126,7 @@ void dwc3_enable_susphy(struct dwc3 *dwc, bool enable)
 			reg |= DWC3_GUSB2PHYCFG_SUSPHY;
 		else
 			reg &= ~DWC3_GUSB2PHYCFG_SUSPHY;
+
 		dwc3_writel(dwc->regs, DWC3_GUSB2PHYCFG(i), reg);
 	}
 }

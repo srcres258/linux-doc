@@ -1930,20 +1930,20 @@ void btrfs_reclaim_bgs_work(struct work_struct *work)
 			btrfs_dec_block_group_ro(bg);
 			btrfs_err(fs_info, "error relocating chunk %llu",
 				  bg->start);
+			reclaimed = 0;
 			spin_lock(&space_info->lock);
-			space_info->reclaim_count++;
+			space_info->reclaim_errors++;
 			if (READ_ONCE(space_info->periodic_reclaim))
 				space_info->periodic_reclaim_ready = false;
 			spin_unlock(&space_info->lock);
-		} else {
-			spin_lock(&space_info->lock);
-			space_info->reclaim_count++;
-			space_info->reclaim_bytes += reclaimed;
-			spin_unlock(&space_info->lock);
 		}
+		spin_lock(&space_info->lock);
+		space_info->reclaim_count++;
+		space_info->reclaim_bytes += reclaimed;
+		spin_unlock(&space_info->lock);
 
 next:
-		if (ret) {
+		if (ret && !READ_ONCE(space_info->periodic_reclaim)) {
 			/* Refcount held by the reclaim_bgs list after splice. */
 			spin_lock(&fs_info->unused_bgs_lock);
 			/*
@@ -4356,13 +4356,13 @@ void btrfs_put_block_group_cache(struct btrfs_fs_info *info)
 		spin_lock(&block_group->lock);
 		if (test_and_clear_bit(BLOCK_GROUP_FLAG_IREF,
 				       &block_group->runtime_flags)) {
-			struct inode *inode = block_group->inode;
+			struct btrfs_inode *inode = block_group->inode;
 
 			block_group->inode = NULL;
 			spin_unlock(&block_group->lock);
 
 			ASSERT(block_group->io_ctl.inode == NULL);
-			iput(inode);
+			iput(&inode->vfs_inode);
 		} else {
 			spin_unlock(&block_group->lock);
 		}

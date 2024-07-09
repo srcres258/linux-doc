@@ -144,36 +144,6 @@ static void nfs_io_completion_put(struct nfs_io_completion *ioc)
 		kref_put(&ioc->refcount, nfs_io_completion_release);
 }
 
-static void
-nfs_page_set_inode_ref(struct nfs_page *req, struct inode *inode)
-{
-	if (!test_and_set_bit(PG_INODE_REF, &req->wb_flags)) {
-		kref_get(&req->wb_kref);
-		atomic_long_inc(&NFS_I(inode)->nrequests);
-	}
-}
-
-static int
-nfs_cancel_remove_inode(struct nfs_page *req, struct inode *inode)
-{
-	int ret;
-
-	if (!test_bit(PG_REMOVE, &req->wb_flags))
-		return 0;
-	ret = nfs_page_group_lock(req);
-	if (ret)
-		return ret;
-	if (test_and_clear_bit(PG_REMOVE, &req->wb_flags))
-		nfs_page_set_inode_ref(req, inode);
-	nfs_page_group_unlock(req);
-	return 0;
-}
-
-static struct nfs_page *nfs_folio_private_request(struct folio *folio)
-{
-	return folio_get_private(folio);
-}
-
 /**
  * nfs_folio_find_head_request - find head request associated with a folio
  * @folio: pointer to folio
@@ -190,41 +160,13 @@ static struct nfs_page *nfs_folio_find_head_request(struct folio *folio)
 	if (!folio_test_private(folio))
 		return NULL;
 	spin_lock(&mapping->i_private_lock);
-	req = nfs_folio_private_request(folio);
+	req = folio->private;
 	if (req) {
 		WARN_ON_ONCE(req->wb_head != req);
 		kref_get(&req->wb_kref);
 	}
 	spin_unlock(&mapping->i_private_lock);
 	return req;
-}
-
-static struct nfs_page *nfs_folio_find_and_lock_request(struct folio *folio)
-{
-	struct inode *inode = folio->mapping->host;
-	struct nfs_page *req, *head;
-	int ret;
-
-	for (;;) {
-		req = nfs_folio_find_head_request(folio);
-		if (!req)
-			return req;
-		head = nfs_page_group_lock_head(req);
-		if (head != req)
-			nfs_release_request(req);
-		if (IS_ERR(head))
-			return head;
-		ret = nfs_cancel_remove_inode(head, inode);
-		if (ret < 0) {
-			nfs_unlock_and_release_request(head);
-			return ERR_PTR(ret);
-		}
-		/* Ensure that nobody removed the request before we locked it */
-		if (head == nfs_folio_private_request(folio))
-			break;
-		nfs_unlock_and_release_request(head);
-	}
-	return head;
 }
 
 /* Adjust the file length if we're writing beyond the end */
@@ -510,6 +452,74 @@ void nfs_join_page_group(struct nfs_page *head, struct nfs_commit_info *cinfo,
 	nfs_destroy_unlinked_subrequests(destroy_list, head, inode);
 }
 
+/**
+ * nfs_wait_on_request - Wait for a request to complete.
+ * @req: request to wait upon.
+ *
+ * Interruptible by fatal signals only.
+ * The user is responsible for holding a count on the request.
+ */
+static int nfs_wait_on_request(struct nfs_page *req)
+{
+	if (!test_bit(PG_BUSY, &req->wb_flags))
+		return 0;
+	set_bit(PG_CONTENDED2, &req->wb_flags);
+	smp_mb__after_atomic();
+	return wait_on_bit_io(&req->wb_flags, PG_BUSY,
+			      TASK_UNINTERRUPTIBLE);
+}
+
+/*
+ * nfs_unroll_locks -  unlock all newly locked reqs and wait on @req
+ * @head: head request of page group, must be holding head lock
+ * @req: request that couldn't lock and needs to wait on the req bit lock
+ *
+ * This is a helper function for nfs_lock_and_join_requests
+ * returns 0 on success, < 0 on error.
+ */
+static void
+nfs_unroll_locks(struct nfs_page *head, struct nfs_page *req)
+{
+	struct nfs_page *tmp;
+
+	/* relinquish all the locks successfully grabbed this run */
+	for (tmp = head->wb_this_page ; tmp != req; tmp = tmp->wb_this_page) {
+		if (!kref_read(&tmp->wb_kref))
+			continue;
+		nfs_unlock_and_release_request(tmp);
+	}
+}
+
+/*
+ * nfs_page_group_lock_subreq -  try to lock a subrequest
+ * @head: head request of page group
+ * @subreq: request to lock
+ *
+ * This is a helper function for nfs_lock_and_join_requests which
+ * must be called with the head request and page group both locked.
+ * On error, it returns with the page group unlocked.
+ */
+static int
+nfs_page_group_lock_subreq(struct nfs_page *head, struct nfs_page *subreq)
+{
+	int ret;
+
+	if (!kref_get_unless_zero(&subreq->wb_kref))
+		return 0;
+	while (!nfs_lock_request(subreq)) {
+		nfs_page_group_unlock(head);
+		ret = nfs_wait_on_request(subreq);
+		if (!ret)
+			ret = nfs_page_group_lock(head);
+		if (ret < 0) {
+			nfs_unroll_locks(head, subreq);
+			nfs_release_request(subreq);
+			return ret;
+		}
+	}
+	return 0;
+}
+
 /*
  * nfs_lock_and_join_requests - join all subreqs to the head req
  * @folio: the folio used to lookup the "page group" of nfs_page structures
@@ -528,30 +538,74 @@ void nfs_join_page_group(struct nfs_page *head, struct nfs_commit_info *cinfo,
 static struct nfs_page *nfs_lock_and_join_requests(struct folio *folio)
 {
 	struct inode *inode = folio->mapping->host;
-	struct nfs_page *head;
+	struct nfs_page *head, *subreq;
 	struct nfs_commit_info cinfo;
+	bool removed;
 	int ret;
 
-	nfs_init_cinfo_from_inode(&cinfo, inode);
 	/*
 	 * A reference is taken only on the head request which acts as a
 	 * reference to the whole page group - the group will not be destroyed
 	 * until the head reference is released.
 	 */
-	head = nfs_folio_find_and_lock_request(folio);
-	if (IS_ERR_OR_NULL(head))
-		return head;
+retry:
+	head = nfs_folio_find_head_request(folio);
+	if (!head)
+		return NULL;
 
-	/* lock each request in the page group */
-	ret = nfs_page_group_lock_subrequests(head);
-	if (ret < 0) {
-		nfs_unlock_and_release_request(head);
-		return ERR_PTR(ret);
+	while (!nfs_lock_request(head)) {
+		ret = nfs_wait_on_request(head);
+		if (ret < 0)
+			return ERR_PTR(ret);
 	}
 
-	nfs_join_page_group(head, &cinfo, inode);
+	/* Ensure that nobody removed the request before we locked it */
+	if (head != folio->private) {
+		nfs_unlock_and_release_request(head);
+		goto retry;
+	}
 
+	ret = nfs_page_group_lock(head);
+	if (ret < 0)
+		goto out_unlock;
+
+	removed = test_bit(PG_REMOVE, &head->wb_flags);
+
+	/* lock each request in the page group */
+	for (subreq = head->wb_this_page;
+	     subreq != head;
+	     subreq = subreq->wb_this_page) {
+		if (test_bit(PG_REMOVE, &subreq->wb_flags))
+			removed = true;
+		ret = nfs_page_group_lock_subreq(head, subreq);
+		if (ret < 0)
+			goto out_unlock;
+	}
+
+	nfs_page_group_unlock(head);
+
+	/*
+	 * If PG_REMOVE is set on any request, I/O on that request has
+	 * completed, but some requests were still under I/O at the time
+	 * we locked the head request.
+	 *
+	 * In that case the above wait for all requests means that all I/O
+	 * has now finished, and we can restart from a clean slate.  Let the
+	 * old requests go away and start from scratch instead.
+	 */
+	if (removed) {
+		nfs_unroll_locks(head, head);
+		nfs_unlock_and_release_request(head);
+		goto retry;
+	}
+
+	nfs_init_cinfo_from_inode(&cinfo, inode);
+	nfs_join_page_group(head, &cinfo, inode);
 	return head;
+
+out_unlock:
+	nfs_unlock_and_release_request(head);
+	return ERR_PTR(ret);
 }
 
 static void nfs_write_error(struct nfs_page *req, int error)
@@ -665,9 +719,12 @@ int nfs_writepages(struct address_space *mapping, struct writeback_control *wbc)
 	int err;
 
 	/* Wait with writeback until write congestion eases */
-	if (wbc->sync_mode == WB_SYNC_NONE && nfss->write_congested)
-		wait_event(nfss->write_congestion_wait,
-			   nfss->write_congested == 0);
+	if (wbc->sync_mode == WB_SYNC_NONE && nfss->write_congested) {
+		err = wait_event_killable(nfss->write_congestion_wait,
+					  nfss->write_congested == 0);
+		if (err)
+			return err;
+	}
 
 	nfs_inc_stats(inode, NFSIOS_VFSWRITEPAGES);
 

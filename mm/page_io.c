@@ -172,42 +172,34 @@ bad_bmap:
 	goto out;
 }
 
-static bool is_folio_page_zero_filled(struct folio *folio, int i)
-{
-	unsigned long *data;
-	unsigned int pos, last_pos = PAGE_SIZE / sizeof(*data) - 1;
-	bool ret = false;
-
-	data = kmap_local_folio(folio, i * PAGE_SIZE);
-	if (data[last_pos])
-		goto out;
-	for (pos = 0; pos < PAGE_SIZE / sizeof(*data); pos++) {
-		if (data[pos])
-			goto out;
-	}
-	ret = true;
-out:
-	kunmap_local(data);
-	return ret;
-}
-
 static bool is_folio_zero_filled(struct folio *folio)
 {
+	unsigned int pos, last_pos;
+	unsigned long *data;
 	unsigned int i;
 
+	last_pos = PAGE_SIZE / sizeof(*data) - 1;
 	for (i = 0; i < folio_nr_pages(folio); i++) {
-		if (!is_folio_page_zero_filled(folio, i))
+		data = kmap_local_folio(folio, i * PAGE_SIZE);
+		/*
+		 * Check last word first, incase the page is zero-filled at
+		 * the start and has non-zero data at the end, which is common
+		 * in real-world workloads.
+		 */
+		if (data[last_pos]) {
+			kunmap_local(data);
 			return false;
+		}
+		for (pos = 0; pos < last_pos; pos++) {
+			if (data[pos]) {
+				kunmap_local(data);
+				return false;
+			}
+		}
+		kunmap_local(data);
 	}
+
 	return true;
-}
-
-static void folio_zero_fill(struct folio *folio)
-{
-	unsigned int i;
-
-	for (i = 0; i < folio_nr_pages(folio); i++)
-		clear_highpage(folio_page(folio, i));
 }
 
 static void swap_zeromap_folio_set(struct folio *folio)
@@ -278,12 +270,24 @@ int swap_writepage(struct page *page, struct writeback_control *wbc)
 		return ret;
 	}
 
+	/*
+	 * Use a bitmap (zeromap) to avoid doing IO for zero-filled pages.
+	 * The bits in zeromap are protected by the locked swapcache folio
+	 * and atomic updates are used to protect against read-modify-write
+	 * corruption due to other zero swap entries seeing concurrent updates.
+	 */
 	if (is_folio_zero_filled(folio)) {
 		swap_zeromap_folio_set(folio);
 		folio_unlock(folio);
 		return 0;
+	} else {
+		/*
+		 * Clear bits this folio occupies in the zeromap to prevent
+		 * zero data being read in from any previous zero writes that
+		 * occupied the same swap entries.
+		 */
+		swap_zeromap_folio_clear(folio);
 	}
-	swap_zeromap_folio_clear(folio);
 	if (zswap_store(folio)) {
 		folio_unlock(folio);
 		return 0;
@@ -530,7 +534,7 @@ static bool swap_read_folio_zeromap(struct folio *folio)
 	if (WARN_ON_ONCE(idx < folio_nr_pages(folio)))
 		return true;
 
-	folio_zero_fill(folio);
+	folio_zero_range(folio, 0, folio_size(folio));
 	folio_mark_uptodate(folio);
 	return true;
 }

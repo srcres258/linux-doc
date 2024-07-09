@@ -180,6 +180,12 @@ struct btrfs_space_info {
 	u64 reclaim_bytes;
 
 	/*
+	 * Monotonically increasing counter of reclaim errors
+	 * Exposed in /sys/fs/<uuid>/allocation/<type>/reclaim_errors
+	 */
+	u64 reclaim_errors;
+
+	/*
 	 * If true, use the dynamic relocation threshold, instead of the
 	 * fixed bg_reclaim_threshold.
 	 */

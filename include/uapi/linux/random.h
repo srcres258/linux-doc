@@ -56,20 +56,18 @@ struct rand_pool_info {
 #define GRND_INSECURE	0x0004
 
 /**
- * struct vgetrandom_alloc_args - arguments for the vgetrandom_alloc syscall
+ * struct vgetrandom_opaque_params - arguments for allocating memory for vgetrandom
  *
- * The arguments are described in the doc comment of vgetrandom_alloc.
- *
- * The structure is versioned by size and thus extensible. New struct members
- * must go at the end of the struct and must be properly 64-bit aligned.
+ * @size_per_opaque_state:	Size of each state that is to be passed to vgetrandom().
+ * @mmap_prot:			Value of the prot argument in mmap(2).
+ * @mmap_flags:			Value of the flags argument in mmap(2).
+ * @reserved:			Reserved for future use.
  */
-struct vgetrandom_alloc_args {
-	__aligned_u64 flags;
-	__aligned_u64 num;
-	__aligned_u64 size_per_each;
-	__aligned_u64 bytes_allocated;
+struct vgetrandom_opaque_params {
+	__u32 size_of_opaque_state;
+	__u32 mmap_prot;
+	__u32 mmap_flags;
+	__u32 reserved[13];
 };
-
-#define VGETRANDOM_ALLOC_ARGS_SIZE_VER0 32 /* sizeof first published struct */
 
 #endif /* _UAPI_LINUX_RANDOM_H */

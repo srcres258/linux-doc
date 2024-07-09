@@ -164,21 +164,6 @@ rcu_barrier();
 kmem_cache_destroy(extent_buffer_cache);
 }
 
-void extent_range_clear_dirty_for_io(struct inode *inode, u64 start, u64 end)
-{
-unsigned long index = start >> PAGE_SHIFT;
-unsigned long end_index = end >> PAGE_SHIFT;
-struct page *page;
-
-while (index <= end_index) {
-	page = find_get_page(inode->i_mapping, index);
-	BUG_ON(!page); /* Pages should be in the extent_io_tree */
-	clear_page_dirty_for_io(page);
-	put_page(page);
-	index++;
-}
-}
-
 static void process_one_page(struct btrfs_fs_info *fs_info,
 			     struct page *page, const struct page *locked_page,
 			     unsigned long page_ops, u64 start, u64 end)
@@ -1003,24 +988,22 @@ error:
 }
 
 /*
- * Populate every free slot in a provided array with folios.
+ * Populate every free slot in a provided array with folios using GFP_NOFS.
  *
  * @nr_folios:   number of folios to allocate
  * @folio_array: the array to fill with folios; any existing non-NULL entries in
  *		 the array will be skipped
- * @extra_gfp:	 the extra GFP flags for the allocation
  *
  * Return: 0        if all folios were able to be allocated;
  *         -ENOMEM  otherwise, the partially allocated folios would be freed and
  *                  the array slots zeroed
  */
-int btrfs_alloc_folio_array(unsigned int nr_folios, struct folio **folio_array,
-			    gfp_t extra_gfp)
+int btrfs_alloc_folio_array(unsigned int nr_folios, struct folio **folio_array)
 {
 	for (int i = 0; i < nr_folios; i++) {
 		if (folio_array[i])
 			continue;
-		folio_array[i] = folio_alloc(GFP_NOFS | extra_gfp, 0);
+		folio_array[i] = folio_alloc(GFP_NOFS, 0);
 		if (!folio_array[i])
 			goto error;
 	}
@@ -1034,21 +1017,21 @@ error:
 }
 
 /*
- * Populate every free slot in a provided array with pages.
+ * Populate every free slot in a provided array with pages, using GFP_NOFS.
  *
  * @nr_pages:   number of pages to allocate
  * @page_array: the array to fill with pages; any existing non-null entries in
- * 		the array will be skipped
- * @extra_gfp:	the extra GFP flags for the allocation.
+ *		the array will be skipped
+ * @nofail:	whether using __GFP_NOFAIL flag
  *
  * Return: 0        if all pages were able to be allocated;
  *         -ENOMEM  otherwise, the partially allocated pages would be freed and
  *                  the array slots zeroed
  */
 int btrfs_alloc_page_array(unsigned int nr_pages, struct page **page_array,
-		   gfp_t extra_gfp)
+			   bool nofail)
 {
-	const gfp_t gfp = GFP_NOFS | extra_gfp;
+	const gfp_t gfp = nofail ? (GFP_NOFS | __GFP_NOFAIL) : GFP_NOFS;
 	unsigned int allocated;
 
 for (allocated = 0; allocated < nr_pages;) {
@@ -1075,33 +1058,13 @@ return 0;
  *
  * For now, the folios populated are always in order 0 (aka, single page).
  */
-static int alloc_eb_folio_array(struct extent_buffer *eb, gfp_t extra_gfp,
-				int order)
+static int alloc_eb_folio_array(struct extent_buffer *eb, bool nofail)
 {
 struct page *page_array[INLINE_EXTENT_BUFFER_PAGES] = { 0 };
 int num_pages = num_extent_pages(eb);
 int ret;
 
-	if (order) {
-		/*
-		 * For higher order folio allocation, we discard the extra_gfp
-		 * (should only be __GFP_NOFAIL, and conflicts with higher order
-		 * folio).
-		 *
-		 * Instead we want no warning when allocation failed, and no
-		 * extra retry (to get a faster allocation).
-		 * As we're completely fine to fall back to lower order.
-		 */
-		eb->folios[0] = folio_alloc(GFP_NOFS | __GFP_NOWARN |
-					    __GFP_NORETRY, order);
-		if (eb->folios[0]) {
-			eb->folio_size = folio_size(eb->folios[0]);
-			eb->folio_shift = folio_shift(eb->folios[0]);
-			return 0;
-		}
-		/* Fallback to 0 order (single page) folios. */
-	}
-	ret = btrfs_alloc_page_array(num_pages, page_array, extra_gfp);
+	ret = btrfs_alloc_page_array(num_pages, page_array, nofail);
 	if (ret < 0)
 		return ret;
 
@@ -1236,29 +1199,12 @@ do {
 	pg_offset += len;
 	disk_bytenr += len;
 
-	/*
-	 * len_to_oe_boundary defaults to U32_MAX, which isn't page or
-	 * sector aligned.  alloc_new_bio() then sets it to the end of
-	 * our ordered extent for writes into zoned devices.
-	 *
-	 * When len_to_oe_boundary is tracking an ordered extent, we
-	 * trust the ordered extent code to align things properly, and
-	 * the check above to cap our write to the ordered extent
-	 * boundary is correct.
-	 *
-	 * When len_to_oe_boundary is U32_MAX, the cap above would
-	 * result in a 4095 byte IO for the last page right before
-	 * we hit the bio limit of UINT_MAX.  bio_add_page() has all
-	 * the checks required to make sure we don't overflow the bio,
-	 * and we should just ignore len_to_oe_boundary completely
-	 * unless we're using it to track an ordered extent.
-	 *
-	 * It's pretty hard to make a bio sized U32_MAX, but it can
-	 * happen when the page cache is able to feed us contiguous
-	 * pages for large extents.
-	 */
-	if (bio_ctrl->len_to_oe_boundary != U32_MAX)
-		bio_ctrl->len_to_oe_boundary -= len;
+		/* Cap to the current ordered extent boundary if there is one. */
+		if (len > bio_ctrl->len_to_oe_boundary) {
+			ASSERT(bio_ctrl->compress_type == BTRFS_COMPRESS_NONE);
+			ASSERT(is_data_inode(inode));
+			len = bio_ctrl->len_to_oe_boundary;
+		}
 
 	/* Ordered extent boundary: move on to a new bio. */
 	if (bio_ctrl->len_to_oe_boundary == 0)
@@ -3256,7 +3202,7 @@ if (new == NULL)
  */
 set_bit(EXTENT_BUFFER_UNMAPPED, &new->bflags);
 
-	ret = alloc_eb_folio_array(new, 0, folio_order(src->folios[0]));
+	ret = alloc_eb_folio_array(new, false);
 	if (ret) {
 		btrfs_release_extent_buffer(new);
 		return NULL;
@@ -3289,7 +3235,7 @@ struct extent_buffer *__alloc_dummy_extent_buffer(struct btrfs_fs_info *fs_info,
 	if (!eb)
 		return NULL;
 
-	ret = alloc_eb_folio_array(eb, 0, 0);
+	ret = alloc_eb_folio_array(eb, false);
 	if (ret)
 		goto err;
 
@@ -3833,7 +3779,7 @@ if (start >= BTRFS_32BIT_EARLY_WARN_THRESHOLD)
 
 reallocate:
 	/* Allocate all pages first. */
-	ret = alloc_eb_folio_array(eb, __GFP_NOFAIL, order);
+	ret = alloc_eb_folio_array(eb, true);
 	if (ret < 0) {
 		btrfs_free_subpage(prealloc);
 		goto out;

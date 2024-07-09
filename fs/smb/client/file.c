@@ -261,124 +261,6 @@ static void cifs_rreq_done(struct netfs_io_request *rreq)
 		inode_set_atime_to_ts(inode, inode_get_mtime(inode));
 }
 
-static void cifs_free_request(struct netfs_io_request *rreq)
-{
-	struct cifs_io_request *req = container_of(rreq, struct cifs_io_request, rreq);
-
-	if (req->cfile)
-		cifsFileInfo_put(req->cfile);
-}
-
-static void cifs_free_subrequest(struct netfs_io_subrequest *subreq)
-{
-	struct cifs_io_subrequest *rdata =
-		container_of(subreq, struct cifs_io_subrequest, subreq);
-	int rc = subreq->error;
-
-	if (rdata->subreq.source == NETFS_DOWNLOAD_FROM_SERVER) {
-#ifdef CONFIG_CIFS_SMB_DIRECT
-		if (rdata->mr) {
-			smbd_deregister_mr(rdata->mr);
-			rdata->mr = NULL;
-		}
-#endif
-	}
-
-	add_credits_and_wake_if(rdata->server, &rdata->credits, 0);
-	if (rdata->have_xid)
-		free_xid(rdata->xid);
-}
-
-const struct netfs_request_ops cifs_req_ops = {
-	.request_pool		= &cifs_io_request_pool,
-	.subrequest_pool	= &cifs_io_subrequest_pool,
-	.init_request		= cifs_init_request,
-	.free_request		= cifs_free_request,
-	.free_subrequest	= cifs_free_subrequest,
-	.clamp_length		= cifs_clamp_length,
-	.issue_read		= cifs_req_issue_read,
-	.done			= cifs_rreq_done,
-	.begin_writeback	= cifs_begin_writeback,
-	.prepare_write		= cifs_prepare_write,
-	.issue_write		= cifs_issue_write,
-};
-
-/*
- * Initialise a request.
- */
-static int cifs_init_request(struct netfs_io_request *rreq, struct file *file)
-{
-	struct cifs_io_request *req = container_of(rreq, struct cifs_io_request, rreq);
-	struct cifs_sb_info *cifs_sb = CIFS_SB(rreq->inode->i_sb);
-	struct cifsFileInfo *open_file = NULL;
-	int ret;
-
-	rreq->rsize = cifs_sb->ctx->rsize;
-	rreq->wsize = cifs_sb->ctx->wsize;
-
-	if (file) {
-		open_file = file->private_data;
-		rreq->netfs_priv = file->private_data;
-		req->cfile = cifsFileInfo_get(open_file);
-	} else if (rreq->origin == NETFS_WRITEBACK ||
-		   rreq->origin == NETFS_LAUNDER_WRITE) {
-		ret = cifs_get_writable_file(CIFS_I(rreq->inode), FIND_WR_ANY, &req->cfile);
-		if (ret) {
-			cifs_dbg(VFS, "No writable handle in writepages ret=%d\n", ret);
-			return ret;
-		}
-	} else {
-		WARN_ON_ONCE(1);
-		return -EIO;
-	}
-
-	return 0;
-}
-
-/*
- * Expand the size of a readahead to the size of the rsize, if at least as
- * large as a page, allowing for the possibility that rsize is not pow-2
- * aligned.
- */
-static void cifs_expand_readahead(struct netfs_io_request *rreq)
-{
-	unsigned int rsize = rreq->rsize;
-	loff_t misalignment, i_size = i_size_read(rreq->inode);
-
-	if (rsize < PAGE_SIZE)
-		return;
-
-	if (rsize < INT_MAX)
-		rsize = roundup_pow_of_two(rsize);
-	else
-		rsize = ((unsigned int)INT_MAX + 1) / 2;
-
-	misalignment = rreq->start & (rsize - 1);
-	if (misalignment) {
-		rreq->start -= misalignment;
-		rreq->len += misalignment;
-	}
-
-	rreq->len = round_up(rreq->len, rsize);
-	if (rreq->start < i_size && rreq->len > i_size - rreq->start)
-		rreq->len = i_size - rreq->start;
-}
-
-/*
- * Completion of a request operation.
- */
-static void cifs_rreq_done(struct netfs_io_request *rreq)
-{
-	struct timespec64 atime, mtime;
-	struct inode *inode = rreq->inode;
-
-	/* we do not want atime to be less than mtime, it broke some apps */
-	atime = inode_set_atime_to_ts(inode, current_time(inode));
-	mtime = inode_get_mtime(inode);
-	if (timespec64_compare(&atime, &mtime))
-		inode_set_atime_to_ts(inode, inode_get_mtime(inode));
-}
-
 static void cifs_post_modify(struct inode *inode)
 {
 	/* Indication to update ctime and mtime as close is deferred */
@@ -420,7 +302,6 @@ const struct netfs_request_ops cifs_req_ops = {
 	.init_request		= cifs_init_request,
 	.free_request		= cifs_free_request,
 	.free_subrequest	= cifs_free_subrequest,
-	.expand_readahead	= cifs_expand_readahead,
 	.clamp_length		= cifs_clamp_length,
 	.issue_read		= cifs_req_issue_read,
 	.done			= cifs_rreq_done,

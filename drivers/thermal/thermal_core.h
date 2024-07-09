@@ -137,7 +137,7 @@ struct thermal_zone_device {
  * Default delay after a failing thermal zone temperature check before
  * attempting to check it again.
  */
-#define THERMAL_RECHECK_DELAY_MS	100
+#define THERMAL_RECHECK_DELAY_MS	250
 
 /* Default Thermal Governor */
 #if defined(CONFIG_THERMAL_DEFAULT_GOV_STEP_WISE)

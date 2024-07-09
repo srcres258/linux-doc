@@ -34,6 +34,7 @@
 #include "disk-io.h"
 #include "transaction.h"
 #include "btrfs_inode.h"
+#include "direct-io.h"
 #include "props.h"
 #include "xattr.h"
 #include "bio.h"
@@ -125,9 +126,6 @@ enum {
 	Opt_rescue,
 	Opt_usebackuproot,
 	Opt_nologreplay,
-	Opt_ignorebadroots,
-	Opt_ignoredatacsums,
-	Opt_rescue_all,
 
 	/* Debugging options */
 	Opt_enospc_debug,
@@ -178,6 +176,8 @@ enum {
 	Opt_rescue_nologreplay,
 	Opt_rescue_ignorebadroots,
 	Opt_rescue_ignoredatacsums,
+	Opt_rescue_ignoremetacsums,
+	Opt_rescue_ignoresuperflags,
 	Opt_rescue_parameter_all,
 };
 
@@ -187,7 +187,11 @@ static const struct constant_table btrfs_parameter_rescue[] = {
 	{ "ignorebadroots", Opt_rescue_ignorebadroots },
 	{ "ibadroots", Opt_rescue_ignorebadroots },
 	{ "ignoredatacsums", Opt_rescue_ignoredatacsums },
+	{ "ignoremetacsums", Opt_rescue_ignoremetacsums},
+	{ "ignoresuperflags", Opt_rescue_ignoresuperflags},
 	{ "idatacsums", Opt_rescue_ignoredatacsums },
+	{ "imetacsums", Opt_rescue_ignoremetacsums},
+	{ "isuperflags", Opt_rescue_ignoresuperflags},
 	{ "all", Opt_rescue_parameter_all },
 	{}
 };
@@ -573,8 +577,16 @@ static int btrfs_parse_param(struct fs_context *fc, struct fs_parameter *param)
 		case Opt_rescue_ignoredatacsums:
 			btrfs_set_opt(ctx->mount_opt, IGNOREDATACSUMS);
 			break;
+		case Opt_rescue_ignoremetacsums:
+			btrfs_set_opt(ctx->mount_opt, IGNOREMETACSUMS);
+			break;
+		case Opt_rescue_ignoresuperflags:
+			btrfs_set_opt(ctx->mount_opt, IGNORESUPERFLAGS);
+			break;
 		case Opt_rescue_parameter_all:
 			btrfs_set_opt(ctx->mount_opt, IGNOREDATACSUMS);
+			btrfs_set_opt(ctx->mount_opt, IGNOREMETACSUMS);
+			btrfs_set_opt(ctx->mount_opt, IGNORESUPERFLAGS);
 			btrfs_set_opt(ctx->mount_opt, IGNOREBADROOTS);
 			btrfs_set_opt(ctx->mount_opt, NOLOGREPLAY);
 			break;
@@ -649,7 +661,9 @@ bool btrfs_check_options(const struct btrfs_fs_info *info, unsigned long *mount_
 	if (!(flags & SB_RDONLY) &&
 	    (check_ro_option(info, *mount_opt, BTRFS_MOUNT_NOLOGREPLAY, "nologreplay") ||
 	     check_ro_option(info, *mount_opt, BTRFS_MOUNT_IGNOREBADROOTS, "ignorebadroots") ||
-	     check_ro_option(info, *mount_opt, BTRFS_MOUNT_IGNOREDATACSUMS, "ignoredatacsums")))
+	     check_ro_option(info, *mount_opt, BTRFS_MOUNT_IGNOREDATACSUMS, "ignoredatacsums") ||
+	     check_ro_option(info, *mount_opt, BTRFS_MOUNT_IGNOREMETACSUMS, "ignoremetacsums") ||
+	     check_ro_option(info, *mount_opt, BTRFS_MOUNT_IGNORESUPERFLAGS, "ignoresuperflags")))
 		ret = false;
 
 	if (btrfs_fs_compat_ro(info, FREE_SPACE_TREE) &&
@@ -1065,6 +1079,10 @@ static int btrfs_show_options(struct seq_file *seq, struct dentry *dentry)
 		print_rescue_option(seq, "ignorebadroots", &printed);
 	if (btrfs_test_opt(info, IGNOREDATACSUMS))
 		print_rescue_option(seq, "ignoredatacsums", &printed);
+	if (btrfs_test_opt(info, IGNOREMETACSUMS))
+		print_rescue_option(seq, "ignoremetacsums", &printed);
+	if (btrfs_test_opt(info, IGNORESUPERFLAGS))
+		print_rescue_option(seq, "ignoresuperflags", &printed);
 	if (btrfs_test_opt(info, FLUSHONCOMMIT))
 		seq_puts(seq, ",flushoncommit");
 	if (btrfs_test_opt(info, DISCARD_SYNC))
@@ -1422,6 +1440,8 @@ static void btrfs_emit_options(struct btrfs_fs_info *info,
 	btrfs_info_if_set(info, old, USEBACKUPROOT, "trying to use backup root at mount time");
 	btrfs_info_if_set(info, old, IGNOREBADROOTS, "ignoring bad roots");
 	btrfs_info_if_set(info, old, IGNOREDATACSUMS, "ignoring data csums");
+	btrfs_info_if_set(info, old, IGNOREMETACSUMS, "ignoring meta csums");
+	btrfs_info_if_set(info, old, IGNORESUPERFLAGS, "ignoring unknown super block flags");
 
 	btrfs_info_if_unset(info, old, NODATACOW, "setting datacow");
 	btrfs_info_if_unset(info, old, SSD, "not using ssd optimizations");
@@ -2491,6 +2511,9 @@ static const struct init_sequence mod_init_seq[] = {
 	}, {
 		.init_func = btrfs_init_cachep,
 		.exit_func = btrfs_destroy_cachep,
+	}, {
+		.init_func = btrfs_init_dio,
+		.exit_func = btrfs_destroy_dio,
 	}, {
 		.init_func = btrfs_transaction_init,
 		.exit_func = btrfs_transaction_exit,

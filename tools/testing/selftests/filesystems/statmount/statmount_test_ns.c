@@ -24,13 +24,13 @@
 static void handle_result(int ret, const char *testname)
 {
 	if (ret == NSID_PASS)
-		ksft_test_result_pass(testname);
+		ksft_test_result_pass("%s\n", testname);
 	else if (ret == NSID_FAIL)
-		ksft_test_result_fail(testname);
+		ksft_test_result_fail("%s\n", testname);
 	else if (ret == NSID_ERROR)
-		ksft_exit_fail_msg(testname);
+		ksft_exit_fail_msg("%s\n", testname);
 	else
-		ksft_test_result_skip(testname);
+		ksft_test_result_skip("%s\n", testname);
 }
 
 static inline int wait_for_pid(pid_t pid)
@@ -216,7 +216,7 @@ static void test_statmount_mnt_ns_id(void)
 	/* We're the original pid, wait for the result. */
 	if (pid != 0) {
 		ret = wait_for_pid(pid);
-		handle_result(ret, "test statmount ns id\n");
+		handle_result(ret, "test statmount ns id");
 		return;
 	}
 
@@ -328,15 +328,19 @@ static void test_listmount_ns(void)
 	close(parent_ready_pipe[0]);
 
 	/* Wait until the child has created everything. */
-	read(child_ready_pipe[0], &nr_mounts, sizeof(nr_mounts));
+	if (read(child_ready_pipe[0], &nr_mounts, sizeof(nr_mounts)) !=
+	    sizeof(nr_mounts))
+		ret = NSID_ERROR;
 
 	ret = validate_external_listmount(pid, nr_mounts);
 
-	write(parent_ready_pipe[1], &pval, sizeof(pval));
+	if (write(parent_ready_pipe[1], &pval, sizeof(pval)) != sizeof(pval))
+		ret = NSID_ERROR;
+
 	child_ret = wait_for_pid(pid);
 	if (child_ret != NSID_PASS)
 		ret = child_ret;
-	handle_result(ret, "test listmount ns id\n");
+	handle_result(ret, "test listmount ns id");
 }
 
 int main(void)

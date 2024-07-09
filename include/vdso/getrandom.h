@@ -12,7 +12,7 @@
 #define CHACHA_BLOCK_SIZE       64
 
 /**
- * struct vgetrandom_state - State used by vDSO getrandom() and allocated by vgetrandom_alloc().
+ * struct vgetrandom_state - State used by vDSO getrandom().
  *
  * @batch:	One and a half ChaCha20 blocks of buffered RNG output.
  *

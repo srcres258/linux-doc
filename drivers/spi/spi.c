@@ -371,7 +371,7 @@ const void *spi_get_device_match_data(const struct spi_device *sdev)
 }
 EXPORT_SYMBOL_GPL(spi_get_device_match_data);
 
-static int spi_match_device(struct device *dev, struct device_driver *drv)
+static int spi_match_device(struct device *dev, const struct device_driver *drv)
 {
 	const struct spi_device	*spi = to_spi_device(dev);
 	const struct spi_driver	*sdrv = to_spi_driver(drv);
@@ -2570,7 +2570,7 @@ struct spi_device *spi_new_ancillary_device(struct spi_device *spi,
 {
 	struct spi_controller *ctlr = spi->controller;
 	struct spi_device *ancillary;
-	int rc = 0;
+	int rc;
 
 	/* Alloc an spi_device */
 	ancillary = spi_alloc_device(ctlr);
@@ -3901,7 +3901,7 @@ static int spi_set_cs_timing(struct spi_device *spi)
 int spi_setup(struct spi_device *spi)
 {
 	unsigned	bad_bits, ugly_bits;
-	int		status = 0;
+	int		status;
 
 	/*
 	 * Check mode to prevent that any two of DUAL, QUAD and NO_MOSI/MISO
