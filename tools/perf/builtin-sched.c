@@ -1594,8 +1594,6 @@ static int map_switch_event(struct perf_sched *sched, struct evsel *evsel,
 
 	sched->curr_thread[this_cpu.cpu] = thread__get(sched_in);
 
-	printf("  ");
-
 	new_shortname = 0;
 	if (!tr->shortname[0]) {
 		if (!strcmp(thread__comm_str(sched_in), "swapper")) {
@@ -1621,6 +1619,11 @@ static int map_switch_event(struct perf_sched *sched, struct evsel *evsel,
 		}
 		new_shortname = 1;
 	}
+
+	if (sched->map.cpus && !perf_cpu_map__has(sched->map.cpus, this_cpu))
+		goto out;
+
+	printf("  ");
 
 	for (i = 0; i < cpus_nr; i++) {
 		struct perf_cpu cpu = {
@@ -1656,9 +1659,6 @@ static int map_switch_event(struct perf_sched *sched, struct evsel *evsel,
 			color_fprintf(stdout, color, "   ");
 	}
 
-	if (sched->map.cpus && !perf_cpu_map__has(sched->map.cpus, this_cpu))
-		goto out;
-
 	timestamp__scnprintf_usec(timestamp, stimestamp, sizeof(stimestamp));
 	color_fprintf(stdout, color, "  %12s secs ", stimestamp);
 	if (new_shortname || tr->comm_changed || (verbose > 0 && thread__tid(sched_in))) {
@@ -1675,9 +1675,9 @@ static int map_switch_event(struct perf_sched *sched, struct evsel *evsel,
 	if (sched->map.comp && new_cpu)
 		color_fprintf(stdout, color, " (CPU %d)", this_cpu);
 
-out:
 	color_fprintf(stdout, color, "\n");
 
+out:
 	thread__put(sched_in);
 
 	return 0;
@@ -2659,7 +2659,10 @@ out:
 		tr->last_state = state;
 
 		/* sched out event for task so reset ready to run time */
-		tr->ready_to_run = 0;
+		if (state == 'R')
+			tr->ready_to_run = t;
+		else
+			tr->ready_to_run = 0;
 	}
 
 	evsel__save_time(evsel, sample->time, sample->cpu);
@@ -3383,6 +3386,9 @@ static int perf_sched__replay(struct perf_sched *sched)
 	sched->thread_funcs_exit = false;
 	create_tasks(sched);
 	printf("------------------------------------------------------------\n");
+	if (sched->replay_repeat == 0)
+		sched->replay_repeat = UINT_MAX;
+
 	for (i = 0; i < sched->replay_repeat; i++)
 		run_one_test(sched);
 
@@ -3548,7 +3554,7 @@ int cmd_sched(int argc, const char **argv)
 	};
 	const struct option replay_options[] = {
 	OPT_UINTEGER('r', "repeat", &sched.replay_repeat,
-		     "repeat the workload replay N times (-1: infinite)"),
+		     "repeat the workload replay N times (0: infinite)"),
 	OPT_PARENT(sched_options)
 	};
 	const struct option map_options[] = {
