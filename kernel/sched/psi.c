@@ -41,7 +41,7 @@
  * What it means for a task to be productive is defined differently
  * for each resource. For IO, productive means a running task. For
  * memory, productive means a running task that isn't a reclaimer. For
- * CPU, productive means an oncpu task.
+ * CPU, productive means an on-CPU task.
  *
  * Naturally, the FULL state doesn't exist for the CPU resource at the
  * system level, but exist at the cgroup level. At the cgroup level,
@@ -49,7 +49,7 @@
  * resource which is being used by others outside of the cgroup or
  * throttled by the cgroup cpu.max configuration.
  *
- * The percentage of wallclock time spent in those compound stall
+ * The percentage of wall clock time spent in those compound stall
  * states gives pressure numbers between 0 and 100 for each resource,
  * where the SOME percentage indicates workload slowdowns and the FULL
  * percentage indicates reduced CPU utilization:
@@ -345,7 +345,7 @@ static void collect_percpu_times(struct psi_group *group,
 
 	/*
 	 * Collect the per-cpu time buckets and average them into a
-	 * single time sample that is normalized to wallclock time.
+	 * single time sample that is normalized to wall clock time.
 	 *
 	 * For averaging, each CPU is weighted by its non-idle time in
 	 * the sampling period. This eliminates artifacts from uneven
@@ -773,6 +773,7 @@ static void psi_group_change(struct psi_group *group, int cpu,
 	enum psi_states s;
 	u32 state_mask;
 
+	lockdep_assert_rq_held(cpu_rq(cpu));
 	groupc = per_cpu_ptr(group->pcpu, cpu);
 
 	/*
@@ -991,22 +992,32 @@ void psi_task_switch(struct task_struct *prev, struct task_struct *next,
 }
 
 #ifdef CONFIG_IRQ_TIME_ACCOUNTING
-void psi_account_irqtime(struct task_struct *task, u32 delta)
+void psi_account_irqtime(struct rq *rq, struct task_struct *curr, struct task_struct *prev)
 {
-	int cpu = task_cpu(task);
+	int cpu = task_cpu(curr);
 	struct psi_group *group;
 	struct psi_group_cpu *groupc;
-	u64 now;
+	u64 now, irq;
+	s64 delta;
 
 	if (static_branch_likely(&psi_disabled))
 		return;
 
-	if (!task->pid)
+	if (!curr->pid)
+		return;
+
+	lockdep_assert_rq_held(rq);
+	group = task_psi_group(curr);
+	if (prev && task_psi_group(prev) == group)
 		return;
 
 	now = cpu_clock(cpu);
+	irq = irq_time_read(cpu);
+	delta = (s64)(irq - rq->psi_irq_time);
+	if (delta < 0)
+		return;
+	rq->psi_irq_time = irq;
 
-	group = task_psi_group(task);
 	do {
 		if (!group->enabled)
 			continue;
