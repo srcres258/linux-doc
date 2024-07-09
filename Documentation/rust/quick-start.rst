@@ -16,6 +16,13 @@ under names like ``rustc``, ``rust-src``, ``rust-bindgen``, etc. However,
 at the time of writing, they are likely not to be recent enough unless
 the distribution tracks the latest releases.
 
+Prebuilt stable versions of LLVM+Rust are provided on `kernel.org
+<https://kernel.org/pub/tools/llvm/rust/>`_. These are the same slim and fast
+LLVM toolchains from :ref:`Getting LLVM <getting_llvm>` with versions of Rust
+added to them that Rust for Linux supports, depending on the Linux version. Two
+sets are provided: the "latest LLVM" and "matching LLVM" (please see the link
+for more information).
+
 To easily check whether the requirements are met, the following target
 can be used::
 
@@ -162,20 +169,6 @@ can be installed manually::
 	rustup component add clippy
 
 The standalone installers also come with ``clippy``.
-
-
-cargo
-*****
-
-``cargo`` is the Rust native build system. It is currently required to run
-the tests since it is used to build a custom standard library that contains
-the facilities provided by the custom ``alloc`` in the kernel. The tests can
-be run using the ``rusttest`` Make target.
-
-If ``rustup`` is being used, all the profiles already install the tool,
-thus nothing needs to be done.
-
-The standalone installers also come with ``cargo``.
 
 
 rustdoc

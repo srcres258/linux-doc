@@ -491,7 +491,6 @@ RUSTDOC		= rustdoc
 RUSTFMT		= rustfmt
 CLIPPY_DRIVER	= clippy-driver
 BINDGEN		= bindgen
-CARGO		= cargo
 PAHOLE		= pahole
 RESOLVE_BTFIDS	= $(objtree)/tools/bpf/resolve_btfids/resolve_btfids
 LEX		= flex
@@ -585,7 +584,7 @@ endif
 export RUSTC_BOOTSTRAP := 1
 
 export ARCH SRCARCH CONFIG_SHELL BASH HOSTCC KBUILD_HOSTCFLAGS CROSS_COMPILE LD CC HOSTPKG_CONFIG
-export RUSTC RUSTDOC RUSTFMT RUSTC_OR_CLIPPY_QUIET RUSTC_OR_CLIPPY BINDGEN CARGO
+export RUSTC RUSTDOC RUSTFMT RUSTC_OR_CLIPPY_QUIET RUSTC_OR_CLIPPY BINDGEN
 export HOSTRUSTC KBUILD_HOSTRUSTFLAGS
 export CPP AR NM STRIP OBJCOPY OBJDUMP READELF PAHOLE RESOLVE_BTFIDS LEX YACC AWK INSTALLKERNEL
 export PERL PYTHON3 CHECK CHECKFLAGS MAKE UTS_MACHINE HOSTCXX
@@ -1951,9 +1950,12 @@ quiet_cmd_tags = GEN     $@
 tags TAGS cscope gtags: FORCE
 	$(call cmd,tags)
 
-# IDE support targets
+# Generate rust-project.json (a file that describes the structure of non-Cargo
+# Rust projects) for rust-analyzer (an implementation of the Language Server
+# Protocol).
 PHONY += rust-analyzer
 rust-analyzer:
+	$(Q)$(CONFIG_SHELL) $(srctree)/scripts/rust_is_available.sh
 	$(Q)$(MAKE) $(build)=rust $@
 
 # Script to generate missing namespace dependencies
