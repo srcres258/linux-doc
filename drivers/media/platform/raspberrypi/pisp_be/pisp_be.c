@@ -1756,7 +1756,7 @@ pm_runtime_disable_err:
 	return ret;
 }
 
-static int pispbe_remove(struct platform_device *pdev)
+static void pispbe_remove(struct platform_device *pdev)
 {
 	struct pispbe_dev *pispbe = platform_get_drvdata(pdev);
 
@@ -1765,8 +1765,6 @@ static int pispbe_remove(struct platform_device *pdev)
 	pispbe_runtime_suspend(pispbe->dev);
 	pm_runtime_dont_use_autosuspend(pispbe->dev);
 	pm_runtime_disable(pispbe->dev);
-
-	return 0;
 }
 
 static const struct dev_pm_ops pispbe_pm_ops = {
