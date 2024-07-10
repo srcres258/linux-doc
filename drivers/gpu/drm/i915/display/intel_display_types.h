@@ -146,6 +146,8 @@ struct intel_framebuffer {
 	};
 
 	struct i915_address_space *dpt_vm;
+
+	unsigned int min_alignment;
 };
 
 enum intel_hotplug_state {
@@ -741,6 +743,9 @@ struct intel_plane_state {
 
 	struct intel_fb_view view;
 	u32 phys_dma_addr; /* for cursor_needs_physical */
+
+	/* for legacy cursor fb unpin */
+	struct drm_vblank_work unpin_work;
 
 	/* Plane pxp decryption state */
 	bool decrypt;
@@ -1566,6 +1571,9 @@ struct intel_plane {
 	int (*max_height)(const struct drm_framebuffer *fb,
 			  int color_plane,
 			  unsigned int rotation);
+	unsigned int (*min_alignment)(struct intel_plane *plane,
+				      const struct drm_framebuffer *fb,
+				      int color_plane);
 	unsigned int (*max_stride)(struct intel_plane *plane,
 				   u32 pixel_format, u64 modifier,
 				   unsigned int rotation);
@@ -1798,6 +1806,7 @@ struct intel_dp {
 
 	/* connector directly attached - won't be use for modeset in mst world */
 	struct intel_connector *attached_connector;
+	bool as_sdp_supported;
 
 	struct drm_dp_tunnel *tunnel;
 	bool tunnel_suspended:1;
