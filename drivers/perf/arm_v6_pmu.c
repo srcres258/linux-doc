@@ -31,8 +31,6 @@
  * enable the interrupt.
  */
 
-#if defined(CONFIG_CPU_V6) || defined(CONFIG_CPU_V6K)
-
 #include <asm/cputype.h>
 #include <asm/irq_regs.h>
 
@@ -66,6 +64,7 @@ enum armv6_counters {
 	ARMV6_CYCLE_COUNTER = 0,
 	ARMV6_COUNTER0,
 	ARMV6_COUNTER1,
+	ARMV6_NUM_COUNTERS
 };
 
 /*
@@ -256,7 +255,7 @@ armv6pmu_handle_irq(struct arm_pmu *cpu_pmu)
 	 */
 	armv6_pmcr_write(pmcr);
 
-	for (idx = 0; idx < cpu_pmu->num_events; ++idx) {
+	for_each_set_bit(idx, cpu_pmu->cntr_mask, ARMV6_NUM_COUNTERS) {
 		struct perf_event *event = cpuc->events[idx];
 		struct hw_perf_event *hwc;
 
@@ -393,20 +392,14 @@ static void armv6pmu_init(struct arm_pmu *cpu_pmu)
 	cpu_pmu->start		= armv6pmu_start;
 	cpu_pmu->stop		= armv6pmu_stop;
 	cpu_pmu->map_event	= armv6_map_event;
-	cpu_pmu->num_events	= 3;
+
+	bitmap_set(cpu_pmu->cntr_mask, 0, ARMV6_NUM_COUNTERS);
 }
 
 static int armv6_1136_pmu_init(struct arm_pmu *cpu_pmu)
 {
 	armv6pmu_init(cpu_pmu);
 	cpu_pmu->name		= "armv6_1136";
-	return 0;
-}
-
-static int armv6_1156_pmu_init(struct arm_pmu *cpu_pmu)
-{
-	armv6pmu_init(cpu_pmu);
-	cpu_pmu->name		= "armv6_1156";
 	return 0;
 }
 
@@ -423,17 +416,9 @@ static const struct of_device_id armv6_pmu_of_device_ids[] = {
 	{ /* sentinel value */ }
 };
 
-static const struct pmu_probe_info armv6_pmu_probe_table[] = {
-	ARM_PMU_PROBE(ARM_CPU_PART_ARM1136, armv6_1136_pmu_init),
-	ARM_PMU_PROBE(ARM_CPU_PART_ARM1156, armv6_1156_pmu_init),
-	ARM_PMU_PROBE(ARM_CPU_PART_ARM1176, armv6_1176_pmu_init),
-	{ /* sentinel value */ }
-};
-
 static int armv6_pmu_device_probe(struct platform_device *pdev)
 {
-	return arm_pmu_device_probe(pdev, armv6_pmu_of_device_ids,
-				    armv6_pmu_probe_table);
+	return arm_pmu_device_probe(pdev, armv6_pmu_of_device_ids, NULL);
 }
 
 static struct platform_driver armv6_pmu_driver = {
@@ -445,4 +430,3 @@ static struct platform_driver armv6_pmu_driver = {
 };
 
 builtin_platform_driver(armv6_pmu_driver);
-#endif	/* CONFIG_CPU_V6 || CONFIG_CPU_V6K */
