@@ -766,7 +766,7 @@ start_journal_io:
 		if (first_block < journal->j_tail)
 			freed += journal->j_last - journal->j_first;
 		/* Update tail only if we free significant amount of space */
-		if (freed < jbd2_journal_get_max_txn_bufs(journal))
+		if (freed < journal->j_max_transaction_buffers)
 			update_tail = 0;
 	}
 	J_ASSERT(commit_transaction->t_state == T_COMMIT);
@@ -1107,7 +1107,7 @@ restart_loop:
 
 	commit_transaction->t_state = T_COMMIT_CALLBACK;
 	J_ASSERT(commit_transaction == journal->j_committing_transaction);
-	journal->j_commit_sequence = commit_transaction->t_tid;
+	WRITE_ONCE(journal->j_commit_sequence, commit_transaction->t_tid);
 	journal->j_committing_transaction = NULL;
 	commit_time = ktime_to_ns(ktime_sub(ktime_get(), start_time));
 

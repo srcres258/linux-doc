@@ -3,6 +3,25 @@ soc/arm
 		git://git.kernel.org/pub/scm/linux/kernel/git/sudeep.holla/linux tags/vexpress-updates-6.11
 	patch
 		MAINTAINERS: ARM: airoha: add entry to cover Airoha SoC
+	tegra/soc-2
+		https://git.kernel.org/pub/scm/linux/kernel/git/tegra/linux tags/tegra-for-6.11-arm-core
+	patch
+		ARM: spitz: fix GPIO assignment for backlight
+		ARM: pxa: consolidate GPIO chip platform data
+		ARM: pxa/gumstix: convert vbus gpio to use software nodes
+		ARM: spitz: Simplify instantiating SPI controller
+		ARM: spitz: Use software nodes to describe SPI CS lines
+		ARM: spitz: Use software nodes to describe audio GPIOs
+		ARM: spitz: Use software nodes to describe LCD GPIOs
+		ARM: spitz: Use software nodes to describe MMC GPIOs
+		ARM: spitz: Use software nodes to describe LED GPIOs
+		ARM: spitz: Use software nodes for the ADS7846 touchscreen
+	imx/soc
+		https://git.kernel.org/pub/scm/linux/kernel/git/shawnguo/linux tags/imx-soc-6.11
+	patch
+		MAINTAINERS: thead: add git tree
+		amazon: MAINTAINERS: change to odd fixes and Tsahee Zidenberg to CREDITS
+		ti: omap: MAINTAINERS: move Benoît Cousson to CREDITS
 
 soc/dt
 	renesas/dt
@@ -76,6 +95,10 @@ soc/dt
 		https://git.kernel.org/pub/scm/linux/kernel/git/mmind/linux-rockchip tags/v6.11-rockchip-dts64-2
 	rockchips/dt32
 		https://git.kernel.org/pub/scm/linux/kernel/git/mmind/linux-rockchip tags/v6.11-rockchip-dts32-2
+	rockchips/dt64-3
+		https://git.kernel.org/pub/scm/linux/kernel/git/mmind/linux-rockchip tags/v6.11-rockchip-dts64-2
+	sophgo/dt
+		https://github.com/sophgo/linux tags/riscv-sophgo-dt-for-v6.11
 
 soc/drivers
 	firmware/scmi
@@ -101,6 +124,28 @@ soc/drivers
 		https://git.kernel.org/pub/scm/linux/kernel/git/amlogic/linux tags/amlogic-drivers-for-v6.11
 	tegra/soc
 		https://git.kernel.org/pub/scm/linux/kernel/git/tegra/linux tags/tegra-for-6.11-soc
+	riscv/cache
+		https://git.kernel.org/pub/scm/linux/kernel/git/conor/linux tags/riscv-cache-for-v6.11
+	riscv/firmware
+		https://git.kernel.org/pub/scm/linux/kernel/git/conor/linux tags/riscv-firmware-for-v6.11
+	ti/drivers
+		https://git.kernel.org/pub/scm/linux/kernel/git/ti/linux tags/ti-driver-soc-for-v6.11
+	patch
+		arm64: stm32: enable scmi regulator for stm32
+	qcom/drivers
+		https://git.kernel.org/pub/scm/linux/kernel/git/qcom/linux tags/qcom-drivers-for-6.11
+	drivers/reset-2
+		git://git.pengutronix.de/pza/linux tags/reset-for-v6.11-2
+	sunxi/drivers
+		https://git.kernel.org/pub/scm/linux/kernel/git/sunxi/linux tags/sunxi-drivers-for-6.11
+	drivers/memory
+		https://git.kernel.org/pub/scm/linux/kernel/git/krzk/linux-mem-ctrl tags/memory-controller-drv-6.11
+	patch
+		soc: samsung: exynos-pmu: add support for PMU_ALIVE non atomic registers
+		platform: cznic: turris-omnia-mcu: Depend on OF
+		platform: cznic: turris-omnia-mcu: Depend on WATCHDOG
+	zynqmp/soc2
+		https://github.com/Xilinx/linux-xlnx tags/zynqmp-soc2-for-6.11
 
 soc/defconfig
 	renesas/defconfig
@@ -117,6 +162,8 @@ soc/defconfig
 		https://git.kernel.org/pub/scm/linux/kernel/git/qcom/linux tags/qcom-arm64-defconfig-for-6.11
 	riscv/defconfig
 		https://git.kernel.org/pub/scm/linux/kernel/git/conor/linux tags/riscv-config-for-v6.11
+	imx/defconfig
+		https://git.kernel.org/pub/scm/linux/kernel/git/shawnguo/linux tags/imx-defconfig-6.11
 
 soc/late
 

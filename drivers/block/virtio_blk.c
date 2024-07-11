@@ -964,8 +964,7 @@ static int init_vq(struct virtio_blk *vblk)
 {
 	int err;
 	unsigned short i;
-	vq_callback_t **callbacks;
-	const char **names;
+	struct virtqueue_info *vqs_info;
 	struct virtqueue **vqs;
 	unsigned short num_vqs;
 	unsigned short num_poll_vqs;
@@ -1002,28 +1001,26 @@ static int init_vq(struct virtio_blk *vblk)
 	if (!vblk->vqs)
 		return -ENOMEM;
 
-	names = kmalloc_array(num_vqs, sizeof(*names), GFP_KERNEL);
-	callbacks = kmalloc_array(num_vqs, sizeof(*callbacks), GFP_KERNEL);
+	vqs_info = kcalloc(num_vqs, sizeof(*vqs_info), GFP_KERNEL);
 	vqs = kmalloc_array(num_vqs, sizeof(*vqs), GFP_KERNEL);
-	if (!names || !callbacks || !vqs) {
+	if (!vqs_info || !vqs) {
 		err = -ENOMEM;
 		goto out;
 	}
 
 	for (i = 0; i < num_vqs - num_poll_vqs; i++) {
-		callbacks[i] = virtblk_done;
+		vqs_info[i].callback = virtblk_done;
 		snprintf(vblk->vqs[i].name, VQ_NAME_LEN, "req.%u", i);
-		names[i] = vblk->vqs[i].name;
+		vqs_info[i].name = vblk->vqs[i].name;
 	}
 
 	for (; i < num_vqs; i++) {
-		callbacks[i] = NULL;
 		snprintf(vblk->vqs[i].name, VQ_NAME_LEN, "req_poll.%u", i);
-		names[i] = vblk->vqs[i].name;
+		vqs_info[i].name = vblk->vqs[i].name;
 	}
 
 	/* Discover virtqueues and write information to configuration.  */
-	err = virtio_find_vqs(vdev, num_vqs, vqs, callbacks, names, &desc);
+	err = virtio_find_vqs(vdev, num_vqs, vqs, vqs_info, &desc);
 	if (err)
 		goto out;
 
@@ -1035,8 +1032,7 @@ static int init_vq(struct virtio_blk *vblk)
 
 out:
 	kfree(vqs);
-	kfree(callbacks);
-	kfree(names);
+	kfree(vqs_info);
 	if (err)
 		kfree(vblk->vqs);
 	return err;
@@ -1250,7 +1246,7 @@ static int virtblk_read_limits(struct virtio_blk *vblk,
 		struct queue_limits *lim)
 {
 	struct virtio_device *vdev = vblk->vdev;
-	u32 v, blk_size, max_size, sg_elems, opt_io_size;
+	u32 v, max_size, sg_elems, opt_io_size;
 	u32 max_discard_segs = 0;
 	u32 discard_granularity = 0;
 	u16 min_io_size;
@@ -1289,46 +1285,36 @@ static int virtblk_read_limits(struct virtio_blk *vblk,
 	lim->max_segment_size = max_size;
 
 	/* Host can optionally specify the block size of the device */
-	err = virtio_cread_feature(vdev, VIRTIO_BLK_F_BLK_SIZE,
+	virtio_cread_feature(vdev, VIRTIO_BLK_F_BLK_SIZE,
 				   struct virtio_blk_config, blk_size,
-				   &blk_size);
-	if (!err) {
-		err = blk_validate_block_size(blk_size);
-		if (err) {
-			dev_err(&vdev->dev,
-				"virtio_blk: invalid block size: 0x%x\n",
-				blk_size);
-			return err;
-		}
-
-		lim->logical_block_size = blk_size;
-	} else
-		blk_size = lim->logical_block_size;
+				   &lim->logical_block_size);
 
 	/* Use topology information if available */
 	err = virtio_cread_feature(vdev, VIRTIO_BLK_F_TOPOLOGY,
 				   struct virtio_blk_config, physical_block_exp,
 				   &physical_block_exp);
 	if (!err && physical_block_exp)
-		lim->physical_block_size = blk_size * (1 << physical_block_exp);
+		lim->physical_block_size =
+			lim->logical_block_size * (1 << physical_block_exp);
 
 	err = virtio_cread_feature(vdev, VIRTIO_BLK_F_TOPOLOGY,
 				   struct virtio_blk_config, alignment_offset,
 				   &alignment_offset);
 	if (!err && alignment_offset)
-		lim->alignment_offset = blk_size * alignment_offset;
+		lim->alignment_offset =
+			lim->logical_block_size * alignment_offset;
 
 	err = virtio_cread_feature(vdev, VIRTIO_BLK_F_TOPOLOGY,
 				   struct virtio_blk_config, min_io_size,
 				   &min_io_size);
 	if (!err && min_io_size)
-		lim->io_min = blk_size * min_io_size;
+		lim->io_min = lim->logical_block_size * min_io_size;
 
 	err = virtio_cread_feature(vdev, VIRTIO_BLK_F_TOPOLOGY,
 				   struct virtio_blk_config, opt_io_size,
 				   &opt_io_size);
 	if (!err && opt_io_size)
-		lim->io_opt = blk_size * opt_io_size;
+		lim->io_opt = lim->logical_block_size * opt_io_size;
 
 	if (virtio_has_feature(vdev, VIRTIO_BLK_F_DISCARD)) {
 		virtio_cread(vdev, struct virtio_blk_config,
@@ -1422,7 +1408,7 @@ static int virtblk_read_limits(struct virtio_blk *vblk,
 			lim->discard_granularity =
 				discard_granularity << SECTOR_SHIFT;
 		else
-			lim->discard_granularity = blk_size;
+			lim->discard_granularity = lim->logical_block_size;
 	}
 
 	if (virtio_has_feature(vdev, VIRTIO_BLK_F_ZONED)) {
@@ -1453,6 +1439,7 @@ static int virtblk_probe(struct virtio_device *vdev)
 	struct virtio_blk *vblk;
 	struct queue_limits lim = {
 		.features		= BLK_FEAT_ROTATIONAL,
+		.logical_block_size	= SECTOR_SIZE,
 	};
 	int err, index;
 	unsigned int queue_depth;

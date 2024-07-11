@@ -154,7 +154,7 @@ u64 stable_page_flags(const struct page *page)
 	} else if (is_huge_zero_folio(folio)) {
 		u |= 1 << KPF_ZERO_PAGE;
 		u |= 1 << KPF_THP;
-	} else if (is_zero_pfn(page_to_pfn(page))) {
+	} else if (is_zero_folio(folio)) {
 		u |= 1 << KPF_ZERO_PAGE;
 	}
 

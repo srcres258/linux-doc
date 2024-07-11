@@ -1626,6 +1626,23 @@ static int _check_data_dev_sectors(struct raid_set *rs)
 	return 0;
 }
 
+/* Get reshape sectors from data_offsets or raid set */
+static sector_t _get_reshape_sectors(struct raid_set *rs)
+{
+	struct md_rdev *rdev;
+	sector_t reshape_sectors = 0;
+
+	rdev_for_each(rdev, &rs->md)
+		if (!test_bit(Journal, &rdev->flags)) {
+			reshape_sectors = (rdev->data_offset > rdev->new_data_offset) ?
+					rdev->data_offset - rdev->new_data_offset :
+					rdev->new_data_offset - rdev->data_offset;
+			break;
+		}
+
+	return max(reshape_sectors, (sector_t) rs->data_offset);
+}
+
 /* Calculate the sectors per device and per array used for @rs */
 static int rs_set_dev_and_array_sectors(struct raid_set *rs, sector_t sectors, bool use_mddev)
 {
@@ -1656,7 +1673,7 @@ static int rs_set_dev_and_array_sectors(struct raid_set *rs, sector_t sectors, b
 		if (sector_div(dev_sectors, data_stripes))
 			goto bad;
 
-		array_sectors = (data_stripes + delta_disks) * dev_sectors;
+		array_sectors = (data_stripes + delta_disks) * (dev_sectors - _get_reshape_sectors(rs));
 		if (sector_div(array_sectors, rs->raid10_copies))
 			goto bad;
 
@@ -1665,7 +1682,7 @@ static int rs_set_dev_and_array_sectors(struct raid_set *rs, sector_t sectors, b
 
 	else
 		/* Striped layouts */
-		array_sectors = (data_stripes + delta_disks) * dev_sectors;
+		array_sectors = (data_stripes + delta_disks) * (dev_sectors - _get_reshape_sectors(rs));
 
 	mddev->array_sectors = array_sectors;
 	mddev->dev_sectors = dev_sectors;
@@ -1704,11 +1721,20 @@ static void do_table_event(struct work_struct *ws)
 	struct raid_set *rs = container_of(ws, struct raid_set, md.event_work);
 
 	smp_rmb(); /* Make sure we access most actual mddev properties */
-	if (!rs_is_reshaping(rs)) {
+
+	/* Only grow size resulting from added stripe(s) after reshape ended. */
+	if (!rs_is_reshaping(rs) &&
+	    rs->array_sectors > rs->md.array_sectors &&
+	    !rs->md.delta_disks &&
+	    rs->md.raid_disks == rs->raid_disks) {
+		/* The raid10 personality doesn't provide proper device sizes -> correct. */
 		if (rs_is_raid10(rs))
 			rs_set_rdev_sectors(rs);
+
+		rs->md.array_sectors = rs->array_sectors;
 		rs_set_capacity(rs);
 	}
+
 	dm_table_event(rs->ti->table);
 }
 
@@ -2809,23 +2835,6 @@ static int rs_prepare_reshape(struct raid_set *rs)
 		set_bit(RT_FLAG_UPDATE_SBS, &rs->runtime_flags);
 
 	return 0;
-}
-
-/* Get reshape sectors from data_offsets or raid set */
-static sector_t _get_reshape_sectors(struct raid_set *rs)
-{
-	struct md_rdev *rdev;
-	sector_t reshape_sectors = 0;
-
-	rdev_for_each(rdev, &rs->md)
-		if (!test_bit(Journal, &rdev->flags)) {
-			reshape_sectors = (rdev->data_offset > rdev->new_data_offset) ?
-					rdev->data_offset - rdev->new_data_offset :
-					rdev->new_data_offset - rdev->data_offset;
-			break;
-		}
-
-	return max(reshape_sectors, (sector_t) rs->data_offset);
 }
 
 /*
@@ -4022,6 +4031,11 @@ static int raid_preresume(struct dm_target *ti)
 	/* This is a resume after a suspend of the set -> it's already started. */
 	if (test_and_set_bit(RT_FLAG_RS_PRERESUMED, &rs->runtime_flags))
 		return 0;
+
+	/* If different and no explicit grow request, expose MD array size as of superblock. */
+	if (!test_bit(RT_FLAG_RS_GROW, &rs->runtime_flags) &&
+	    rs->array_sectors != mddev->array_sectors)
+		rs_set_capacity(rs);
 
 	/*
 	 * The superblocks need to be updated on disk if the

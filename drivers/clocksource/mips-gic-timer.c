@@ -237,11 +237,6 @@ static int __init __gic_clocksource_init(void)
 		gic_clocksource.rating = 200;
 	gic_clocksource.rating += clamp(gic_frequency / 10000000, 0, 99);
 
-	if (mips_cps_multicluster_cpus()) {
-		gic_clocksource.read = &gic_hpt_read_multicluster;
-		gic_clocksource.vdso_clock_mode = VDSO_CLOCKMODE_NONE;
-	}
-
 	ret = clocksource_register_hz(&gic_clocksource, gic_frequency);
 	if (ret < 0)
 		pr_warn("Unable to register clocksource\n");

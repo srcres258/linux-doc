@@ -210,7 +210,7 @@ static inline unsigned get_max_io_size(struct bio *bio,
  * get_max_segment_size() - maximum number of bytes to add as a single segment
  * @lim: Request queue limits.
  * @paddr: address of the range to add
- * @max_len: maximum length available to add at @paddr
+ * @len: maximum length available to add at @paddr
  *
  * Returns the maximum number of bytes of the range starting at @paddr that can
  * be added to a single segment.
@@ -491,8 +491,8 @@ static unsigned blk_bvec_map_sg(struct request_queue *q,
 
 	while (nbytes > 0) {
 		unsigned offset = bvec->bv_offset + total;
-		unsigned len = get_max_segment_size(&q->limits, bvec_phys(bvec),
-			nbytes);
+		unsigned len = get_max_segment_size(&q->limits,
+				bvec_phys(bvec) + total, nbytes);
 		struct page *page = bvec->bv_page;
 
 		/*

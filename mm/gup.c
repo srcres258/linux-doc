@@ -3630,6 +3630,9 @@ long memfd_pin_folios(struct file *memfd, loff_t start, loff_t end,
 	if (!shmem_file(memfd) && !is_file_hugepages(memfd))
 		return -EINVAL;
 
+	if (end >= i_size_read(file_inode(memfd)))
+		return -EINVAL;
+
 	if (is_file_hugepages(memfd)) {
 		h = hstate_file(memfd);
 		pgshift = huge_page_shift(h);
@@ -3664,6 +3667,8 @@ long memfd_pin_folios(struct file *memfd, loff_t start, loff_t end,
 
 			next_idx = 0;
 			for (i = 0; i < nr_found; i++) {
+				int ret2;
+
 				/*
 				 * As there can be multiple entries for a
 				 * given folio in the batch returned by
@@ -3676,10 +3681,10 @@ long memfd_pin_folios(struct file *memfd, loff_t start, loff_t end,
 					continue;
 
 				folio = page_folio(&fbatch.folios[i]->page);
-
-				if (try_grab_folio(folio, 1, FOLL_PIN)) {
+				ret2 = try_grab_folio(folio, 1, FOLL_PIN);
+				if (ret2) {
 					folio_batch_release(&fbatch);
-					ret = -EINVAL;
+					ret = ret2;
 					goto err;
 				}
 

@@ -239,7 +239,8 @@ struct qcom_pcie_ops {
  /**
   * struct qcom_pcie_cfg - Per SoC config struct
   * @ops: qcom PCIe ops structure
-  * @override_no_snoop: Override NO_SNOOP attribute in TLP to enable cache snooping
+  * @override_no_snoop: Override NO_SNOOP attribute in TLP to enable cache
+  * snooping
   */
 struct qcom_pcie_cfg {
 	const struct qcom_pcie_ops *ops;
@@ -1426,7 +1427,8 @@ static void qcom_pcie_icc_opp_update(struct qcom_pcie *pcie)
 	width = FIELD_GET(PCI_EXP_LNKSTA_NLW, status);
 
 	if (pcie->icc_mem) {
-		ret = icc_set_bw(pcie->icc_mem, 0, width * QCOM_PCIE_LINK_SPEED_TO_BW(speed));
+		ret = icc_set_bw(pcie->icc_mem, 0,
+				 width * QCOM_PCIE_LINK_SPEED_TO_BW(speed));
 		if (ret) {
 			dev_err(pci->dev, "Failed to set bandwidth for PCIe-MEM interconnect path: %d\n",
 				ret);
@@ -1437,14 +1439,15 @@ static void qcom_pcie_icc_opp_update(struct qcom_pcie *pcie)
 			return;
 
 		freq_kbps = freq_mbps * KILO;
-		opp = dev_pm_opp_find_freq_exact(pci->dev, freq_kbps * width, true);
+		opp = dev_pm_opp_find_freq_exact(pci->dev, freq_kbps * width,
+						 true);
 		if (!IS_ERR(opp)) {
 			ret = dev_pm_opp_set_opp(pci->dev, opp);
 			if (ret)
 				dev_err(pci->dev, "Failed to set OPP for freq (%lu): %d\n",
 					freq_kbps * width, ret);
+			dev_pm_opp_put(opp);
 		}
-		dev_pm_opp_put(opp);
 	}
 }
 
@@ -1566,15 +1569,16 @@ static int qcom_pcie_probe(struct platform_device *pdev)
 	}
 
 	/*
-	 * Before PCIe link is initialized vote for highest OPP in the OPP table,
-	 * so that we are voting for maximum voltage corner for the link to come up
-	 * in maximum supported speed. At the end of the probe(), OPP will be
-	 * updated using qcom_pcie_icc_opp_update().
+	 * Before the PCIe link is initialized, vote for highest OPP in the OPP
+	 * table, so that we are voting for maximum voltage corner for the
+	 * link to come up in maximum supported speed. At the end of the
+	 * probe(), OPP will be updated using qcom_pcie_icc_opp_update().
 	 */
 	if (!ret) {
 		opp = dev_pm_opp_find_freq_floor(dev, &max_freq);
 		if (IS_ERR(opp)) {
-			dev_err_probe(pci->dev, PTR_ERR(opp),
+			ret = PTR_ERR(opp);
+			dev_err_probe(pci->dev, ret,
 				      "Unable to find max freq OPP\n");
 			goto err_pm_runtime_put;
 		} else {
@@ -1632,7 +1636,7 @@ err_pm_runtime_put:
 static int qcom_pcie_suspend_noirq(struct device *dev)
 {
 	struct qcom_pcie *pcie = dev_get_drvdata(dev);
-	int ret;
+	int ret = 0;
 
 	/*
 	 * Set minimum bandwidth required to keep data path functional during

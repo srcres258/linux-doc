@@ -552,7 +552,7 @@ static void pcim_iomap_release(struct device *gendev, void *res)
  * This function is DEPRECATED. Do not use it in new code. Instead, obtain a
  * mapping's address directly from one of the pcim_* mapping functions. For
  * example:
- * void __iomem *mappy = pcim_iomap(pdev, bar, length);
+ * void __iomem \*mappy = pcim_iomap(pdev, bar, length);
  */
 void __iomem * const *pcim_iomap_table(struct pci_dev *pdev)
 {

@@ -4029,7 +4029,7 @@ size_t msr_counter_info_count_perf(const struct msr_counter_info_t *mci)
 	return ret;
 }
 
-int get_msr_counters(unsigned int cpu, struct thread_data *t)
+int get_smi_aperf_mperf(unsigned int cpu, struct thread_data *t)
 {
 	unsigned long long perf_data[NUM_MSR_COUNTERS + 1];
 
@@ -4146,7 +4146,7 @@ int get_counters(struct thread_data *t, struct core_data *c, struct pkg_data *p)
 
 	t->tsc = rdtsc();	/* we are running on local CPU of interest */
 
-	get_msr_counters(cpu, t);
+	get_smi_aperf_mperf(cpu, t);
 
 	if (DO_BIC(BIC_IPC))
 		if (read(get_instr_count_fd(cpu), &t->instr_count, sizeof(long long)) != sizeof(long long))

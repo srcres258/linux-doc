@@ -5628,8 +5628,10 @@ __bpf_kfunc_start_defs();
  */
 __bpf_kfunc u32 scx_bpf_reenqueue_local(void)
 {
-	u32 nr_enqueued, i;
+	LIST_HEAD(tasks);
+	u32 nr_enqueued = 0;
 	struct rq *rq;
+	struct task_struct *p, *n;
 
 	if (!scx_kf_allowed(SCX_KF_CPU_RELEASE))
 		return 0;
@@ -5638,22 +5640,34 @@ __bpf_kfunc u32 scx_bpf_reenqueue_local(void)
 	lockdep_assert_rq_held(rq);
 
 	/*
-	 * Get the number of tasks on the local DSQ before iterating over it to
-	 * pull off tasks. The enqueue callback below can signal that it wants
-	 * the task to stay on the local DSQ, and we want to prevent the BPF
-	 * scheduler from causing us to loop indefinitely.
+	 * The BPF scheduler may choose to dispatch tasks back to
+	 * @rq->scx.local_dsq. Move all candidate tasks off to a private list
+	 * first to avoid processing the same tasks repeatedly.
 	 */
-	nr_enqueued = rq->scx.local_dsq.nr;
-	for (i = 0; i < nr_enqueued; i++) {
-		struct task_struct *p;
+	list_for_each_entry_safe(p, n, &rq->scx.local_dsq.list,
+				 scx.dsq_list.node) {
+		/*
+		 * If @p is being migrated, @p's current CPU may not agree with
+		 * its allowed CPUs and the migration_cpu_stop is about to
+		 * deactivate and re-activate @p anyway. Skip re-enqueueing.
+		 *
+		 * While racing sched property changes may also dequeue and
+		 * re-enqueue a migrating task while its current CPU and allowed
+		 * CPUs disagree, they use %ENQUEUE_RESTORE which is bypassed to
+		 * the current local DSQ for running tasks and thus are not
+		 * visible to the BPF scheduler.
+		 */
+		if (p->migration_pending)
+			continue;
 
-		p = first_local_task(rq);
-		WARN_ON_ONCE(atomic_long_read(&p->scx.ops_state) !=
-			     SCX_OPSS_NONE);
-		WARN_ON_ONCE(!(p->scx.flags & SCX_TASK_QUEUED));
-		WARN_ON_ONCE(p->scx.holding_cpu != -1);
 		dispatch_dequeue(rq, p);
+		list_add_tail(&p->scx.dsq_list.node, &tasks);
+	}
+
+	list_for_each_entry_safe(p, n, &tasks, scx.dsq_list.node) {
+		list_del_init(&p->scx.dsq_list.node);
 		do_enqueue_task(rq, p, SCX_ENQ_REENQ, -1);
+		nr_enqueued++;
 	}
 
 	return nr_enqueued;
