@@ -24,6 +24,8 @@ struct z_erofs_decompressor {
 		      void *data, int size);
 	int (*decompress)(struct z_erofs_decompress_req *rq,
 			  struct page **pagepool);
+	int (*init)(void);
+	void (*exit)(void);
 	char *name;
 };
 
@@ -81,21 +83,28 @@ static inline bool z_erofs_put_shortlivedpage(struct page **pagepool,
 	return true;
 }
 
+extern const struct z_erofs_decompressor z_erofs_lzma_decomp;
+extern const struct z_erofs_decompressor z_erofs_deflate_decomp;
+extern const struct z_erofs_decompressor z_erofs_zstd_decomp;
+extern const struct z_erofs_decompressor *z_erofs_decomp[];
+
+struct z_erofs_stream_dctx {
+	struct z_erofs_decompress_req *rq;
+	unsigned int inpages, outpages;	/* # of {en,de}coded pages */
+	int no, ni;			/* the current {en,de}coded page # */
+
+	unsigned int avail_out;		/* remaining bytes in the decoded buffer */
+	unsigned int inbuf_pos, inbuf_sz;
+					/* current status of the encoded buffer */
+	u8 *kin, *kout;			/* buffer mapped pointers */
+	void *bounce;			/* bounce buffer for inplace I/Os */
+	bool bounced;			/* is the bounce buffer used now? */
+};
+
+int z_erofs_stream_switch_bufs(struct z_erofs_stream_dctx *dctx, void **dst,
+			       void **src, struct page **pgpl);
 int z_erofs_fixup_insize(struct z_erofs_decompress_req *rq, const char *padbuf,
 			 unsigned int padbufsize);
-extern const struct z_erofs_decompressor erofs_decompressors[];
-
-/* prototypes for specific algorithms */
-int z_erofs_load_lzma_config(struct super_block *sb,
-			struct erofs_super_block *dsb, void *data, int size);
-int z_erofs_load_deflate_config(struct super_block *sb,
-			struct erofs_super_block *dsb, void *data, int size);
-int z_erofs_load_zstd_config(struct super_block *sb,
-			struct erofs_super_block *dsb, void *data, int size);
-int z_erofs_lzma_decompress(struct z_erofs_decompress_req *rq,
-			    struct page **pagepool);
-int z_erofs_deflate_decompress(struct z_erofs_decompress_req *rq,
-			       struct page **pagepool);
-int z_erofs_zstd_decompress(struct z_erofs_decompress_req *rq,
-			    struct page **pgpl);
+int __init z_erofs_init_decompressor(void);
+void z_erofs_exit_decompressor(void);
 #endif
