@@ -1815,8 +1815,15 @@ static void unmap_single_vma(struct mmu_gather *tlb,
 	if (vma->vm_file)
 		uprobe_munmap(vma, start, end);
 
-	if (unlikely(vma->vm_flags & VM_PFNMAP))
+	if (unlikely(vma->vm_flags & VM_PFNMAP)) {
+		if (!mm_wr_locked)
+			mmap_read_lock(vma->vm_mm);
+
 		untrack_pfn(vma, 0, 0, mm_wr_locked);
+
+		if (!mm_wr_locked)
+			mmap_read_unlock(vma->vm_mm);
+	}
 
 	if (start != end) {
 		if (unlikely(is_vm_hugetlb_page(vma))) {
@@ -4681,7 +4688,7 @@ void set_pte_range(struct vm_fault *vmf, struct folio *folio,
 {
 	struct vm_area_struct *vma = vmf->vma;
 	bool write = vmf->flags & FAULT_FLAG_WRITE;
-	bool prefault = in_range(vmf->address, addr, nr * PAGE_SIZE);
+	bool prefault = !in_range(vmf->address, addr, nr * PAGE_SIZE);
 	pte_t entry;
 
 	flush_icache_pages(vma, page, nr);
