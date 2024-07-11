@@ -93,7 +93,8 @@ struct thermal_zone_device_ops {
 	int (*set_trips) (struct thermal_zone_device *, int, int);
 	int (*change_mode) (struct thermal_zone_device *,
 		enum thermal_device_mode);
-	int (*set_trip_temp) (struct thermal_zone_device *, int, int);
+	int (*set_trip_temp) (struct thermal_zone_device *,
+			      const struct thermal_trip *, int);
 	int (*get_crit_temp) (struct thermal_zone_device *, int *);
 	int (*set_emul_temp) (struct thermal_zone_device *, int);
 	int (*get_trend) (struct thermal_zone_device *,
@@ -201,8 +202,6 @@ static inline void devm_thermal_of_zone_unregister(struct device *dev,
 }
 #endif
 
-int __thermal_zone_get_trip(struct thermal_zone_device *tz, int trip_id,
-			    struct thermal_trip *trip);
 int thermal_zone_get_trip(struct thermal_zone_device *tz, int trip_id,
 			  struct thermal_trip *trip);
 int for_each_thermal_trip(struct thermal_zone_device *tz,
