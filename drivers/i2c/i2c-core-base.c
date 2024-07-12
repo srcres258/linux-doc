@@ -1066,8 +1066,8 @@ EXPORT_SYMBOL(i2c_find_device_by_fwnode);
 
 
 static const struct i2c_device_id dummy_id[] = {
-	{ "dummy", 0 },
-	{ },
+	{ "dummy" },
+	{ }
 };
 
 static int dummy_probe(struct i2c_client *client)
@@ -1467,6 +1467,8 @@ int i2c_handle_smbus_host_notify(struct i2c_adapter *adap, unsigned short addr)
 
 	if (!adap)
 		return -EINVAL;
+
+	dev_dbg(&adap->dev, "Detected HostNotify from address 0x%02x", addr);
 
 	irq = irq_find_mapping(adap->host_notify_domain, addr);
 	if (irq <= 0)
