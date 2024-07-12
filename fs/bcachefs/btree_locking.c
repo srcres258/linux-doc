@@ -10,7 +10,7 @@ void bch2_btree_lock_init(struct btree_bkey_cached_common *b,
 			  enum six_lock_init_flags flags)
 {
 	__six_lock_init(&b->lock, "b->c.lock", &bch2_btree_node_lock_key, flags);
-	lockdep_set_novalidate_class(&b->lock);
+	lockdep_set_notrack_class(&b->lock);
 }
 
 #ifdef CONFIG_LOCKDEP
@@ -231,7 +231,7 @@ static noinline int break_cycle(struct lock_graph *g, struct printbuf *cycle)
 			prt_newline(&buf);
 		}
 
-		bch2_print_string_as_lines(KERN_ERR, buf.buf);
+		bch2_print_string_as_lines_nonblocking(KERN_ERR, buf.buf);
 		printbuf_exit(&buf);
 		BUG();
 	}
@@ -792,7 +792,7 @@ static inline int __bch2_trans_relock(struct btree_trans *trans, bool trace)
 			return bch2_trans_relock_fail(trans, path, &f, trace);
 	}
 
-	trans->locked = true;
+	trans_set_locked(trans);
 out:
 	bch2_trans_verify_locks(trans);
 	return 0;
@@ -812,16 +812,14 @@ void bch2_trans_unlock_noassert(struct btree_trans *trans)
 {
 	__bch2_trans_unlock(trans);
 
-	trans->locked = false;
-	trans->last_unlock_ip = _RET_IP_;
+	trans_set_unlocked(trans);
 }
 
 void bch2_trans_unlock(struct btree_trans *trans)
 {
 	__bch2_trans_unlock(trans);
 
-	trans->locked = false;
-	trans->last_unlock_ip = _RET_IP_;
+	trans_set_unlocked(trans);
 }
 
 void bch2_trans_unlock_long(struct btree_trans *trans)
