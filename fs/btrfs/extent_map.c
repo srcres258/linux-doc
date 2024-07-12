@@ -1110,7 +1110,14 @@ out_free_pre:
 	return ret;
 }
 
-static long btrfs_scan_inode(struct btrfs_inode *inode, long *scanned, long nr_to_scan)
+struct btrfs_em_shrink_ctx {
+	long nr_to_scan;
+	long scanned;
+	u64 last_ino;
+	u64 last_root;
+};
+
+static long btrfs_scan_inode(struct btrfs_inode *inode, struct btrfs_em_shrink_ctx *ctx)
 {
 	const u64 cur_fs_gen = btrfs_get_fs_generation(inode->root->fs_info);
 	struct extent_map_tree *tree = &inode->extent_tree;
@@ -1139,7 +1146,18 @@ static long btrfs_scan_inode(struct btrfs_inode *inode, long *scanned, long nr_t
 	if (!down_read_trylock(&inode->i_mmap_lock))
 		return 0;
 
-	write_lock(&tree->lock);
+	/*
+	 * We want to be fast because we can be called from any path trying to
+	 * allocate memory, so if the lock is busy we don't want to spend time
+	 * waiting for it - either some task is about to do IO for the inode or
+	 * we may have another task shrinking extent maps, here in this code, so
+	 * skip this inode.
+	 */
+	if (!write_trylock(&tree->lock)) {
+		up_read(&inode->i_mmap_lock);
+		return 0;
+	}
+
 	node = rb_first(&tree->root);
 	while (node) {
 		struct rb_node *next = rb_next(node);
@@ -1147,8 +1165,8 @@ static long btrfs_scan_inode(struct btrfs_inode *inode, long *scanned, long nr_t
 		u64 next_min_offset;
 
 		em = rb_entry(node, struct extent_map, rb_node);
-		next_min_offset = extent_map_end(em);
-		(*scanned)++;
+		node = rb_next(node);
+		ctx->scanned++;
 
 		if (em->flags & EXTENT_FLAG_PINNED)
 			goto next;
@@ -1169,28 +1187,18 @@ static long btrfs_scan_inode(struct btrfs_inode *inode, long *scanned, long nr_t
 		free_extent_map(em);
 		nr_dropped++;
 next:
-		if (*scanned >= nr_to_scan)
+		if (ctx->scanned >= ctx->nr_to_scan)
 			break;
 
 		/*
-		 * If we had to reschedule start from where we were before. We
-		 * could start from the first extent map in the tree in case we
-		 * passed through pinned extent maps that may have become
-		 * unpinned in the meanwhile, but it might be the case that they
-		 * haven't been unpinned yet, so if we have many still unpinned
-		 * extent maps, we could be wasting a lot of time and cpu. So
-		 * don't consider previously pinned extent maps, we'll consider
-		 * them in future calls of the extent map shrinker.
+		 * Stop if we need to reschedule or there's contention on the
+		 * lock. This is to avoid slowing other tasks trying to take the
+		 * lock and because the shrinker might be called during a memory
+		 * allocation path and we want to avoid taking a very long time
+		 * and slowing down all sorts of tasks.
 		 */
-		if (cond_resched_rwlock_write(&tree->lock)) {
-			em = search_extent_mapping(tree, next_min_offset, 0);
-			if (em)
-				node = &em->rb_node;
-			else
-				node = NULL;
-		} else {
-			node = next;
-		}
+		if (need_resched() || rwlock_needbreak(&tree->lock))
+			break;
 	}
 	write_unlock(&tree->lock);
 	up_read(&inode->i_mmap_lock);
@@ -1198,25 +1206,30 @@ next:
 	return nr_dropped;
 }
 
-static long btrfs_scan_root(struct btrfs_root *root, long *scanned, long nr_to_scan)
+static long btrfs_scan_root(struct btrfs_root *root, struct btrfs_em_shrink_ctx *ctx)
 {
-	struct btrfs_fs_info *fs_info = root->fs_info;
 	struct btrfs_inode *inode;
 	long nr_dropped = 0;
-	u64 min_ino = fs_info->extent_map_shrinker_last_ino + 1;
+	u64 min_ino = ctx->last_ino + 1;
 
 	inode = btrfs_find_first_inode(root, min_ino);
 	while (inode) {
-		nr_dropped += btrfs_scan_inode(inode, scanned, nr_to_scan);
+		nr_dropped += btrfs_scan_inode(inode, ctx);
 
 		min_ino = btrfs_ino(inode) + 1;
-		fs_info->extent_map_shrinker_last_ino = btrfs_ino(inode);
-		iput(&inode->vfs_inode);
+		ctx->last_ino = btrfs_ino(inode);
+		btrfs_add_delayed_iput(inode);
 
-		if (*scanned >= nr_to_scan)
+		if (ctx->scanned >= ctx->nr_to_scan)
 			break;
 
-		cond_resched();
+		/*
+		 * We may be called from memory allocation paths, so we don't
+		 * want to take too much time and slowdown tasks.
+		 */
+		if (need_resched())
+			break;
+
 		inode = btrfs_find_first_inode(root, min_ino);
 	}
 
@@ -1228,14 +1241,14 @@ static long btrfs_scan_root(struct btrfs_root *root, long *scanned, long nr_to_s
 		 * inode if there is one or we will find out this was the last
 		 * one and move to the next root.
 		 */
-		fs_info->extent_map_shrinker_last_root = btrfs_root_id(root);
+		ctx->last_root = btrfs_root_id(root);
 	} else {
 		/*
 		 * No more inodes in this root, set extent_map_shrinker_last_ino to 0 so
 		 * that when processing the next root we start from its first inode.
 		 */
-		fs_info->extent_map_shrinker_last_ino = 0;
-		fs_info->extent_map_shrinker_last_root = btrfs_root_id(root) + 1;
+		ctx->last_ino = 0;
+		ctx->last_root = btrfs_root_id(root) + 1;
 	}
 
 	return nr_dropped;
@@ -1243,19 +1256,41 @@ static long btrfs_scan_root(struct btrfs_root *root, long *scanned, long nr_to_s
 
 long btrfs_free_extent_maps(struct btrfs_fs_info *fs_info, long nr_to_scan)
 {
-	const u64 start_root_id = fs_info->extent_map_shrinker_last_root;
-	u64 next_root_id = start_root_id;
+	struct btrfs_em_shrink_ctx ctx;
+	u64 start_root_id;
+	u64 next_root_id;
 	bool cycled = false;
 	long nr_dropped = 0;
-	long scanned = 0;
+
+	ctx.scanned = 0;
+	ctx.nr_to_scan = nr_to_scan;
+
+	/*
+	 * In case we have multiple tasks running this shrinker, make the next
+	 * one start from the next inode in case it starts before we finish.
+	 */
+	spin_lock(&fs_info->extent_map_shrinker_lock);
+	ctx.last_ino = fs_info->extent_map_shrinker_last_ino;
+	fs_info->extent_map_shrinker_last_ino++;
+	ctx.last_root = fs_info->extent_map_shrinker_last_root;
+	spin_unlock(&fs_info->extent_map_shrinker_lock);
+
+	start_root_id = ctx.last_root;
+	next_root_id = ctx.last_root;
 
 	if (trace_btrfs_extent_map_shrinker_scan_enter_enabled()) {
 		s64 nr = percpu_counter_sum_positive(&fs_info->evictable_extent_maps);
 
-		trace_btrfs_extent_map_shrinker_scan_enter(fs_info, nr_to_scan, nr);
+		trace_btrfs_extent_map_shrinker_scan_enter(fs_info, nr_to_scan,
+							   nr, ctx.last_root,
+							   ctx.last_ino);
 	}
 
-	while (scanned < nr_to_scan) {
+	/*
+	 * We may be called from memory allocation paths, so we don't want to
+	 * take too much time and slowdown tasks, so stop if we need reschedule.
+	 */
+	while (ctx.scanned < ctx.nr_to_scan && !need_resched()) {
 		struct btrfs_root *root;
 		unsigned long count;
 
@@ -1267,8 +1302,8 @@ long btrfs_free_extent_maps(struct btrfs_fs_info *fs_info, long nr_to_scan)
 			spin_unlock(&fs_info->fs_roots_radix_lock);
 			if (start_root_id > 0 && !cycled) {
 				next_root_id = 0;
-				fs_info->extent_map_shrinker_last_root = 0;
-				fs_info->extent_map_shrinker_last_ino = 0;
+				ctx.last_root = 0;
+				ctx.last_ino = 0;
 				cycled = true;
 				continue;
 			}
@@ -1282,15 +1317,33 @@ long btrfs_free_extent_maps(struct btrfs_fs_info *fs_info, long nr_to_scan)
 			continue;
 
 		if (is_fstree(btrfs_root_id(root)))
-			nr_dropped += btrfs_scan_root(root, &scanned, nr_to_scan);
+			nr_dropped += btrfs_scan_root(root, &ctx);
 
 		btrfs_put_root(root);
 	}
 
+	/*
+	 * In case of multiple tasks running this extent map shrinking code this
+	 * isn't perfect but it's simple and silences things like KCSAN. It's
+	 * not possible to know which task made more progress because we can
+	 * cycle back to the first root and first inode if it's not the first
+	 * time the shrinker ran, see the above logic. Also a task that started
+	 * later may finish ealier than another task and made less progress. So
+	 * make this simple and update to the progress of the last task that
+	 * finished, with the occasional possiblity of having two consecutive
+	 * runs of the shrinker process the same inodes.
+	 */
+	spin_lock(&fs_info->extent_map_shrinker_lock);
+	fs_info->extent_map_shrinker_last_ino = ctx.last_ino;
+	fs_info->extent_map_shrinker_last_root = ctx.last_root;
+	spin_unlock(&fs_info->extent_map_shrinker_lock);
+
 	if (trace_btrfs_extent_map_shrinker_scan_exit_enabled()) {
 		s64 nr = percpu_counter_sum_positive(&fs_info->evictable_extent_maps);
 
-		trace_btrfs_extent_map_shrinker_scan_exit(fs_info, nr_dropped, nr);
+		trace_btrfs_extent_map_shrinker_scan_exit(fs_info, nr_dropped,
+							  nr, ctx.last_root,
+							  ctx.last_ino);
 	}
 
 	return nr_dropped;

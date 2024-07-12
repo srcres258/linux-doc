@@ -96,6 +96,7 @@
 #define CS530X_ASP_TDM_SLOT_MASK	GENMASK(5, 3)
 #define CS530X_ASP_TDM_SLOT_SHIFT	3
 #define CS530X_ASP_CH_REVERSE		BIT(9)
+#define CS530X_TDM_EN_MASK		BIT(2)
 #define CS530X_ASP_FMT_I2S		0
 #define CS530X_ASP_FMT_LJ		1
 #define CS530X_ASP_FMT_DSP_A		0x6
@@ -210,7 +211,6 @@ struct cs530x_priv {
 
 	int tdm_width;
 	int tdm_slots;
-	int bclk;
 	int fs;
 	int adc_pairs_count;
 

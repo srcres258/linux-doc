@@ -39,11 +39,12 @@ static inline void __clear_shadow_entry(struct address_space *mapping,
 	xas_store(&xas, NULL);
 }
 
-static void clear_shadow_entry(struct address_space *mapping,
-			       struct folio_batch *fbatch, pgoff_t *indices)
+static void clear_shadow_entries(struct address_space *mapping,
+				 struct folio_batch *fbatch, pgoff_t *indices)
 {
 	int i;
 
+	/* Handled by shmem itself, or for DAX we do nothing. */
 	if (shmem_mapping(mapping) || dax_mapping(mapping))
 		return;
 
@@ -508,7 +509,7 @@ unsigned long mapping_try_invalidate(struct address_space *mapping,
 		}
 
 		if (xa_has_values)
-			clear_shadow_entry(mapping, &fbatch, indices);
+			clear_shadow_entries(mapping, &fbatch, indices);
 
 		folio_batch_remove_exceptionals(&fbatch);
 		folio_batch_release(&fbatch);
@@ -658,7 +659,7 @@ int invalidate_inode_pages2_range(struct address_space *mapping,
 		}
 
 		if (xa_has_values)
-			clear_shadow_entry(mapping, &fbatch, indices);
+			clear_shadow_entries(mapping, &fbatch, indices);
 
 		folio_batch_remove_exceptionals(&fbatch);
 		folio_batch_release(&fbatch);

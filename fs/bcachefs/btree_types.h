@@ -483,6 +483,7 @@ struct btree_trans {
 	bool			lock_may_not_fail:1;
 	bool			srcu_held:1;
 	bool			locked:1;
+	bool			pf_memalloc_nofs:1;
 	bool			write_locked:1;
 	bool			used_mempool:1;
 	bool			in_traverse_all:1;
@@ -522,6 +523,9 @@ struct btree_trans {
 	unsigned		journal_u64s;
 	unsigned		extra_disk_res; /* XXX kill */
 
+#ifdef CONFIG_DEBUG_LOCK_ALLOC
+	struct lockdep_map	dep_map;
+#endif
 	/* Entries before this are zeroed out on every bch2_trans_get() call */
 
 	struct list_head	list;

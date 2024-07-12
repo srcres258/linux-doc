@@ -28,7 +28,7 @@
 	{LOONGARCH_EXCEPTION_INT,  "Interrupt" },		\
 	{LOONGARCH_EXCEPTION_PIL,  "Mem Read" },		\
 	{LOONGARCH_EXCEPTION_PIS,  "Mem Store" },		\
-	{LOONGARCH_EXCEPTION_PIF,  "Inst Fecth" },		\
+	{LOONGARCH_EXCEPTION_PIF,  "Inst Fetch" },		\
 	{LOONGARCH_EXCEPTION_PME,  "Mem Modify" },		\
 	{LOONGARCH_EXCEPTION_FPD,  "FPU" },			\
 	{LOONGARCH_EXCEPTION_SXD,  "LSX" },			\

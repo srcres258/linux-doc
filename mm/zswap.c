@@ -794,9 +794,13 @@ static void zswap_entry_cache_free(struct zswap_entry *entry)
  */
 static void zswap_entry_free(struct zswap_entry *entry)
 {
-	zswap_lru_del(&zswap_list_lru, entry);
+	if (!entry->length)
+		atomic_dec(&zswap_same_filled_pages);
+	else {
+		zswap_lru_del(&zswap_list_lru, entry);
 	zpool_free(entry->pool->zpool, entry->handle);
-	zswap_pool_put(entry->pool);
+		zswap_pool_put(entry->pool);
+	}
 	if (entry->objcg) {
 		obj_cgroup_uncharge_zswap(entry->objcg, entry->length);
 		obj_cgroup_put(entry->objcg);
@@ -1453,7 +1457,10 @@ bool zswap_store(struct folio *folio)
 	return true;
 
 store_failed:
-	zpool_free(entry->pool->zpool, entry->handle);
+	if (!entry->length)
+		atomic_dec(&zswap_same_filled_pages);
+	else {
+		zpool_free(entry->pool->zpool, entry->handle);
 put_pool:
 	zswap_pool_put(entry->pool);
 freepage:

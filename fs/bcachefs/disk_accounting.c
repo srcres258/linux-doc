@@ -521,8 +521,9 @@ fsck_err:
 	return ret;
 }
 
-static int accounting_read_key(struct bch_fs *c, struct btree_trans *trans, struct bkey_s_c k)
+static int accounting_read_key(struct btree_trans *trans, struct bkey_s_c k)
 {
+	struct bch_fs *c = trans->c;
 	struct printbuf buf = PRINTBUF;
 
 	if (k.k->type != KEY_TYPE_accounting)
@@ -557,15 +558,15 @@ fsck_err:
 int bch2_accounting_read(struct bch_fs *c)
 {
 	struct bch_accounting_mem *acc = &c->accounting;
+	struct btree_trans *trans = bch2_trans_get(c);
 
-	int ret = bch2_trans_run(c,
-		for_each_btree_key(trans, iter,
+	int ret = for_each_btree_key(trans, iter,
 				BTREE_ID_accounting, POS_MIN,
 				BTREE_ITER_prefetch|BTREE_ITER_all_snapshots, k, ({
 			struct bkey u;
 			struct bkey_s_c k = bch2_btree_path_peek_slot_exact(btree_iter_path(trans, &iter), &u);
-			accounting_read_key(c, trans, k);
-		})));
+			accounting_read_key(trans, k);
+		}));
 	if (ret)
 		goto err;
 
@@ -598,7 +599,7 @@ int bch2_accounting_read(struct bch_fs *c)
 				continue;
 			}
 
-			ret = accounting_read_key(c, NULL, k);
+			ret = accounting_read_key(trans, k);
 			if (ret)
 				goto err;
 		}
@@ -645,6 +646,7 @@ int bch2_accounting_read(struct bch_fs *c)
 	preempt_enable();
 	percpu_up_read(&c->mark_lock);
 err:
+	bch2_trans_put(trans);
 	bch_err_fn(c, ret);
 	return ret;
 }

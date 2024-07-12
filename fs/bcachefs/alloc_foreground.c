@@ -1728,6 +1728,7 @@ void bch2_fs_alloc_debug_to_text(struct printbuf *out, struct bch_fs *c)
 	for (unsigned i = 0; i < ARRAY_SIZE(c->open_buckets); i++)
 		nr[c->open_buckets[i].data_type]++;
 
+	printbuf_tabstops_reset(out);
 	printbuf_tabstop_push(out, 24);
 
 	prt_printf(out, "hidden\t%llu\n",		percpu_u64_get(&c->usage->hidden));
@@ -1759,6 +1760,7 @@ void bch2_dev_alloc_debug_to_text(struct printbuf *out, struct bch_dev *ca)
 	for (unsigned i = 0; i < ARRAY_SIZE(c->open_buckets); i++)
 		nr[c->open_buckets[i].data_type]++;
 
+	printbuf_tabstops_reset(out);
 	printbuf_tabstop_push(out, 12);
 	printbuf_tabstop_push(out, 16);
 	printbuf_tabstop_push(out, 16);
