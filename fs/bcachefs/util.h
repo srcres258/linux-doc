@@ -315,6 +315,7 @@ void bch2_prt_u64_base2_nbits(struct printbuf *, u64, unsigned);
 void bch2_prt_u64_base2(struct printbuf *, u64);
 
 void bch2_print_string_as_lines(const char *prefix, const char *lines);
+void bch2_print_string_as_lines_nonblocking(const char *prefix, const char *lines);
 
 typedef DARRAY(unsigned long) bch_stacktrace;
 int bch2_save_backtrace(bch_stacktrace *stack, struct task_struct *, unsigned, gfp_t);
@@ -697,14 +698,19 @@ do {									\
 	}								\
 } while (0)
 
+#define per_cpu_sum(_p)							\
+({									\
+	typeof(*_p) _ret = 0;						\
+									\
+	int cpu;							\
+	for_each_possible_cpu(cpu)					\
+		_ret += *per_cpu_ptr(_p, cpu);				\
+	_ret;								\
+})
+
 static inline u64 percpu_u64_get(u64 __percpu *src)
 {
-	u64 ret = 0;
-	int cpu;
-
-	for_each_possible_cpu(cpu)
-		ret += *per_cpu_ptr(src, cpu);
-	return ret;
+	return per_cpu_sum(src);
 }
 
 static inline void percpu_u64_set(u64 __percpu *dst, u64 src)
@@ -718,9 +724,7 @@ static inline void percpu_u64_set(u64 __percpu *dst, u64 src)
 
 static inline void acc_u64s(u64 *acc, const u64 *src, unsigned nr)
 {
-	unsigned i;
-
-	for (i = 0; i < nr; i++)
+	for (unsigned i = 0; i < nr; i++)
 		acc[i] += src[i];
 }
 
