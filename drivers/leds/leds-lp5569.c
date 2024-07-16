@@ -172,8 +172,7 @@ out:
 static int lp5569_post_init_device(struct lp55xx_chip *chip)
 {
 	int ret;
-	int val;
-	u8 u8val;
+	u8 val;
 
 	val = LP5569_DEFAULT_CONFIG;
 	val |= FIELD_PREP(LP5569_CP_MODE_MASK, chip->pdata->charge_pump_mode);
@@ -202,7 +201,7 @@ static int lp5569_post_init_device(struct lp55xx_chip *chip)
 
 	read_poll_timeout(lp55xx_read, ret, !(val & LP5569_STARTUP_BUSY),
 			  LP5569_STARTUP_SLEEP, LP5569_STARTUP_SLEEP * 10, false,
-			  chip, LP5569_REG_STATUS, &u8val);
+			  chip, LP5569_REG_STATUS, &val);
 
 	return lp5569_init_program_engine(chip);
 }

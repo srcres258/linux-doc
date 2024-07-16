@@ -64,7 +64,7 @@ quiet_cmd_initfs = GEN     $@
 	$(CONFIG_SHELL) $< -o $@ -l $(obj)/.initramfs_data.cpio.d \
 	$(addprefix -u , $(CONFIG_INITRAMFS_ROOT_UID)) \
 	$(addprefix -g , $(CONFIG_INITRAMFS_ROOT_GID)) \
-	$(patsubst %,-d "%", $(KBUILD_BUILD_TIMESTAMP)) \
+	$(if $(KBUILD_BUILD_TIMESTAMP), -d "$(KBUILD_BUILD_TIMESTAMP)") \
 	$(ramfs-input)
 
 # We rebuild initramfs_data.cpio if:

@@ -31,9 +31,11 @@ static const struct bprm_stack_limits_result bprm_stack_limits_results[] = {
 	 */
 	{ { .p = ULONG_MAX, .rlim_stack.rlim_cur = ULONG_MAX,
 	    .argc = 0x20000001, .envc = 0x20000001 }, .expected_rc = -E2BIG },
+#ifdef CONFIG_MMU
 	/* Make sure a pathological bprm->p doesn't cause an overflow. */
 	{ { .p = sizeof(void *), .rlim_stack.rlim_cur = ULONG_MAX,
 	    .argc = 10, .envc = 10 }, .expected_rc = -E2BIG },
+#endif
 	/*
 	 * 0 rlim_stack will get raised to ARG_MAX. With 1 string pointer,
 	 * we should see p - ARG_MAX + sizeof(void *).
@@ -120,7 +122,9 @@ static void exec_test_bprm_stack_limits(struct kunit *test)
 
 		rc = bprm_stack_limits(&bprm);
 		KUNIT_EXPECT_EQ_MSG(test, rc, result->expected_rc, "on loop %d", i);
+#ifdef CONFIG_MMU
 		KUNIT_EXPECT_EQ_MSG(test, bprm.argmin, result->expected_argmin, "on loop %d", i);
+#endif
 	}
 }
 

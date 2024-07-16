@@ -3667,8 +3667,6 @@ long memfd_pin_folios(struct file *memfd, loff_t start, loff_t end,
 
 			next_idx = 0;
 			for (i = 0; i < nr_found; i++) {
-				int ret2;
-
 				/*
 				 * As there can be multiple entries for a
 				 * given folio in the batch returned by
@@ -3681,10 +3679,10 @@ long memfd_pin_folios(struct file *memfd, loff_t start, loff_t end,
 					continue;
 
 				folio = page_folio(&fbatch.folios[i]->page);
-				ret2 = try_grab_folio(folio, 1, FOLL_PIN);
-				if (ret2) {
+
+				if (try_grab_folio(folio, 1, FOLL_PIN)) {
 					folio_batch_release(&fbatch);
-					ret = ret2;
+					ret = -EINVAL;
 					goto err;
 				}
 

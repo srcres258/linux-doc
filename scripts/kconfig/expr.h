@@ -131,7 +131,6 @@ struct symbol {
 
 #define SYMBOL_CONST      0x0001  /* symbol is const */
 #define SYMBOL_CHECK      0x0008  /* used during dependency checking */
-#define SYMBOL_CHOICEVAL  0x0020  /* used as a value in a choice block */
 #define SYMBOL_VALID      0x0080  /* set when symbol.curr is calculated */
 #define SYMBOL_WRITE      0x0200  /* write symbol to file (KCONFIG_CONFIG) */
 #define SYMBOL_WRITTEN    0x0800  /* track info to avoid double-write to .config */
@@ -291,11 +290,11 @@ struct expr *expr_trans_compare(struct expr *e, enum expr_type type, struct symb
 
 void expr_fprint(struct expr *e, FILE *out);
 struct gstr; /* forward */
-void expr_gstr_print(struct expr *e, struct gstr *gs);
+void expr_gstr_print(const struct expr *e, struct gstr *gs);
 void expr_gstr_print_revdep(struct expr *e, struct gstr *gs,
 			    tristate pr_type, const char *title);
 
-static inline int expr_is_yes(struct expr *e)
+static inline int expr_is_yes(const struct expr *e)
 {
 	return !e || (e->type == E_SYMBOL && e->left.sym == &symbol_yes);
 }

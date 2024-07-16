@@ -18,6 +18,7 @@
 #include <linux/if_ether.h>
 #include <linux/netlink.h>
 #include <uapi/linux/ethtool.h>
+#include <uapi/linux/net_tstamp.h>
 
 struct compat_ethtool_rx_flow_spec {
 	u32		flow_type;
@@ -181,6 +182,7 @@ struct ethtool_rxfh_context {
 	/* private: driver private data, indirection table, and hash key are
 	 * stored sequentially in @data area.  Use below helpers to access.
 	 */
+	u32 key_off;
 	u8 data[] __aligned(sizeof(void *));
 };
 
@@ -196,19 +198,10 @@ static inline u32 *ethtool_rxfh_context_indir(struct ethtool_rxfh_context *ctx)
 
 static inline u8 *ethtool_rxfh_context_key(struct ethtool_rxfh_context *ctx)
 {
-	return (u8 *)(ethtool_rxfh_context_indir(ctx) + ctx->indir_size);
+	return &ctx->data[ctx->key_off];
 }
 
-static inline size_t ethtool_rxfh_context_size(u32 indir_size, u32 key_size,
-					       u16 priv_size)
-{
-	size_t indir_bytes = array_size(indir_size, sizeof(u32));
-	size_t flex_len;
-
-	flex_len = size_add(size_add(indir_bytes, key_size),
-			    ALIGN(priv_size, sizeof(u32)));
-	return struct_size_t(struct ethtool_rxfh_context, data, flex_len);
-}
+void ethtool_rxfh_context_lost(struct net_device *dev, u32 context_id);
 
 /* declare a link mode bitmap */
 #define __ETHTOOL_DECLARE_LINK_MODE_MASK(name)		\
@@ -714,6 +707,22 @@ struct ethtool_rxfh_param {
 };
 
 /**
+ * struct kernel_ethtool_ts_info - kernel copy of struct ethtool_ts_info
+ * @cmd: command number = %ETHTOOL_GET_TS_INFO
+ * @so_timestamping: bit mask of the sum of the supported SO_TIMESTAMPING flags
+ * @phc_index: device index of the associated PHC, or -1 if there is none
+ * @tx_types: bit mask of the supported hwtstamp_tx_types enumeration values
+ * @rx_filters: bit mask of the supported hwtstamp_rx_filters enumeration values
+ */
+struct kernel_ethtool_ts_info {
+	u32 cmd;
+	u32 so_timestamping;
+	int phc_index;
+	enum hwtstamp_tx_types tx_types;
+	enum hwtstamp_rx_filters rx_filters;
+};
+
+/**
  * struct ethtool_ops - optional netdev operations
  * @cap_link_lanes_supported: indicates if the driver supports lanes
  *	parameter.
@@ -721,6 +730,10 @@ struct ethtool_rxfh_param {
  *	contexts.
  * @cap_rss_sym_xor_supported: indicates if the driver supports symmetric-xor
  *	RSS.
+ * @rxfh_indir_space: max size of RSS indirection tables, if indirection table
+ *	size as returned by @get_rxfh_indir_size may change during lifetime
+ *	of the device. Leave as 0 if the table size is constant.
+ * @rxfh_key_space: same as @rxfh_indir_space, but for the key.
  * @rxfh_priv_size: size of the driver private data area the core should
  *	allocate for an RSS context (in &struct ethtool_rxfh_context).
  * @rxfh_max_context_id: maximum (exclusive) supported RSS context ID.  If this
@@ -938,6 +951,8 @@ struct ethtool_ops {
 	u32     cap_link_lanes_supported:1;
 	u32     cap_rss_ctx_supported:1;
 	u32	cap_rss_sym_xor_supported:1;
+	u32	rxfh_indir_space;
+	u16	rxfh_key_space;
 	u16	rxfh_priv_size;
 	u32	rxfh_max_context_id;
 	u32	supported_coalesce_params;
@@ -1020,7 +1035,7 @@ struct ethtool_ops {
 	int	(*get_dump_data)(struct net_device *,
 				 struct ethtool_dump *, void *);
 	int	(*set_dump)(struct net_device *, struct ethtool_dump *);
-	int	(*get_ts_info)(struct net_device *, struct ethtool_ts_info *);
+	int	(*get_ts_info)(struct net_device *, struct kernel_ethtool_ts_info *);
 	void	(*get_ts_stats)(struct net_device *dev,
 				struct ethtool_ts_stats *ts_stats);
 	int     (*get_module_info)(struct net_device *,
@@ -1181,7 +1196,8 @@ int ethtool_get_phc_vclocks(struct net_device *dev, int **vclock_index);
 
 /* Some generic methods drivers may use in their ethtool_ops */
 u32 ethtool_op_get_link(struct net_device *dev);
-int ethtool_op_get_ts_info(struct net_device *dev, struct ethtool_ts_info *eti);
+int ethtool_op_get_ts_info(struct net_device *dev,
+			   struct kernel_ethtool_ts_info *eti);
 
 /**
  * ethtool_mm_frag_size_add_to_min - Translate (standard) additional fragment
@@ -1230,7 +1246,8 @@ static inline int ethtool_mm_frag_size_min_to_add(u32 val_min, u32 *val_add,
  * @info: buffer to hold the result
  * Returns zero on success, non-zero otherwise.
  */
-int ethtool_get_ts_info_by_layer(struct net_device *dev, struct ethtool_ts_info *info);
+int ethtool_get_ts_info_by_layer(struct net_device *dev,
+				 struct kernel_ethtool_ts_info *info);
 
 /**
  * ethtool_sprintf - Write formatted string to ethtool string data

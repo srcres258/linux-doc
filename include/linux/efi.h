@@ -611,7 +611,11 @@ typedef struct {
 	u32 num_entries;
 	u32 desc_size;
 	u32 flags;
-	efi_memory_desc_t entry[0];
+	/*
+	 * There are @num_entries following, each of size @desc_size bytes,
+	 * including an efi_memory_desc_t header. See efi_memdesc_ptr().
+	 */
+	efi_memory_desc_t entry[];
 } efi_memory_attributes_table_t;
 
 typedef struct {
@@ -787,7 +791,7 @@ extern int efi_memattr_apply_permissions(struct mm_struct *mm,
 					 efi_memattr_perm_setter fn);
 
 /*
- * efi_early_memdesc_ptr - get the n-th EFI memmap descriptor
+ * efi_memdesc_ptr - get the n-th EFI memmap descriptor
  * @map: the start of efi memmap
  * @desc_size: the size of space for each EFI memmap descriptor
  * @n: the index of efi memmap descriptor
@@ -805,7 +809,7 @@ extern int efi_memattr_apply_permissions(struct mm_struct *mm,
  * during bootup since for_each_efi_memory_desc_xxx() is available after the
  * kernel initializes the EFI subsystem to set up struct efi_memory_map.
  */
-#define efi_early_memdesc_ptr(map, desc_size, n)			\
+#define efi_memdesc_ptr(map, desc_size, n)			\
 	(efi_memory_desc_t *)((void *)(map) + ((n) * (desc_size)))
 
 /* Iterate through an efi_memory_map */

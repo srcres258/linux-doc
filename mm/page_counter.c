@@ -386,7 +386,7 @@ static unsigned long effective_protection(unsigned long usage,
 /**
  * page_counter_calculate_protection - check if memory consumption is in the normal range
  * @root: the top ancestor of the sub-tree being checked
- * @memcg: the memory cgroup to check
+ * @counter: the page_counter the counter to update
  * @recursive_protection: Whether to use memory_recursiveprot behavior.
  *
  * Calculates elow/emin thresholds for given page_counter.

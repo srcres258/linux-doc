@@ -851,7 +851,6 @@ static u32 scx_dsp_max_batch;
 
 struct scx_dsp_ctx {
 	struct rq		*rq;
-	struct rq_flags		*rf;
 	u32			cursor;
 	u32			nr_tasks;
 	struct scx_dsp_buf_ent	buf[];
@@ -889,6 +888,7 @@ static struct kobject *scx_root_kobj;
 #define CREATE_TRACE_POINTS
 #include <trace/events/sched_ext.h>
 
+static void process_ddsp_deferred_locals(struct rq *rq);
 static void scx_bpf_kick_cpu(s32 cpu, u64 flags);
 static __printf(3, 4) void scx_ops_exit_kind(enum scx_exit_kind kind,
 					     s64 exit_code,
@@ -1363,6 +1363,67 @@ static int ops_sanitize_err(const char *ops_name, s32 err)
 	return -EPROTO;
 }
 
+static void run_deferred(struct rq *rq)
+{
+	process_ddsp_deferred_locals(rq);
+}
+
+#ifdef CONFIG_SMP
+static void deferred_bal_cb_workfn(struct rq *rq)
+{
+	run_deferred(rq);
+}
+#endif
+
+static void deferred_irq_workfn(struct irq_work *irq_work)
+{
+	struct rq *rq = container_of(irq_work, struct rq, scx.deferred_irq_work);
+
+	raw_spin_rq_lock(rq);
+	run_deferred(rq);
+	raw_spin_rq_unlock(rq);
+}
+
+/**
+ * schedule_deferred - Schedule execution of deferred actions on an rq
+ * @rq: target rq
+ *
+ * Schedule execution of deferred actions on @rq. Must be called with @rq
+ * locked. Deferred actions are executed with @rq locked but unpinned, and thus
+ * can unlock @rq to e.g. migrate tasks to other rqs.
+ */
+static void schedule_deferred(struct rq *rq)
+{
+	lockdep_assert_rq_held(rq);
+
+#ifdef CONFIG_SMP
+	/*
+	 * If in the middle of waking up a task, task_woken_scx() will be called
+	 * afterwards which will then run the deferred actions, no need to
+	 * schedule anything.
+	 */
+	if (rq->scx.flags & SCX_RQ_IN_WAKEUP)
+		return;
+
+	/*
+	 * If in balance, the balance callbacks will be called before rq lock is
+	 * released. Schedule one.
+	 */
+	if (rq->scx.flags & SCX_RQ_IN_BALANCE) {
+		queue_balance_callback(rq, &rq->scx.deferred_bal_cb,
+				       deferred_bal_cb_workfn);
+		return;
+	}
+#endif
+	/*
+	 * No scheduler hooks available. Queue an irq work. They are executed on
+	 * IRQ re-enable which may take a bit longer than the scheduler hooks.
+	 * The above WAKEUP and BALANCE paths should cover most of the cases and
+	 * the time to IRQ re-enable shouldn't be long.
+	 */
+	irq_work_queue(&rq->scx.deferred_irq_work);
+}
+
 /**
  * touch_core_sched - Update timestamp used for core-sched task ordering
  * @rq: rq to read clock from, must be locked
@@ -1572,18 +1633,19 @@ static void task_unlink_from_dsq(struct task_struct *p,
 	list_del_init(&p->scx.dsq_list.node);
 }
 
-static bool task_linked_on_dsq(struct task_struct *p)
-{
-	return !list_empty(&p->scx.dsq_list.node);
-}
-
 static void dispatch_dequeue(struct rq *rq, struct task_struct *p)
 {
 	struct scx_dispatch_q *dsq = p->scx.dsq;
 	bool is_local = dsq == &rq->scx.local_dsq;
 
 	if (!dsq) {
-		WARN_ON_ONCE(task_linked_on_dsq(p));
+		/*
+		 * If !dsq && on-list, @p is on @rq's ddsp_deferred_locals.
+		 * Unlinking is all that's needed to cancel.
+		 */
+		if (unlikely(!list_empty(&p->scx.dsq_list.node)))
+			list_del_init(&p->scx.dsq_list.node);
+
 		/*
 		 * When dispatching directly from the BPF scheduler to a local
 		 * DSQ, the task isn't associated with any DSQ but
@@ -1592,6 +1654,7 @@ static void dispatch_dequeue(struct rq *rq, struct task_struct *p)
 		 */
 		if (p->scx.holding_cpu >= 0)
 			p->scx.holding_cpu = -1;
+
 		return;
 	}
 
@@ -1604,7 +1667,7 @@ static void dispatch_dequeue(struct rq *rq, struct task_struct *p)
 	*/
 	if (p->scx.holding_cpu < 0) {
 		/* @p must still be on @dsq, dequeue */
-		WARN_ON_ONCE(!task_linked_on_dsq(p));
+		WARN_ON_ONCE(list_empty(&p->scx.dsq_list.node));
 		task_unlink_from_dsq(p, dsq);
 		dsq_mod_nr(dsq, -1);
 	} else {
@@ -1614,7 +1677,7 @@ static void dispatch_dequeue(struct rq *rq, struct task_struct *p)
 		 * holding_cpu which tells dispatch_to_local_dsq() that it lost
 		 * the race.
 		 */
-		WARN_ON_ONCE(task_linked_on_dsq(p));
+		WARN_ON_ONCE(!list_empty(&p->scx.dsq_list.node));
 		p->scx.holding_cpu = -1;
 	}
 	p->scx.dsq = NULL;
@@ -1679,17 +1742,6 @@ static void mark_direct_dispatch(struct task_struct *ddsp_task,
 		return;
 	}
 
-	/*
-	 * %SCX_DSQ_LOCAL_ON is not supported during direct dispatch because
-	 * dispatching to the local DSQ of a different CPU requires unlocking
-	 * the current rq which isn't allowed in the enqueue path. Use
-	 * ops.select_cpu() to be on the target CPU and then %SCX_DSQ_LOCAL.
-	 */
-	if (unlikely((dsq_id & SCX_DSQ_LOCAL_ON) == SCX_DSQ_LOCAL_ON)) {
-		scx_ops_error("SCX_DSQ_LOCAL_ON can't be used for direct-dispatch");
-		return;
-	}
-
 	WARN_ON_ONCE(p->scx.ddsp_dsq_id != SCX_DSQ_INVALID);
 	WARN_ON_ONCE(p->scx.ddsp_enq_flags);
 
@@ -1699,13 +1751,58 @@ static void mark_direct_dispatch(struct task_struct *ddsp_task,
 
 static void direct_dispatch(struct task_struct *p, u64 enq_flags)
 {
+	struct rq *rq = task_rq(p);
 	struct scx_dispatch_q *dsq;
+	u64 dsq_id = p->scx.ddsp_dsq_id;
 
-	touch_core_sched_dispatch(task_rq(p), p);
+	touch_core_sched_dispatch(rq, p);
 
-	enq_flags |= (p->scx.ddsp_enq_flags | SCX_ENQ_CLEAR_OPSS);
-	dsq = find_dsq_for_dispatch(task_rq(p), p->scx.ddsp_dsq_id, p);
-	dispatch_enqueue(dsq, p, enq_flags);
+	p->scx.ddsp_enq_flags |= enq_flags;
+
+	/*
+	 * We are in the enqueue path with @rq locked and pinned, and thus can't
+	 * double lock a remote rq and enqueue to its local DSQ. For
+	 * DSQ_LOCAL_ON verdicts targeting the local DSQ of a remote CPU, defer
+	 * the enqueue so that it's executed when @rq can be unlocked.
+	 */
+	if ((dsq_id & SCX_DSQ_LOCAL_ON) == SCX_DSQ_LOCAL_ON) {
+		s32 cpu = dsq_id & SCX_DSQ_LOCAL_CPU_MASK;
+		unsigned long opss;
+
+		if (cpu == cpu_of(rq)) {
+			dsq_id = SCX_DSQ_LOCAL;
+			goto dispatch;
+		}
+
+		opss = atomic_long_read(&p->scx.ops_state) & SCX_OPSS_STATE_MASK;
+
+		switch (opss & SCX_OPSS_STATE_MASK) {
+		case SCX_OPSS_NONE:
+			break;
+		case SCX_OPSS_QUEUEING:
+			/*
+			 * As @p was never passed to the BPF side, _release is
+			 * not strictly necessary. Still do it for consistency.
+			 */
+			atomic_long_set_release(&p->scx.ops_state, SCX_OPSS_NONE);
+			break;
+		default:
+			WARN_ONCE(true, "sched_ext: %s[%d] has invalid ops state 0x%lx in direct_dispatch()",
+				  p->comm, p->pid, opss);
+			atomic_long_set_release(&p->scx.ops_state, SCX_OPSS_NONE);
+			break;
+		}
+
+		WARN_ON_ONCE(p->scx.dsq || !list_empty(&p->scx.dsq_list.node));
+		list_add_tail(&p->scx.dsq_list.node,
+			      &rq->scx.ddsp_deferred_locals);
+		schedule_deferred(rq);
+		return;
+	}
+
+dispatch:
+	dsq = find_dsq_for_dispatch(rq, dsq_id, p);
+	dispatch_enqueue(dsq, p, p->scx.ddsp_enq_flags | SCX_ENQ_CLEAR_OPSS);
 }
 
 static bool scx_rq_online(struct rq *rq)
@@ -1833,6 +1930,9 @@ static void enqueue_task_scx(struct rq *rq, struct task_struct *p, int enq_flags
 {
 	int sticky_cpu = p->scx.sticky_cpu;
 
+	if (enq_flags & ENQUEUE_WAKEUP)
+		rq->scx.flags |= SCX_RQ_IN_WAKEUP;
+
 	enq_flags |= rq->scx.extra_enq_flags;
 
 	if (sticky_cpu >= 0)
@@ -1849,7 +1949,7 @@ static void enqueue_task_scx(struct rq *rq, struct task_struct *p, int enq_flags
 
 	if (p->scx.flags & SCX_TASK_QUEUED) {
 		WARN_ON_ONCE(!task_runnable(p));
-		return;
+		goto out;
 	}
 
 	set_task_runnable(rq, p);
@@ -1864,6 +1964,8 @@ static void enqueue_task_scx(struct rq *rq, struct task_struct *p, int enq_flags
 		touch_core_sched(rq, p);
 
 	do_enqueue_task(rq, p, enq_flags, sticky_cpu);
+out:
+	rq->scx.flags &= ~SCX_RQ_IN_WAKEUP;
 }
 
 static void ops_dequeue(struct task_struct *p, u64 deq_flags)
@@ -2045,7 +2147,6 @@ static bool move_task_to_local_dsq(struct rq *rq, struct task_struct *p,
 /**
  * dispatch_to_local_dsq_lock - Ensure source and destination rq's are locked
  * @rq: current rq which is locked
- * @rf: rq_flags to use when unlocking @rq
  * @src_rq: rq to move task from
  * @dst_rq: rq to move task to
  *
@@ -2054,20 +2155,16 @@ static bool move_task_to_local_dsq(struct rq *rq, struct task_struct *p,
  * @rq stays locked isn't important as long as the state is restored after
  * dispatch_to_local_dsq_unlock().
  */
-static void dispatch_to_local_dsq_lock(struct rq *rq, struct rq_flags *rf,
-				       struct rq *src_rq, struct rq *dst_rq)
+static void dispatch_to_local_dsq_lock(struct rq *rq, struct rq *src_rq,
+				       struct rq *dst_rq)
 {
-	rq_unpin_lock(rq, rf);
-
 	if (src_rq == dst_rq) {
 		raw_spin_rq_unlock(rq);
 		raw_spin_rq_lock(dst_rq);
 	} else if (rq == src_rq) {
 		double_lock_balance(rq, dst_rq);
-		rq_repin_lock(rq, rf);
 	} else if (rq == dst_rq) {
 		double_lock_balance(rq, src_rq);
-		rq_repin_lock(rq, rf);
 	} else {
 		raw_spin_rq_unlock(rq);
 		double_rq_lock(src_rq, dst_rq);
@@ -2077,19 +2174,17 @@ static void dispatch_to_local_dsq_lock(struct rq *rq, struct rq_flags *rf,
 /**
  * dispatch_to_local_dsq_unlock - Undo dispatch_to_local_dsq_lock()
  * @rq: current rq which is locked
- * @rf: rq_flags to use when unlocking @rq
  * @src_rq: rq to move task from
  * @dst_rq: rq to move task to
  *
  * Unlock @src_rq and @dst_rq and ensure that @rq is locked on return.
  */
-static void dispatch_to_local_dsq_unlock(struct rq *rq, struct rq_flags *rf,
-					 struct rq *src_rq, struct rq *dst_rq)
+static void dispatch_to_local_dsq_unlock(struct rq *rq, struct rq *src_rq,
+					 struct rq *dst_rq)
 {
 	if (src_rq == dst_rq) {
 		raw_spin_rq_unlock(dst_rq);
 		raw_spin_rq_lock(rq);
-		rq_repin_lock(rq, rf);
 	} else if (rq == src_rq) {
 		double_unlock_balance(rq, dst_rq);
 	} else if (rq == dst_rq) {
@@ -2097,7 +2192,6 @@ static void dispatch_to_local_dsq_unlock(struct rq *rq, struct rq_flags *rf,
 	} else {
 		double_rq_unlock(src_rq, dst_rq);
 		raw_spin_rq_lock(rq);
-		rq_repin_lock(rq, rf);
 	}
 }
 #endif	/* CONFIG_SMP */
@@ -2137,8 +2231,7 @@ static bool task_can_run_on_remote_rq(struct task_struct *p, struct rq *rq)
 	return true;
 }
 
-static bool consume_remote_task(struct rq *rq, struct rq_flags *rf,
-				struct scx_dispatch_q *dsq,
+static bool consume_remote_task(struct rq *rq, struct scx_dispatch_q *dsq,
 				struct task_struct *p, struct rq *task_rq)
 {
 	bool moved = false;
@@ -2158,9 +2251,7 @@ static bool consume_remote_task(struct rq *rq, struct rq_flags *rf,
 	p->scx.holding_cpu = raw_smp_processor_id();
 	raw_spin_unlock(&dsq->lock);
 
-	rq_unpin_lock(rq, rf);
 	double_lock_balance(rq, task_rq);
-	rq_repin_lock(rq, rf);
 
 	moved = move_task_to_local_dsq(rq, p, 0);
 
@@ -2170,13 +2261,11 @@ static bool consume_remote_task(struct rq *rq, struct rq_flags *rf,
 }
 #else	/* CONFIG_SMP */
 static bool task_can_run_on_remote_rq(struct task_struct *p, struct rq *rq) { return false; }
-static bool consume_remote_task(struct rq *rq, struct rq_flags *rf,
-				struct scx_dispatch_q *dsq,
+static bool consume_remote_task(struct rq *rq, struct scx_dispatch_q *dsq,
 				struct task_struct *p, struct rq *task_rq) { return false; }
 #endif	/* CONFIG_SMP */
 
-static bool consume_dispatch_q(struct rq *rq, struct rq_flags *rf,
-			       struct scx_dispatch_q *dsq)
+static bool consume_dispatch_q(struct rq *rq, struct scx_dispatch_q *dsq)
 {
 	struct task_struct *p;
 retry:
@@ -2199,7 +2288,7 @@ retry:
 		}
 
 		if (task_can_run_on_remote_rq(p, rq)) {
-			if (likely(consume_remote_task(rq, rf, dsq, p, task_rq)))
+			if (likely(consume_remote_task(rq, dsq, p, task_rq)))
 				return true;
 			goto retry;
 		}
@@ -2219,7 +2308,6 @@ enum dispatch_to_local_dsq_ret {
 /**
  * dispatch_to_local_dsq - Dispatch a task to a local dsq
  * @rq: current rq which is locked
- * @rf: rq_flags to use when unlocking @rq
  * @dsq_id: destination dsq ID
  * @p: task to dispatch
  * @enq_flags: %SCX_ENQ_*
@@ -2232,8 +2320,8 @@ enum dispatch_to_local_dsq_ret {
  * %SCX_OPSS_DISPATCHING).
  */
 static enum dispatch_to_local_dsq_ret
-dispatch_to_local_dsq(struct rq *rq, struct rq_flags *rf, u64 dsq_id,
-		      struct task_struct *p, u64 enq_flags)
+dispatch_to_local_dsq(struct rq *rq, u64 dsq_id, struct task_struct *p,
+		      u64 enq_flags)
 {
 	struct rq *src_rq = task_rq(p);
 	struct rq *dst_rq;
@@ -2282,7 +2370,7 @@ dispatch_to_local_dsq(struct rq *rq, struct rq_flags *rf, u64 dsq_id,
 		/* store_release ensures that dequeue sees the above */
 		atomic_long_set_release(&p->scx.ops_state, SCX_OPSS_NONE);
 
-		dispatch_to_local_dsq_lock(rq, rf, src_rq, locked_dst_rq);
+		dispatch_to_local_dsq_lock(rq, src_rq, locked_dst_rq);
 
 		/*
 		 * We don't require the BPF scheduler to avoid dispatching to
@@ -2317,7 +2405,7 @@ dispatch_to_local_dsq(struct rq *rq, struct rq_flags *rf, u64 dsq_id,
 					     dst_rq->curr->sched_class))
 			resched_curr(dst_rq);
 
-		dispatch_to_local_dsq_unlock(rq, rf, src_rq, locked_dst_rq);
+		dispatch_to_local_dsq_unlock(rq, src_rq, locked_dst_rq);
 
 		return dsp ? DTL_DISPATCHED : DTL_LOST;
 	}
@@ -2331,7 +2419,6 @@ dispatch_to_local_dsq(struct rq *rq, struct rq_flags *rf, u64 dsq_id,
 /**
  * finish_dispatch - Asynchronously finish dispatching a task
  * @rq: current rq which is locked
- * @rf: rq_flags to use when unlocking @rq
  * @p: task to finish dispatching
  * @qseq_at_dispatch: qseq when @p started getting dispatched
  * @dsq_id: destination DSQ ID
@@ -2348,8 +2435,7 @@ dispatch_to_local_dsq(struct rq *rq, struct rq_flags *rf, u64 dsq_id,
  * was valid in the first place. Make sure that the task is still owned by the
  * BPF scheduler and claim the ownership before dispatching.
  */
-static void finish_dispatch(struct rq *rq, struct rq_flags *rf,
-			    struct task_struct *p,
+static void finish_dispatch(struct rq *rq, struct task_struct *p,
 			    unsigned long qseq_at_dispatch,
 			    u64 dsq_id, u64 enq_flags)
 {
@@ -2402,7 +2488,7 @@ retry:
 
 	BUG_ON(!(p->scx.flags & SCX_TASK_QUEUED));
 
-	switch (dispatch_to_local_dsq(rq, rf, dsq_id, p, enq_flags)) {
+	switch (dispatch_to_local_dsq(rq, dsq_id, p, enq_flags)) {
 	case DTL_DISPATCHED:
 		break;
 	case DTL_LOST:
@@ -2418,7 +2504,7 @@ retry:
 	}
 }
 
-static void flush_dispatch_buf(struct rq *rq, struct rq_flags *rf)
+static void flush_dispatch_buf(struct rq *rq)
 {
 	struct scx_dsp_ctx *dspc = this_cpu_ptr(scx_dsp_ctx);
 	u32 u;
@@ -2426,7 +2512,7 @@ static void flush_dispatch_buf(struct rq *rq, struct rq_flags *rf)
 	for (u = 0; u < dspc->cursor; u++) {
 		struct scx_dsp_buf_ent *ent = &dspc->buf[u];
 
-		finish_dispatch(rq, rf, ent->task, ent->qseq, ent->dsq_id,
+		finish_dispatch(rq, ent->task, ent->qseq, ent->dsq_id,
 				ent->enq_flags);
 	}
 
@@ -2434,8 +2520,7 @@ static void flush_dispatch_buf(struct rq *rq, struct rq_flags *rf)
 	dspc->cursor = 0;
 }
 
-static int balance_one(struct rq *rq, struct task_struct *prev,
-		       struct rq_flags *rf, bool local)
+static int balance_one(struct rq *rq, struct task_struct *prev, bool local)
 {
 	struct scx_dsp_ctx *dspc = this_cpu_ptr(scx_dsp_ctx);
 	bool prev_on_scx = prev->sched_class == &ext_sched_class;
@@ -2443,7 +2528,7 @@ static int balance_one(struct rq *rq, struct task_struct *prev,
 	bool has_tasks = false;
 
 	lockdep_assert_rq_held(rq);
-	rq->scx.flags |= SCX_RQ_BALANCING;
+	rq->scx.flags |= SCX_RQ_IN_BALANCE;
 
 	if (static_branch_unlikely(&scx_ops_cpu_preempt) &&
 	    unlikely(rq->scx.cpu_released)) {
@@ -2489,14 +2574,13 @@ static int balance_one(struct rq *rq, struct task_struct *prev,
 	if (rq->scx.local_dsq.nr)
 		goto has_tasks;
 
-	if (consume_dispatch_q(rq, rf, &scx_dsq_global))
+	if (consume_dispatch_q(rq, &scx_dsq_global))
 		goto has_tasks;
 
 	if (!SCX_HAS_OP(dispatch) || scx_ops_bypassing() || !scx_rq_online(rq))
 		goto out;
 
 	dspc->rq = rq;
-	dspc->rf = rf;
 
 	/*
 	 * The dispatch loop. Because flush_dispatch_buf() may drop the rq lock,
@@ -2511,11 +2595,11 @@ static int balance_one(struct rq *rq, struct task_struct *prev,
 		SCX_CALL_OP(SCX_KF_DISPATCH, dispatch, cpu_of(rq),
 			    prev_on_scx ? prev : NULL);
 
-		flush_dispatch_buf(rq, rf);
+		flush_dispatch_buf(rq);
 
 		if (rq->scx.local_dsq.nr)
 			goto has_tasks;
-		if (consume_dispatch_q(rq, rf, &scx_dsq_global))
+		if (consume_dispatch_q(rq, &scx_dsq_global))
 			goto has_tasks;
 
 		/*
@@ -2538,16 +2622,19 @@ static int balance_one(struct rq *rq, struct task_struct *prev,
 has_tasks:
 	has_tasks = true;
 out:
-	rq->scx.flags &= ~SCX_RQ_BALANCING;
+	rq->scx.flags &= ~SCX_RQ_IN_BALANCE;
 	return has_tasks;
 }
 
+#ifdef CONFIG_SMP
 static int balance_scx(struct rq *rq, struct task_struct *prev,
 		       struct rq_flags *rf)
 {
 	int ret;
 
-	ret = balance_one(rq, prev, rf, true);
+	rq_unpin_lock(rq, rf);
+
+	ret = balance_one(rq, prev, true);
 
 #ifdef CONFIG_SCHED_SMT
 	/*
@@ -2561,28 +2648,19 @@ static int balance_scx(struct rq *rq, struct task_struct *prev,
 
 		for_each_cpu_andnot(scpu, smt_mask, cpumask_of(cpu_of(rq))) {
 			struct rq *srq = cpu_rq(scpu);
-			struct rq_flags srf;
 			struct task_struct *sprev = srq->curr;
 
-			/*
-			 * While core-scheduling, rq lock is shared among
-			 * siblings but the debug annotations and rq clock
-			 * aren't. Do pinning dance to transfer the ownership.
-			 */
 			WARN_ON_ONCE(__rq_lockp(rq) != __rq_lockp(srq));
-			rq_unpin_lock(rq, rf);
-			rq_pin_lock(srq, &srf);
-
 			update_rq_clock(srq);
-			balance_one(srq, sprev, &srf, false);
-
-			rq_unpin_lock(srq, &srf);
-			rq_repin_lock(rq, rf);
+			balance_one(srq, sprev, false);
 		}
 	}
 #endif
+	rq_repin_lock(rq, rf);
+
 	return ret;
 }
+#endif
 
 static void set_next_task_scx(struct rq *rq, struct task_struct *p, bool first)
 {
@@ -2626,6 +2704,29 @@ static void set_next_task_scx(struct rq *rq, struct task_struct *p, bool first)
 	}
 }
 
+static void process_ddsp_deferred_locals(struct rq *rq)
+{
+	struct task_struct *p, *tmp;
+
+	lockdep_assert_rq_held(rq);
+
+	/*
+	 * Now that @rq can be unlocked, execute the deferred enqueueing of
+	 * tasks directly dispatched to the local DSQs of other CPUs. See
+	 * direct_dispatch().
+	 */
+	list_for_each_entry_safe(p, tmp, &rq->scx.ddsp_deferred_locals,
+				 scx.dsq_list.node) {
+		s32 ret;
+
+		list_del_init(&p->scx.dsq_list.node);
+
+		ret = dispatch_to_local_dsq(rq, p->scx.ddsp_dsq_id, p,
+					    p->scx.ddsp_enq_flags);
+		WARN_ON_ONCE(ret == DTL_NOT_LOCAL);
+	}
+}
+
 static void put_prev_task_scx(struct rq *rq, struct task_struct *p)
 {
 #ifndef CONFIG_SMP
@@ -2652,11 +2753,11 @@ static void put_prev_task_scx(struct rq *rq, struct task_struct *p)
 	 * balance_scx() must be called before the previous SCX task goes
 	 * through put_prev_task_scx().
 	 *
-	 * As UP doesn't transfer tasks around, balance_scx() doesn't need @rf.
-	 * Pass in %NULL.
+         * @rq is pinned and can't be unlocked. As UP doesn't transfer tasks
+         * around, balance_one() doesn't need to.
 	 */
 	if (p->scx.flags & (SCX_TASK_QUEUED | SCX_TASK_DEQD_FOR_SLEEP))
-		balance_scx(rq, p, NULL);
+		balance_one(rq, p, true);
 #endif
 
 	update_curr_scx(rq);
@@ -2719,7 +2820,7 @@ static struct task_struct *pick_next_task_scx(struct rq *rq)
 #ifndef CONFIG_SMP
 	/* UP workaround - see the comment at the head of put_prev_task_scx() */
 	if (unlikely(rq->curr->sched_class != &ext_sched_class))
-		balance_scx(rq, rq->curr, NULL);
+		balance_one(rq, rq->curr, true);
 #endif
 
 	p = first_local_task(rq);
@@ -3045,6 +3146,11 @@ static int select_task_rq_scx(struct task_struct *p, int prev_cpu, int wake_flag
 		}
 		return cpu;
 	}
+}
+
+static void task_woken_scx(struct rq *rq, struct task_struct *p)
+{
+	run_deferred(rq);
 }
 
 static void set_cpus_allowed_scx(struct task_struct *p,
@@ -3563,8 +3669,6 @@ bool scx_can_stop_tick(struct rq *rq)
  *
  * - task_fork/dead: We need fork/dead notifications for all tasks regardless of
  *   their current sched_class. Call them directly from sched core instead.
- *
- * - task_woken: Unnecessary.
  */
 DEFINE_SCHED_CLASS(ext) = {
 	.enqueue_task		= enqueue_task_scx,
@@ -3584,6 +3688,7 @@ DEFINE_SCHED_CLASS(ext) = {
 #ifdef CONFIG_SMP
 	.balance		= balance_scx,
 	.select_task_rq		= select_task_rq_scx,
+	.task_woken		= task_woken_scx,
 	.set_cpus_allowed	= set_cpus_allowed_scx,
 
 	.rq_online		= rq_online_scx,
@@ -4952,7 +5057,7 @@ static void bpf_scx_unreg(void *kdata, struct bpf_link *link)
 
 static int bpf_scx_init(struct btf *btf)
 {
-	u32 type_id;
+	s32 type_id;
 
 	type_id = btf_find_by_name_kind(btf, "task_struct", BTF_KIND_STRUCT);
 	if (type_id < 0)
@@ -5093,7 +5198,7 @@ static bool can_skip_idle_kick(struct rq *rq)
 	 * The race window is small and we don't and can't guarantee that @rq is
 	 * only kicked while idle anyway. Skip only when sure.
 	 */
-	return !is_idle_task(rq->curr) && !(rq->scx.flags & SCX_RQ_BALANCING);
+	return !is_idle_task(rq->curr) && !(rq->scx.flags & SCX_RQ_IN_BALANCE);
 }
 
 static bool kick_one_cpu(s32 cpu, struct rq *this_rq, unsigned long *pseqs)
@@ -5288,11 +5393,13 @@ void __init init_sched_ext_class(void)
 
 		init_dsq(&rq->scx.local_dsq, SCX_DSQ_LOCAL);
 		INIT_LIST_HEAD(&rq->scx.runnable_list);
+		INIT_LIST_HEAD(&rq->scx.ddsp_deferred_locals);
 
 		BUG_ON(!zalloc_cpumask_var(&rq->scx.cpus_to_kick, GFP_KERNEL));
 		BUG_ON(!zalloc_cpumask_var(&rq->scx.cpus_to_kick_if_idle, GFP_KERNEL));
 		BUG_ON(!zalloc_cpumask_var(&rq->scx.cpus_to_preempt, GFP_KERNEL));
 		BUG_ON(!zalloc_cpumask_var(&rq->scx.cpus_to_wait, GFP_KERNEL));
+		init_irq_work(&rq->scx.deferred_irq_work, deferred_irq_workfn);
 		init_irq_work(&rq->scx.kick_cpus_irq_work, kick_cpus_irq_workfn);
 
 		if (cpu_online(cpu))
@@ -5582,7 +5689,7 @@ __bpf_kfunc bool scx_bpf_consume(u64 dsq_id)
 	if (!scx_kf_allowed(SCX_KF_DISPATCH))
 		return false;
 
-	flush_dispatch_buf(dspc->rq, dspc->rf);
+	flush_dispatch_buf(dspc->rq);
 
 	dsq = find_non_local_dsq(dsq_id);
 	if (unlikely(!dsq)) {
@@ -5590,7 +5697,7 @@ __bpf_kfunc bool scx_bpf_consume(u64 dsq_id)
 		return false;
 	}
 
-	if (consume_dispatch_q(dspc->rq, dspc->rf, dsq)) {
+	if (consume_dispatch_q(dspc->rq, dsq)) {
 		/*
 		 * A successfully consumed task can be dequeued before it starts
 		 * running while the CPU is trying to migrate other dispatched

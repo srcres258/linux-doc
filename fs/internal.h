@@ -240,6 +240,7 @@ extern void mnt_pin_kill(struct mount *m);
  * fs/nsfs.c
  */
 extern const struct dentry_operations ns_dentry_operations;
+int open_namespace(struct ns_common *ns);
 
 /*
  * fs/stat.c:
@@ -342,4 +343,3 @@ static inline bool path_mounted(const struct path *path)
 {
 	return path->mnt->mnt_root == path->dentry;
 }
-int open_namespace(struct ns_common *ns);

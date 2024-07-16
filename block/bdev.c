@@ -1262,13 +1262,16 @@ void sync_bdevs(bool wait)
 /*
  * Handle STATX_{DIOALIGN, WRITE_ATOMIC} for block devices.
  */
-void bdev_statx(struct inode *backing_inode, struct kstat *stat,
+void bdev_statx(struct path *path, struct kstat *stat,
 		u32 request_mask)
 {
+	struct inode *backing_inode;
 	struct block_device *bdev;
 
 	if (!(request_mask & (STATX_DIOALIGN | STATX_WRITE_ATOMIC)))
 		return;
+
+	backing_inode = d_backing_inode(path->dentry);
 
 	/*
 	 * Note that backing_inode is the inode of a block device node file,

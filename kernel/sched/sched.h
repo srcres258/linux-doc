@@ -615,6 +615,11 @@ do {									\
 # define u64_u32_load(var)		u64_u32_load_copy(var, var##_copy)
 # define u64_u32_store(var, val)	u64_u32_store_copy(var, var##_copy, val)
 
+struct balance_callback {
+	struct balance_callback *next;
+	void (*func)(struct rq *rq);
+};
+
 /* CFS-related fields in a runqueue */
 struct cfs_rq {
 	struct load_weight	load;
@@ -732,13 +737,16 @@ enum scx_rq_flags {
 	 * only while the BPF scheduler considers the CPU to be online.
 	 */
 	SCX_RQ_ONLINE		= 1 << 0,
-	SCX_RQ_BALANCING	= 1 << 1,
-	SCX_RQ_CAN_STOP_TICK	= 1 << 2,
+	SCX_RQ_CAN_STOP_TICK	= 1 << 1,
+
+	SCX_RQ_IN_WAKEUP	= 1 << 16,
+	SCX_RQ_IN_BALANCE	= 1 << 17,
 };
 
 struct scx_rq {
 	struct scx_dispatch_q	local_dsq;
 	struct list_head	runnable_list;		/* runnable tasks on this rq */
+	struct list_head	ddsp_deferred_locals;	/* deferred ddsps from enq */
 	unsigned long		ops_qseq;
 	u64			extra_enq_flags;	/* see move_task_to_local_dsq() */
 	u32			nr_running;
@@ -750,6 +758,8 @@ struct scx_rq {
 	cpumask_var_t		cpus_to_preempt;
 	cpumask_var_t		cpus_to_wait;
 	unsigned long		pnt_seq;
+	struct balance_callback	deferred_bal_cb;
+	struct irq_work		deferred_irq_work;
 	struct irq_work		kick_cpus_irq_work;
 };
 #endif /* CONFIG_SCHED_CLASS_EXT */
@@ -1053,11 +1063,6 @@ struct uclamp_rq {
 
 DECLARE_STATIC_KEY_FALSE(sched_uclamp_used);
 #endif /* CONFIG_UCLAMP_TASK */
-
-struct balance_callback {
-	struct balance_callback *next;
-	void (*func)(struct rq *rq);
-};
 
 /*
  * This is the main, per-CPU runqueue data structure.

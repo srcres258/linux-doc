@@ -41,7 +41,7 @@ struct symbol *modules_sym;
 static tristate modules_val;
 static int sym_warnings;
 
-enum symbol_type sym_get_type(struct symbol *sym)
+enum symbol_type sym_get_type(const struct symbol *sym)
 {
 	enum symbol_type type = sym->type;
 
@@ -76,7 +76,7 @@ const char *sym_type_name(enum symbol_type type)
  *
  * Return: a choice menu if this function is called against a choice member.
  */
-struct menu *sym_get_choice_menu(struct symbol *sym)
+struct menu *sym_get_choice_menu(const struct symbol *sym)
 {
 	struct menu *menu = NULL;
 	struct menu *m;
@@ -356,7 +356,7 @@ struct symbol *sym_calc_choice(struct menu *choice)
 	return res;
 }
 
-static void sym_warn_unmet_dep(struct symbol *sym)
+static void sym_warn_unmet_dep(const struct symbol *sym)
 {
 	struct gstr gs = str_new();
 
@@ -522,7 +522,7 @@ void sym_clear_all_valid(void)
 	sym_calc_value(modules_sym);
 }
 
-bool sym_tristate_within_range(struct symbol *sym, tristate val)
+bool sym_tristate_within_range(const struct symbol *sym, tristate val)
 {
 	int type = sym_get_type(sym);
 
@@ -867,9 +867,14 @@ const char *sym_get_string_value(struct symbol *sym)
 	return (const char *)sym->curr.val;
 }
 
-bool sym_is_changeable(struct symbol *sym)
+bool sym_is_changeable(const struct symbol *sym)
 {
 	return !sym_is_choice(sym) && sym->visible > sym->rev_dep.tri;
+}
+
+bool sym_is_choice_value(const struct symbol *sym)
+{
+	return !list_empty(&sym->choice_link);
 }
 
 HASHTABLE_DEFINE(sym_hashtable, SYMBOL_HASHSIZE);
@@ -909,6 +914,7 @@ struct symbol *sym_lookup(const char *name, int flags)
 	symbol->type = S_UNKNOWN;
 	symbol->flags = flags;
 	INIT_LIST_HEAD(&symbol->menus);
+	INIT_LIST_HEAD(&symbol->choice_link);
 
 	hash_add(sym_hashtable, &symbol->node, hash);
 
@@ -1151,7 +1157,7 @@ static void sym_check_print_recursive(struct symbol *last_sym)
 		dep_stack_remove();
 }
 
-static struct symbol *sym_check_expr_deps(struct expr *e)
+static struct symbol *sym_check_expr_deps(const struct expr *e)
 {
 	struct symbol *sym;
 
@@ -1310,7 +1316,7 @@ struct symbol *sym_check_deps(struct symbol *sym)
 	return sym2;
 }
 
-struct symbol *prop_get_symbol(struct property *prop)
+struct symbol *prop_get_symbol(const struct property *prop)
 {
 	if (prop->expr && prop->expr->type == E_SYMBOL)
 		return prop->expr->left.sym;

@@ -268,9 +268,8 @@ static int vfs_statx_path(struct path *path, int flags, struct kstat *stat,
 	 * attributes with the block device specific parameters that need to be
 	 * obtained from the bdev backing inode.
 	 */
-	backing_inode = d_backing_inode(path->dentry);
-	if (S_ISBLK(backing_inode->i_mode))
-		bdev_statx(backing_inode, stat, request_mask);
+	if (S_ISBLK(stat->mode))
+		bdev_statx(path, stat, request_mask);
 
 	return error;
 }
