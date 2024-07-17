@@ -3943,9 +3943,9 @@ S:	Odd Fixes
 F:	drivers/net/ethernet/netronome/nfp/bpf/
 
 BPF JIT for POWERPC (32-BIT AND 64-BIT)
-M:	Michael Ellerman <mpe@ellerman.id.au>
 M:	Hari Bathini <hbathini@linux.ibm.com>
 M:	Christophe Leroy <christophe.leroy@csgroup.eu>
+M:	Michael Ellerman <mpe@ellerman.id.au>
 R:	Naveen N Rao <naveen@kernel.org>
 L:	bpf@vger.kernel.org
 S:	Supported
@@ -12855,7 +12855,6 @@ F:	arch/powerpc/platforms/52xx/
 LINUX FOR POWERPC EMBEDDED PPC4XX
 L:	linuxppc-dev@lists.ozlabs.org
 S:	Orphan
-F:	arch/powerpc/platforms/40x/
 F:	arch/powerpc/platforms/44x/
 
 LINUX FOR POWERPC EMBEDDED PPC85XX
