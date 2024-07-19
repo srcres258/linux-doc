@@ -135,9 +135,17 @@ else
 fi
 maintainer="${name} <${email}>"
 
-if [ "$1" = --need-source ]; then
-	gen_source
-fi
+while [ $# -gt 0 ]; do
+	case "$1" in
+	--need-source)
+		gen_source
+		shift
+		;;
+	*)
+		break
+		;;
+	esac
+done
 
 # Some variables and settings used throughout the script
 version=$KERNELRELEASE

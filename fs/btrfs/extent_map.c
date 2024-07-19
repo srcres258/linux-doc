@@ -1165,7 +1165,6 @@ static long btrfs_scan_inode(struct btrfs_inode *inode, struct btrfs_em_shrink_c
 		u64 next_min_offset;
 
 		em = rb_entry(node, struct extent_map, rb_node);
-		node = rb_next(node);
 		ctx->scanned++;
 
 		if (em->flags & EXTENT_FLAG_PINNED)
@@ -1199,6 +1198,7 @@ next:
 		 */
 		if (need_resched() || rwlock_needbreak(&tree->lock))
 			break;
+		node = next;
 	}
 	write_unlock(&tree->lock);
 	up_read(&inode->i_mmap_lock);

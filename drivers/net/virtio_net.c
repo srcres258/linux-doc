@@ -553,7 +553,7 @@ static void __free_old_xmit(struct send_queue *sq, struct netdev_queue *txq,
 	unsigned int len;
 	void *ptr;
 
-	stats->bytes = stats->packets = 0;
+	memset(stats, 0, sizeof(*stats));
 
 	while ((ptr = virtqueue_get_buf(sq->vq, &len)) != NULL) {
 		if (!is_xdp_frame(ptr)) {

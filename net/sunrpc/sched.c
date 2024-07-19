@@ -370,8 +370,7 @@ static void rpc_make_runnable(struct workqueue_struct *wq,
 		INIT_WORK(&task->u.tk_work, rpc_async_schedule);
 		queue_work(wq, &task->u.tk_work);
 	} else {
-		/* paired with set_current_state() in prepare_to_wait */
-		smp_mb();
+		smp_mb__after_atomic();
 		wake_up_bit(&task->tk_runstate, RPC_TASK_QUEUED);
 	}
 }

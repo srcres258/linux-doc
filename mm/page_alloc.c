@@ -290,7 +290,6 @@ EXPORT_SYMBOL(nr_online_nodes);
 
 static bool page_contains_unaccepted(struct page *page, unsigned int order);
 static void accept_page(struct page *page, unsigned int order);
-static bool try_to_accept_memory(struct zone *zone, unsigned int order);
 static inline bool has_unaccepted_memory(void);
 static bool __free_unaccepted(struct page *page);
 
@@ -7067,6 +7066,23 @@ unsigned long free_reserved_area(void *start, void *end, int poison, const char 
 	return pages;
 }
 
+void free_reserved_page(struct page *page)
+{
+	if (mem_alloc_profiling_enabled()) {
+		union codetag_ref *ref = get_page_tag_ref(page);
+
+		if (ref) {
+			set_codetag_empty(ref);
+			put_page_tag_ref(ref);
+		}
+	}
+	ClearPageReserved(page);
+	init_page_count(page);
+	__free_page(page);
+	adjust_managed_page_count(page, 1);
+}
+EXPORT_SYMBOL(free_reserved_page);
+
 static int page_alloc_cpu_dead(unsigned int cpu)
 {
 	struct zone *zone;
@@ -8210,7 +8226,7 @@ static bool try_to_accept_memory_one(struct zone *zone)
 	return true;
 }
 
-static bool try_to_accept_memory(struct zone *zone, unsigned int order)
+bool try_to_accept_memory(struct zone *zone, unsigned int order)
 {
 	long to_accept;
 	int ret = false;
@@ -8267,11 +8283,6 @@ static bool page_contains_unaccepted(struct page *page, unsigned int order)
 
 static void accept_page(struct page *page, unsigned int order)
 {
-}
-
-static bool try_to_accept_memory(struct zone *zone, unsigned int order)
-{
-	return false;
 }
 
 static inline bool has_unaccepted_memory(void)
