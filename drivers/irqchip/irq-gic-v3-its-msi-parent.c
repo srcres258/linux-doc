@@ -65,7 +65,7 @@ static int its_pci_msi_prepare(struct irq_domain *domain, struct device *dev,
 	}
 
 	/* ITS specific DeviceID, as the core ITS ignores dev. */
-	info->scratchpad[0].ul = pci_msi_domain_get_msi_rid(domain, pdev);
+	info->scratchpad[0].ul = pci_msi_domain_get_msi_rid(domain->parent, pdev);
 
 	/*
 	 * @domain->msi_domain_info->hwsize contains the size of the
@@ -134,7 +134,7 @@ static int its_pmsi_prepare(struct irq_domain *domain, struct device *dev,
 	int ret;
 
 	if (dev->of_node)
-		ret = of_pmsi_get_dev_id(domain, dev, &dev_id);
+		ret = of_pmsi_get_dev_id(domain->parent, dev, &dev_id);
 	else
 		ret = iort_pmsi_get_dev_id(dev, &dev_id);
 	if (ret)

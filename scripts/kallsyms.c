@@ -36,8 +36,7 @@ struct sym_entry {
 	unsigned long long addr;
 	unsigned int len;
 	unsigned int seq;
-	unsigned int start_pos;
-	unsigned int percpu_absolute;
+	bool percpu_absolute;
 	unsigned char sym[];
 };
 
@@ -182,7 +181,7 @@ static struct sym_entry *read_symbol(FILE *in, char **buf, size_t *buf_len)
 	sym->len = len;
 	sym->sym[0] = type;
 	strcpy(sym_name(sym), name);
-	sym->percpu_absolute = 0;
+	sym->percpu_absolute = false;
 
 	return sym;
 }
@@ -278,7 +277,7 @@ static void read_map(const char *in)
 		if (!sym)
 			continue;
 
-		sym->start_pos = table_cnt;
+		sym->seq = table_cnt;
 
 		if (table_cnt >= table_size) {
 			table_size += 10000;
@@ -340,7 +339,7 @@ static int expand_symbol(const unsigned char *data, int len, char *result)
 	return total;
 }
 
-static int symbol_absolute(const struct sym_entry *s)
+static bool symbol_absolute(const struct sym_entry *s)
 {
 	return s->percpu_absolute;
 }
@@ -393,7 +392,7 @@ static void write_src(void)
 {
 	unsigned int i, k, off;
 	unsigned int best_idx[256];
-	unsigned int *markers;
+	unsigned int *markers, markers_cnt;
 	char buf[KSYM_NAME_LEN];
 
 	printf("#include <asm/bitsperlong.h>\n");
@@ -413,7 +412,8 @@ static void write_src(void)
 
 	/* table of offset markers, that give the offset in the compressed stream
 	 * every 256 symbols */
-	markers = malloc(sizeof(unsigned int) * ((table_cnt + 255) / 256));
+	markers_cnt = (table_cnt + 255) / 256;
+	markers = malloc(sizeof(*markers) * markers_cnt);
 	if (!markers) {
 		fprintf(stderr, "kallsyms failure: "
 			"unable to allocate required memory\n");
@@ -455,21 +455,19 @@ static void write_src(void)
 		}
 		for (k = 0; k < table[i]->len; k++)
 			printf(", 0x%02x", table[i]->sym[k]);
-		printf("\n");
+
+		/*
+		 * Now that we wrote out the compressed symbol name, restore the
+		 * original name and print it in the comment.
+		 */
+		expand_symbol(table[i]->sym, table[i]->len, buf);
+		strcpy((char *)table[i]->sym, buf);
+		printf("\t/* %s */\n", table[i]->sym);
 	}
 	printf("\n");
 
-	/*
-	 * Now that we wrote out the compressed symbol names, restore the
-	 * original names, which are needed in some of the later steps.
-	 */
-	for (i = 0; i < table_cnt; i++) {
-		expand_symbol(table[i]->sym, table[i]->len, buf);
-		strcpy((char *)table[i]->sym, buf);
-	}
-
 	output_label("kallsyms_markers");
-	for (i = 0; i < ((table_cnt + 255) >> 8); i++)
+	for (i = 0; i < markers_cnt; i++)
 		printf("\t.long\t%u\n", markers[i]);
 	printf("\n");
 
@@ -520,7 +518,7 @@ static void write_src(void)
 				table[i]->addr);
 			exit(EXIT_FAILURE);
 		}
-		printf("\t.long\t%#x	/* %s */\n", (int)offset, table[i]->sym);
+		printf("\t.long\t%#x\t/* %s */\n", (int)offset, table[i]->sym);
 	}
 	printf("\n");
 
@@ -535,10 +533,11 @@ static void write_src(void)
 	sort_symbols_by_name();
 	output_label("kallsyms_seqs_of_names");
 	for (i = 0; i < table_cnt; i++)
-		printf("\t.byte 0x%02x, 0x%02x, 0x%02x\n",
+		printf("\t.byte 0x%02x, 0x%02x, 0x%02x\t/* %s */\n",
 			(unsigned char)(table[i]->seq >> 16),
 			(unsigned char)(table[i]->seq >> 8),
-			(unsigned char)(table[i]->seq >> 0));
+			(unsigned char)(table[i]->seq >> 0),
+		       table[i]->sym);
 	printf("\n");
 }
 
@@ -762,7 +761,7 @@ static int compare_symbols(const void *a, const void *b)
 		return wa - wb;
 
 	/* sort by initial order, so that other symbols are left undisturbed */
-	return sa->start_pos - sb->start_pos;
+	return sa->seq - sb->seq;
 }
 
 static void sort_symbols(void)
@@ -782,7 +781,7 @@ static void make_percpus_absolute(void)
 			 * versions of this tool.
 			 */
 			table[i]->sym[0] = 'A';
-			table[i]->percpu_absolute = 1;
+			table[i]->percpu_absolute = true;
 		}
 }
 

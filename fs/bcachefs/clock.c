@@ -176,7 +176,7 @@ void bch2_io_timers_to_text(struct printbuf *out, struct io_clock *clock)
 	printbuf_tabstop_push(out, 40);
 	prt_printf(out, "current time:\t%llu\n", now);
 
-	for (int i = 0; i < clock->timers.nr; i++)
+	for (unsigned i = 0; i < clock->timers.nr; i++)
 		prt_printf(out, "%ps %ps:\t%llu\n",
 		       clock->timers.data[i]->fn,
 		       clock->timers.data[i]->fn2,

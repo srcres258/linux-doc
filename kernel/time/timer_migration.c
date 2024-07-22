@@ -535,7 +535,7 @@ static void __walk_groups(up_f up, struct tmigr_walk *data,
 
 		child = group;
 		group = group->parent;
-		data->childmask = group->groupmask;
+		data->childmask = child->groupmask;
 	} while (group);
 }
 
@@ -1542,7 +1542,8 @@ static struct tmigr_group *tmigr_get_group(unsigned int cpu, int node,
 }
 
 static void tmigr_connect_child_parent(struct tmigr_group *child,
-				       struct tmigr_group *parent)
+				       struct tmigr_group *parent,
+				       bool activate)
 {
 	struct tmigr_walk data;
 
@@ -1556,6 +1557,9 @@ static void tmigr_connect_child_parent(struct tmigr_group *child,
 	raw_spin_unlock_irq(&child->lock);
 
 	trace_tmigr_connect_child_parent(child);
+
+	if (!activate)
+		return;
 
 	/*
 	 * To prevent inconsistent states, active children need to be active in
@@ -1642,7 +1646,7 @@ static int tmigr_setup_groups(unsigned int cpu, unsigned int node)
 		 * Update tmc -> group / child -> group connection
 		 */
 		if (i == 0) {
-			struct tmigr_cpu *tmc = this_cpu_ptr(&tmigr_cpu);
+			struct tmigr_cpu *tmc = per_cpu_ptr(&tmigr_cpu, cpu);
 
 			raw_spin_lock_irq(&group->lock);
 
@@ -1657,7 +1661,8 @@ static int tmigr_setup_groups(unsigned int cpu, unsigned int node)
 			continue;
 		} else {
 			child = stack[i - 1];
-			tmigr_connect_child_parent(child, group);
+			/* Will be activated at online time */
+			tmigr_connect_child_parent(child, group, false);
 		}
 
 		/* check if uppermost level was newly created */
@@ -1673,7 +1678,7 @@ static int tmigr_setup_groups(unsigned int cpu, unsigned int node)
 				if (child->parent)
 					continue;
 
-				tmigr_connect_child_parent(child, group);
+				tmigr_connect_child_parent(child, group, true);
 			}
 		}
 	}
@@ -1700,11 +1705,25 @@ static int tmigr_cpu_prepare(unsigned int cpu)
 	struct tmigr_cpu *tmc = per_cpu_ptr(&tmigr_cpu, cpu);
 	int ret = 0;
 
+	/*
+	 * The target CPU must never do the prepare work. Otherwise it may
+	 * spuriously activate the old top level group inside the new one
+	 * (nevertheless whether old top level group is active or not) and/or
+	 * release an uninitialized childmask.
+	 */
+	WARN_ON_ONCE(cpu == raw_smp_processor_id());
+
 	/* Not first online attempt? */
 	if (tmc->tmgroup)
 		return ret;
 
 	raw_spin_lock_init(&tmc->lock);
+	timerqueue_init(&tmc->cpuevt.nextevt);
+	tmc->cpuevt.nextevt.expires = KTIME_MAX;
+	tmc->cpuevt.ignore = true;
+	tmc->cpuevt.cpu = cpu;
+	tmc->remote = false;
+	WRITE_ONCE(tmc->wakeup, KTIME_MAX);
 
 	ret = tmigr_add_cpu(cpu);
 	if (ret < 0)
@@ -1712,13 +1731,6 @@ static int tmigr_cpu_prepare(unsigned int cpu)
 
 	if (tmc->groupmask == 0)
 		return -EINVAL;
-
-	timerqueue_init(&tmc->cpuevt.nextevt);
-	tmc->cpuevt.nextevt.expires = KTIME_MAX;
-	tmc->cpuevt.ignore = true;
-	tmc->cpuevt.cpu = cpu;
-	tmc->remote = false;
-	WRITE_ONCE(tmc->wakeup, KTIME_MAX);
 
 	return ret;
 }
@@ -1779,7 +1791,7 @@ static int __init tmigr_init(void)
 		tmigr_hierarchy_levels, TMIGR_CHILDREN_PER_GROUP,
 		tmigr_crossnode_level);
 
-	ret = cpuhp_setup_state(CPUHP_AP_TMIGR_ONLINE, "tmigr:prepare",
+	ret = cpuhp_setup_state(CPUHP_TMIGR_PREPARE, "tmigr:prepare",
 				tmigr_cpu_prepare, NULL);
 	if (ret)
 		goto err;
@@ -1795,4 +1807,4 @@ err:
 	pr_err("Timer migration setup failed\n");
 	return ret;
 }
-late_initcall(tmigr_init);
+early_initcall(tmigr_init);
