@@ -933,7 +933,7 @@ static int hmat_callback(struct notifier_block *self,
 	return NOTIFY_OK;
 }
 
-static int hmat_set_default_dram_perf(void)
+static int __init hmat_set_default_dram_perf(void)
 {
 	int rc;
 	int nid, pxm;

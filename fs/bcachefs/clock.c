@@ -37,7 +37,7 @@ void bch2_io_timer_add(struct io_clock *clock, struct io_timer *timer)
 		return;
 	}
 
-	for (int i = 0; i < clock->timers.nr; i++)
+	for (size_t i = 0; i < clock->timers.nr; i++)
 		if (clock->timers.data[i] == timer)
 			goto out;
 
@@ -55,7 +55,7 @@ void bch2_io_timer_del(struct io_clock *clock, struct io_timer *timer)
 
 	spin_lock(&clock->timer_lock);
 
-	for (int i = 0; i < clock->timers.nr; i++)
+	for (size_t i = 0; i < clock->timers.nr; i++)
 		if (clock->timers.data[i] == timer) {
 			min_heap_del(&clock->timers, i, &callbacks, NULL);
 			break;
