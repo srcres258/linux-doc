@@ -1899,9 +1899,14 @@ smb2_copychunk_range(const unsigned int xid,
 cchunk_out:
 	kfree(pcchunk);
 	kfree(retbuf);
-	if (rc)
+	if (rc) {
+		if (tcon)
+			trace_smb3_copychunk_err(xid, srcfile->fid.volatile_fid,
+					trgtfile->fid.volatile_fid,
+					tcon->tid, tcon->ses->Suid, src_off,
+					dest_off, len, rc);
 		return rc;
-	else
+	} else
 		return total_bytes_written;
 }
 
@@ -2075,6 +2080,11 @@ smb2_duplicate_extents(const unsigned int xid,
 		cifs_dbg(FYI, "Non-zero response length in duplicate extents\n");
 
 duplicate_extents_out:
+	if (rc)
+		trace_smb3_clone_err(xid, srcfile->fid.volatile_fid,
+				     trgtfile->fid.volatile_fid,
+				     tcon->tid, tcon->ses->Suid, src_off,
+				     dest_off, len, rc);
 	return rc;
 }
 
