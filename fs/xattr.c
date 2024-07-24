@@ -586,6 +586,20 @@ retry_deleg:
 }
 EXPORT_SYMBOL_GPL(vfs_removexattr);
 
+static int copy_xattr_name_from_user(char *kname, const char __user *uname,
+				     size_t len)
+{
+	int error;
+
+	error = strncpy_from_user(kname, uname, len);
+	if (error == 0 || error == len)
+		return  -ERANGE;
+	if (error < 0)
+		return error;
+
+	return 0;
+}
+
 /*
  * Extended attribute SET operations
  */
@@ -597,14 +611,11 @@ int setxattr_copy(const char __user *name, struct xattr_ctx *ctx)
 	if (ctx->flags & ~(XATTR_CREATE|XATTR_REPLACE))
 		return -EINVAL;
 
-	error = strncpy_from_user(ctx->kname->name, name,
-				sizeof(ctx->kname->name));
-	if (error == 0 || error == sizeof(ctx->kname->name))
-		return  -ERANGE;
+	error = copy_xattr_name_from_user(ctx->kname->name, name,
+					  sizeof(ctx->kname->name));
 	if (error < 0)
 		return error;
 
-	error = 0;
 	if (ctx->size) {
 		if (ctx->size > XATTR_SIZE_MAX)
 			return -E2BIG;
@@ -763,9 +774,7 @@ getxattr(struct mnt_idmap *idmap, struct dentry *d,
 		.flags    = 0,
 	};
 
-	error = strncpy_from_user(kname.name, name, sizeof(kname.name));
-	if (error == 0 || error == sizeof(kname.name))
-		error = -ERANGE;
+	error = copy_xattr_name_from_user(kname.name, name, sizeof(kname.name));
 	if (error < 0)
 		return error;
 
@@ -914,9 +923,7 @@ static int path_removexattr(const char __user *pathname,
 	int error;
 	char kname[XATTR_NAME_MAX + 1];
 
-	error = strncpy_from_user(kname, name, sizeof(kname));
-	if (error == 0 || error == sizeof(kname))
-		error = -ERANGE;
+	error = copy_xattr_name_from_user(kname, name, sizeof(kname));
 	if (error < 0)
 		return error;
 retry:
@@ -958,9 +965,7 @@ SYSCALL_DEFINE2(fremovexattr, int, fd, const char __user *, name)
 		return error;
 	audit_file(f.file);
 
-	error = strncpy_from_user(kname, name, sizeof(kname));
-	if (error == 0 || error == sizeof(kname))
-		error = -ERANGE;
+	error = copy_xattr_name_from_user(kname, name, sizeof(kname));
 	if (error < 0)
 		return error;
 
