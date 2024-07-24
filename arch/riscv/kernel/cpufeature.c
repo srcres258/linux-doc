@@ -103,31 +103,6 @@ static int riscv_ext_zicboz_validate(const struct riscv_isa_ext_data *data,
 	return 0;
 }
 
-#define _RISCV_ISA_EXT_DATA(_name, _id, _subset_exts, _subset_exts_size, _validate) {	\
-	.name = #_name,									\
-	.property = #_name,								\
-	.id = _id,									\
-	.subset_ext_ids = _subset_exts,							\
-	.subset_ext_size = _subset_exts_size,						\
-	.validate = _validate								\
-}
-
-#define __RISCV_ISA_EXT_DATA(_name, _id) _RISCV_ISA_EXT_DATA(_name, _id, NULL, 0, NULL)
-
-#define __RISCV_ISA_EXT_DATA_VALIDATE(_name, _id, _validate) \
-			_RISCV_ISA_EXT_DATA(_name, _id, NULL, 0, _validate)
-
-/* Used to declare pure "lasso" extension (Zk for instance) */
-#define __RISCV_ISA_EXT_BUNDLE(_name, _bundled_exts) \
-	_RISCV_ISA_EXT_DATA(_name, RISCV_ISA_EXT_INVALID, _bundled_exts, \
-			    ARRAY_SIZE(_bundled_exts), NULL)
-
-/* Used to declare extensions that are a superset of other extensions (Zvbb for instance) */
-#define __RISCV_ISA_EXT_SUPERSET(_name, _id, _sub_exts) \
-	_RISCV_ISA_EXT_DATA(_name, _id, _sub_exts, ARRAY_SIZE(_sub_exts), NULL)
-#define __RISCV_ISA_EXT_SUPERSET_VALIDATE(_name, _id, _sub_exts, _validate) \
-	_RISCV_ISA_EXT_DATA(_name, _id, _sub_exts, ARRAY_SIZE(_sub_exts), _validate)
-
 static int riscv_ext_zca_depends(const struct riscv_isa_ext_data *data,
 				 const unsigned long *isa_bitmap)
 {
@@ -772,21 +747,23 @@ static void __init riscv_fill_cpu_vendor_ext(struct device_node *cpu_node, int c
 	}
 }
 
+/*
+ * Populate all_harts_isa_bitmap for each vendor with all of the extensions that
+ * are shared across CPUs for that vendor.
+ */
 static void __init riscv_fill_vendor_ext_list(int cpu)
 {
-	static bool first = true;
-
 	if (!IS_ENABLED(CONFIG_RISCV_ISA_VENDOR_EXT))
 		return;
 
 	for (int i = 0; i < riscv_isa_vendor_ext_list_size; i++) {
 		struct riscv_isa_vendor_ext_data_list *ext_list = riscv_isa_vendor_ext_list[i];
 
-		if (first) {
+		if (!ext_list->is_initialized) {
 			bitmap_copy(ext_list->all_harts_isa_bitmap.isa,
 				    ext_list->per_hart_isa_bitmap[cpu].isa,
 				    RISCV_ISA_VENDOR_EXT_MAX);
-			first = false;
+			ext_list->is_initialized = true;
 		} else {
 			bitmap_and(ext_list->all_harts_isa_bitmap.isa,
 				   ext_list->all_harts_isa_bitmap.isa,
@@ -828,6 +805,7 @@ static int __init riscv_fill_hwcap_from_ext_list(unsigned long *isa2hwcap)
 		}
 
 		riscv_resolve_isa(source_isa, isainfo->isa, &this_hwcap, isa2hwcap);
+		riscv_fill_cpu_vendor_ext(cpu_node, cpu);
 
 		of_node_put(cpu_node);
 
@@ -1060,17 +1038,18 @@ void __init_or_module riscv_cpufeature_patch_func(struct alt_entry *begin,
 
 			if (!__riscv_isa_extension_available(NULL, id))
 				continue;
+
+			value = PATCH_ID_CPUFEATURE_VALUE(alt->patch_id);
+			if (!riscv_cpufeature_patch_check(id, value))
+				continue;
 		} else if (id >= RISCV_VENDOR_EXT_ALTERNATIVES_BASE) {
-			if (!__riscv_isa_vendor_extension_available(VENDOR_EXT_ALL_CPUS, vendor, id))
+			if (!__riscv_isa_vendor_extension_available(VENDOR_EXT_ALL_CPUS, vendor,
+								    id - RISCV_VENDOR_EXT_ALTERNATIVES_BASE))
 				continue;
 		} else {
 			WARN(1, "This extension id:%d is not in ISA extension list", id);
 			continue;
 		}
-
-		value = PATCH_ID_CPUFEATURE_VALUE(alt->patch_id);
-		if (!riscv_cpufeature_patch_check(id, value))
-			continue;
 
 		oldptr = ALT_OLD_PTR(alt);
 		altptr = ALT_ALT_PTR(alt);

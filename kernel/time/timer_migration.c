@@ -1673,6 +1673,15 @@ static int tmigr_setup_groups(unsigned int cpu, unsigned int node)
 
 		lvllist = &tmigr_level_list[top];
 		if (group->num_children == 1 && list_is_singular(lvllist)) {
+			/*
+			 * The target CPU must never do the prepare work, except
+			 * on early boot when the boot CPU is the target. Otherwise
+			 * it may spuriously activate the old top level group inside
+			 * the new one (nevertheless whether old top level group is
+			 * active or not) and/or release an uninitialized childmask.
+			 */
+			WARN_ON_ONCE(cpu == raw_smp_processor_id());
+
 			lvllist = &tmigr_level_list[top - 1];
 			list_for_each_entry(child, lvllist, list) {
 				if (child->parent)
@@ -1704,14 +1713,6 @@ static int tmigr_cpu_prepare(unsigned int cpu)
 {
 	struct tmigr_cpu *tmc = per_cpu_ptr(&tmigr_cpu, cpu);
 	int ret = 0;
-
-	/*
-	 * The target CPU must never do the prepare work. Otherwise it may
-	 * spuriously activate the old top level group inside the new one
-	 * (nevertheless whether old top level group is active or not) and/or
-	 * release an uninitialized childmask.
-	 */
-	WARN_ON_ONCE(cpu == raw_smp_processor_id());
 
 	/* Not first online attempt? */
 	if (tmc->tmgroup)

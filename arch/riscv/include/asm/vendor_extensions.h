@@ -21,6 +21,7 @@ struct riscv_isavendorinfo {
 };
 
 struct riscv_isa_vendor_ext_data_list {
+	bool is_initialized;
 	const size_t ext_data_count;
 	const struct riscv_isa_ext_data *ext_data;
 	struct riscv_isavendorinfo per_hart_isa_bitmap[NR_CPUS];

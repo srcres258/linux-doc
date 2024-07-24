@@ -82,3 +82,118 @@ void uninit_queue(struct queue *q)
 {
 	kfree(q);
 }
+
+int kfd_queue_buffer_get(struct amdgpu_vm *vm, void __user *addr, struct amdgpu_bo **pbo,
+			 u64 expected_size)
+{
+	struct amdgpu_bo_va_mapping *mapping;
+	u64 user_addr;
+	u64 size;
+
+	user_addr = (u64)addr >> AMDGPU_GPU_PAGE_SHIFT;
+	size = expected_size >> AMDGPU_GPU_PAGE_SHIFT;
+
+	mapping = amdgpu_vm_bo_lookup_mapping(vm, user_addr);
+	if (!mapping)
+		goto out_err;
+
+	if (user_addr != mapping->start ||
+	    (size != 0 && user_addr + size - 1 != mapping->last)) {
+		pr_debug("expected size 0x%llx not equal to mapping addr 0x%llx size 0x%llx\n",
+			expected_size, mapping->start << AMDGPU_GPU_PAGE_SHIFT,
+			(mapping->last - mapping->start + 1) << AMDGPU_GPU_PAGE_SHIFT);
+		goto out_err;
+	}
+
+	*pbo = amdgpu_bo_ref(mapping->bo_va->base.bo);
+	mapping->bo_va->queue_refcount++;
+	return 0;
+
+out_err:
+	*pbo = NULL;
+	return -EINVAL;
+}
+
+void kfd_queue_buffer_put(struct amdgpu_vm *vm, struct amdgpu_bo **bo)
+{
+	if (*bo) {
+		struct amdgpu_bo_va *bo_va;
+
+		bo_va = amdgpu_vm_bo_find(vm, *bo);
+		if (bo_va)
+			bo_va->queue_refcount--;
+	}
+
+	amdgpu_bo_unref(bo);
+}
+
+int kfd_queue_acquire_buffers(struct kfd_process_device *pdd, struct queue_properties *properties)
+{
+	struct amdgpu_vm *vm;
+	int err;
+
+	vm = drm_priv_to_vm(pdd->drm_priv);
+	err = amdgpu_bo_reserve(vm->root.bo, false);
+	if (err)
+		return err;
+
+	err = kfd_queue_buffer_get(vm, properties->write_ptr, &properties->wptr_bo, PAGE_SIZE);
+	if (err)
+		goto out_err_unreserve;
+
+	err = kfd_queue_buffer_get(vm, properties->read_ptr, &properties->rptr_bo, PAGE_SIZE);
+	if (err)
+		goto out_err_unreserve;
+
+	err = kfd_queue_buffer_get(vm, (void *)properties->queue_address,
+				   &properties->ring_bo, properties->queue_size);
+	if (err)
+		goto out_err_unreserve;
+
+	/* only compute queue requires EOP buffer and CWSR area */
+	if (properties->type != KFD_QUEUE_TYPE_COMPUTE)
+		goto out_unreserve;
+
+	/* EOP buffer is not required for all ASICs */
+	if (properties->eop_ring_buffer_address) {
+		err = kfd_queue_buffer_get(vm, (void *)properties->eop_ring_buffer_address,
+					   &properties->eop_buf_bo,
+					   properties->eop_ring_buffer_size);
+		if (err)
+			goto out_err_unreserve;
+	}
+
+	err = kfd_queue_buffer_get(vm, (void *)properties->ctx_save_restore_area_address,
+				   &properties->cwsr_bo, 0);
+	if (err)
+		goto out_err_unreserve;
+
+out_unreserve:
+	amdgpu_bo_unreserve(vm->root.bo);
+	return 0;
+
+out_err_unreserve:
+	amdgpu_bo_unreserve(vm->root.bo);
+	kfd_queue_release_buffers(pdd, properties);
+	return err;
+}
+
+int kfd_queue_release_buffers(struct kfd_process_device *pdd, struct queue_properties *properties)
+{
+	struct amdgpu_vm *vm;
+	int err;
+
+	vm = drm_priv_to_vm(pdd->drm_priv);
+	err = amdgpu_bo_reserve(vm->root.bo, false);
+	if (err)
+		return err;
+
+	kfd_queue_buffer_put(vm, &properties->wptr_bo);
+	kfd_queue_buffer_put(vm, &properties->rptr_bo);
+	kfd_queue_buffer_put(vm, &properties->ring_bo);
+	kfd_queue_buffer_put(vm, &properties->eop_buf_bo);
+	kfd_queue_buffer_put(vm, &properties->cwsr_bo);
+
+	amdgpu_bo_unreserve(vm->root.bo);
+	return 0;
+}
