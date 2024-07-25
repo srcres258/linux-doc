@@ -589,6 +589,20 @@ retry_deleg:
 }
 EXPORT_SYMBOL_GPL(vfs_removexattr);
 
+static int copy_xattr_name_from_user(char *kname, const char __user *uname,
+				     size_t len)
+{
+	int error;
+
+	error = strncpy_from_user(kname, uname, len);
+	if (error == 0 || error == len)
+		return  -ERANGE;
+	if (error < 0)
+		return error;
+
+	return 0;
+}
+
 /*
  * Extended attribute SET operations
  */
@@ -600,14 +614,11 @@ int setxattr_copy(const char __user *name, struct kernel_xattr_ctx *ctx)
 	if (ctx->flags & ~(XATTR_CREATE|XATTR_REPLACE))
 		return -EINVAL;
 
-	error = strncpy_from_user(ctx->kname->name, name,
-				sizeof(ctx->kname->name));
-	if (error == 0 || error == sizeof(ctx->kname->name))
-		return  -ERANGE;
+	error = copy_xattr_name_from_user(ctx->kname->name, name,
+					  sizeof(ctx->kname->name));
 	if (error < 0)
 		return error;
 
-	error = 0;
 	if (ctx->size) {
 		if (ctx->size > XATTR_SIZE_MAX)
 			return -E2BIG;
@@ -633,10 +644,9 @@ int do_setxattr(struct mnt_idmap *idmap, struct dentry *dentry,
 			ctx->kvalue, ctx->size, ctx->flags);
 }
 
-static long
-setxattr(struct mnt_idmap *idmap, struct dentry *d,
-	const char __user *name, const void __user *value, size_t size,
-	int flags)
+static int path_setxattr(const char __user *pathname,
+			 const char __user *name, const void __user *value,
+			 size_t size, int flags, unsigned int lookup_flags)
 {
 	struct xattr_name kname;
 	struct kernel_xattr_ctx ctx = {
@@ -646,40 +656,20 @@ setxattr(struct mnt_idmap *idmap, struct dentry *d,
 		.kname    = &kname,
 		.flags    = flags,
 	};
+	struct path path;
 	int error;
 
 	error = setxattr_copy(name, &ctx);
 	if (error)
 		return error;
 
-	error = do_setxattr(idmap, d, &ctx);
-
-	kvfree(ctx.kvalue);
-	return error;
-}
-
-static int do_setxattrat(int dfd, const char __user *pathname, unsigned int at_flags,
-			 const char __user *name, const void __user *value,
-			 size_t size, int xattr_flags)
-{
-	struct path path;
-	int error;
-	int lookup_flags;
-
-	if ((at_flags & ~(AT_SYMLINK_NOFOLLOW | AT_EMPTY_PATH)) != 0)
-		return -EINVAL;
-
-	lookup_flags = (at_flags & AT_SYMLINK_NOFOLLOW) ? 0 : LOOKUP_FOLLOW;
-	if (at_flags & AT_EMPTY_PATH)
-		lookup_flags |= LOOKUP_EMPTY | LOOKUP_NO_FMODE_PATH;
 retry:
 	error = user_path_at(dfd, pathname, lookup_flags, &path);
 	if (error)
-		return error;
+		goto out;
 	error = mnt_want_write(path.mnt);
 	if (!error) {
-		error = setxattr(mnt_idmap(path.mnt), path.dentry, name,
-				 value, size, xattr_flags);
+		error = do_setxattr(mnt_idmap(path.mnt), path.dentry, &ctx);
 		mnt_drop_write(path.mnt);
 	}
 	path_put(&path);
@@ -687,6 +677,9 @@ retry:
 		lookup_flags |= LOOKUP_REVAL;
 		goto retry;
 	}
+
+out:
+	kvfree(ctx.kvalue);
 	return error;
 }
 
@@ -731,20 +724,32 @@ SYSCALL_DEFINE5(lsetxattr, const char __user *, pathname,
 SYSCALL_DEFINE5(fsetxattr, int, fd, const char __user *, name,
 		const void __user *,value, size_t, size, int, flags)
 {
-	struct fd f = fdget(fd);
-	int error = -EBADF;
+	struct xattr_name kname;
+	struct xattr_ctx ctx = {
+		.cvalue   = value,
+		.kvalue   = NULL,
+		.size     = size,
+		.kname    = &kname,
+		.flags    = flags,
+	};
+	int error;
 
+	CLASS(fd, f)(fd);
 	if (!f.file)
-		return error;
+		return -EBADF;
+
 	audit_file(f.file);
+	error = setxattr_copy(name, &ctx);
+	if (error)
+		return error;
+
 	error = mnt_want_write_file(f.file);
 	if (!error) {
-		error = setxattr(file_mnt_idmap(f.file),
-				 f.file->f_path.dentry, name,
-				 value, size, flags);
+		error = do_setxattr(file_mnt_idmap(f.file),
+				    f.file->f_path.dentry, &ctx);
 		mnt_drop_write_file(f.file);
 	}
-	fdput(f);
+	kvfree(ctx.kvalue);
 	return error;
 }
 
@@ -796,9 +801,7 @@ getxattr(struct mnt_idmap *idmap, struct dentry *d,
 		.flags    = 0,
 	};
 
-	error = strncpy_from_user(kname.name, name, sizeof(kname.name));
-	if (error == 0 || error == sizeof(kname.name))
-		error = -ERANGE;
+	error = copy_xattr_name_from_user(kname.name, name, sizeof(kname.name));
 	if (error < 0)
 		return error;
 
@@ -981,23 +984,12 @@ SYSCALL_DEFINE3(flistxattr, int, fd, char __user *, list, size_t, size)
 /*
  * Extended attribute REMOVE operations
  */
-static int
-removexattr(struct mnt_idmap *idmap, struct dentry *d,
-	    const char __user *name)
+static long
+removexattr(struct mnt_idmap *idmap, struct dentry *d, const char *name)
 {
-	int error;
-	char kname[XATTR_NAME_MAX + 1];
-
-	error = strncpy_from_user(kname, name, sizeof(kname));
-	if (error == 0 || error == sizeof(kname))
-		error = -ERANGE;
-	if (error < 0)
-		return error;
-
-	if (is_posix_acl_xattr(kname))
-		return vfs_remove_acl(idmap, d, kname);
-
-	return vfs_removexattr(idmap, d, kname);
+	if (is_posix_acl_xattr(name))
+		return vfs_remove_acl(idmap, d, name);
+	return vfs_removexattr(idmap, d, name);
 }
 
 static int do_removexattrat(int dfd, const char __user *pathname,
@@ -1005,21 +997,18 @@ static int do_removexattrat(int dfd, const char __user *pathname,
 {
 	struct path path;
 	int error;
-	int lookup_flags;
+	char kname[XATTR_NAME_MAX + 1];
 
-	if ((at_flags & ~(AT_SYMLINK_NOFOLLOW | AT_EMPTY_PATH)) != 0)
-		return -EINVAL;
-
-	lookup_flags = (at_flags & AT_SYMLINK_NOFOLLOW) ? 0 : LOOKUP_FOLLOW;
-	if (at_flags & AT_EMPTY_PATH)
-		lookup_flags |= LOOKUP_EMPTY | LOOKUP_NO_FMODE_PATH;
+	error = copy_xattr_name_from_user(kname, name, sizeof(kname));
+	if (error < 0)
+		return error;
 retry:
 	error = user_path_at(dfd, pathname, lookup_flags, &path);
 	if (error)
 		return error;
 	error = mnt_want_write(path.mnt);
 	if (!error) {
-		error = removexattr(mnt_idmap(path.mnt), path.dentry, name);
+		error = removexattr(mnt_idmap(path.mnt), path.dentry, kname);
 		mnt_drop_write(path.mnt);
 	}
 	path_put(&path);
@@ -1051,15 +1040,21 @@ SYSCALL_DEFINE2(lremovexattr, const char __user *, pathname,
 SYSCALL_DEFINE2(fremovexattr, int, fd, const char __user *, name)
 {
 	struct fd f = fdget(fd);
+	char kname[XATTR_NAME_MAX + 1];
 	int error = -EBADF;
 
 	if (!f.file)
 		return error;
 	audit_file(f.file);
+
+	error = copy_xattr_name_from_user(kname, name, sizeof(kname));
+	if (error < 0)
+		return error;
+
 	error = mnt_want_write_file(f.file);
 	if (!error) {
 		error = removexattr(file_mnt_idmap(f.file),
-				    f.file->f_path.dentry, name);
+				    f.file->f_path.dentry, kname);
 		mnt_drop_write_file(f.file);
 	}
 	fdput(f);

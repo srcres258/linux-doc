@@ -24,6 +24,8 @@
 
 #include <linux/slab.h>
 #include "kfd_priv.h"
+#include "kfd_topology.h"
+#include "kfd_svm.h"
 
 void print_queue_properties(struct queue_properties *q)
 {
@@ -83,6 +85,100 @@ void uninit_queue(struct queue *q)
 	kfree(q);
 }
 
+static int kfd_queue_buffer_svm_get(struct kfd_process_device *pdd, u64 addr, u64 size)
+{
+	struct kfd_process *p = pdd->process;
+	struct list_head update_list;
+	struct svm_range *prange;
+	int ret = -EINVAL;
+
+	INIT_LIST_HEAD(&update_list);
+	addr >>= PAGE_SHIFT;
+	size >>= PAGE_SHIFT;
+
+	mutex_lock(&p->svms.lock);
+
+	/*
+	 * range may split to multiple svm pranges aligned to granularity boundaery.
+	 */
+	while (size) {
+		uint32_t gpuid, gpuidx;
+		int r;
+
+		prange = svm_range_from_addr(&p->svms, addr, NULL);
+		if (!prange)
+			break;
+
+		if (!prange->mapped_to_gpu)
+			break;
+
+		r = kfd_process_gpuid_from_node(p, pdd->dev, &gpuid, &gpuidx);
+		if (r < 0)
+			break;
+		if (!test_bit(gpuidx, prange->bitmap_access) &&
+		    !test_bit(gpuidx, prange->bitmap_aip))
+			break;
+
+		if (!(prange->flags & KFD_IOCTL_SVM_FLAG_GPU_ALWAYS_MAPPED))
+			break;
+
+		list_add(&prange->update_list, &update_list);
+
+		if (prange->last - prange->start + 1 >= size) {
+			size = 0;
+			break;
+		}
+
+		size -= prange->last - prange->start + 1;
+		addr += prange->last - prange->start + 1;
+	}
+	if (size) {
+		pr_debug("[0x%llx 0x%llx] not registered\n", addr, addr + size - 1);
+		goto out_unlock;
+	}
+
+	list_for_each_entry(prange, &update_list, update_list)
+		atomic_inc(&prange->queue_refcount);
+	ret = 0;
+
+out_unlock:
+	mutex_unlock(&p->svms.lock);
+	return ret;
+}
+
+static void kfd_queue_buffer_svm_put(struct kfd_process_device *pdd, u64 addr, u64 size)
+{
+	struct kfd_process *p = pdd->process;
+	struct svm_range *prange, *pchild;
+	struct interval_tree_node *node;
+	unsigned long last;
+
+	addr >>= PAGE_SHIFT;
+	last = addr + (size >> PAGE_SHIFT) - 1;
+
+	mutex_lock(&p->svms.lock);
+
+	node = interval_tree_iter_first(&p->svms.objects, addr, last);
+	while (node) {
+		struct interval_tree_node *next_node;
+		unsigned long next_start;
+
+		prange = container_of(node, struct svm_range, it_node);
+		next_node = interval_tree_iter_next(node, addr, last);
+		next_start = min(node->last, last) + 1;
+
+		if (atomic_add_unless(&prange->queue_refcount, -1, 0)) {
+			list_for_each_entry(pchild, &prange->child_list, child_list)
+				atomic_add_unless(&pchild->queue_refcount, -1, 0);
+		}
+
+		node = next_node;
+		addr = next_start;
+	}
+
+	mutex_unlock(&p->svms.lock);
+}
+
 int kfd_queue_buffer_get(struct amdgpu_vm *vm, void __user *addr, struct amdgpu_bo **pbo,
 			 u64 expected_size)
 {
@@ -129,8 +225,14 @@ void kfd_queue_buffer_put(struct amdgpu_vm *vm, struct amdgpu_bo **bo)
 
 int kfd_queue_acquire_buffers(struct kfd_process_device *pdd, struct queue_properties *properties)
 {
+	struct kfd_topology_device *topo_dev;
 	struct amdgpu_vm *vm;
+	u32 total_cwsr_size;
 	int err;
+
+	topo_dev = kfd_topology_device_by_id(pdd->dev->id);
+	if (!topo_dev)
+		return -EINVAL;
 
 	vm = drm_priv_to_vm(pdd->drm_priv);
 	err = amdgpu_bo_reserve(vm->root.bo, false);
@@ -156,6 +258,12 @@ int kfd_queue_acquire_buffers(struct kfd_process_device *pdd, struct queue_prope
 
 	/* EOP buffer is not required for all ASICs */
 	if (properties->eop_ring_buffer_address) {
+		if (properties->eop_ring_buffer_size != topo_dev->node_props.eop_buffer_size) {
+			pr_debug("queue eop bo size 0x%lx not equal to node eop buf size 0x%x\n",
+				properties->eop_buf_bo->tbo.base.size,
+				topo_dev->node_props.eop_buffer_size);
+			goto out_err_unreserve;
+		}
 		err = kfd_queue_buffer_get(vm, (void *)properties->eop_ring_buffer_address,
 					   &properties->eop_buf_bo,
 					   properties->eop_ring_buffer_size);
@@ -163,10 +271,37 @@ int kfd_queue_acquire_buffers(struct kfd_process_device *pdd, struct queue_prope
 			goto out_err_unreserve;
 	}
 
-	err = kfd_queue_buffer_get(vm, (void *)properties->ctx_save_restore_area_address,
-				   &properties->cwsr_bo, 0);
-	if (err)
+	if (properties->ctl_stack_size != topo_dev->node_props.ctl_stack_size) {
+		pr_debug("queue ctl stack size 0x%x not equal to node ctl stack size 0x%x\n",
+			properties->ctl_stack_size,
+			topo_dev->node_props.ctl_stack_size);
 		goto out_err_unreserve;
+	}
+
+	if (properties->ctx_save_restore_area_size != topo_dev->node_props.cwsr_size) {
+		pr_debug("queue cwsr size 0x%x not equal to node cwsr size 0x%x\n",
+			properties->ctx_save_restore_area_size,
+			topo_dev->node_props.cwsr_size);
+		goto out_err_unreserve;
+	}
+
+	total_cwsr_size = (topo_dev->node_props.cwsr_size + topo_dev->node_props.debug_memory_size)
+			  * NUM_XCC(pdd->dev->xcc_mask);
+	total_cwsr_size = ALIGN(total_cwsr_size, PAGE_SIZE);
+
+	err = kfd_queue_buffer_get(vm, (void *)properties->ctx_save_restore_area_address,
+				   &properties->cwsr_bo, total_cwsr_size);
+	if (!err)
+		goto out_unreserve;
+
+	amdgpu_bo_unreserve(vm->root.bo);
+
+	err = kfd_queue_buffer_svm_get(pdd, properties->ctx_save_restore_area_address,
+				       total_cwsr_size);
+	if (err)
+		goto out_err_release;
+
+	return 0;
 
 out_unreserve:
 	amdgpu_bo_unreserve(vm->root.bo);
@@ -174,13 +309,16 @@ out_unreserve:
 
 out_err_unreserve:
 	amdgpu_bo_unreserve(vm->root.bo);
+out_err_release:
 	kfd_queue_release_buffers(pdd, properties);
 	return err;
 }
 
 int kfd_queue_release_buffers(struct kfd_process_device *pdd, struct queue_properties *properties)
 {
+	struct kfd_topology_device *topo_dev;
 	struct amdgpu_vm *vm;
+	u32 total_cwsr_size;
 	int err;
 
 	vm = drm_priv_to_vm(pdd->drm_priv);
@@ -195,5 +333,88 @@ int kfd_queue_release_buffers(struct kfd_process_device *pdd, struct queue_prope
 	kfd_queue_buffer_put(vm, &properties->cwsr_bo);
 
 	amdgpu_bo_unreserve(vm->root.bo);
+
+	topo_dev = kfd_topology_device_by_id(pdd->dev->id);
+	if (!topo_dev)
+		return -EINVAL;
+	total_cwsr_size = (topo_dev->node_props.cwsr_size + topo_dev->node_props.debug_memory_size)
+			  * NUM_XCC(pdd->dev->xcc_mask);
+	total_cwsr_size = ALIGN(total_cwsr_size, PAGE_SIZE);
+
+	kfd_queue_buffer_svm_put(pdd, properties->ctx_save_restore_area_address, total_cwsr_size);
 	return 0;
+}
+
+#define SGPR_SIZE_PER_CU	0x4000
+#define LDS_SIZE_PER_CU		0x10000
+#define HWREG_SIZE_PER_CU	0x1000
+#define DEBUGGER_BYTES_ALIGN	64
+#define DEBUGGER_BYTES_PER_WAVE	32
+
+static u32 kfd_get_vgpr_size_per_cu(u32 gfxv)
+{
+	u32 vgpr_size = 0x40000;
+
+	if ((gfxv / 100 * 100) == 90400 ||	/* GFX_VERSION_AQUA_VANJARAM */
+	    gfxv == 90010 ||			/* GFX_VERSION_ALDEBARAN */
+	    gfxv == 90008)			/* GFX_VERSION_ARCTURUS */
+		vgpr_size = 0x80000;
+	else if (gfxv == 110000 ||		/* GFX_VERSION_PLUM_BONITO */
+		 gfxv == 110001 ||		/* GFX_VERSION_WHEAT_NAS */
+		 gfxv == 120000 ||		/* GFX_VERSION_GFX1200 */
+		 gfxv == 120001)		/* GFX_VERSION_GFX1201 */
+		vgpr_size = 0x60000;
+
+	return vgpr_size;
+}
+
+#define WG_CONTEXT_DATA_SIZE_PER_CU(gfxv)	\
+	(kfd_get_vgpr_size_per_cu(gfxv) + SGPR_SIZE_PER_CU +\
+	 LDS_SIZE_PER_CU + HWREG_SIZE_PER_CU)
+
+#define CNTL_STACK_BYTES_PER_WAVE(gfxv)	\
+	((gfxv) >= 100100 ? 12 : 8)	/* GFX_VERSION_NAVI10*/
+
+#define SIZEOF_HSA_USER_CONTEXT_SAVE_AREA_HEADER 40
+
+void kfd_queue_ctx_save_restore_size(struct kfd_topology_device *dev)
+{
+	struct kfd_node_properties *props = &dev->node_props;
+	u32 gfxv = props->gfx_target_version;
+	u32 ctl_stack_size;
+	u32 wg_data_size;
+	u32 wave_num;
+	u32 cu_num;
+
+	if (gfxv < 80001)	/* GFX_VERSION_CARRIZO */
+		return;
+
+	cu_num = props->simd_count / props->simd_per_cu / NUM_XCC(dev->gpu->xcc_mask);
+	wave_num = (gfxv < 100100) ?	/* GFX_VERSION_NAVI10 */
+		    min(cu_num * 40, props->array_count / props->simd_arrays_per_engine * 512)
+		    : cu_num * 32;
+
+	wg_data_size = ALIGN(cu_num * WG_CONTEXT_DATA_SIZE_PER_CU(gfxv), PAGE_SIZE);
+	ctl_stack_size = wave_num * CNTL_STACK_BYTES_PER_WAVE(gfxv) + 8;
+	ctl_stack_size = ALIGN(SIZEOF_HSA_USER_CONTEXT_SAVE_AREA_HEADER + ctl_stack_size,
+			       PAGE_SIZE);
+
+	if ((gfxv / 10000 * 10000) == 100000) {
+		/* HW design limits control stack size to 0x7000.
+		 * This is insufficient for theoretical PM4 cases
+		 * but sufficient for AQL, limited by SPI events.
+		 */
+		ctl_stack_size = min(ctl_stack_size, 0x7000);
+	}
+
+	props->ctl_stack_size = ctl_stack_size;
+	props->debug_memory_size = ALIGN(wave_num * DEBUGGER_BYTES_PER_WAVE, DEBUGGER_BYTES_ALIGN);
+	props->cwsr_size = ctl_stack_size + wg_data_size;
+
+	if (gfxv == 80002)	/* GFX_VERSION_TONGA */
+		props->eop_buffer_size = 0x8000;
+	else if ((gfxv / 100 * 100) == 90400)	/* GFX_VERSION_AQUA_VANJARAM */
+		props->eop_buffer_size = 4096;
+	else if (gfxv >= 80000)
+		props->eop_buffer_size = 4096;
 }
