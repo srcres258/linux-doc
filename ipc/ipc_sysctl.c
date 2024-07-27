@@ -17,8 +17,8 @@
 #include <linux/cred.h>
 #include "util.h"
 
-static int proc_ipc_dointvec_minmax_orphans(const struct ctl_table *table,
-		int write, void *buffer, size_t *lenp, loff_t *ppos)
+static int proc_ipc_dointvec_minmax_orphans(const struct ctl_table *table, int write,
+		void *buffer, size_t *lenp, loff_t *ppos)
 {
 	struct ipc_namespace *ns =
 		container_of(table->data, struct ipc_namespace, shm_rmid_forced);

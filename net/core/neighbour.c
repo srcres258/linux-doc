@@ -3595,9 +3595,9 @@ static void neigh_proc_update(const struct ctl_table *ctl, int write)
 		neigh_copy_dflt_parms(net, p, index);
 }
 
-static int neigh_proc_dointvec_zero_intmax(const struct ctl_table *ctl,
-					   int write, void *buffer,
-					   size_t *lenp, loff_t *ppos)
+static int neigh_proc_dointvec_zero_intmax(const struct ctl_table *ctl, int write,
+					   void *buffer, size_t *lenp,
+					   loff_t *ppos)
 {
 	struct ctl_table tmp = *ctl;
 	int ret;

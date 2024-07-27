@@ -6702,9 +6702,8 @@ int addrconf_disable_policy(const struct ctl_table *ctl, int *valp, int val)
 	return 0;
 }
 
-static int addrconf_sysctl_disable_policy(const struct ctl_table *ctl,
-					  int write, void *buffer, size_t *lenp,
-					  loff_t *ppos)
+static int addrconf_sysctl_disable_policy(const struct ctl_table *ctl, int write,
+				   void *buffer, size_t *lenp, loff_t *ppos)
 {
 	int *valp = ctl->data;
 	int val = *valp;

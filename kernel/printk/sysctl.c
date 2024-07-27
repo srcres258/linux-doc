@@ -11,9 +11,8 @@
 
 static const int ten_thousand = 10000;
 
-static int proc_dointvec_minmax_sysadmin(const struct ctl_table *table,
-				int write, void *buffer, size_t *lenp,
-				loff_t *ppos)
+static int proc_dointvec_minmax_sysadmin(const struct ctl_table *table, int write,
+				void *buffer, size_t *lenp, loff_t *ppos)
 {
 	if (write && !capable(CAP_SYS_ADMIN))
 		return -EPERM;

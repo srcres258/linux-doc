@@ -7363,8 +7363,8 @@ postcore_initcall(init_per_zone_wmark_min)
  *	that we can call two helper functions whenever min_free_kbytes
  *	changes.
  */
-static int min_free_kbytes_sysctl_handler(const struct ctl_table *table,
-		int write, void *buffer, size_t *length, loff_t *ppos)
+static int min_free_kbytes_sysctl_handler(const struct ctl_table *table, int write,
+		void *buffer, size_t *length, loff_t *ppos)
 {
 	int rc;
 
@@ -7379,8 +7379,8 @@ static int min_free_kbytes_sysctl_handler(const struct ctl_table *table,
 	return 0;
 }
 
-static int watermark_scale_factor_sysctl_handler(const struct ctl_table *table,
-		int write, void *buffer, size_t *length, loff_t *ppos)
+static int watermark_scale_factor_sysctl_handler(const struct ctl_table *table, int write,
+		void *buffer, size_t *length, loff_t *ppos)
 {
 	int rc;
 
@@ -7409,8 +7409,8 @@ static void setup_min_unmapped_ratio(void)
 }
 
 
-static int sysctl_min_unmapped_ratio_sysctl_handler(const struct ctl_table *table,
-		int write, void *buffer, size_t *length, loff_t *ppos)
+static int sysctl_min_unmapped_ratio_sysctl_handler(const struct ctl_table *table, int write,
+		void *buffer, size_t *length, loff_t *ppos)
 {
 	int rc;
 
@@ -7436,8 +7436,8 @@ static void setup_min_slab_ratio(void)
 						     sysctl_min_slab_ratio) / 100;
 }
 
-static int sysctl_min_slab_ratio_sysctl_handler(const struct ctl_table *table,
-		int write, void *buffer, size_t *length, loff_t *ppos)
+static int sysctl_min_slab_ratio_sysctl_handler(const struct ctl_table *table, int write,
+		void *buffer, size_t *length, loff_t *ppos)
 {
 	int rc;
 

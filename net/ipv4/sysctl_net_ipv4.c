@@ -484,7 +484,7 @@ static void proc_fib_multipath_hash_set_seed(struct net *net, u32 user_seed)
 	WRITE_ONCE(net->ipv4.sysctl_fib_multipath_hash_seed, new);
 }
 
-static int proc_fib_multipath_hash_seed(struct ctl_table *table, int write,
+static int proc_fib_multipath_hash_seed(const struct ctl_table *table, int write,
 					void *buffer, size_t *lenp,
 					loff_t *ppos)
 {

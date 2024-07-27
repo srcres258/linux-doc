@@ -128,8 +128,6 @@ static void meson_audio_arb_remove(struct platform_device *pdev)
 	spin_lock(&arb->lock);
 	writel(0, arb->regs);
 	spin_unlock(&arb->lock);
-
-	clk_disable_unprepare(arb->clk);
 }
 
 static int meson_audio_arb_probe(struct platform_device *pdev)

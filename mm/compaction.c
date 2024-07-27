@@ -3030,8 +3030,8 @@ static int compact_nodes(void)
 	return 0;
 }
 
-static int compaction_proactiveness_sysctl_handler(const struct ctl_table *table,
-		int write, void *buffer, size_t *length, loff_t *ppos)
+static int compaction_proactiveness_sysctl_handler(const struct ctl_table *table, int write,
+		void *buffer, size_t *length, loff_t *ppos)
 {
 	int rc, nid;
 

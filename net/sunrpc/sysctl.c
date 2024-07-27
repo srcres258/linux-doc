@@ -62,8 +62,8 @@ static int proc_do_xprt(const struct ctl_table *table, int write,
 }
 
 static int
-proc_dodebug(const struct ctl_table *table, int write, void *buffer,
-	     size_t *lenp, loff_t *ppos)
+proc_dodebug(const struct ctl_table *table, int write, void *buffer, size_t *lenp,
+	     loff_t *ppos)
 {
 	char		tmpbuf[20], *s = NULL;
 	char *p;

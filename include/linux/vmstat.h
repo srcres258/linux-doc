@@ -285,8 +285,8 @@ void cpu_vm_stats_fold(int cpu);
 void refresh_zone_stat_thresholds(void);
 
 struct ctl_table;
-int vmstat_refresh(const struct ctl_table *, int write, void *buffer,
-		size_t *lenp, loff_t *ppos);
+int vmstat_refresh(const struct ctl_table *, int write, void *buffer, size_t *lenp,
+		loff_t *ppos);
 
 void drain_zonestat(struct zone *zone, struct per_cpu_zonestat *);
 
