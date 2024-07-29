@@ -743,7 +743,7 @@ struct super_block *sget_fc(struct fs_context *fc,
 	 * an fs_fd opened in another user namespace.
 	 */
 	if (user_ns != &init_user_ns && !(fc->fs_type->fs_flags & FS_USERNS_MOUNT)) {
-		errorfc(fc, "mounting from non-initial user namespace is not allowed");
+		errorfc(fc, "VFS: Mounting from non-initial user namespace is not allowed");
 		return ERR_PTR(-EPERM);
 	}
 

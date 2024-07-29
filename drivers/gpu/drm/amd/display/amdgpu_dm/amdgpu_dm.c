@@ -176,6 +176,7 @@ MODULE_FIRMWARE(FIRMWARE_DCN_401_DMUB);
 static int amdgpu_dm_init(struct amdgpu_device *adev);
 static void amdgpu_dm_fini(struct amdgpu_device *adev);
 static bool is_freesync_video_mode(const struct drm_display_mode *mode, struct amdgpu_dm_connector *aconnector);
+static void reset_freesync_config_for_crtc(struct dm_crtc_state *new_crtc_state);
 
 static enum drm_mode_subconnector get_subconnector_type(struct dc_link *link)
 {
@@ -877,6 +878,7 @@ static void dm_dmub_outbox1_low_irq(void *interrupt_params)
 		"HPD_IRQ",
 		"SET_CONFIGC_REPLY",
 		"DPIA_NOTIFICATION",
+		"HPD_SENSE_NOTIFY",
 	};
 
 	do {
@@ -3212,8 +3214,11 @@ static int dm_resume(void *handle)
 	drm_connector_list_iter_end(&iter);
 
 	/* Force mode set in atomic commit */
-	for_each_new_crtc_in_state(dm->cached_state, crtc, new_crtc_state, i)
+	for_each_new_crtc_in_state(dm->cached_state, crtc, new_crtc_state, i) {
 		new_crtc_state->active_changed = true;
+		dm_new_crtc_state = to_dm_crtc_state(new_crtc_state);
+		reset_freesync_config_for_crtc(dm_new_crtc_state);
+	}
 
 	/*
 	 * atomic_check is expected to create the dc states. We need to release
@@ -8246,42 +8251,10 @@ static void manage_dm_interrupts(struct amdgpu_device *adev,
 				 struct amdgpu_crtc *acrtc,
 				 bool enable)
 {
-	/*
-	 * We have no guarantee that the frontend index maps to the same
-	 * backend index - some even map to more than one.
-	 *
-	 * TODO: Use a different interrupt or check DC itself for the mapping.
-	 */
-	int irq_type =
-		amdgpu_display_crtc_idx_to_irq_type(
-			adev,
-			acrtc->crtc_id);
-
-	if (enable) {
+	if (enable)
 		drm_crtc_vblank_on(&acrtc->base);
-		amdgpu_irq_get(
-			adev,
-			&adev->pageflip_irq,
-			irq_type);
-#if defined(CONFIG_DRM_AMD_SECURE_DISPLAY)
-		amdgpu_irq_get(
-			adev,
-			&adev->vline0_irq,
-			irq_type);
-#endif
-	} else {
-#if defined(CONFIG_DRM_AMD_SECURE_DISPLAY)
-		amdgpu_irq_put(
-			adev,
-			&adev->vline0_irq,
-			irq_type);
-#endif
-		amdgpu_irq_put(
-			adev,
-			&adev->pageflip_irq,
-			irq_type);
+	else
 		drm_crtc_vblank_off(&acrtc->base);
-	}
 }
 
 static void dm_update_pflip_irq_state(struct amdgpu_device *adev,
@@ -12115,7 +12088,8 @@ void amdgpu_dm_update_freesync_caps(struct drm_connector *connector,
 		}
 	}
 
-	as_type = dm_get_adaptive_sync_support_type(amdgpu_dm_connector->dc_link);
+	if (amdgpu_dm_connector->dc_link)
+		as_type = dm_get_adaptive_sync_support_type(amdgpu_dm_connector->dc_link);
 
 	if (as_type == FREESYNC_TYPE_PCON_IN_WHITELIST) {
 		i = parse_hdmi_amd_vsdb(amdgpu_dm_connector, edid, &vsdb_info);

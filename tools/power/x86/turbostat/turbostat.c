@@ -44,6 +44,7 @@
 #include <sys/stat.h>
 #include <sys/select.h>
 #include <sys/resource.h>
+#include <sys/mman.h>
 #include <fcntl.h>
 #include <signal.h>
 #include <sys/time.h>
@@ -192,6 +193,7 @@ struct msr_counter bic[] = {
 	{ 0x0, "SAM%mc6", NULL, 0, 0, 0, NULL, 0 },
 	{ 0x0, "SAMMHz", NULL, 0, 0, 0, NULL, 0 },
 	{ 0x0, "SAMAMHz", NULL, 0, 0, 0, NULL, 0 },
+	{ 0x0, "Die%c6", NULL, 0, 0, 0, NULL, 0 },
 };
 
 #define MAX_BIC (sizeof(bic) / sizeof(struct msr_counter))
@@ -253,11 +255,12 @@ struct msr_counter bic[] = {
 #define	BIC_SAM_mc6		(1ULL << 55)
 #define	BIC_SAMMHz		(1ULL << 56)
 #define	BIC_SAMACTMHz		(1ULL << 57)
+#define	BIC_Diec6		(1ULL << 58)
 
 #define BIC_TOPOLOGY (BIC_Package | BIC_Node | BIC_CoreCnt | BIC_PkgCnt | BIC_Core | BIC_CPU | BIC_Die )
 #define BIC_THERMAL_PWR ( BIC_CoreTmp | BIC_PkgTmp | BIC_PkgWatt | BIC_CorWatt | BIC_GFXWatt | BIC_RAMWatt | BIC_PKG__ | BIC_RAM__)
 #define BIC_FREQUENCY (BIC_Avg_MHz | BIC_Busy | BIC_Bzy_MHz | BIC_TSC_MHz | BIC_GFXMHz | BIC_GFXACTMHz | BIC_SAMMHz | BIC_SAMACTMHz | BIC_UNCORE_MHZ)
-#define BIC_IDLE (BIC_sysfs | BIC_CPU_c1 | BIC_CPU_c3 | BIC_CPU_c6 | BIC_CPU_c7 | BIC_GFX_rc6 | BIC_Pkgpc2 | BIC_Pkgpc3 | BIC_Pkgpc6 | BIC_Pkgpc7 | BIC_Pkgpc8 | BIC_Pkgpc9 | BIC_Pkgpc10 | BIC_CPU_LPI | BIC_SYS_LPI | BIC_Mod_c6 | BIC_Totl_c0 | BIC_Any_c0 | BIC_GFX_c0 | BIC_CPUGFX | BIC_SAM_mc6)
+#define BIC_IDLE (BIC_sysfs | BIC_CPU_c1 | BIC_CPU_c3 | BIC_CPU_c6 | BIC_CPU_c7 | BIC_GFX_rc6 | BIC_Pkgpc2 | BIC_Pkgpc3 | BIC_Pkgpc6 | BIC_Pkgpc7 | BIC_Pkgpc8 | BIC_Pkgpc9 | BIC_Pkgpc10 | BIC_CPU_LPI | BIC_SYS_LPI | BIC_Mod_c6 | BIC_Totl_c0 | BIC_Any_c0 | BIC_GFX_c0 | BIC_CPUGFX | BIC_SAM_mc6 | BIC_Diec6)
 #define BIC_OTHER ( BIC_IRQ | BIC_SMI | BIC_ThreadC | BIC_CoreTmp | BIC_IPC)
 
 #define BIC_DISABLED_BY_DEFAULT	(BIC_USEC | BIC_TOD | BIC_APIC | BIC_X2APIC)
@@ -1054,8 +1057,7 @@ void probe_platform_features(unsigned int family, unsigned int model)
 		return;
 
 	for (i = 0; turbostat_pdata[i].features; i++) {
-		if (VFM_FAMILY(turbostat_pdata[i].vfm) == family &&
-		    VFM_MODEL(turbostat_pdata[i].vfm) == model) {
+		if (VFM_FAMILY(turbostat_pdata[i].vfm) == family && VFM_MODEL(turbostat_pdata[i].vfm) == model) {
 			platform = turbostat_pdata[i].features;
 			return;
 		}
@@ -1082,6 +1084,9 @@ size_t cpu_present_setsize, cpu_effective_setsize, cpu_allowed_setsize, cpu_affi
 #define MAX_ADDED_THREAD_COUNTERS 24
 #define MAX_ADDED_CORE_COUNTERS 8
 #define MAX_ADDED_PACKAGE_COUNTERS 16
+#define PMT_MAX_ADDED_THREAD_COUNTERS 24
+#define PMT_MAX_ADDED_CORE_COUNTERS 8
+#define PMT_MAX_ADDED_PACKAGE_COUNTERS 16
 #define BITMASK_SIZE 32
 
 #define ZERO_ARRAY(arr) (memset(arr, 0, sizeof(arr)) + __must_be_array(arr))
@@ -1442,29 +1447,129 @@ enum msr_arch_info_index {
 
 static struct msr_counter_arch_info msr_counter_arch_infos[] = {
 	[MSR_ARCH_INFO_APERF_INDEX] = {
-		.perf_subsys = "msr",
-		.perf_name = "aperf",
-		.msr = MSR_IA32_APERF,
-		.msr_mask = 0xFFFFFFFFFFFFFFFF,
-		.rci_index = MSR_RCI_INDEX_APERF,
-	},
+				       .perf_subsys = "msr",
+				       .perf_name = "aperf",
+				       .msr = MSR_IA32_APERF,
+				       .msr_mask = 0xFFFFFFFFFFFFFFFF,
+				       .rci_index = MSR_RCI_INDEX_APERF,
+				        },
 
 	[MSR_ARCH_INFO_MPERF_INDEX] = {
-		.perf_subsys = "msr",
-		.perf_name = "mperf",
-		.msr = MSR_IA32_MPERF,
-		.msr_mask = 0xFFFFFFFFFFFFFFFF,
-		.rci_index = MSR_RCI_INDEX_MPERF,
-	},
+				       .perf_subsys = "msr",
+				       .perf_name = "mperf",
+				       .msr = MSR_IA32_MPERF,
+				       .msr_mask = 0xFFFFFFFFFFFFFFFF,
+				       .rci_index = MSR_RCI_INDEX_MPERF,
+				        },
 
 	[MSR_ARCH_INFO_SMI_INDEX] = {
-		.perf_subsys = "msr",
-		.perf_name = "smi",
-		.msr = MSR_SMI_COUNT,
-		.msr_mask = 0xFFFFFFFF,
-		.rci_index = MSR_RCI_INDEX_SMI,
-	},
+				     .perf_subsys = "msr",
+				     .perf_name = "smi",
+				     .msr = MSR_SMI_COUNT,
+				     .msr_mask = 0xFFFFFFFF,
+				     .rci_index = MSR_RCI_INDEX_SMI,
+				      },
 };
+
+/* Can be redefined when compiling, useful for testing. */
+#ifndef SYSFS_TELEM_PATH
+#define SYSFS_TELEM_PATH "/sys/class/intel_pmt"
+#endif
+
+#define PMT_COUNTER_MTL_DC6_OFFSET 120
+#define PMT_COUNTER_MTL_DC6_LSB    0
+#define PMT_COUNTER_MTL_DC6_MSB    63
+#define PMT_MTL_DC6_GUID           0x1a067102
+
+#define PMT_COUNTER_NAME_SIZE_BYTES      16
+#define PMT_COUNTER_TYPE_NAME_SIZE_BYTES 32
+
+struct pmt_mmio {
+	struct pmt_mmio *next;
+
+	unsigned int guid;
+	unsigned int size;
+
+	/* Base pointer to the mmaped memory. */
+	void *mmio_base;
+
+	/*
+	 * Offset to be applied to the mmio_base
+	 * to get the beginning of the PMT counters for given GUID.
+	 */
+	unsigned long pmt_offset;
+} *pmt_mmios;
+
+enum pmt_datatype {
+	PMT_TYPE_RAW,
+	PMT_TYPE_XTAL_TIME,
+};
+
+struct pmt_domain_info {
+	/*
+	 * Pointer to the MMIO obtained by applying a counter offset
+	 * to the mmio_base of the mmaped region for the given GUID.
+	 *
+	 * This is where to read the raw value of the counter from.
+	 */
+	unsigned long *pcounter;
+};
+
+struct pmt_counter {
+	struct pmt_counter *next;
+
+	/* PMT metadata */
+	char name[PMT_COUNTER_NAME_SIZE_BYTES];
+	enum pmt_datatype type;
+	enum counter_scope scope;
+	unsigned int lsb;
+	unsigned int msb;
+
+	/* BIC-like metadata */
+	enum counter_format format;
+
+	unsigned int num_domains;
+	struct pmt_domain_info *domains;
+};
+
+unsigned int pmt_counter_get_width(const struct pmt_counter *p)
+{
+	return (p->msb - p->lsb) + 1;
+}
+
+void pmt_counter_resize_(struct pmt_counter *pcounter, unsigned int new_size)
+{
+	struct pmt_domain_info *new_mem;
+
+	new_mem = (struct pmt_domain_info *)reallocarray(pcounter->domains, new_size, sizeof(*pcounter->domains));
+	if (!new_mem) {
+		fprintf(stderr, "%s: failed to allocate memory for PMT counters\n", __func__);
+		exit(1);
+	}
+
+	/* Zero initialize just allocated memory. */
+	const size_t num_new_domains = new_size - pcounter->num_domains;
+
+	memset(&new_mem[pcounter->num_domains], 0, num_new_domains * sizeof(*pcounter->domains));
+
+	pcounter->num_domains = new_size;
+	pcounter->domains = new_mem;
+}
+
+void pmt_counter_resize(struct pmt_counter *pcounter, unsigned int new_size)
+{
+	/*
+	 * Allocate more memory ahead of time.
+	 *
+	 * Always allocate space for at least 8 elements
+	 * and double the size when growing.
+	 */
+	if (new_size < 8)
+		new_size = 8;
+	new_size = MAX(new_size, pcounter->num_domains * 2);
+
+	pmt_counter_resize_(pcounter, new_size);
+}
 
 struct thread_data {
 	struct timeval tv_begin;
@@ -1484,6 +1589,7 @@ struct thread_data {
 	bool is_atom;
 	unsigned long long counter[MAX_ADDED_THREAD_COUNTERS];
 	unsigned long long perf_counter[MAX_ADDED_THREAD_COUNTERS];
+	unsigned long long pmt_counter[PMT_MAX_ADDED_THREAD_COUNTERS];
 } *thread_even, *thread_odd;
 
 struct core_data {
@@ -1498,6 +1604,7 @@ struct core_data {
 	unsigned long long core_throt_cnt;
 	unsigned long long counter[MAX_ADDED_CORE_COUNTERS];
 	unsigned long long perf_counter[MAX_ADDED_CORE_COUNTERS];
+	unsigned long long pmt_counter[PMT_MAX_ADDED_CORE_COUNTERS];
 } *core_even, *core_odd;
 
 struct pkg_data {
@@ -1530,8 +1637,10 @@ struct pkg_data {
 	struct rapl_counter rapl_dram_perf_status;	/* MSR_DRAM_PERF_STATUS */
 	unsigned int pkg_temp_c;
 	unsigned int uncore_mhz;
+	unsigned long long die_c6;
 	unsigned long long counter[MAX_ADDED_PACKAGE_COUNTERS];
 	unsigned long long perf_counter[MAX_ADDED_PACKAGE_COUNTERS];
+	unsigned long long pmt_counter[PMT_MAX_ADDED_PACKAGE_COUNTERS];
 } *package_even, *package_odd;
 
 #define ODD_COUNTERS thread_odd, core_odd, package_odd
@@ -1681,6 +1790,10 @@ struct sys_counters {
 	struct perf_counter_info *perf_tp;
 	struct perf_counter_info *perf_cp;
 	struct perf_counter_info *perf_pp;
+
+	struct pmt_counter *pmt_tp;
+	struct pmt_counter *pmt_cp;
+	struct pmt_counter *pmt_pp;
 } sys;
 
 static size_t free_msr_counters_(struct msr_counter **pp)
@@ -1981,9 +2094,11 @@ void help(void)
 		"  -a, --add	add a counter\n"
 		"		  eg. --add msr0x10,u64,cpu,delta,MY_TSC\n"
 		"		  eg. --add perf/cstate_pkg/c2-residency,package,delta,percent,perfPC2\n"
+		"		  eg. --add pmt,name=XTAL,type=raw,domain=package0,offset=0,lsb=0,msb=63,guid=0x1a067102\n"
 		"  -c, --cpu	cpu-set	limit output to summary plus cpu-set:\n"
 		"		  {core | package | j,k,l..m,n-p }\n"
 		"  -d, --debug	displays usec, Time_Of_Day_Seconds and more debugging\n"
+		"		debug messages are printed to stderr\n"
 		"  -D, --Dump	displays the raw counter values\n"
 		"  -e, --enable	[all | column]\n"
 		"		shows all or the specified disabled column\n"
@@ -2091,6 +2206,7 @@ void print_header(char *delim)
 {
 	struct msr_counter *mp;
 	struct perf_counter_info *pp;
+	struct pmt_counter *ppmt;
 	int printed = 0;
 
 	if (DO_BIC(BIC_USEC))
@@ -2163,6 +2279,25 @@ void print_header(char *delim)
 		}
 	}
 
+	ppmt = sys.pmt_tp;
+	while (ppmt) {
+		switch (ppmt->type) {
+		case PMT_TYPE_RAW:
+			if (pmt_counter_get_width(ppmt) <= 32)
+				outp += sprintf(outp, "%s%10.10s", (printed++ ? delim : ""), ppmt->name);
+			else
+				outp += sprintf(outp, "%s%18.18s", (printed++ ? delim : ""), ppmt->name);
+
+			break;
+
+		case PMT_TYPE_XTAL_TIME:
+			outp += sprintf(outp, "%s%s", delim, ppmt->name);
+			break;
+		}
+
+		ppmt = ppmt->next;
+	}
+
 	if (DO_BIC(BIC_CPU_c1))
 		outp += sprintf(outp, "%sCPU%%c1", (printed++ ? delim : ""));
 	if (DO_BIC(BIC_CPU_c3))
@@ -2218,6 +2353,25 @@ void print_header(char *delim)
 		}
 	}
 
+	ppmt = sys.pmt_cp;
+	while (ppmt) {
+		switch (ppmt->type) {
+		case PMT_TYPE_RAW:
+			if (pmt_counter_get_width(ppmt) <= 32)
+				outp += sprintf(outp, "%s%10.10s", (printed++ ? delim : ""), ppmt->name);
+			else
+				outp += sprintf(outp, "%s%18.18s", (printed++ ? delim : ""), ppmt->name);
+
+			break;
+
+		case PMT_TYPE_XTAL_TIME:
+			outp += sprintf(outp, "%s%s", delim, ppmt->name);
+			break;
+		}
+
+		ppmt = ppmt->next;
+	}
+
 	if (DO_BIC(BIC_PkgTmp))
 		outp += sprintf(outp, "%sPkgTmp", (printed++ ? delim : ""));
 
@@ -2262,6 +2416,8 @@ void print_header(char *delim)
 		outp += sprintf(outp, "%sPkg%%pc9", (printed++ ? delim : ""));
 	if (DO_BIC(BIC_Pkgpc10))
 		outp += sprintf(outp, "%sPk%%pc10", (printed++ ? delim : ""));
+	if (DO_BIC(BIC_Diec6))
+		outp += sprintf(outp, "%sDie%%c6", (printed++ ? delim : ""));
 	if (DO_BIC(BIC_CPU_LPI))
 		outp += sprintf(outp, "%sCPU%%LPI", (printed++ ? delim : ""));
 	if (DO_BIC(BIC_SYS_LPI))
@@ -2326,6 +2482,25 @@ void print_header(char *delim)
 			else
 				outp += sprintf(outp, "%s%s", (printed++ ? delim : ""), pp->name);
 		}
+	}
+
+	ppmt = sys.pmt_pp;
+	while (ppmt) {
+		switch (ppmt->type) {
+		case PMT_TYPE_RAW:
+			if (pmt_counter_get_width(ppmt) <= 32)
+				outp += sprintf(outp, "%s%10.10s", (printed++ ? delim : ""), ppmt->name);
+			else
+				outp += sprintf(outp, "%s%18.18s", (printed++ ? delim : ""), ppmt->name);
+
+			break;
+
+		case PMT_TYPE_XTAL_TIME:
+			outp += sprintf(outp, "%s%s", delim, ppmt->name);
+			break;
+		}
+
+		ppmt = ppmt->next;
 	}
 
 	outp += sprintf(outp, "\n");
@@ -2449,6 +2624,7 @@ int format_counters(struct thread_data *t, struct core_data *c, struct pkg_data 
 	int i;
 	struct msr_counter *mp;
 	struct perf_counter_info *pp;
+	struct pmt_counter *ppmt;
 	char *delim = "\t";
 	int printed = 0;
 
@@ -2611,6 +2787,26 @@ int format_counters(struct thread_data *t, struct core_data *c, struct pkg_data 
 		}
 	}
 
+	for (i = 0, ppmt = sys.pmt_tp; ppmt; i++, ppmt = ppmt->next) {
+		switch (ppmt->type) {
+		case PMT_TYPE_RAW:
+			if (pmt_counter_get_width(ppmt) <= 32)
+				outp += sprintf(outp, "%s0x%08x", (printed++ ? delim : ""),
+						(unsigned int)t->pmt_counter[i]);
+			else
+				outp += sprintf(outp, "%s0x%016llx", (printed++ ? delim : ""), t->pmt_counter[i]);
+
+			break;
+
+		case PMT_TYPE_XTAL_TIME:
+			const unsigned long value_raw = t->pmt_counter[i];
+			const double value_converted = 100.0 * value_raw / crystal_hz / interval_float;
+
+			outp += sprintf(outp, "%s%.2f", (printed++ ? delim : ""), value_converted);
+			break;
+		}
+	}
+
 	/* C1 */
 	if (DO_BIC(BIC_CPU_c1))
 		outp += sprintf(outp, "%s%.2f", (printed++ ? delim : ""), 100.0 * t->c1 / tsc);
@@ -2669,6 +2865,26 @@ int format_counters(struct thread_data *t, struct core_data *c, struct pkg_data 
 				outp += sprintf(outp, "%s%lld", (printed++ ? delim : ""), c->perf_counter[i]);
 		} else if (pp->format == FORMAT_PERCENT) {
 			outp += sprintf(outp, "%s%.2f", (printed++ ? delim : ""), 100.0 * c->perf_counter[i] / tsc);
+		}
+	}
+
+	for (i = 0, ppmt = sys.pmt_cp; ppmt; i++, ppmt = ppmt->next) {
+		switch (ppmt->type) {
+		case PMT_TYPE_RAW:
+			if (pmt_counter_get_width(ppmt) <= 32)
+				outp += sprintf(outp, "%s0x%08x", (printed++ ? delim : ""),
+						(unsigned int)c->pmt_counter[i]);
+			else
+				outp += sprintf(outp, "%s0x%016llx", (printed++ ? delim : ""), c->pmt_counter[i]);
+
+			break;
+
+		case PMT_TYPE_XTAL_TIME:
+			const unsigned long value_raw = c->pmt_counter[i];
+			const double value_converted = 100.0 * value_raw / crystal_hz / interval_float;
+
+			outp += sprintf(outp, "%s%.2f", (printed++ ? delim : ""), value_converted);
+			break;
 		}
 	}
 
@@ -2750,6 +2966,10 @@ int format_counters(struct thread_data *t, struct core_data *c, struct pkg_data 
 		outp += sprintf(outp, "%s%.2f", (printed++ ? delim : ""), 100.0 * p->pc9 / tsc);
 	if (DO_BIC(BIC_Pkgpc10))
 		outp += sprintf(outp, "%s%.2f", (printed++ ? delim : ""), 100.0 * p->pc10 / tsc);
+
+	if (DO_BIC(BIC_Diec6))
+		outp +=
+		    sprintf(outp, "%s%.2f", (printed++ ? delim : ""), 100.0 * p->die_c6 / crystal_hz / interval_float);
 
 	if (DO_BIC(BIC_CPU_LPI)) {
 		if (p->cpu_lpi >= 0)
@@ -2841,9 +3061,30 @@ int format_counters(struct thread_data *t, struct core_data *c, struct pkg_data 
 				outp += sprintf(outp, "%s%lld", (printed++ ? delim : ""), p->perf_counter[i]);
 		} else if (pp->format == FORMAT_PERCENT) {
 			outp += sprintf(outp, "%s%.2f", (printed++ ? delim : ""), 100.0 * p->perf_counter[i] / tsc);
-		} else if (pp->type == COUNTER_K2M)
+		} else if (pp->type == COUNTER_K2M) {
 			outp +=
 			    sprintf(outp, "%s%d", (printed++ ? delim : ""), (unsigned int)p->perf_counter[i] / 1000);
+		}
+	}
+
+	for (i = 0, ppmt = sys.pmt_pp; ppmt; i++, ppmt = ppmt->next) {
+		switch (ppmt->type) {
+		case PMT_TYPE_RAW:
+			if (pmt_counter_get_width(ppmt) <= 32)
+				outp += sprintf(outp, "%s0x%08x", (printed++ ? delim : ""),
+						(unsigned int)p->pmt_counter[i]);
+			else
+				outp += sprintf(outp, "%s0x%016llx", (printed++ ? delim : ""), p->pmt_counter[i]);
+
+			break;
+
+		case PMT_TYPE_XTAL_TIME:
+			const unsigned long value_raw = p->pmt_counter[i];
+			const double value_converted = 100.0 * value_raw / crystal_hz / interval_float;
+
+			outp += sprintf(outp, "%s%.2f", (printed++ ? delim : ""), value_converted);
+			break;
+		}
 	}
 
 done:
@@ -2900,6 +3141,7 @@ int delta_package(struct pkg_data *new, struct pkg_data *old)
 	int i;
 	struct msr_counter *mp;
 	struct perf_counter_info *pp;
+	struct pmt_counter *ppmt;
 
 	if (DO_BIC(BIC_Totl_c0))
 		old->pkg_wtd_core_c0 = new->pkg_wtd_core_c0 - old->pkg_wtd_core_c0;
@@ -2920,6 +3162,7 @@ int delta_package(struct pkg_data *new, struct pkg_data *old)
 	old->pc8 = new->pc8 - old->pc8;
 	old->pc9 = new->pc9 - old->pc9;
 	old->pc10 = new->pc10 - old->pc10;
+	old->die_c6 = new->die_c6 - old->die_c6;
 	old->cpu_lpi = new->cpu_lpi - old->cpu_lpi;
 	old->sys_lpi = new->sys_lpi - old->sys_lpi;
 	old->pkg_temp_c = new->pkg_temp_c;
@@ -2969,6 +3212,13 @@ int delta_package(struct pkg_data *new, struct pkg_data *old)
 			old->perf_counter[i] = new->perf_counter[i] - old->perf_counter[i];
 	}
 
+	for (i = 0, ppmt = sys.pmt_pp; ppmt; i++, ppmt = ppmt->next) {
+		if (ppmt->format == FORMAT_RAW)
+			old->pmt_counter[i] = new->pmt_counter[i];
+		else
+			old->pmt_counter[i] = new->pmt_counter[i] - old->pmt_counter[i];
+	}
+
 	return 0;
 }
 
@@ -2977,6 +3227,7 @@ void delta_core(struct core_data *new, struct core_data *old)
 	int i;
 	struct msr_counter *mp;
 	struct perf_counter_info *pp;
+	struct pmt_counter *ppmt;
 
 	old->c3 = new->c3 - old->c3;
 	old->c6 = new->c6 - old->c6;
@@ -3000,6 +3251,13 @@ void delta_core(struct core_data *new, struct core_data *old)
 		else
 			old->perf_counter[i] = new->perf_counter[i] - old->perf_counter[i];
 	}
+
+	for (i = 0, ppmt = sys.pmt_cp; ppmt; i++, ppmt = ppmt->next) {
+		if (ppmt->format == FORMAT_RAW)
+			old->pmt_counter[i] = new->pmt_counter[i];
+		else
+			old->pmt_counter[i] = new->pmt_counter[i] - old->pmt_counter[i];
+	}
 }
 
 int soft_c1_residency_display(int bic)
@@ -3018,6 +3276,7 @@ int delta_thread(struct thread_data *new, struct thread_data *old, struct core_d
 	int i;
 	struct msr_counter *mp;
 	struct perf_counter_info *pp;
+	struct pmt_counter *ppmt;
 
 	/* we run cpuid just the 1st time, copy the results */
 	if (DO_BIC(BIC_APIC))
@@ -3104,6 +3363,13 @@ int delta_thread(struct thread_data *new, struct thread_data *old, struct core_d
 			old->perf_counter[i] = new->perf_counter[i] - old->perf_counter[i];
 	}
 
+	for (i = 0, ppmt = sys.pmt_tp; ppmt; i++, ppmt = ppmt->next) {
+		if (ppmt->format == FORMAT_RAW)
+			old->pmt_counter[i] = new->pmt_counter[i];
+		else
+			old->pmt_counter[i] = new->pmt_counter[i] - old->pmt_counter[i];
+	}
+
 	return 0;
 }
 
@@ -3180,6 +3446,7 @@ void clear_counters(struct thread_data *t, struct core_data *c, struct pkg_data 
 	p->pc8 = 0;
 	p->pc9 = 0;
 	p->pc10 = 0;
+	p->die_c6 = 0;
 	p->cpu_lpi = 0;
 	p->sys_lpi = 0;
 
@@ -3210,6 +3477,10 @@ void clear_counters(struct thread_data *t, struct core_data *c, struct pkg_data 
 	memset(&t->perf_counter[0], 0, sizeof(t->perf_counter));
 	memset(&c->perf_counter[0], 0, sizeof(c->perf_counter));
 	memset(&p->perf_counter[0], 0, sizeof(p->perf_counter));
+
+	memset(&t->pmt_counter[0], 0, ARRAY_SIZE(t->pmt_counter));
+	memset(&c->pmt_counter[0], 0, ARRAY_SIZE(c->pmt_counter));
+	memset(&p->pmt_counter[0], 0, ARRAY_SIZE(p->pmt_counter));
 }
 
 void rapl_counter_accumulate(struct rapl_counter *dst, const struct rapl_counter *src)
@@ -3231,6 +3502,7 @@ int sum_counters(struct thread_data *t, struct core_data *c, struct pkg_data *p)
 	int i;
 	struct msr_counter *mp;
 	struct perf_counter_info *pp;
+	struct pmt_counter *ppmt;
 
 	/* copy un-changing apic_id's */
 	if (DO_BIC(BIC_APIC))
@@ -3267,6 +3539,10 @@ int sum_counters(struct thread_data *t, struct core_data *c, struct pkg_data *p)
 		average.threads.perf_counter[i] += t->perf_counter[i];
 	}
 
+	for (i = 0, ppmt = sys.pmt_tp; ppmt; i++, ppmt = ppmt->next) {
+		average.threads.pmt_counter[i] += t->pmt_counter[i];
+	}
+
 	/* sum per-core values only for 1st thread in core */
 	if (!is_cpu_first_thread_in_core(t, c, p))
 		return 0;
@@ -3293,6 +3569,10 @@ int sum_counters(struct thread_data *t, struct core_data *c, struct pkg_data *p)
 		average.cores.perf_counter[i] += c->perf_counter[i];
 	}
 
+	for (i = 0, ppmt = sys.pmt_cp; ppmt; i++, ppmt = ppmt->next) {
+		average.cores.pmt_counter[i] += c->pmt_counter[i];
+	}
+
 	/* sum per-pkg values only for 1st core in pkg */
 	if (!is_cpu_first_core_in_package(t, c, p))
 		return 0;
@@ -3316,6 +3596,7 @@ int sum_counters(struct thread_data *t, struct core_data *c, struct pkg_data *p)
 	average.packages.pc8 += p->pc8;
 	average.packages.pc9 += p->pc9;
 	average.packages.pc10 += p->pc10;
+	average.packages.die_c6 += p->die_c6;
 
 	average.packages.cpu_lpi = p->cpu_lpi;
 	average.packages.sys_lpi = p->sys_lpi;
@@ -3352,6 +3633,10 @@ int sum_counters(struct thread_data *t, struct core_data *c, struct pkg_data *p)
 			average.packages.perf_counter[i] += p->perf_counter[i];
 	}
 
+	for (i = 0, ppmt = sys.pmt_pp; ppmt; i++, ppmt = ppmt->next) {
+		average.packages.pmt_counter[i] += p->pmt_counter[i];
+	}
+
 	return 0;
 }
 
@@ -3364,6 +3649,7 @@ void compute_average(struct thread_data *t, struct core_data *c, struct pkg_data
 	int i;
 	struct msr_counter *mp;
 	struct perf_counter_info *pp;
+	struct pmt_counter *ppmt;
 
 	clear_counters(&average.threads, &average.cores, &average.packages);
 
@@ -3406,6 +3692,7 @@ void compute_average(struct thread_data *t, struct core_data *c, struct pkg_data
 	average.packages.pc8 /= topo.allowed_packages;
 	average.packages.pc9 /= topo.allowed_packages;
 	average.packages.pc10 /= topo.allowed_packages;
+	average.packages.die_c6 /= topo.allowed_packages;
 
 	for (i = 0, mp = sys.tp; mp; i++, mp = mp->next) {
 		if (mp->format == FORMAT_RAW)
@@ -3463,6 +3750,16 @@ void compute_average(struct thread_data *t, struct core_data *c, struct pkg_data
 				sums_need_wide_columns = 1;
 		}
 		average.packages.perf_counter[i] /= topo.allowed_packages;
+	}
+
+	for (i = 0, ppmt = sys.pmt_tp; ppmt; i++, ppmt = ppmt->next) {
+		average.threads.pmt_counter[i] /= topo.allowed_cpus;
+	}
+	for (i = 0, ppmt = sys.pmt_cp; ppmt; i++, ppmt = ppmt->next) {
+		average.cores.pmt_counter[i] /= topo.allowed_cores;
+	}
+	for (i = 0, ppmt = sys.pmt_pp; ppmt; i++, ppmt = ppmt->next) {
+		average.packages.pmt_counter[i] /= topo.allowed_packages;
 	}
 }
 
@@ -3720,15 +4017,55 @@ static unsigned int read_perf_type(const char *subsys)
 	return read_perf_counter_info_n(path, format);
 }
 
-static unsigned int read_rapl_config(const char *subsys, const char *event_name)
+static unsigned int read_perf_config(const char *subsys, const char *event_name)
 {
 	const char *const path_format = "/sys/bus/event_source/devices/%s/events/%s";
-	const char *const format = "event=%x";
+	FILE *fconfig = NULL;
 	char path[128];
+	char config_str[64];
+	unsigned int config;
+	unsigned int umask;
+	bool has_config = false;
+	bool has_umask = false;
+	unsigned int ret = -1;
 
 	snprintf(path, sizeof(path), path_format, subsys, event_name);
 
-	return read_perf_counter_info_n(path, format);
+	fconfig = fopen(path, "r");
+	if (!fconfig)
+		return -1;
+
+	if (fgets(config_str, ARRAY_SIZE(config_str), fconfig) != config_str)
+		goto cleanup_and_exit;
+
+	for (char *pconfig_str = &config_str[0]; pconfig_str;) {
+		if (sscanf(pconfig_str, "event=%x", &config) == 1) {
+			has_config = true;
+			goto next;
+		}
+
+		if (sscanf(pconfig_str, "umask=%x", &umask) == 1) {
+			has_umask = true;
+			goto next;
+		}
+
+next:
+		pconfig_str = strchr(pconfig_str, ',');
+		if (pconfig_str) {
+			*pconfig_str = '\0';
+			++pconfig_str;
+		}
+	}
+
+	if (!has_umask)
+		umask = 0;
+
+	if (has_config)
+		ret = (umask << 8) | config;
+
+cleanup_and_exit:
+	fclose(fconfig);
+	return ret;
 }
 
 static unsigned int read_perf_rapl_unit(const char *subsys, const char *event_name)
@@ -3747,7 +4084,7 @@ static unsigned int read_perf_rapl_unit(const char *subsys, const char *event_na
 	return RAPL_UNIT_INVALID;
 }
 
-static double read_perf_rapl_scale(const char *subsys, const char *event_name)
+static double read_perf_scale(const char *subsys, const char *event_name)
 {
 	const char *const path_format = "/sys/bus/event_source/devices/%s/events/%s.scale";
 	const char *const format = "%lf";
@@ -3796,7 +4133,7 @@ int get_rapl_counters(int cpu, unsigned int domain, struct core_data *c, struct 
 	unsigned long long perf_data[NUM_RAPL_COUNTERS + 1];
 	struct rapl_counter_info_t *rci;
 
-	if (debug)
+	if (debug >= 2)
 		fprintf(stderr, "%s: cpu%d domain%d\n", __func__, cpu, domain);
 
 	assert(rapl_counter_info_perdomain);
@@ -3826,7 +4163,7 @@ int get_rapl_counters(int cpu, unsigned int domain, struct core_data *c, struct 
 			assert(pi < ARRAY_SIZE(perf_data));
 			assert(rci->fd_perf != -1);
 
-			if (debug)
+			if (debug >= 2)
 				fprintf(stderr, "Reading rapl counter via perf at %u (%llu %e %lf)\n",
 					i, perf_data[pi], rci->scale[i], perf_data[pi] * rci->scale[i]);
 
@@ -3836,7 +4173,7 @@ int get_rapl_counters(int cpu, unsigned int domain, struct core_data *c, struct 
 			break;
 
 		case COUNTER_SOURCE_MSR:
-			if (debug)
+			if (debug >= 2)
 				fprintf(stderr, "Reading rapl counter via msr at %u\n", i);
 
 			assert(!no_msr);
@@ -3894,7 +4231,7 @@ int get_cstate_counters(unsigned int cpu, struct thread_data *t, struct core_dat
 
 	struct cstate_counter_info_t *cci;
 
-	if (debug)
+	if (debug >= 2)
 		fprintf(stderr, "%s: cpu%d\n", __func__, cpu);
 
 	assert(ccstate_counter_info);
@@ -3964,9 +4301,8 @@ int get_cstate_counters(unsigned int cpu, struct thread_data *t, struct core_dat
 			assert(pi < ARRAY_SIZE(perf_data));
 			assert(cci->fd_perf_core != -1 || cci->fd_perf_pkg != -1);
 
-			if (debug) {
+			if (debug >= 2)
 				fprintf(stderr, "cstate via %s %u: %llu\n", "perf", i, perf_data[pi]);
-			}
 
 			cci->data[i] = perf_data[pi];
 
@@ -3978,9 +4314,8 @@ int get_cstate_counters(unsigned int cpu, struct thread_data *t, struct core_dat
 			if (get_msr(cpu, cci->msr[i], &cci->data[i]))
 				return -13 - i;
 
-			if (debug) {
+			if (debug >= 2)
 				fprintf(stderr, "cstate via %s0x%llx %u: %llu\n", "msr", cci->msr[i], i, cci->data[i]);
-			}
 
 			break;
 		}
@@ -4035,7 +4370,7 @@ int get_smi_aperf_mperf(unsigned int cpu, struct thread_data *t)
 
 	struct msr_counter_info_t *mci;
 
-	if (debug)
+	if (debug >= 2)
 		fprintf(stderr, "%s: cpu%d\n", __func__, cpu);
 
 	assert(msr_counter_info);
@@ -4065,7 +4400,7 @@ int get_smi_aperf_mperf(unsigned int cpu, struct thread_data *t)
 			assert(pi < ARRAY_SIZE(perf_data));
 			assert(mci->fd_perf != -1);
 
-			if (debug)
+			if (debug >= 2)
 				fprintf(stderr, "Reading msr counter via perf at %u: %llu\n", i, perf_data[pi]);
 
 			mci->data[i] = perf_data[pi];
@@ -4081,7 +4416,7 @@ int get_smi_aperf_mperf(unsigned int cpu, struct thread_data *t)
 
 			mci->data[i] &= mci->msr_mask[i];
 
-			if (debug)
+			if (debug >= 2)
 				fprintf(stderr, "Reading msr counter via msr at %u: %llu\n", i, mci->data[i]);
 
 			break;
@@ -4121,6 +4456,32 @@ int perf_counter_info_read_values(struct perf_counter_info *pp, int cpu, unsigne
 	return 0;
 }
 
+unsigned long pmt_gen_value_mask(unsigned int lsb, unsigned int msb)
+{
+	unsigned long mask;
+
+	if (msb == 63)
+		mask = 0xffffffffffffffff;
+	else
+		mask = ((1 << (msb + 1)) - 1);
+
+	mask -= (1 << lsb) - 1;
+
+	return mask;
+}
+
+unsigned long pmt_read_counter(struct pmt_counter *ppmt, unsigned int domain_id)
+{
+	assert(domain_id < ppmt->num_domains);
+
+	const unsigned long *pmmio = ppmt->domains[domain_id].pcounter;
+	const unsigned long value = pmmio ? *pmmio : 0;
+	const unsigned long value_mask = pmt_gen_value_mask(ppmt->lsb, ppmt->msb);
+	const unsigned long value_shift = ppmt->lsb;
+
+	return (value & value_mask) >> value_shift;
+}
+
 /*
  * get_counters(...)
  * migrate to cpu
@@ -4131,6 +4492,7 @@ int get_counters(struct thread_data *t, struct core_data *c, struct pkg_data *p)
 	int cpu = t->cpu_id;
 	unsigned long long msr;
 	struct msr_counter *mp;
+	struct pmt_counter *pp;
 	int i;
 	int status;
 
@@ -4164,6 +4526,9 @@ int get_counters(struct thread_data *t, struct core_data *c, struct pkg_data *p)
 
 	if (perf_counter_info_read_values(sys.perf_tp, cpu, t->perf_counter, MAX_ADDED_THREAD_COUNTERS))
 		return -10;
+
+	for (i = 0, pp = sys.pmt_tp; pp; i++, pp = pp->next)
+		t->pmt_counter[i] = pmt_read_counter(pp, t->cpu_id);
 
 	/* collect core counters only for 1st thread in core */
 	if (!is_cpu_first_thread_in_core(t, c, p))
@@ -4205,6 +4570,9 @@ int get_counters(struct thread_data *t, struct core_data *c, struct pkg_data *p)
 
 	if (perf_counter_info_read_values(sys.perf_cp, cpu, c->perf_counter, MAX_ADDED_CORE_COUNTERS))
 		return -10;
+
+	for (i = 0, pp = sys.pmt_cp; pp; i++, pp = pp->next)
+		c->pmt_counter[i] = pmt_read_counter(pp, c->core_id);
 
 	/* collect package counters only for 1st core in package */
 	if (!is_cpu_first_core_in_package(t, c, p))
@@ -4281,6 +4649,9 @@ int get_counters(struct thread_data *t, struct core_data *c, struct pkg_data *p)
 
 	if (perf_counter_info_read_values(sys.perf_pp, cpu, p->perf_counter, MAX_ADDED_PACKAGE_COUNTERS))
 		return -10;
+
+	for (i = 0, pp = sys.pmt_pp; pp; i++, pp = pp->next)
+		p->pmt_counter[i] = pmt_read_counter(pp, p->package_id);
 
 done:
 	gettimeofday(&t->tv_end, (struct timezone *)NULL);
@@ -5225,6 +5596,7 @@ void msr_perf_init(void);
 void rapl_perf_init(void);
 void cstate_perf_init(void);
 void added_perf_counters_init(void);
+void pmt_init(void);
 
 void re_initialize(void)
 {
@@ -5235,6 +5607,7 @@ void re_initialize(void)
 	rapl_perf_init();
 	cstate_perf_init();
 	added_perf_counters_init();
+	pmt_init();
 	fprintf(outf, "turbostat: re-initialized with num_cpus %d, allowed_cpus %d\n", topo.num_cpus,
 		topo.allowed_cpus);
 }
@@ -7092,7 +7465,7 @@ int add_rapl_perf_counter_(int cpu, struct rapl_counter_info_t *rci, const struc
 	if (no_perf)
 		return -1;
 
-	const double scale = read_perf_rapl_scale(cai->perf_subsys, cai->perf_name);
+	const double scale = read_perf_scale(cai->perf_subsys, cai->perf_name);
 
 	if (scale == 0.0)
 		return -1;
@@ -7103,7 +7476,7 @@ int add_rapl_perf_counter_(int cpu, struct rapl_counter_info_t *rci, const struc
 		return -1;
 
 	const unsigned int rapl_type = read_perf_type(cai->perf_subsys);
-	const unsigned int rapl_energy_pkg_config = read_rapl_config(cai->perf_subsys, cai->perf_name);
+	const unsigned int rapl_energy_pkg_config = read_perf_config(cai->perf_subsys, cai->perf_name);
 
 	const int fd_counter =
 	    open_perf_counter(cpu, rapl_type, rapl_energy_pkg_config, rci->fd_perf, PERF_FORMAT_GROUP);
@@ -7124,7 +7497,7 @@ int add_rapl_perf_counter(int cpu, struct rapl_counter_info_t *rci, const struct
 {
 	int ret = add_rapl_perf_counter_(cpu, rci, cai, scale, unit);
 
-	if (debug)
+	if (debug >= 2)
 		fprintf(stderr, "%s: %d (cpu: %d)\n", __func__, ret, cpu);
 
 	return ret;
@@ -7265,7 +7638,7 @@ int add_cstate_perf_counter_(int cpu, struct cstate_counter_info_t *cci, const s
 		return -1;
 
 	const unsigned int type = read_perf_type(cai->perf_subsys);
-	const unsigned int config = read_rapl_config(cai->perf_subsys, cai->perf_name);
+	const unsigned int config = read_perf_config(cai->perf_subsys, cai->perf_name);
 
 	const int fd_counter = open_perf_counter(cpu, type, config, *pfd_group, PERF_FORMAT_GROUP);
 
@@ -7283,7 +7656,7 @@ int add_cstate_perf_counter(int cpu, struct cstate_counter_info_t *cci, const st
 {
 	int ret = add_cstate_perf_counter_(cpu, cci, cai);
 
-	if (debug)
+	if (debug >= 2)
 		fprintf(stderr, "%s: %d (cpu: %d)\n", __func__, ret, cpu);
 
 	return ret;
@@ -7295,7 +7668,7 @@ int add_msr_perf_counter_(int cpu, struct msr_counter_info_t *cci, const struct 
 		return -1;
 
 	const unsigned int type = read_perf_type(cai->perf_subsys);
-	const unsigned int config = read_rapl_config(cai->perf_subsys, cai->perf_name);
+	const unsigned int config = read_perf_config(cai->perf_subsys, cai->perf_name);
 
 	const int fd_counter = open_perf_counter(cpu, type, config, cci->fd_perf, PERF_FORMAT_GROUP);
 
@@ -8238,7 +8611,7 @@ int added_perf_counters_init_(struct perf_counter_info *pinfo)
 				continue;
 			}
 
-			perf_config = read_rapl_config(pinfo->device, pinfo->event);
+			perf_config = read_perf_config(pinfo->device, pinfo->event);
 			if (perf_config == (unsigned int)-1) {
 				warnx("%s: perf/%s/%s: failed to read %s",
 				      __func__, pinfo->device, pinfo->event, "config");
@@ -8246,7 +8619,7 @@ int added_perf_counters_init_(struct perf_counter_info *pinfo)
 			}
 
 			/* Scale is not required, some counters just don't have it. */
-			perf_scale = read_perf_rapl_scale(pinfo->device, pinfo->event);
+			perf_scale = read_perf_scale(pinfo->device, pinfo->event);
 			if (perf_scale == 0.0)
 				perf_scale = 1.0;
 
@@ -8262,8 +8635,8 @@ int added_perf_counters_init_(struct perf_counter_info *pinfo)
 			pinfo->scale = perf_scale;
 
 			if (debug)
-				printf("Add perf/%s/%s cpu%d: %d\n",
-				       pinfo->device, pinfo->event, cpu, pinfo->fd_perf_per_domain[next_domain]);
+				fprintf(stderr, "Add perf/%s/%s cpu%d: %d\n",
+					pinfo->device, pinfo->event, cpu, pinfo->fd_perf_per_domain[next_domain]);
 		}
 
 		pinfo = pinfo->next;
@@ -8286,6 +8659,313 @@ void added_perf_counters_init(void)
 		errx(1, "%s: %s", __func__, "package");
 }
 
+int parse_telem_info_file(int fd_dir, const char *info_filename, const char *format, unsigned long *output)
+{
+	int fd_telem_info;
+	FILE *file_telem_info;
+	unsigned long value;
+
+	fd_telem_info = openat(fd_dir, info_filename, O_RDONLY);
+	if (fd_telem_info == -1)
+		return -1;
+
+	file_telem_info = fdopen(fd_telem_info, "r");
+	if (file_telem_info == NULL) {
+		close(fd_telem_info);
+		return -1;
+	}
+
+	if (fscanf(file_telem_info, format, &value) != 1) {
+		fclose(file_telem_info);
+		return -1;
+	}
+
+	fclose(file_telem_info);
+
+	*output = value;
+
+	return 0;
+}
+
+struct pmt_mmio *pmt_mmio_open(unsigned int target_guid)
+{
+	DIR *dirp;
+	struct dirent *entry;
+	struct stat st;
+	unsigned int telem_idx;
+	int fd_telem_dir, fd_pmt;
+	unsigned long guid, size, offset;
+	size_t mmap_size;
+	void *mmio;
+	struct pmt_mmio *ret = NULL;
+
+	if (stat(SYSFS_TELEM_PATH, &st) == -1)
+		return NULL;
+
+	dirp = opendir(SYSFS_TELEM_PATH);
+	if (dirp == NULL)
+		return NULL;
+
+	for (;;) {
+		entry = readdir(dirp);
+
+		if (entry == NULL)
+			break;
+
+		if (strcmp(entry->d_name, ".") == 0)
+			continue;
+
+		if (strcmp(entry->d_name, "..") == 0)
+			continue;
+
+		if (sscanf(entry->d_name, "telem%u", &telem_idx) != 1)
+			continue;
+
+		if (fstatat(dirfd(dirp), entry->d_name, &st, 0) == -1) {
+			break;
+		}
+
+		if (!S_ISDIR(st.st_mode))
+			continue;
+
+		fd_telem_dir = openat(dirfd(dirp), entry->d_name, O_RDONLY);
+		if (fd_telem_dir == -1) {
+			break;
+		}
+
+		if (parse_telem_info_file(fd_telem_dir, "guid", "%lx", &guid)) {
+			close(fd_telem_dir);
+			break;
+		}
+
+		if (parse_telem_info_file(fd_telem_dir, "size", "%lu", &size)) {
+			close(fd_telem_dir);
+			break;
+		}
+
+		if (guid != target_guid) {
+			close(fd_telem_dir);
+			continue;
+		}
+
+		if (parse_telem_info_file(fd_telem_dir, "offset", "%lu", &offset)) {
+			close(fd_telem_dir);
+			break;
+		}
+
+		assert(offset == 0);
+
+		fd_pmt = openat(fd_telem_dir, "telem", O_RDONLY);
+		if (fd_pmt == -1)
+			goto loop_cleanup_and_break;
+
+		mmap_size = (size + 0x1000UL) & (~0x1000UL);
+		mmio = mmap(0, mmap_size, PROT_READ, MAP_SHARED, fd_pmt, 0);
+		if (mmio != MAP_FAILED) {
+
+			if (debug)
+				fprintf(stderr, "%s: 0x%lx mmaped at: %p\n", __func__, guid, mmio);
+
+			ret = calloc(1, sizeof(*ret));
+
+			if (!ret) {
+				fprintf(stderr, "%s: Failed to allocate pmt_mmio\n", __func__);
+				exit(1);
+			}
+
+			ret->guid = guid;
+			ret->mmio_base = mmio;
+			ret->pmt_offset = offset;
+			ret->size = size;
+
+			ret->next = pmt_mmios;
+			pmt_mmios = ret;
+		}
+
+loop_cleanup_and_break:
+		close(fd_pmt);
+		close(fd_telem_dir);
+		break;
+	}
+
+	closedir(dirp);
+
+	return ret;
+}
+
+struct pmt_mmio *pmt_mmio_find(unsigned int guid)
+{
+	struct pmt_mmio *pmmio = pmt_mmios;
+
+	while (pmmio) {
+		if (pmmio->guid == guid)
+			return pmmio;
+
+		pmmio = pmmio->next;
+	}
+
+	return NULL;
+}
+
+void *pmt_get_counter_pointer(struct pmt_mmio *pmmio, unsigned long counter_offset)
+{
+	char *ret;
+
+	/* Get base of mmaped PMT file. */
+	ret = (char *)pmmio->mmio_base;
+
+	/*
+	 * Apply PMT MMIO offset to obtain beginning of the mmaped telemetry data.
+	 * It's not guaranteed that the mmaped memory begins with the telemetry data
+	 *      - we might have to apply the offset first.
+	 */
+	ret += pmmio->pmt_offset;
+
+	/* Apply the counter offset to get the address to the mmaped counter. */
+	ret += counter_offset;
+
+	return ret;
+}
+
+struct pmt_mmio *pmt_add_guid(unsigned int guid)
+{
+	struct pmt_mmio *ret;
+
+	ret = pmt_mmio_find(guid);
+	if (!ret)
+		ret = pmt_mmio_open(guid);
+
+	return ret;
+}
+
+enum pmt_open_mode {
+	PMT_OPEN_TRY,		/* Open failure is not an error. */
+	PMT_OPEN_REQUIRED,	/* Open failure is a fatal error. */
+};
+
+struct pmt_counter *pmt_find_counter(struct pmt_counter *pcounter, const char *name)
+{
+	while (pcounter) {
+		if (strcmp(pcounter->name, name) == 0)
+			break;
+
+		pcounter = pcounter->next;
+	}
+
+	return pcounter;
+}
+
+struct pmt_counter **pmt_get_scope_root(enum counter_scope scope)
+{
+	switch (scope) {
+	case SCOPE_CPU:
+		return &sys.pmt_tp;
+	case SCOPE_CORE:
+		return &sys.pmt_cp;
+	case SCOPE_PACKAGE:
+		return &sys.pmt_pp;
+	}
+
+	__builtin_unreachable();
+}
+
+void pmt_counter_add_domain(struct pmt_counter *pcounter, unsigned long *pmmio, unsigned int domain_id)
+{
+	/* Make sure the new domain fits. */
+	if (domain_id >= pcounter->num_domains)
+		pmt_counter_resize(pcounter, domain_id + 1);
+
+	assert(pcounter->domains);
+	assert(domain_id < pcounter->num_domains);
+
+	pcounter->domains[domain_id].pcounter = pmmio;
+}
+
+int pmt_add_counter(unsigned int guid, const char *name, enum pmt_datatype type,
+		    unsigned int lsb, unsigned int msb, unsigned int offset, enum counter_scope scope,
+		    enum counter_format format, unsigned int domain_id, enum pmt_open_mode mode)
+{
+	struct pmt_mmio *mmio;
+	struct pmt_counter *pcounter;
+	struct pmt_counter **const pmt_root = pmt_get_scope_root(scope);
+	bool new_counter = false;
+	int conflict = 0;
+
+	if (lsb > msb) {
+		fprintf(stderr, "%s: %s: `%s` must be satisfied\n", __func__, "lsb <= msb", name);
+		exit(1);
+	}
+
+	if (msb >= 64) {
+		fprintf(stderr, "%s: %s: `%s` must be satisfied\n", __func__, "msb < 64", name);
+		exit(1);
+	}
+
+	mmio = pmt_add_guid(guid);
+	if (!mmio) {
+		if (mode != PMT_OPEN_TRY) {
+			fprintf(stderr, "%s: failed to map PMT MMIO for guid %x\n", __func__, guid);
+			exit(1);
+		}
+
+		return 1;
+	}
+
+	if (offset >= mmio->size) {
+		if (mode != PMT_OPEN_TRY) {
+			fprintf(stderr, "%s: offset %u outside of PMT MMIO size %u\n", __func__, offset, mmio->size);
+			exit(1);
+		}
+
+		return 1;
+	}
+
+	pcounter = pmt_find_counter(*pmt_root, name);
+	if (!pcounter) {
+		pcounter = calloc(1, sizeof(*pcounter));
+		new_counter = true;
+	}
+
+	if (new_counter) {
+		strncpy(pcounter->name, name, ARRAY_SIZE(pcounter->name) - 1);
+		pcounter->type = type;
+		pcounter->scope = scope;
+		pcounter->lsb = lsb;
+		pcounter->msb = msb;
+		pcounter->format = format;
+	} else {
+		conflict += pcounter->type != type;
+		conflict += pcounter->scope != scope;
+		conflict += pcounter->lsb != lsb;
+		conflict += pcounter->msb != msb;
+		conflict += pcounter->format != format;
+	}
+
+	if (conflict) {
+		fprintf(stderr, "%s: conflicting parameters for the PMT counter with the same name %s\n",
+			__func__, name);
+		exit(1);
+	}
+
+	pmt_counter_add_domain(pcounter, pmt_get_counter_pointer(mmio, offset), domain_id);
+
+	if (new_counter) {
+		pcounter->next = *pmt_root;
+		*pmt_root = pcounter;
+	}
+
+	return 0;
+}
+
+void pmt_init(void)
+{
+	if (BIC_IS_ENABLED(BIC_Diec6)) {
+		pmt_add_counter(PMT_MTL_DC6_GUID, "Die%c6", PMT_TYPE_XTAL_TIME, PMT_COUNTER_MTL_DC6_LSB,
+				PMT_COUNTER_MTL_DC6_MSB, PMT_COUNTER_MTL_DC6_OFFSET, SCOPE_PACKAGE, FORMAT_DELTA,
+				0, PMT_OPEN_TRY);
+	}
+}
+
 void turbostat_init()
 {
 	setup_all_buffers(true);
@@ -8300,6 +8980,7 @@ void turbostat_init()
 	rapl_perf_init();
 	cstate_perf_init();
 	added_perf_counters_init();
+	pmt_init();
 
 	for_all_cpus(get_cpu_type, ODD_COUNTERS);
 	for_all_cpus(get_cpu_type, EVEN_COUNTERS);
@@ -8390,7 +9071,7 @@ int get_and_dump_counters(void)
 
 void print_version()
 {
-	fprintf(outf, "turbostat version 2024.05.10 - Len Brown <lenb@kernel.org>\n");
+	fprintf(outf, "turbostat version 2024.07.26 - Len Brown <lenb@kernel.org>\n");
 }
 
 #define COMMAND_LINE_SIZE 2048
@@ -8422,7 +9103,7 @@ struct msr_counter *find_msrp_by_name(struct msr_counter *head, char *name)
 
 	for (mp = head; mp; mp = mp->next) {
 		if (debug)
-			printf("%s: %s %s\n", __func__, name, mp->name);
+			fprintf(stderr, "%s: %s %s\n", __func__, name, mp->name);
 		if (!strncmp(name, mp->name, strlen(mp->name)))
 			return mp;
 	}
@@ -8439,8 +9120,8 @@ int add_counter(unsigned int msr_num, char *path, char *name,
 		errx(1, "Requested MSR counter 0x%x, but in --no-msr mode", msr_num);
 
 	if (debug)
-		printf("%s(msr%d, %s, %s, width%d, scope%d, type%d, format%d, flags%x, id%d)\n", __func__, msr_num,
-		       path, name, width, scope, type, format, flags, id);
+		fprintf(stderr, "%s(msr%d, %s, %s, width%d, scope%d, type%d, format%d, flags%x, id%d)\n",
+			__func__, msr_num, path, name, width, scope, type, format, flags, id);
 
 	switch (scope) {
 
@@ -8448,7 +9129,7 @@ int add_counter(unsigned int msr_num, char *path, char *name,
 		msrp = find_msrp_by_name(sys.tp, name);
 		if (msrp) {
 			if (debug)
-				printf("%s: %s FOUND\n", __func__, name);
+				fprintf(stderr, "%s: %s FOUND\n", __func__, name);
 			break;
 		}
 		if (sys.added_thread_counters++ >= MAX_ADDED_THREAD_COUNTERS) {
@@ -8460,7 +9141,7 @@ int add_counter(unsigned int msr_num, char *path, char *name,
 		msrp = find_msrp_by_name(sys.cp, name);
 		if (msrp) {
 			if (debug)
-				printf("%s: %s FOUND\n", __func__, name);
+				fprintf(stderr, "%s: %s FOUND\n", __func__, name);
 			break;
 		}
 		if (sys.added_core_counters++ >= MAX_ADDED_CORE_COUNTERS) {
@@ -8472,7 +9153,7 @@ int add_counter(unsigned int msr_num, char *path, char *name,
 		msrp = find_msrp_by_name(sys.pp, name);
 		if (msrp) {
 			if (debug)
-				printf("%s: %s FOUND\n", __func__, name);
+				fprintf(stderr, "%s: %s FOUND\n", __func__, name);
 			break;
 		}
 		if (sys.added_package_counters++ >= MAX_ADDED_PACKAGE_COUNTERS) {
@@ -8617,13 +9298,13 @@ int add_perf_counter(const char *perf_device, const char *perf_event, const char
 
 	// FIXME: we might not have debug here yet
 	if (debug)
-		printf("%s: %s/%s, name: %s, scope%d\n",
-		       __func__, pinfo->device, pinfo->event, pinfo->name, pinfo->scope);
+		fprintf(stderr, "%s: %s/%s, name: %s, scope%d\n",
+			__func__, pinfo->device, pinfo->event, pinfo->name, pinfo->scope);
 
 	return 0;
 }
 
-void parse_add_command(char *add_command)
+void parse_add_command_msr(char *add_command)
 {
 	int msr_num = 0;
 	char *path = NULL;
@@ -8746,6 +9427,195 @@ next:
 		help();
 		exit(1);
 	}
+}
+
+bool starts_with(const char *str, const char *prefix)
+{
+	return strncmp(prefix, str, strlen(prefix)) == 0;
+}
+
+void parse_add_command_pmt(char *add_command)
+{
+	char *name = NULL;
+	char *type_name = NULL;
+	char *format_name = NULL;
+	unsigned int offset;
+	unsigned int lsb;
+	unsigned int msb;
+	unsigned int guid;
+	unsigned int domain_id;
+	enum counter_scope scope = 0;
+	enum pmt_datatype type = PMT_TYPE_RAW;
+	enum counter_format format = FORMAT_RAW;
+	bool has_offset = false;
+	bool has_lsb = false;
+	bool has_msb = false;
+	bool has_format = true;	/* Format has a default value. */
+	bool has_guid = false;
+	bool has_scope = false;
+	bool has_type = true;	/* Type has a default value. */
+
+	/* Consume the "pmt," prefix. */
+	add_command = strchr(add_command, ',');
+	if (!add_command) {
+		help();
+		exit(1);
+	}
+	++add_command;
+
+	while (add_command) {
+		if (starts_with(add_command, "name=")) {
+			name = add_command + strlen("name=");
+			goto next;
+		}
+
+		if (starts_with(add_command, "type=")) {
+			type_name = add_command + strlen("type=");
+			goto next;
+		}
+
+		if (starts_with(add_command, "domain=")) {
+			const size_t prefix_len = strlen("domain=");
+
+			if (sscanf(add_command + prefix_len, "cpu%u", &domain_id) == 1) {
+				scope = SCOPE_CPU;
+				has_scope = true;
+			} else if (sscanf(add_command + prefix_len, "core%u", &domain_id) == 1) {
+				scope = SCOPE_CORE;
+				has_scope = true;
+			} else if (sscanf(add_command + prefix_len, "package%u", &domain_id) == 1) {
+				scope = SCOPE_PACKAGE;
+				has_scope = true;
+			}
+
+			if (!has_scope) {
+				printf("%s: invalid value for scope. Expected cpu%%u, core%%u or package%%u.\n",
+				       __func__);
+				exit(1);
+			}
+
+			goto next;
+		}
+
+		if (starts_with(add_command, "format=")) {
+			format_name = add_command + strlen("format=");
+			goto next;
+		}
+
+		if (sscanf(add_command, "offset=%u", &offset) == 1) {
+			has_offset = true;
+			goto next;
+		}
+
+		if (sscanf(add_command, "lsb=%u", &lsb) == 1) {
+			has_lsb = true;
+			goto next;
+		}
+
+		if (sscanf(add_command, "msb=%u", &msb) == 1) {
+			has_msb = true;
+			goto next;
+		}
+
+		if (sscanf(add_command, "guid=%x", &guid) == 1) {
+			has_guid = true;
+			goto next;
+		}
+
+next:
+		add_command = strchr(add_command, ',');
+		if (add_command) {
+			*add_command = '\0';
+			add_command++;
+		}
+	}
+
+	if (!name) {
+		printf("%s: missing %s\n", __func__, "name");
+		exit(1);
+	}
+
+	if (strlen(name) >= PMT_COUNTER_NAME_SIZE_BYTES) {
+		printf("%s: name has to be at most %d characters long\n", __func__, PMT_COUNTER_NAME_SIZE_BYTES);
+		exit(1);
+	}
+
+	if (format_name) {
+		has_format = false;
+
+		if (strcmp("raw", format_name) == 0) {
+			format = FORMAT_RAW;
+			has_format = true;
+		}
+
+		if (strcmp("delta", format_name) == 0) {
+			format = FORMAT_DELTA;
+			has_format = true;
+		}
+
+		if (!has_format) {
+			fprintf(stderr, "%s: Invalid format %s. Expected raw or delta\n", __func__, format_name);
+			exit(1);
+		}
+	}
+
+	if (type_name) {
+		has_type = false;
+
+		if (strcmp("raw", type_name) == 0) {
+			type = PMT_TYPE_RAW;
+			has_type = true;
+		}
+
+		if (strcmp("txtal_time", type_name) == 0) {
+			type = PMT_TYPE_XTAL_TIME;
+			has_type = true;
+		}
+
+		if (!has_type) {
+			printf("%s: invalid %s: %s\n", __func__, "type", type_name);
+			exit(1);
+		}
+	}
+
+	if (!has_offset) {
+		printf("%s : missing %s\n", __func__, "offset");
+		exit(1);
+	}
+
+	if (!has_lsb) {
+		printf("%s: missing %s\n", __func__, "lsb");
+		exit(1);
+	}
+
+	if (!has_msb) {
+		printf("%s: missing %s\n", __func__, "msb");
+		exit(1);
+	}
+
+	if (!has_guid) {
+		printf("%s: missing %s\n", __func__, "guid");
+		exit(1);
+	}
+
+	if (!has_scope) {
+		printf("%s: missing %s\n", __func__, "scope");
+		exit(1);
+	}
+
+	if (lsb > msb) {
+		printf("%s: lsb > msb doesn't make sense\n", __func__);
+		exit(1);
+	}
+
+	pmt_add_counter(guid, name, type, lsb, msb, offset, scope, format, domain_id, PMT_OPEN_REQUIRED);
+}
+
+void parse_add_command(char *add_command)
+{
+	if (strncmp(add_command, "pmt", strlen("pmt")) == 0)
+		return parse_add_command_pmt(add_command);
+	return parse_add_command_msr(add_command);
 }
 
 int is_deferred_add(char *name)

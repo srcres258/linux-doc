@@ -242,10 +242,6 @@ static void hwprobe_one_pair(struct riscv_hwprobe *pair,
 		pair->value = riscv_timebase;
 		break;
 
-	case RISCV_HWPROBE_KEY_VENDOR_EXT_THEAD_0:
-		hwprobe_isa_vendor_ext_thead_0(pair, cpus);
-		break;
-
 	/*
 	 * For forward compatibility, unknown keys don't fail the whole
 	 * call, but get their element key set to -1 and value set to 0

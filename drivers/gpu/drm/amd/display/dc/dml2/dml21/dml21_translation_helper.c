@@ -788,14 +788,6 @@ static void populate_dml21_plane_config_from_plane_state(struct dml2_context *dm
 		 * certain cases. Hence do corrective active and disable scaling.
 		 */
 		plane->composition.scaler_info.enabled = false;
-	} else if ((plane_state->ctx->dc->config.use_spl == true) &&
-		(plane->composition.scaler_info.enabled == false)) {
-		/* To enable sharpener for 1:1, scaler must be enabled.  If use_spl is set, then
-		 *  allow case where ratio is 1 but taps > 1
-		 */
-		if ((scaler_data->taps.h_taps > 1) || (scaler_data->taps.v_taps > 1) ||
-			(scaler_data->taps.h_taps_c > 1) || (scaler_data->taps.v_taps_c > 1))
-			plane->composition.scaler_info.enabled = true;
 	}
 
 	/* always_scale is only used for debug purposes not used in production but has to be
@@ -966,6 +958,11 @@ bool dml21_map_dc_state_into_dml_display_cfg(const struct dc *in_dc, struct dc_s
 	dml_dispcfg->hostvm_enable = false;
 	dml_dispcfg->minimize_det_reallocation = true;
 	dml_dispcfg->overrides.enable_subvp_implicit_pmo = true;
+
+	if (in_dc->debug.disable_unbounded_requesting) {
+		dml_dispcfg->overrides.hw.force_unbounded_requesting.enable = true;
+		dml_dispcfg->overrides.hw.force_unbounded_requesting.value = false;
+	}
 
 	for (stream_index = 0; stream_index < context->stream_count; stream_index++) {
 		disp_cfg_stream_location = map_stream_to_dml21_display_cfg(dml_ctx, context->streams[stream_index]);
