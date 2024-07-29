@@ -129,14 +129,6 @@ bool intel_dp_is_edp(struct intel_dp *intel_dp)
 	return dig_port->base.type == INTEL_OUTPUT_EDP;
 }
 
-bool intel_dp_as_sdp_supported(struct intel_dp *intel_dp)
-{
-	struct drm_i915_private *i915 = dp_to_i915(intel_dp);
-
-	return HAS_AS_SDP(i915) &&
-		drm_dp_as_sdp_supported(&intel_dp->aux, intel_dp->dpcd);
-}
-
 static void intel_dp_unset_edid(struct intel_dp *intel_dp);
 
 /* Is link rate UHBR and thus 128b/132b? */
@@ -2625,8 +2617,7 @@ static void intel_dp_compute_as_sdp(struct intel_dp *intel_dp,
 	const struct drm_display_mode *adjusted_mode =
 		&crtc_state->hw.adjusted_mode;
 
-	if (!crtc_state->vrr.enable ||
-	    !intel_dp_as_sdp_supported(intel_dp))
+	if (!crtc_state->vrr.enable || intel_dp->as_sdp_supported)
 		return;
 
 	crtc_state->infoframes.enable |= intel_hdmi_infoframe_enable(DP_SDP_ADAPTIVE_SYNC);
@@ -2875,7 +2866,6 @@ static void intel_dp_queue_modeset_retry_work(struct intel_connector *connector)
 		drm_connector_put(&connector->base);
 }
 
-/* NOTE: @state is only valid for MST links and can be %NULL for SST. */
 void
 intel_dp_queue_modeset_retry_for_link(struct intel_atomic_state *state,
 				      struct intel_encoder *encoder,
@@ -2884,7 +2874,6 @@ intel_dp_queue_modeset_retry_for_link(struct intel_atomic_state *state,
 	struct intel_connector *connector;
 	struct intel_digital_connector_state *conn_state;
 	struct intel_dp *intel_dp = enc_to_intel_dp(encoder);
-	struct drm_i915_private *i915 = dp_to_i915(intel_dp);
 	int i;
 
 	if (!intel_crtc_has_type(crtc_state, INTEL_OUTPUT_DP_MST)) {
@@ -2892,9 +2881,6 @@ intel_dp_queue_modeset_retry_for_link(struct intel_atomic_state *state,
 
 		return;
 	}
-
-	if (drm_WARN_ON(&i915->drm, !state))
-		return;
 
 	for_each_new_intel_connector_in_state(state, connector, conn_state, i) {
 		if (!conn_state->base.crtc)
@@ -3434,7 +3420,7 @@ static void intel_dp_get_pcon_dsc_cap(struct intel_dp *intel_dp)
 
 static int intel_dp_pcon_get_frl_mask(u8 frl_bw_mask)
 {
-	int bw_gbps[] = {9, 18, 24, 32, 40, 48};
+	static const int bw_gbps[] = {9, 18, 24, 32, 40, 48};
 	int i;
 
 	for (i = ARRAY_SIZE(bw_gbps) - 1; i >= 0; i--) {
@@ -4383,8 +4369,11 @@ void intel_dp_set_infoframes(struct intel_encoder *encoder,
 	if (!enable && HAS_DSC(dev_priv))
 		val &= ~VDIP_ENABLE_PPS;
 
-	/* When PSR is enabled, this routine doesn't disable VSC DIP */
-	if (!crtc_state->has_psr)
+	/*
+	 * This routine disables VSC DIP if the function is called
+	 * to disable SDP or if it does not have PSR
+	 */
+	if (!enable || !crtc_state->has_psr)
 		val &= ~VIDEO_DIP_ENABLE_VSC_HSW;
 
 	intel_de_write(dev_priv, reg, val);
@@ -5251,8 +5240,6 @@ static int intel_dp_retrain_link(struct intel_encoder *encoder,
 {
 	struct drm_i915_private *dev_priv = to_i915(encoder->base.dev);
 	struct intel_dp *intel_dp = enc_to_intel_dp(encoder);
-	struct intel_crtc *crtc;
-	bool mst_output = false;
 	u8 pipe_mask;
 	int ret;
 
@@ -5281,78 +5268,28 @@ static int intel_dp_retrain_link(struct intel_encoder *encoder,
 		    encoder->base.base.id, encoder->base.name,
 		    str_yes_no(intel_dp->link.force_retrain));
 
-	for_each_intel_crtc_in_pipe_mask(&dev_priv->drm, crtc, pipe_mask) {
-		const struct intel_crtc_state *crtc_state =
-			to_intel_crtc_state(crtc->base.state);
+	ret = intel_modeset_commit_pipes(dev_priv, pipe_mask, ctx);
+	if (ret == -EDEADLK)
+		return ret;
 
-		if (intel_crtc_has_type(crtc_state, INTEL_OUTPUT_DP_MST)) {
-			mst_output = true;
-			break;
-		}
+	intel_dp->link.force_retrain = false;
 
-		/* Suppress underruns caused by re-training */
-		intel_set_cpu_fifo_underrun_reporting(dev_priv, crtc->pipe, false);
-		if (crtc_state->has_pch_encoder)
-			intel_set_pch_fifo_underrun_reporting(dev_priv,
-							      intel_crtc_pch_transcoder(crtc), false);
-	}
-
-	/* TODO: use a modeset for SST as well. */
-	if (mst_output) {
-		ret = intel_modeset_commit_pipes(dev_priv, pipe_mask, ctx);
-
-		if (ret && ret != -EDEADLK)
-			drm_dbg_kms(&dev_priv->drm,
-				    "[ENCODER:%d:%s] link retraining failed: %pe\n",
-				    encoder->base.base.id, encoder->base.name,
-				    ERR_PTR(ret));
-
-		goto out;
-	}
-
-	for_each_intel_crtc_in_pipe_mask(&dev_priv->drm, crtc, pipe_mask) {
-		const struct intel_crtc_state *crtc_state =
-			to_intel_crtc_state(crtc->base.state);
-
-		intel_dp->link_trained = false;
-
-		intel_dp_check_frl_training(intel_dp);
-		intel_dp_pcon_dsc_configure(intel_dp, crtc_state);
-		intel_dp_start_link_train(NULL, intel_dp, crtc_state);
-		intel_dp_stop_link_train(intel_dp, crtc_state);
-		break;
-	}
-
-	for_each_intel_crtc_in_pipe_mask(&dev_priv->drm, crtc, pipe_mask) {
-		const struct intel_crtc_state *crtc_state =
-			to_intel_crtc_state(crtc->base.state);
-
-		/* Keep underrun reporting disabled until things are stable */
-		intel_crtc_wait_for_next_vblank(crtc);
-
-		intel_set_cpu_fifo_underrun_reporting(dev_priv, crtc->pipe, true);
-		if (crtc_state->has_pch_encoder)
-			intel_set_pch_fifo_underrun_reporting(dev_priv,
-							      intel_crtc_pch_transcoder(crtc), true);
-	}
-
-out:
-	if (ret != -EDEADLK)
-		intel_dp->link.force_retrain = false;
+	if (ret)
+		drm_dbg_kms(&dev_priv->drm,
+			    "[ENCODER:%d:%s] link retraining failed: %pe\n",
+			    encoder->base.base.id, encoder->base.name,
+			    ERR_PTR(ret));
 
 	return ret;
 }
 
 void intel_dp_link_check(struct intel_encoder *encoder)
 {
-	struct drm_i915_private *i915 = to_i915(encoder->base.dev);
 	struct drm_modeset_acquire_ctx ctx;
 	int ret;
 
 	intel_modeset_lock_ctx_retry(&ctx, NULL, 0, ret)
 		ret = intel_dp_retrain_link(encoder, &ctx);
-
-	drm_WARN_ON(&i915->drm, ret);
 }
 
 void intel_dp_check_link_state(struct intel_dp *intel_dp)
@@ -5902,6 +5839,15 @@ intel_dp_detect_dsc_caps(struct intel_dp *intel_dp, struct intel_connector *conn
 					  connector);
 }
 
+static void
+intel_dp_detect_sdp_caps(struct intel_dp *intel_dp)
+{
+	struct drm_i915_private *i915 = dp_to_i915(intel_dp);
+
+	intel_dp->as_sdp_supported = HAS_AS_SDP(i915) &&
+		drm_dp_as_sdp_supported(&intel_dp->aux, intel_dp->dpcd);
+}
+
 static int
 intel_dp_detect(struct drm_connector *connector,
 		struct drm_modeset_acquire_ctx *ctx,
@@ -5959,6 +5905,8 @@ intel_dp_detect(struct drm_connector *connector,
 		intel_psr_init_dpcd(intel_dp);
 
 	intel_dp_detect_dsc_caps(intel_dp, intel_connector);
+
+	intel_dp_detect_sdp_caps(intel_dp);
 
 	intel_dp_mst_configure(intel_dp);
 
