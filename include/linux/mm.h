@@ -2915,9 +2915,10 @@ static inline spinlock_t *ptlock_ptr(struct ptdesc *ptdesc)
 }
 #endif /* ALLOC_SPLIT_PTLOCKS */
 
-static inline spinlock_t *pte_lockptr(struct mm_struct *mm, pmd_t *pmd)
+static inline spinlock_t *pte_lockptr(struct mm_struct *mm, pte_t *pte)
 {
-	return ptlock_ptr(page_ptdesc(pmd_page(*pmd)));
+	/* PTE page tables don't currently exceed a single page. */
+	return ptlock_ptr(virt_to_ptdesc(pte));
 }
 
 static inline bool ptlock_init(struct ptdesc *ptdesc)
@@ -2940,7 +2941,7 @@ static inline bool ptlock_init(struct ptdesc *ptdesc)
 /*
  * We use mm->page_table_lock to guard all pagetable pages of the mm.
  */
-static inline spinlock_t *pte_lockptr(struct mm_struct *mm, pmd_t *pmd)
+static inline spinlock_t *pte_lockptr(struct mm_struct *mm, pte_t *pte)
 {
 	return &mm->page_table_lock;
 }
