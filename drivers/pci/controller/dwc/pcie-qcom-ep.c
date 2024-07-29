@@ -186,6 +186,8 @@ struct qcom_pcie_ep_cfg {
  * @link_status: PCIe Link status
  * @global_irq: Qualcomm PCIe specific Global IRQ
  * @perst_irq: PERST# IRQ
+ * @cleanup_pending: Cleanup is pending for the controller (because refclk is
+ *                   needed for cleanup)
  */
 struct qcom_pcie_ep {
 	struct dw_pcie pci;
@@ -214,6 +216,7 @@ struct qcom_pcie_ep {
 	enum qcom_pcie_ep_link_status link_status;
 	int global_irq;
 	int perst_irq;
+	bool cleanup_pending;
 };
 
 static int qcom_pcie_ep_core_reset(struct qcom_pcie_ep *pcie_ep)
@@ -389,6 +392,12 @@ static int qcom_pcie_perst_deassert(struct dw_pcie *pci)
 		return ret;
 	}
 
+	if (pcie_ep->cleanup_pending) {
+		pci_epc_deinit_notify(pci->ep.epc);
+		dw_pcie_ep_cleanup(&pci->ep);
+		pcie_ep->cleanup_pending = false;
+	}
+
 	/* Assert WAKE# to RC to indicate device is ready */
 	gpiod_set_value_cansleep(pcie_ep->wake, 1);
 	usleep_range(WAKE_DELAY_US, WAKE_DELAY_US + 500);
@@ -522,10 +531,9 @@ static void qcom_pcie_perst_assert(struct dw_pcie *pci)
 {
 	struct qcom_pcie_ep *pcie_ep = to_pcie_ep(pci);
 
-	pci_epc_deinit_notify(pci->ep.epc);
-	dw_pcie_ep_cleanup(&pci->ep);
 	qcom_pcie_disable_resources(pcie_ep);
 	pcie_ep->link_status = QCOM_PCIE_EP_LINK_DISABLED;
+	pcie_ep->cleanup_pending = true;
 }
 
 /* Common DWC controller ops */
