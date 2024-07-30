@@ -999,29 +999,26 @@ static int __comp_algorithm_store(struct zram *zram, u32 prio, const char *buf)
 	return 0;
 }
 
-static void __reset_comp_config(struct zram *zram, u32 prio)
+static void comp_params_reset(struct zram *zram, u32 prio)
 {
-	struct zcomp_config *config = &zram->configs[prio];
+	struct zcomp_params *params = &zram->params[prio];
 
-	/* config->private should be freed by the backend */
-	WARN_ON_ONCE(config->private);
-
-	vfree(config->dict);
-	config->level = ZCOMP_CONFIG_NO_LEVEL;
-	config->dict_sz = 0;
-	config->dict = NULL;
+	vfree(params->dict);
+	params->level = ZCOMP_PARAM_NO_LEVEL;
+	params->dict_sz = 0;
+	params->dict = NULL;
 }
 
-static int comp_config_store(struct zram *zram, u32 prio, s32 level,
+static int comp_params_store(struct zram *zram, u32 prio, s32 level,
 			     const char *dict_path)
 {
 	ssize_t sz = 0;
 
-	__reset_comp_config(zram, prio);
+	comp_params_reset(zram, prio);
 
 	if (dict_path) {
 		sz = kernel_read_file_from_path(dict_path, 0,
-						&zram->configs[prio].dict,
+						&zram->params[prio].dict,
 						INT_MAX,
 						NULL,
 						READING_POLICY);
@@ -1029,8 +1026,8 @@ static int comp_config_store(struct zram *zram, u32 prio, s32 level,
 			return -EINVAL;
 	}
 
-	zram->configs[prio].level = level;
-	zram->configs[prio].dict_sz = sz;
+	zram->params[prio].dict_sz = sz;
+	zram->params[prio].level = level;
 	return 0;
 }
 
@@ -1051,7 +1048,7 @@ static ssize_t comp_algorithm_store(struct device *dev,
 	struct zram *zram = dev_to_zram(dev);
 	char *args, *param, *val;
 	char *alg = NULL, *dict_path = NULL;
-	s32 level = ZCOMP_CONFIG_NO_LEVEL;
+	s32 level = ZCOMP_PARAM_NO_LEVEL;
 	int ret;
 
 	args = skip_spaces(buf);
@@ -1088,7 +1085,7 @@ static ssize_t comp_algorithm_store(struct device *dev,
 	if (!alg)
 		return -EINVAL;
 
-	ret = comp_config_store(zram, ZRAM_PRIMARY_COMP, level, dict_path);
+	ret = comp_params_store(zram, ZRAM_PRIMARY_COMP, level, dict_path);
 	if (!ret)
 		ret = __comp_algorithm_store(zram, ZRAM_PRIMARY_COMP, alg);
 	return ret ? ret : len;
@@ -1123,7 +1120,7 @@ static ssize_t recomp_algorithm_store(struct device *dev,
 	int prio = ZRAM_SECONDARY_COMP;
 	char *args, *param, *val;
 	char *alg = NULL, *dict_path = NULL;
-	s32 level = ZCOMP_CONFIG_NO_LEVEL;
+	s32 level = ZCOMP_PARAM_NO_LEVEL;
 	int ret;
 
 	args = skip_spaces(buf);
@@ -1164,7 +1161,7 @@ static ssize_t recomp_algorithm_store(struct device *dev,
 	if (prio < ZRAM_SECONDARY_COMP || prio >= ZRAM_MAX_COMPS)
 		return -EINVAL;
 
-	ret = comp_config_store(zram, prio, level, dict_path);
+	ret = comp_params_store(zram, prio, level, dict_path);
 	if (!ret)
 		ret = __comp_algorithm_store(zram, prio, alg);
 	return ret ? ret : len;
@@ -2069,12 +2066,12 @@ static void zram_slot_free_notify(struct block_device *bdev,
 	zram_slot_unlock(zram, index);
 }
 
-static void zram_reset_comp_configs(struct zram *zram)
+static void zram_comp_params_reset(struct zram *zram)
 {
 	u32 prio;
 
 	for (prio = 0; prio < ZRAM_MAX_COMPS; prio++) {
-		__reset_comp_config(zram, prio);
+		comp_params_reset(zram, prio);
 	}
 }
 
@@ -2092,7 +2089,7 @@ static void zram_destroy_comps(struct zram *zram)
 		zram->num_active_comps--;
 	}
 
-	zram_reset_comp_configs(zram);
+	zram_comp_params_reset(zram);
 }
 
 static void zram_reset_device(struct zram *zram)
@@ -2151,7 +2148,7 @@ static ssize_t disksize_store(struct device *dev,
 			continue;
 
 		comp = zcomp_create(zram->comp_algs[prio],
-				    &zram->configs[prio]);
+				    &zram->params[prio]);
 		if (IS_ERR(comp)) {
 			pr_err("Cannot initialise %s compressing backend\n",
 			       zram->comp_algs[prio]);
@@ -2356,7 +2353,7 @@ static int zram_add(void)
 	if (ret)
 		goto out_cleanup_disk;
 
-	zram_reset_comp_configs(zram);
+	zram_comp_params_reset(zram);
 	comp_algorithm_set(zram, ZRAM_PRIMARY_COMP, default_compressor);
 
 	zram_debugfs_register(zram);

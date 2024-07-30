@@ -240,21 +240,22 @@ size_t zstd_free_cctx(zstd_cctx* cctx);
 typedef ZSTD_CDict zstd_cdict;
 
 /**
- * zstd_create_cdict_advanced() - Create compression dictionary
+ * zstd_create_cdict_byreference() - Create compression dictionary
  * @dict:              Pointer to dictionary buffer.
  * @dict_size:         Size of the dictionary buffer.
  * @dict_load_method:  Dictionary load method.
  * @dict_content_type: Dictionary content type.
  * @custom_mem:        Memory allocator.
  *
+ * Note, this uses @dict by reference (ZSTD_dlm_byRef), so it should be
+ * free before zstd_cdict is destroyed.
+ *
  * Return:             NULL on error, pointer to compression dictionary
  *                     otherwise.
  */
-zstd_cdict *zstd_create_cdict_advanced(const void *dict, size_t dict_size,
-				       zstd_dict_load_method dict_load_method,
-				       zstd_dict_content_type dict_content_type,
-				       zstd_compression_parameters cparams,
-				       zstd_custom_mem custom_mem);
+zstd_cdict *zstd_create_cdict_byreference(const void *dict, size_t dict_size,
+					  zstd_compression_parameters cparams,
+					  zstd_custom_mem custom_mem);
 
 /**
  * zstd_free_cdict() - Free compression dictionary
@@ -328,20 +329,21 @@ size_t zstd_decompress_dctx(zstd_dctx *dctx, void *dst, size_t dst_capacity,
 typedef ZSTD_DDict zstd_ddict;
 
 /**
- * zstd_create_ddict_advanced() - Create decompression dictionary
+ * zstd_create_ddict_byreference() - Create decompression dictionary
  * @dict:              Pointer to dictionary buffer.
  * @dict_size:         Size of the dictionary buffer.
  * @dict_load_method:  Dictionary load method.
  * @dict_content_type: Dictionary content type.
  * @custom_mem:        Memory allocator.
  *
+ * Note, this uses @dict by reference (ZSTD_dlm_byRef), so it should be
+ * free before zstd_ddict is destroyed.
+ *
  * Return:             NULL on error, pointer to decompression dictionary
  *                     otherwise.
  */
-zstd_ddict *zstd_create_ddict_advanced(const void *dict, size_t dict_size,
-				       zstd_dict_load_method dict_load_method,
-				       zstd_dict_content_type dict_content_type,
-				       zstd_custom_mem custom_mem);
+zstd_ddict *zstd_create_ddict_byreference(const void *dict, size_t dict_size,
+					  zstd_custom_mem custom_mem);
 /**
  * zstd_free_ddict() - Free decompression dictionary
  * @dict:         Pointer to the dictionary.

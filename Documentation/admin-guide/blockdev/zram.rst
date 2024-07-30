@@ -123,6 +123,13 @@ path to the dictionary along with other parameters::
 	#pass path to pre-trained dictionary
 	echo "algo=zstd dict=/etc/dictioary" > /sys/block/zram0/comp_algorithm
 
+Parameters are algorithm specific: not all algorithms support pre-trained
+dictionaries, not all algorithms support 'level'. Furthermore, for certain
+algorithms 'level' controls the compression level (the higher the value the
+better the compression ratio, it even can take negatives values for some
+algorithms), for other algorithms 'level' is acceleration level (the higher
+the value the lower the compression ratio).
+
 4) Set Disksize
 ===============
 

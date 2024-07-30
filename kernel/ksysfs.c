@@ -93,21 +93,16 @@ static ssize_t profiling_store(struct kobject *kobj,
 {
 	static DEFINE_MUTEX(lock);
 	int ret;
+	static DEFINE_MUTEX(lock);
 
 	/*
 	 * We need serialization, for profile_setup() initializes prof_on
-	 * value. Also, use killable wait in case memory allocation from
-	 * profile_init() triggered the OOM killer and chose current thread
-	 * blocked here.
+	 * value and profile_init() must not reallocate prof_buffer after
+	 * once allocated.
 	 */
-	if (mutex_lock_killable(&lock))
-		return -EINTR;
-
-	if (prof_on) {
-		count = -EEXIST;
-		goto out;
-	}
-
+	guard(mutex)(&lock);
+	if (prof_on)
+		return -EEXIST;
 	/*
 	 * This eventually calls into get_option() which
 	 * has a ton of callers and is not const.  It is

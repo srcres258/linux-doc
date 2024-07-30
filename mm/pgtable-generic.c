@@ -313,7 +313,7 @@ pte_t *pte_offset_map_nolock(struct mm_struct *mm, pmd_t *pmd,
 
 	pte = __pte_offset_map(pmd, addr, &pmdval);
 	if (likely(pte))
-		*ptlp = pte_lockptr(mm, &pmdval);
+		*ptlp = pte_lockptr(mm, pte);
 	return pte;
 }
 
@@ -371,7 +371,7 @@ again:
 	pte = __pte_offset_map(pmd, addr, &pmdval);
 	if (unlikely(!pte))
 		return pte;
-	ptl = pte_lockptr(mm, &pmdval);
+	ptl = pte_lockptr(mm, pte);
 	spin_lock(ptl);
 	if (likely(pmd_same(pmdval, pmdp_get_lockless(pmd)))) {
 		*ptlp = ptl;

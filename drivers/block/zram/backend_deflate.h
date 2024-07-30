@@ -5,6 +5,6 @@
 
 #include "zcomp.h"
 
-extern struct zcomp_backend backend_deflate;
+extern const struct zcomp_ops backend_deflate;
 
 #endif /* __BACKEND_DEFLATE_H__ */

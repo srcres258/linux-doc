@@ -31,9 +31,10 @@ is_enabled()
 	grep -q "^$1=y$" include/config/auto.conf
 }
 
-# Set XZ_VERSION (and LIBLZMA_VERSION). This is needed to disable features
-# that aren't available in old XZ Utils versions.
-eval "$($XZ --robot --version)" || exit
+# XZ_VERSION is needed to disable features that aren't available in
+# old XZ Utils versions.
+XZ_VERSION=$($XZ --robot --version) || exit
+XZ_VERSION=$(printf '%s\n' "$XZ_VERSION" | sed -n 's/^XZ_VERSION=//p')
 
 # Assume that no BCJ filter is available.
 BCJ=

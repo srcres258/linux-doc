@@ -118,17 +118,14 @@ size_t zstd_free_cctx(zstd_cctx *cctx)
 }
 EXPORT_SYMBOL(zstd_free_cctx);
 
-zstd_cdict *zstd_create_cdict_advanced(const void *dict, size_t dict_size,
-				       zstd_dict_load_method dict_load_method,
-				       zstd_dict_content_type dict_content_type,
-				       zstd_compression_parameters cparams,
-				       zstd_custom_mem custom_mem)
+zstd_cdict *zstd_create_cdict_byreference(const void *dict, size_t dict_size,
+					  zstd_compression_parameters cparams,
+					  zstd_custom_mem custom_mem)
 {
-	return ZSTD_createCDict_advanced(dict, dict_size, dict_load_method,
-					 dict_content_type, cparams,
-					 custom_mem);
+	return ZSTD_createCDict_advanced(dict, dict_size, ZSTD_dlm_byRef,
+					 ZSTD_dct_auto, cparams, custom_mem);
 }
-EXPORT_SYMBOL(zstd_create_cdict_advanced);
+EXPORT_SYMBOL(zstd_create_cdict_byreference);
 
 size_t zstd_free_cdict(zstd_cdict *cdict)
 {

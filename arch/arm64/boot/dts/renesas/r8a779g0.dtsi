@@ -820,6 +820,7 @@
 			phy-mode = "rgmii";
 			rx-internal-delay-ps = <0>;
 			tx-internal-delay-ps = <0>;
+			iommus = <&ipmmu_hc 0>;
 			status = "disabled";
 		};
 
@@ -865,6 +866,7 @@
 			phy-mode = "rgmii";
 			rx-internal-delay-ps = <0>;
 			tx-internal-delay-ps = <0>;
+			iommus = <&ipmmu_hc 1>;
 			status = "disabled";
 		};
 
@@ -910,6 +912,7 @@
 			phy-mode = "rgmii";
 			rx-internal-delay-ps = <0>;
 			tx-internal-delay-ps = <0>;
+			iommus = <&ipmmu_hc 2>;
 			status = "disabled";
 		};
 
@@ -1992,6 +1995,7 @@
 			clocks = <&cpg CPG_MOD 508>;
 			power-domains = <&sysc R8A779G0_PD_ALWAYS_ON>;
 			resets = <&cpg 508>;
+			iommus = <&ipmmu_vi1 6>;
 		};
 
 		fcpvd1: fcp@fea11000 {
@@ -2000,6 +2004,7 @@
 			clocks = <&cpg CPG_MOD 509>;
 			power-domains = <&sysc R8A779G0_PD_ALWAYS_ON>;
 			resets = <&cpg 509>;
+			iommus = <&ipmmu_vi1 7>;
 		};
 
 		vspd0: vsp@fea20000 {

@@ -56,16 +56,14 @@ size_t zstd_free_dctx(zstd_dctx *dctx)
 }
 EXPORT_SYMBOL(zstd_free_dctx);
 
-zstd_ddict *zstd_create_ddict_advanced(const void *dict, size_t dict_size,
-                                      zstd_dict_load_method dict_load_method,
-                                      zstd_dict_content_type dict_content_type,
-                                      zstd_custom_mem custom_mem)
+zstd_ddict *zstd_create_ddict_byreference(const void *dict, size_t dict_size,
+					  zstd_custom_mem custom_mem)
 {
-	return ZSTD_createDDict_advanced(dict, dict_size, dict_load_method,
-					 dict_content_type, custom_mem);
+	return ZSTD_createDDict_advanced(dict, dict_size, ZSTD_dlm_byRef,
+					 ZSTD_dct_auto, custom_mem);
 
 }
-EXPORT_SYMBOL(zstd_create_ddict_advanced);
+EXPORT_SYMBOL(zstd_create_ddict_byreference);
 
 size_t zstd_free_ddict(zstd_ddict *ddict)
 {

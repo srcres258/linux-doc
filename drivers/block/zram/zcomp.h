@@ -1,42 +1,61 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
-/*
- * Copyright (C) 2014 Sergey Senozhatsky.
- */
 
 #ifndef _ZCOMP_H_
 #define _ZCOMP_H_
 
 #include <linux/local_lock.h>
 
-struct zcomp_strm {
-	/* The members ->buffer and ->tfm are protected by ->lock. */
-	local_lock_t lock;
-	/* compression/decompression buffer */
-	void *buffer;
-	void *ctx;
-};
+#define ZCOMP_PARAM_NO_LEVEL	INT_MIN
 
-#define ZCOMP_CONFIG_NO_LEVEL	INT_MIN
-
-struct zcomp_config {
-	s32 level;
-	size_t dict_sz;
+/*
+ * Immutable driver (backend) parameters. The driver may attach private
+ * data to it (e.g. driver representation of the dictionary, etc.).
+ *
+ * This data is kept per-comp and is shared among execution contexts.
+ */
+struct zcomp_params {
 	void *dict;
-	void *private;
+	size_t dict_sz;
+	s32 level;
+
+	void *drv_data;
 };
 
-struct zcomp_backend {
-	int (*compress)(void *ctx, const unsigned char *src,
-			unsigned char *dst, size_t *dst_len);
+/*
+ * Run-time driver context - scratch buffers, etc. It is modified during
+ * request execution (compression/decompression), cannot be shared, so
+ * it's in per-CPU area.
+ */
+struct zcomp_ctx {
+	void *context;
+};
 
-	int (*decompress)(void *ctx, const unsigned char *src, size_t src_len,
-			  unsigned char *dst);
+struct zcomp_strm {
+	local_lock_t lock;
+	/* compression buffer */
+	void *buffer;
+	struct zcomp_ctx ctx;
+};
 
-	void *(*create_ctx)(struct zcomp_config *config);
-	void (*destroy_ctx)(void *ctx);
+struct zcomp_req {
+	const unsigned char *src;
+	const size_t src_len;
 
-	int (*init_config)(struct zcomp_config *config);
-	void (*release_config)(struct zcomp_config *config);
+	unsigned char *dst;
+	size_t dst_len;
+};
+
+struct zcomp_ops {
+	int (*compress)(struct zcomp_params *params, struct zcomp_ctx *ctx,
+			struct zcomp_req *req);
+	int (*decompress)(struct zcomp_params *params, struct zcomp_ctx *ctx,
+			  struct zcomp_req *req);
+
+	int (*create_ctx)(struct zcomp_params *params, struct zcomp_ctx *ctx);
+	void (*destroy_ctx)(struct zcomp_ctx *ctx);
+
+	int (*setup_params)(struct zcomp_params *params);
+	void (*release_params)(struct zcomp_params *params);
 
 	const char *name;
 };
@@ -44,8 +63,8 @@ struct zcomp_backend {
 /* dynamic per-device compression frontend */
 struct zcomp {
 	struct zcomp_strm __percpu *stream;
-	struct zcomp_backend *backend;
-	struct zcomp_config *config;
+	const struct zcomp_ops *ops;
+	struct zcomp_params *params;
 	struct hlist_node node;
 };
 
@@ -54,7 +73,7 @@ int zcomp_cpu_dead(unsigned int cpu, struct hlist_node *node);
 ssize_t zcomp_available_show(const char *comp, char *buf);
 bool zcomp_available_algorithm(const char *comp);
 
-struct zcomp *zcomp_create(const char *alg, struct zcomp_config *config);
+struct zcomp *zcomp_create(const char *alg, struct zcomp_params *params);
 void zcomp_destroy(struct zcomp *comp);
 
 struct zcomp_strm *zcomp_stream_get(struct zcomp *comp);
