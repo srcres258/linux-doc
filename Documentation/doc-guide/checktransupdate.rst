@@ -1,6 +1,7 @@
 .. SPDX-License-Identifier: GPL-2.0
 
-Check translation update
+Checking for needed translation updates
+=======================================
 
 This script helps track the translation status of the documentation in
 different locales, i.e., whether the documentation is up-to-date with

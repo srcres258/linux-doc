@@ -4357,6 +4357,9 @@ EXPORT_SYMBOL_GPL(kmsg_dump_reason_str);
 void kmsg_dump_desc(enum kmsg_dump_reason reason, const char *desc)
 {
 	struct kmsg_dumper *dumper;
+	struct kmsg_dump_detail detail = {
+		.reason = reason,
+		.description = desc};
 
 	rcu_read_lock();
 	list_for_each_entry_rcu(dumper, &dump_list, list) {
@@ -4374,7 +4377,7 @@ void kmsg_dump_desc(enum kmsg_dump_reason reason, const char *desc)
 			continue;
 
 		/* invoke dumper which will iterate over records */
-		dumper->dump(dumper, reason, desc);
+		dumper->dump(dumper, &detail);
 	}
 	rcu_read_unlock();
 }

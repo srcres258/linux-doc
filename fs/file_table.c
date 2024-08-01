@@ -136,6 +136,7 @@ static int __init init_fs_stat_sysctls(void)
 	register_sysctl_init("fs", fs_stat_sysctls);
 	if (IS_ENABLED(CONFIG_BINFMT_MISC)) {
 		struct ctl_table_header *hdr;
+
 		hdr = register_sysctl_mount_point("fs/binfmt_misc");
 		kmemleak_not_leak(hdr);
 	}
@@ -388,12 +389,11 @@ struct file *alloc_file_clone(struct file *base, int flags,
 {
 	struct file *f;
 
-	f = alloc_empty_file(flags, current_cred());
-	if (IS_ERR(f))
-		return f;
-	file_init(f, &base->f_path, flags, fops);
-	path_get(&f->f_path);
-	f->f_mapping = base->f_mapping;
+	f = alloc_file(&base->f_path, flags, fops);
+	if (!IS_ERR(f)) {
+		path_get(&f->f_path);
+		f->f_mapping = base->f_mapping;
+	}
 	return f;
 }
 

@@ -4599,7 +4599,7 @@ static void slab_free_after_rcu_debug(struct rcu_head *rcu_head)
 	/* resume freeing */
 	if (!slab_free_hook(s, object, slab_want_init_on_free(s), true))
 		return;
-	do_slab_free(s, slab, object, NULL, 1, _THIS_IP_);
+	do_slab_free(s, slab, object, object, 1, _THIS_IP_);
 	kfree(delayed_free);
 }
 #endif /* CONFIG_SLUB_RCU_DEBUG */
@@ -4794,6 +4794,9 @@ static void __kmem_cache_free_bulk(struct kmem_cache *s, size_t size, void **p)
 
 		size = build_detached_freelist(s, size, p, &df);
 		if (!df.slab)
+			continue;
+
+		if (kfence_free(df.freelist))
 			continue;
 
 		do_slab_free(df.s, df.slab, df.freelist, df.tail, df.cnt,

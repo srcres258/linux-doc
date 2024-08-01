@@ -6147,6 +6147,12 @@ static void shrink_node(pg_data_t *pgdat, struct scan_control *sc)
 			return;
 	}
 
+	/* Try to accept memory before going for reclaim */
+	if (node_try_to_accept_memory(pgdat, sc)) {
+		if (!should_continue_reclaim(pgdat, 0, sc))
+			return;
+	}
+
 	if (lru_gen_enabled() && root_reclaim(sc)) {
 		lru_gen_shrink_node(pgdat, sc);
 		return;

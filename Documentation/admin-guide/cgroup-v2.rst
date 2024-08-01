@@ -981,6 +981,14 @@ All cgroup core files are prefixed with "cgroup."
 		A dying cgroup can consume system resources not exceeding
 		limits, which were active at the moment of cgroup deletion.
 
+	  nr_subsys_<cgroup_subsys>
+		Total number of live cgroup subsystems (e.g memory
+		cgroup) at and beneath the current cgroup.
+
+	  nr_dying_subsys_<cgroup_subsys>
+		Total number of dying cgroup subsystems (e.g. memory
+		cgroup) at and beneath the current cgroup.
+
   cgroup.freeze
 	A read-write single value file which exists on non-root cgroups.
 	Allowed values are "0" and "1". The default is "0".
@@ -1338,11 +1346,9 @@ The following nested keys are defined.
 	The max memory usage recorded for the cgroup and its descendants since
 	either the creation of the cgroup or the most recent reset for that FD.
 
-	A write of the string "reset" to this file resets it to the
+	A write of any non-empty string to this file resets it to the
 	current memory usage for subsequent reads through the same
 	file descriptor.
-	Attempts to write any other non-empty string will return EINVAL
-	(modulo leading and trailing whitespace).
 
   memory.oom.group
 	A read-write single value file which exists on non-root
@@ -1677,11 +1683,9 @@ The following nested keys are defined.
 	The max swap usage recorded for the cgroup and its descendants since
 	the creation of the cgroup or the most recent reset for that FD.
 
-	A write of the string "reset" to this file resets it to the
+	A write of any non-empty string to this file resets it to the
 	current memory usage for subsequent reads through the same
 	file descriptor.
-	Attempts to write any other non-empty string will return EINVAL
-	(modulo leading and trailing whitespace).
 
   memory.swap.max
 	A read-write single value file which exists on non-root
@@ -2961,8 +2965,8 @@ Deprecated v1 Core Features
 
 - "cgroup.clone_children" is removed.
 
-- /proc/cgroups is meaningless for v2.  Use "cgroup.controllers" file
-  at the root instead.
+- /proc/cgroups is meaningless for v2.  Use "cgroup.controllers" or
+  "cgroup.stat" files at the root instead.
 
 
 Issues with v1 and Rationales for v2

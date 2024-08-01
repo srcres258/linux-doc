@@ -1223,8 +1223,8 @@ int security_vm_enough_memory_mm(struct mm_struct *mm, long pages)
 	 * agree that it should be set it will. If any module thinks it should
 	 * not be set it won't.
 	 */
-	lsm_for_each_hook(scall, vm_enough_memory) {
-		rc = scall->hl->hook.vm_enough_memory(mm, pages);
+	hlist_for_each_entry(hp, &security_hook_heads.vm_enough_memory, list) {
+		rc = hp->hook.vm_enough_memory(mm, pages);
 		if (rc < 0) {
 			cap_sys_admin = 0;
 			break;

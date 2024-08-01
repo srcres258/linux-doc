@@ -296,7 +296,6 @@ static int nct7802_read_voltage(struct nct7802_data *data, int nr, int index)
 	u8 v[2];
 	int ret;
 
-	mutex_lock(&data->access_lock);
 	if (index == 0) {	/* voltage */
 		unsigned int regs[2] = {REG_VOLTAGE[nr], REG_VOLTAGE_LOW};
 

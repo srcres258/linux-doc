@@ -40,6 +40,17 @@ struct kmsg_dump_iter {
 };
 
 /**
+ * struct kmsg_dump_detail - kernel crash detail
+ * @reason: reason for the crash, see kmsg_dump_reason.
+ * @description: optional short string, to provide additional information.
+ */
+
+struct kmsg_dump_detail {
+	enum kmsg_dump_reason reason;
+	const char *description;
+};
+
+/**
  * struct kmsg_dumper - kernel crash message dumper structure
  * @list:	Entry in the dumper list (private)
  * @dump:	Call into dumping code which will retrieve the data with
@@ -49,9 +60,7 @@ struct kmsg_dump_iter {
  */
 struct kmsg_dumper {
 	struct list_head list;
-	void (*dump)(struct kmsg_dumper *dumper,
-		     enum kmsg_dump_reason reason,
-		     const char *desc);
+	void (*dump)(struct kmsg_dumper *dumper, struct kmsg_dump_detail *detail);
 	enum kmsg_dump_reason max_reason;
 	bool registered;
 };

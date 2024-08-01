@@ -534,18 +534,20 @@ static int exfat_extend_valid_size(struct file *file, loff_t start, loff_t end)
 	const struct address_space_operations *ops = mapping->a_ops;
 
 	while (start < end) {
-		u32 len;
-		struct page *page = NULL;
+		u32 zerofrom, len;
+		struct folio *folio;
 
 		len = PAGE_SIZE - (start & (PAGE_SIZE - 1));
 		if (start + len > end)
 			len = end - start;
 
-		err = ops->write_begin(file, mapping, start, len, &page, NULL);
+		err = ops->write_begin(file, mapping, start, len, &folio, NULL);
 		if (err)
 			goto out;
 
-		err = ops->write_end(file, mapping, start, len, len, page, NULL);
+		folio_zero_range(folio, offset_in_folio(folio, start), len);
+
+		err = ops->write_end(file, mapping, start, len, len, folio, NULL);
 		if (err < 0)
 			goto out;
 		start += len;

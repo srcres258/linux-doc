@@ -322,7 +322,7 @@ static const unsigned int memcg_stat_items[] = {
 #define NR_MEMCG_NODE_STAT_ITEMS ARRAY_SIZE(memcg_node_stat_items)
 #define MEMCG_VMSTAT_SIZE (NR_MEMCG_NODE_STAT_ITEMS + \
 			   ARRAY_SIZE(memcg_stat_items))
-#define IS_INVALID(index) ((index) == U8_MAX)
+#define BAD_STAT_IDX(index) ((u32)(index) >= U8_MAX)
 static u8 mem_cgroup_stats_index[MEMCG_NR_STAT] __read_mostly;
 
 static void init_memcg_stats(void)
@@ -374,7 +374,7 @@ unsigned long lruvec_page_state(struct lruvec *lruvec, enum node_stat_item idx)
 		return node_page_state(lruvec_pgdat(lruvec), idx);
 
 	i = memcg_stats_index(idx);
-	if (WARN_ONCE(IS_INVALID(i), "%s: missing stat item %d\n", __func__, idx))
+	if (WARN_ONCE(BAD_STAT_IDX(i), "%s: missing stat item %d\n", __func__, idx))
 		return 0;
 
 	pn = container_of(lruvec, struct mem_cgroup_per_node, lruvec);
@@ -397,7 +397,7 @@ unsigned long lruvec_page_state_local(struct lruvec *lruvec,
 		return node_page_state(lruvec_pgdat(lruvec), idx);
 
 	i = memcg_stats_index(idx);
-	if (WARN_ONCE(IS_INVALID(i), "%s: missing stat item %d\n", __func__, idx))
+	if (WARN_ONCE(BAD_STAT_IDX(i), "%s: missing stat item %d\n", __func__, idx))
 		return 0;
 
 	pn = container_of(lruvec, struct mem_cgroup_per_node, lruvec);
@@ -629,7 +629,7 @@ unsigned long memcg_page_state(struct mem_cgroup *memcg, int idx)
 	long x;
 	int i = memcg_stats_index(idx);
 
-	if (WARN_ONCE(IS_INVALID(i), "%s: missing stat item %d\n", __func__, idx))
+	if (WARN_ONCE(BAD_STAT_IDX(i), "%s: missing stat item %d\n", __func__, idx))
 		return 0;
 
 	x = READ_ONCE(memcg->vmstats->state[i]);
@@ -670,7 +670,7 @@ void __mod_memcg_state(struct mem_cgroup *memcg, enum memcg_stat_item idx,
 	if (mem_cgroup_disabled())
 		return;
 
-	if (WARN_ONCE(IS_INVALID(i), "%s: missing stat item %d\n", __func__, idx))
+	if (WARN_ONCE(BAD_STAT_IDX(i), "%s: missing stat item %d\n", __func__, idx))
 		return;
 
 	__this_cpu_add(memcg->vmstats_percpu->state[i], val);
@@ -683,7 +683,7 @@ unsigned long memcg_page_state_local(struct mem_cgroup *memcg, int idx)
 	long x;
 	int i = memcg_stats_index(idx);
 
-	if (WARN_ONCE(IS_INVALID(i), "%s: missing stat item %d\n", __func__, idx))
+	if (WARN_ONCE(BAD_STAT_IDX(i), "%s: missing stat item %d\n", __func__, idx))
 		return 0;
 
 	x = READ_ONCE(memcg->vmstats->state_local[i]);
@@ -702,7 +702,7 @@ static void __mod_memcg_lruvec_state(struct lruvec *lruvec,
 	struct mem_cgroup *memcg;
 	int i = memcg_stats_index(idx);
 
-	if (WARN_ONCE(IS_INVALID(i), "%s: missing stat item %d\n", __func__, idx))
+	if (WARN_ONCE(BAD_STAT_IDX(i), "%s: missing stat item %d\n", __func__, idx))
 		return;
 
 	pn = container_of(lruvec, struct mem_cgroup_per_node, lruvec);
@@ -821,10 +821,7 @@ void __count_memcg_events(struct mem_cgroup *memcg, enum vm_event_item idx,
 	if (mem_cgroup_disabled())
 		return;
 
-	if (WARN_ONCE(IS_INVALID(i), "%s: missing stat item %d\n", __func__, idx))
-		return;
-
-	if (WARN_ONCE(i < 0, "%s: missing stat item %d\n", __func__, idx))
+	if (WARN_ONCE(BAD_STAT_IDX(i), "%s: missing stat item %d\n", __func__, idx))
 		return;
 
 	if (WARN_ONCE(i < 0, "%s: missing stat item %d\n", __func__, idx))
@@ -845,7 +842,7 @@ unsigned long memcg_events(struct mem_cgroup *memcg, int event)
 {
 	int i = memcg_events_index(event);
 
-	if (WARN_ONCE(IS_INVALID(i), "%s: missing stat item %d\n", __func__, event))
+	if (WARN_ONCE(BAD_STAT_IDX(i), "%s: missing stat item %d\n", __func__, event))
 		return 0;
 
 	return READ_ONCE(memcg->vmstats->events[i]);
@@ -855,7 +852,7 @@ unsigned long memcg_events_local(struct mem_cgroup *memcg, int event)
 {
 	int i = memcg_events_index(event);
 
-	if (WARN_ONCE(IS_INVALID(i), "%s: missing stat item %d\n", __func__, event))
+	if (WARN_ONCE(BAD_STAT_IDX(i), "%s: missing stat item %d\n", __func__, event))
 		return 0;
 	}
 
@@ -3969,16 +3966,18 @@ static u64 memory_current_read(struct cgroup_subsys_state *css,
 	return (u64)page_counter_read(&memcg->memory) * PAGE_SIZE;
 }
 
+#define OFP_PEAK_UNSET (((-1UL)))
+
 static int peak_show(struct seq_file *sf, void *v, struct page_counter *pc)
 {
 	struct cgroup_of_peak *ofp = of_peak(sf->private);
 	u64 fd_peak = READ_ONCE(ofp->value), peak;
 
 	/* User wants global or local peak? */
-	if (fd_peak == -1UL)
+	if (fd_peak == OFP_PEAK_UNSET)
 		peak = pc->watermark;
 	else
-		peak = max(fd_peak, pc->local_watermark);
+		peak = max(fd_peak, READ_ONCE(pc->local_watermark));
 
 	seq_printf(sf, "%llu\n", peak * PAGE_SIZE);
 	return 0;
@@ -3995,7 +3994,7 @@ static int peak_open(struct kernfs_open_file *of)
 {
 	struct cgroup_of_peak *ofp = of_peak(of);
 
-	ofp->value = -1;
+	ofp->value = OFP_PEAK_UNSET;
 	return 0;
 }
 
@@ -4004,7 +4003,7 @@ static void peak_release(struct kernfs_open_file *of)
 	struct mem_cgroup *memcg = mem_cgroup_from_css(of_css(of));
 	struct cgroup_of_peak *ofp = of_peak(of);
 
-	if (ofp->value == -1) {
+	if (ofp->value == OFP_PEAK_UNSET) {
 		/* fast path (no writes on this fd) */
 		return;
 	}
@@ -4022,25 +4021,20 @@ static ssize_t peak_write(struct kernfs_open_file *of, char *buf, size_t nbytes,
 	struct mem_cgroup *memcg = mem_cgroup_from_css(of_css(of));
 	struct cgroup_of_peak *ofp = of_peak(of);
 
-	buf = strstrip(buf);
-	/* Only allow "reset" to keep the API clear */
-	if (strcmp(buf, "reset"))
-		return -EINVAL;
-
 	spin_lock(&memcg->peaks_lock);
 
-	pc->local_watermark = page_counter_read(pc);
-	usage = pc->local_watermark;
+	usage = page_counter_read(pc);
+	WRITE_ONCE(pc->local_watermark, usage);
 
 	list_for_each_entry(peer_ctx, watchers, list)
 		if (usage > peer_ctx->value)
-			peer_ctx->value = usage;
+			WRITE_ONCE(peer_ctx->value, usage);
 
 	/* initial write, register watcher */
 	if (ofp->value == -1)
 		list_add(&ofp->list, watchers);
 
-	ofp->value = usage;
+	WRITE_ONCE(ofp->value, usage);
 	spin_unlock(&memcg->peaks_lock);
 
 	return nbytes;
@@ -4054,6 +4048,8 @@ static ssize_t memory_peak_write(struct kernfs_open_file *of, char *buf,
 	return peak_write(of, buf, nbytes, off, &memcg->memory,
 			  &memcg->memory_peaks);
 }
+
+#undef OFP_PEAK_UNSET
 
 static int memory_min_show(struct seq_file *m, void *v)
 {

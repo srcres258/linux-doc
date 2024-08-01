@@ -667,6 +667,7 @@ void *__kvmalloc_node_noprof(DECL_BUCKET_PARAMS(size, b), gfp_t flags, int node)
 
 	/* Don't even allow crazy sizes */
 	if (unlikely(size > INT_MAX)) {
+		BUG_ON(flags & __GFP_NOFAIL);
 		WARN_ON_ONCE(!(flags & __GFP_NOWARN));
 		return NULL;
 	}
@@ -726,11 +727,16 @@ EXPORT_SYMBOL(kvfree_sensitive);
  * @size: the size to reallocate
  * @flags: the flags for the page level allocator
  *
- * The contents of the object pointed to are preserved up to the lesser of the
- * new and old size (__GFP_ZERO flag is effectively ignored).
- *
  * If @p is %NULL, kvrealloc() behaves exactly like kvmalloc(). If @size is 0
  * and @p is not a %NULL pointer, the object pointed to is freed.
+ *
+ * If __GFP_ZERO logic is requested, callers must ensure that, starting with the
+ * initial memory allocation, every subsequent call to this API for the same
+ * memory allocation is flagged with __GFP_ZERO. Otherwise, it is possible that
+ * __GFP_ZERO is not fully honored by this API.
+ *
+ * In any case, the contents of the object pointed to are preserved up to the
+ * lesser of the new and old sizes.
  *
  * This function must not be called concurrently with itself or kvfree() for the
  * same memory allocation.
@@ -753,7 +759,10 @@ void *kvrealloc_noprof(const void *p, size_t size, gfp_t flags)
 
 		if (p) {
 			/* We already know that `p` is not a vmalloc address. */
-			memcpy(n, p, ksize(p));
+			kasan_disable_current();
+			memcpy(n, kasan_reset_tag(p), ksize(p));
+			kasan_enable_current();
+
 			kfree(p);
 		}
 	}

@@ -1021,7 +1021,8 @@ static void kmem_cache_rcu_uaf(struct kunit *test)
 	/* Free the object - this will internally schedule an RCU callback. */
 	kmem_cache_free(cache, p);
 
-	/* We should still be allowed to access the object at this point because
+	/*
+	 * We should still be allowed to access the object at this point because
 	 * the cache is SLAB_TYPESAFE_BY_RCU and we've been in an RCU read-side
 	 * critical section since before the kmem_cache_free().
 	 */
@@ -1029,7 +1030,8 @@ static void kmem_cache_rcu_uaf(struct kunit *test)
 
 	rcu_read_unlock();
 
-	/* Wait for the RCU callback to execute; after this, the object should
+	/*
+	 * Wait for the RCU callback to execute; after this, the object should
 	 * have actually been freed from KASAN's perspective.
 	 */
 	rcu_barrier();

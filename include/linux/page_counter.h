@@ -26,6 +26,7 @@ struct page_counter {
 	atomic_long_t children_low_usage;
 
 	unsigned long watermark;
+	/* Latest cg2 reset watermark */
 	unsigned long local_watermark;
 	unsigned long failcnt;
 
