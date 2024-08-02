@@ -1446,13 +1446,4 @@ static inline bool try_to_accept_memory(struct zone *zone, unsigned int order)
 }
 #endif /* CONFIG_UNACCEPTED_MEMORY */
 
-#ifdef CONFIG_UNACCEPTED_MEMORY
-bool try_to_accept_memory(struct zone *zone, unsigned int order);
-#else
-static inline bool try_to_accept_memory(struct zone *zone, unsigned int order)
-{
-	return false;
-}
-#endif /* CONFIG_UNACCEPTED_MEMORY */
-
 #endif	/* __MM_INTERNAL_H */

@@ -79,8 +79,8 @@ is no such guarantee, and the second file may appear to have been modified
 before, after or at the same time as the first, regardless of which one was
 submitted first.
 
-Multigrain Timestamps
-=====================
+Multigrain Timestamp Implementation
+===================================
 Multigrain timestamps are aimed at ensuring that changes to a single file are
 always recognizable, without violating the ordering guarantees when multiple
 different files are modified. This affects the mtime and the ctime, but the

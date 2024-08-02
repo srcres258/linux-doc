@@ -85,6 +85,7 @@
 #include <linux/elf.h>
 #include <linux/pid_namespace.h>
 #include <linux/user_namespace.h>
+#include <linux/fs_parser.h>
 #include <linux/fs_struct.h>
 #include <linux/slab.h>
 #include <linux/sched/autogroup.h>
@@ -116,6 +117,35 @@
 
 static u8 nlink_tid __ro_after_init;
 static u8 nlink_tgid __ro_after_init;
+
+enum proc_mem_force {
+	PROC_MEM_FORCE_ALWAYS,
+	PROC_MEM_FORCE_PTRACE,
+	PROC_MEM_FORCE_NEVER
+};
+
+static enum proc_mem_force proc_mem_force_override __ro_after_init =
+	IS_ENABLED(CONFIG_PROC_MEM_NO_FORCE) ? PROC_MEM_FORCE_NEVER :
+	IS_ENABLED(CONFIG_PROC_MEM_FORCE_PTRACE) ? PROC_MEM_FORCE_PTRACE :
+	PROC_MEM_FORCE_ALWAYS;
+
+static const struct constant_table proc_mem_force_table[] __initconst = {
+	{ "never", PROC_MEM_FORCE_NEVER },
+	{ "ptrace", PROC_MEM_FORCE_PTRACE },
+	{ }
+};
+
+static int __init early_proc_mem_force_override(char *buf)
+{
+	if (!buf)
+		return -EINVAL;
+
+	proc_mem_force_override = lookup_constant(proc_mem_force_table,
+						  buf, PROC_MEM_FORCE_ALWAYS);
+
+	return 0;
+}
+early_param("proc_mem.force_override", early_proc_mem_force_override);
 
 struct pid_entry {
 	const char *name;
@@ -965,60 +995,24 @@ static int mem_open(struct inode *inode, struct file *file)
 	return ret;
 }
 
-static bool __mem_rw_current_is_ptracer(struct file *file)
+static bool proc_mem_foll_force(struct file *file, struct mm_struct *mm)
 {
-	struct inode *inode = file_inode(file);
-	struct task_struct *task = get_proc_task(inode);
-	struct mm_struct *mm = NULL;
-	int is_ptracer = false, has_mm_access = false;
+	struct task_struct *task;
+	bool ptrace_active = false;
 
-	if (task) {
-		rcu_read_lock();
-		is_ptracer = current == ptrace_parent(task);
-		rcu_read_unlock();
-
-		mm = mm_access(task, PTRACE_MODE_READ_FSCREDS);
-		if (mm && file->private_data == mm) {
-			has_mm_access = true;
-			mmput(mm);
+	switch (proc_mem_force_override) {
+	case PROC_MEM_FORCE_NEVER:
+		return false;
+	case PROC_MEM_FORCE_PTRACE:
+		task = get_proc_task(file_inode(file));
+		if (task) {
+			ptrace_active = task->ptrace && task->mm == mm && task->parent == current;
+			put_task_struct(task);
 		}
-
-		put_task_struct(task);
+		return ptrace_active;
+	default:
+		return true;
 	}
-
-	return is_ptracer && has_mm_access;
-}
-
-static unsigned int __mem_rw_get_foll_force_flag(struct file *file)
-{
-	/* Deny if FOLL_FORCE is disabled via param */
-	if (static_branch_maybe(CONFIG_PROC_MEM_RESTRICT_FOLL_FORCE_DEFAULT,
-				&proc_mem_restrict_foll_force_all))
-		return 0;
-
-	/* Deny if FOLL_FORCE is allowed only for ptracers via param */
-	if (static_branch_maybe(CONFIG_PROC_MEM_RESTRICT_FOLL_FORCE_PTRACE_DEFAULT,
-				&proc_mem_restrict_foll_force_ptracer) &&
-	    !__mem_rw_current_is_ptracer(file))
-		return 0;
-
-	return FOLL_FORCE;
-}
-
-static bool __mem_rw_block_writes(struct file *file)
-{
-	/* Block if writes are disabled via param proc_mem.restrict_write=all */
-	if (static_branch_maybe(CONFIG_PROC_MEM_RESTRICT_WRITE_DEFAULT,
-				&proc_mem_restrict_write_all))
-		return true;
-
-	/* Block with an exception only for ptracers */
-	if (static_branch_maybe(CONFIG_PROC_MEM_RESTRICT_WRITE_PTRACE_DEFAULT,
-				&proc_mem_restrict_write_ptracer) &&
-	    !__mem_rw_current_is_ptracer(file))
-		return true;
-
-	return false;
 }
 
 static ssize_t mem_rw(struct file *file, char __user *buf,
@@ -1049,8 +1043,9 @@ static ssize_t mem_rw(struct file *file, char __user *buf,
 	if (!mmget_not_zero(mm))
 		goto free;
 
-	flags = (write ? FOLL_WRITE : 0);
-	flags |= __mem_rw_get_foll_force_flag(file);
+	flags = write ? FOLL_WRITE : 0;
+	if (proc_mem_foll_force(file, mm))
+		flags |= FOLL_FORCE;
 
 	while (count > 0) {
 		size_t this_len = min_t(size_t, count, PAGE_SIZE);

@@ -824,9 +824,6 @@ void __count_memcg_events(struct mem_cgroup *memcg, enum vm_event_item idx,
 	if (WARN_ONCE(BAD_STAT_IDX(i), "%s: missing stat item %d\n", __func__, idx))
 		return;
 
-	if (WARN_ONCE(i < 0, "%s: missing stat item %d\n", __func__, idx))
-		return;
-
 	if (unlikely(index < 0)) {
 		pr_warn_once("%s: event item index: %d\n", __func__, idx);
 		return;
