@@ -28,6 +28,7 @@
 #define _BITUL(x)	(_UL(1) << (x))
 #define _BITULL(x)	(_ULL(1) << (x))
 
+#if !defined(__ASSEMBLY__)
 /*
  * Missing asm support
  *
@@ -42,6 +43,7 @@
  * GENMASK_U128() which would then start supporting asm code.
  */
 #define _BIT128(x)	((unsigned __int128)(1) << (x))
+#endif
 
 #define __ALIGN_KERNEL(x, a)		__ALIGN_KERNEL_MASK(x, (__typeof__(x))(a) - 1)
 #define __ALIGN_KERNEL_MASK(x, mask)	(((x) + (mask)) & ~(mask))
