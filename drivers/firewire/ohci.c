@@ -162,13 +162,6 @@ struct context {
 	struct tasklet_struct tasklet;
 };
 
-#define IT_HEADER_SY(v)          ((v) <<  0)
-#define IT_HEADER_TCODE(v)       ((v) <<  4)
-#define IT_HEADER_CHANNEL(v)     ((v) <<  8)
-#define IT_HEADER_TAG(v)         ((v) << 14)
-#define IT_HEADER_SPEED(v)       ((v) << 16)
-#define IT_HEADER_DATA_LENGTH(v) ((v) << 16)
-
 struct iso_context {
 	struct fw_iso_context base;
 	struct context context;
@@ -1409,12 +1402,6 @@ static int at_context_queue_packet(struct context *ctx,
 	d[0].control   = cpu_to_le16(DESCRIPTOR_KEY_IMMEDIATE);
 	d[0].res_count = cpu_to_le16(packet->timestamp);
 
-	/*
-	 * The DMA format for asynchronous link packets is different
-	 * from the IEEE1394 layout, so shift the fields around
-	 * accordingly.
-	 */
-
 	tcode = async_header_get_tcode(packet->header);
 	header = (__le32 *) &d[1];
 	switch (tcode) {
@@ -1427,11 +1414,21 @@ static int at_context_queue_packet(struct context *ctx,
 	case TCODE_READ_BLOCK_RESPONSE:
 	case TCODE_LOCK_REQUEST:
 	case TCODE_LOCK_RESPONSE:
-		header[0] = cpu_to_le32((packet->header[0] & 0xffff) |
-					(packet->speed << 16));
-		header[1] = cpu_to_le32((packet->header[1] & 0xffff) |
-					(packet->header[0] & 0xffff0000));
-		header[2] = cpu_to_le32(packet->header[2]);
+		ohci1394_at_data_set_src_bus_id(header, false);
+		ohci1394_at_data_set_speed(header, packet->speed);
+		ohci1394_at_data_set_tlabel(header, async_header_get_tlabel(packet->header));
+		ohci1394_at_data_set_retry(header, async_header_get_retry(packet->header));
+		ohci1394_at_data_set_tcode(header, tcode);
+
+		ohci1394_at_data_set_destination_id(header,
+						    async_header_get_destination(packet->header));
+
+		if (ctx == &ctx->ohci->at_response_ctx) {
+			ohci1394_at_data_set_rcode(header, async_header_get_rcode(packet->header));
+		} else {
+			ohci1394_at_data_set_destination_offset(header,
+							async_header_get_offset(packet->header));
+		}
 
 		if (tcode_is_block_packet(tcode))
 			header[3] = cpu_to_le32(packet->header[3]);
@@ -1440,10 +1437,10 @@ static int at_context_queue_packet(struct context *ctx,
 
 		d[0].req_count = cpu_to_le16(packet->header_length);
 		break;
-
 	case TCODE_LINK_INTERNAL:
-		header[0] = cpu_to_le32((TCODE_LINK_INTERNAL << 4) |
-					(packet->speed << 16));
+		ohci1394_at_data_set_speed(header, packet->speed);
+		ohci1394_at_data_set_tcode(header, TCODE_LINK_INTERNAL);
+
 		header[1] = cpu_to_le32(packet->header[1]);
 		header[2] = cpu_to_le32(packet->header[2]);
 		d[0].req_count = cpu_to_le16(12);
@@ -1453,9 +1450,14 @@ static int at_context_queue_packet(struct context *ctx,
 		break;
 
 	case TCODE_STREAM_DATA:
-		header[0] = cpu_to_le32((packet->header[0] & 0xffff) |
-					(packet->speed << 16));
-		header[1] = cpu_to_le32(packet->header[0] & 0xffff0000);
+		ohci1394_it_data_set_speed(header, packet->speed);
+		ohci1394_it_data_set_tag(header, isoc_header_get_tag(packet->header[0]));
+		ohci1394_it_data_set_channel(header, isoc_header_get_channel(packet->header[0]));
+		ohci1394_it_data_set_tcode(header, TCODE_STREAM_DATA);
+		ohci1394_it_data_set_sync(header, isoc_header_get_sy(packet->header[0]));
+
+		ohci1394_it_data_set_data_length(header, isoc_header_get_data_length(packet->header[0]));
+
 		d[0].req_count = cpu_to_le16(8);
 		break;
 
@@ -3399,14 +3401,14 @@ static int queue_iso_transmit(struct iso_context *ctx,
 		d[0].branch_address = cpu_to_le32(d_bus | z);
 
 		header = (__le32 *) &d[1];
-		header[0] = cpu_to_le32(IT_HEADER_SY(p->sy) |
-					IT_HEADER_TAG(p->tag) |
-					IT_HEADER_TCODE(TCODE_STREAM_DATA) |
-					IT_HEADER_CHANNEL(ctx->base.channel) |
-					IT_HEADER_SPEED(ctx->base.speed));
-		header[1] =
-			cpu_to_le32(IT_HEADER_DATA_LENGTH(p->header_length +
-							  p->payload_length));
+
+		ohci1394_it_data_set_speed(header, ctx->base.speed);
+		ohci1394_it_data_set_tag(header, p->tag);
+		ohci1394_it_data_set_channel(header, ctx->base.channel);
+		ohci1394_it_data_set_tcode(header, TCODE_STREAM_DATA);
+		ohci1394_it_data_set_sync(header, p->sy);
+
+		ohci1394_it_data_set_data_length(header, p->header_length + p->payload_length);
 	}
 
 	if (p->header_length > 0) {

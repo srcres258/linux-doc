@@ -188,8 +188,7 @@ static int lpc3xxx_i2s_hw_params(struct snd_pcm_substream *substream,
 
 	__lpc3xxx_find_clkdiv(&clkx, &clky, i2s_info_p->freq, xfersize, i2s_info_p->clkrate);
 
-	dev_dbg(dev, "Stream                : %s\n",
-		substream->stream == SNDRV_PCM_STREAM_PLAYBACK ? "playback" : "capture");
+	dev_dbg(dev, "Stream                : %s\n", snd_pcm_direction_name(substream->stream));
 	dev_dbg(dev, "Desired clock rate    : %d\n", i2s_info_p->freq);
 	dev_dbg(dev, "Base clock rate       : %d\n", i2s_info_p->clkrate);
 	dev_dbg(dev, "Transfer size (bytes) : %d\n", xfersize);
@@ -258,7 +257,7 @@ static int lpc3xxx_i2s_dai_probe(struct snd_soc_dai *dai)
 	return 0;
 }
 
-const struct snd_soc_dai_ops lpc3xxx_i2s_dai_ops = {
+static const struct snd_soc_dai_ops lpc3xxx_i2s_dai_ops = {
 	.probe	= lpc3xxx_i2s_dai_probe,
 	.startup = lpc3xxx_i2s_startup,
 	.shutdown = lpc3xxx_i2s_shutdown,
@@ -268,7 +267,7 @@ const struct snd_soc_dai_ops lpc3xxx_i2s_dai_ops = {
 	.set_fmt = lpc3xxx_i2s_set_dai_fmt,
 };
 
-struct snd_soc_dai_driver lpc3xxx_i2s_dai_driver = {
+static struct snd_soc_dai_driver lpc3xxx_i2s_dai_driver = {
 	.playback = {
 		.channels_min = 1,
 		.channels_max = 2,

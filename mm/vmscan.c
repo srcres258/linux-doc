@@ -6159,6 +6159,12 @@ static void shrink_node(pg_data_t *pgdat, struct scan_control *sc)
 			return;
 	}
 
+	/* Try to accept memory before going for reclaim */
+	if (node_try_to_accept_memory(pgdat, sc)) {
+		if (!should_continue_reclaim(pgdat, 0, sc))
+			return;
+	}
+
 	if (lru_gen_enabled() && root_reclaim(sc)) {
 		lru_gen_shrink_node(pgdat, sc);
 		return;
@@ -6904,7 +6910,7 @@ static bool pgdat_balanced(pg_data_t *pgdat, int order, int highest_zoneidx)
 			continue;
 
 		if (sysctl_numa_balancing_mode & NUMA_BALANCING_MEMORY_TIERING)
-			mark = wmark_pages(zone, WMARK_PROMO);
+			mark = promo_wmark_pages(zone);
 		else
 			mark = high_wmark_pages(zone);
 		if (zone_watermark_ok_safe(zone, order, mark, highest_zoneidx))

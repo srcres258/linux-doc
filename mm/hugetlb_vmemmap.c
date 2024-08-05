@@ -698,7 +698,7 @@ void hugetlb_vmemmap_optimize_folios(struct hstate *h, struct list_head *folio_l
 			break;
 	}
 
-	vmemmap_flush_tlb_all();
+	flush_tlb_all();
 
 	list_for_each_entry(folio, folio_list, lru) {
 		int ret;

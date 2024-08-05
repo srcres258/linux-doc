@@ -539,7 +539,6 @@ extern inline void writeq(u64 b, volatile void __iomem *addr)
 #define iowrite32be(v,p) iowrite32(swab32(v), (p))
 #define iowrite64be(v,p) iowrite64(swab64(v), (p))
 
-
 #define inb_p		inb
 #define inw_p		inw
 #define inl_p		inl
