@@ -38,6 +38,7 @@
 #define GENMASK_U128(h, l) \
 	(GENMASK_INPUT_CHECK(h, l) + __GENMASK_U128(h, l))
 
+#if !defined(__ASSEMBLY__)
 /*
  * Missing asm support
  *
@@ -50,5 +51,6 @@
  */
 #define GENMASK_U128(h, l) \
 	(GENMASK_INPUT_CHECK(h, l) + __GENMASK_U128(h, l))
+#endif
 
 #endif	/* __LINUX_BITS_H */
