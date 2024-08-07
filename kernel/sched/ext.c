@@ -1252,8 +1252,29 @@ retry:
 
 	while ((p = scx_task_iter_next(iter))) {
 		/*
-		 * is_idle_task() tests %PF_IDLE which may not be set for CPUs
-		 * which haven't yet been onlined. Test sched_class directly.
+		 * scx_task_iter is used to prepare and move tasks into SCX
+		 * while loading the BPF scheduler and vice-versa while
+		 * unloading. The init_tasks ("swappers") should be excluded
+		 * from the iteration because:
+		 *
+		 * - It's unsafe to use __setschduler_prio() on an init_task to
+		 *   determine the sched_class to use as it won't preserve its
+		 *   idle_sched_class.
+		 *
+		 * - ops.init/exit_task() can easily be confused if called with
+		 *   init_tasks as they, e.g., share PID 0.
+		 *
+		 * As init_tasks are never scheduled through SCX, they can be
+		 * skipped safely. Note that is_idle_task() which tests %PF_IDLE
+		 * doesn't work here:
+		 *
+		 * - %PF_IDLE may not be set for an init_task whose CPU hasn't
+		 *   yet been onlined.
+		 *
+		 * - %PF_IDLE can be set on tasks that are not init_tasks. See
+		 *   play_idle_precise() used by CONFIG_IDLE_INJECT.
+		 *
+		 * Test for idle_sched_class as only init_tasks are on it.
 		 */
 		if (p->sched_class != &idle_sched_class)
 			break;
@@ -1466,20 +1487,14 @@ static void touch_core_sched_dispatch(struct rq *rq, struct task_struct *p)
 static void update_curr_scx(struct rq *rq)
 {
 	struct task_struct *curr = rq->curr;
-	u64 now = rq_clock_task(rq);
-	u64 delta_exec;
+	s64 delta_exec;
 
-	if (time_before_eq64(now, curr->se.exec_start))
+	delta_exec = update_curr_common(rq);
+	if (unlikely(delta_exec <= 0))
 		return;
 
-	delta_exec = now - curr->se.exec_start;
-	curr->se.exec_start = now;
-	curr->se.sum_exec_runtime += delta_exec;
-	account_group_exec_runtime(curr, delta_exec);
-	cgroup_account_cputime(curr, delta_exec);
-
 	if (curr->scx.slice != SCX_SLICE_INF) {
-		curr->scx.slice -= min(curr->scx.slice, delta_exec);
+		curr->scx.slice -= min_t(u64, curr->scx.slice, delta_exec);
 		if (!curr->scx.slice)
 			touch_core_sched(rq, curr);
 	}
@@ -2209,18 +2224,29 @@ static void consume_local_task(struct rq *rq, struct scx_dispatch_q *dsq,
 
 #ifdef CONFIG_SMP
 /*
- * Similar to kernel/sched/core.c::is_cpu_allowed() but we're testing whether @p
- * can be pulled to @rq.
+ * Similar to kernel/sched/core.c::is_cpu_allowed(). However, there are two
+ * differences:
+ *
+ * - is_cpu_allowed() asks "Can this task run on this CPU?" while
+ *   task_can_run_on_remote_rq() asks "Can the BPF scheduler migrate the task to
+ *   this CPU?".
+ *
+ *   While migration is disabled, is_cpu_allowed() has to say "yes" as the task
+ *   must be allowed to finish on the CPU that it's currently on regardless of
+ *   the CPU state. However, task_can_run_on_remote_rq() must say "no" as the
+ *   BPF scheduler shouldn't attempt to migrate a task which has migration
+ *   disabled.
+ *
+ * - The BPF scheduler is bypassed while the rq is offline and we can always say
+ *   no to the BPF scheduler initiated migrations while offline.
  */
 static bool task_can_run_on_remote_rq(struct task_struct *p, struct rq *rq)
 {
 	int cpu = cpu_of(rq);
 
-	if (!cpumask_test_cpu(cpu, p->cpus_ptr))
+	if (!task_allowed_on_cpu(p, cpu))
 		return false;
 	if (unlikely(is_migration_disabled(p)))
-		return false;
-	if (!(p->flags & PF_KTHREAD) && unlikely(!task_cpu_possible(cpu, p)))
 		return false;
 	if (!scx_rq_online(rq))
 		return false;
@@ -2622,7 +2648,6 @@ out:
 	return has_tasks;
 }
 
-#ifdef CONFIG_SMP
 static int balance_scx(struct rq *rq, struct task_struct *prev,
 		       struct rq_flags *rf)
 {
@@ -2656,7 +2681,6 @@ static int balance_scx(struct rq *rq, struct task_struct *prev,
 
 	return ret;
 }
-#endif
 
 static void set_next_task_scx(struct rq *rq, struct task_struct *p, bool first)
 {
@@ -2725,37 +2749,6 @@ static void process_ddsp_deferred_locals(struct rq *rq)
 
 static void put_prev_task_scx(struct rq *rq, struct task_struct *p)
 {
-#ifndef CONFIG_SMP
-	/*
-	 * UP workaround.
-	 *
-	 * Because SCX may transfer tasks across CPUs during dispatch, dispatch
-	 * is performed from its balance operation which isn't called in UP.
-	 * Let's work around by calling it from the operations which come right
-	 * after.
-	 *
-	 * 1. If the prev task is on SCX, pick_next_task() calls
-	 *    .put_prev_task() right after. As .put_prev_task() is also called
-	 *    from other places, we need to distinguish the calls which can be
-	 *    done by looking at the previous task's state - if still queued or
-	 *    dequeued with %SCX_DEQ_SLEEP, the caller must be pick_next_task().
-	 *    This case is handled here.
-	 *
-	 * 2. If the prev task is not on SCX, the first following call into SCX
-	 *    will be .pick_next_task(), which is covered by calling
-	 *    balance_scx() from pick_next_task_scx().
-	 *
-	 * Note that we can't merge the first case into the second as
-	 * balance_scx() must be called before the previous SCX task goes
-	 * through put_prev_task_scx().
-	 *
-         * @rq is pinned and can't be unlocked. As UP doesn't transfer tasks
-         * around, balance_one() doesn't need to.
-	 */
-	if (p->scx.flags & (SCX_TASK_QUEUED | SCX_TASK_DEQD_FOR_SLEEP))
-		balance_one(rq, p, true);
-#endif
-
 	update_curr_scx(rq);
 
 	/* see dequeue_task_scx() on why we skip when !QUEUED */
@@ -2812,12 +2805,6 @@ static struct task_struct *first_local_task(struct rq *rq)
 static struct task_struct *pick_next_task_scx(struct rq *rq)
 {
 	struct task_struct *p;
-
-#ifndef CONFIG_SMP
-	/* UP workaround - see the comment at the head of put_prev_task_scx() */
-	if (unlikely(rq->curr->sched_class != &ext_sched_class))
-		balance_one(rq, rq->curr, true);
-#endif
 
 	p = first_local_task(rq);
 	if (!p)
@@ -3679,6 +3666,7 @@ DEFINE_SCHED_CLASS(ext) = {
 
 	.wakeup_preempt		= wakeup_preempt_scx,
 
+	.balance		= balance_scx,
 	.pick_next_task		= pick_next_task_scx,
 
 	.put_prev_task		= put_prev_task_scx,
@@ -3687,7 +3675,6 @@ DEFINE_SCHED_CLASS(ext) = {
 	.switch_class		= switch_class_scx,
 
 #ifdef CONFIG_SMP
-	.balance		= balance_scx,
 	.select_task_rq		= select_task_rq_scx,
 	.task_woken		= task_woken_scx,
 	.set_cpus_allowed	= set_cpus_allowed_scx,

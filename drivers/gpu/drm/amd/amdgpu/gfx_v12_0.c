@@ -202,6 +202,12 @@ static const struct amdgpu_hwip_reg_entry gc_gfx_queue_reg_list_12[] = {
 	SOC15_REG_ENTRY_STR(GC, 0, regCP_IB1_BUFSZ)
 };
 
+static const struct soc15_reg_golden golden_settings_gc_12_0[] = {
+	SOC15_REG_GOLDEN_VALUE(GC, 0, regDB_MEM_CONFIG, 0x0000000f, 0x0000000f),
+	SOC15_REG_GOLDEN_VALUE(GC, 0, regCB_HW_CONTROL_1, 0x03000000, 0x03000000),
+	SOC15_REG_GOLDEN_VALUE(GC, 0, regGL2C_CTRL5, 0x00000070, 0x00000020)
+};
+
 #define DEFAULT_SH_MEM_CONFIG \
 	((SH_MEM_ADDRESS_MODE_64 << SH_MEM_CONFIG__ADDRESS_MODE__SHIFT) | \
 	 (SH_MEM_ALIGNMENT_MODE_UNALIGNED << SH_MEM_CONFIG__ALIGNMENT_MODE__SHIFT) | \
@@ -3481,6 +3487,24 @@ static void gfx_v12_0_disable_gpa_mode(struct amdgpu_device *adev)
 	WREG32_SOC15(GC, 0, regCPG_PSP_DEBUG, data);
 }
 
+static void gfx_v12_0_init_golden_registers(struct amdgpu_device *adev)
+{
+	if (amdgpu_sriov_vf(adev))
+		return;
+
+	switch (amdgpu_ip_version(adev, GC_HWIP, 0)) {
+	case IP_VERSION(12, 0, 0):
+	case IP_VERSION(12, 0, 1):
+		if (adev->rev_id == 0)
+			soc15_program_register_sequence(adev,
+					golden_settings_gc_12_0,
+					(const u32)ARRAY_SIZE(golden_settings_gc_12_0));
+		break;
+	default:
+		break;
+	}
+}
+
 static int gfx_v12_0_hw_init(void *handle)
 {
 	int r;
@@ -3520,6 +3544,9 @@ static int gfx_v12_0_hw_init(void *handle)
 			return r;
 		}
 	}
+
+	if (!amdgpu_emu_mode)
+		gfx_v12_0_init_golden_registers(adev);
 
 	adev->gfx.is_poweron = true;
 
@@ -5005,6 +5032,24 @@ static void gfx_v12_0_emit_mem_sync(struct amdgpu_ring *ring)
 	amdgpu_ring_write(ring, gcr_cntl); /* GCR_CNTL */
 }
 
+static void gfx_v12_ring_insert_nop(struct amdgpu_ring *ring, uint32_t num_nop)
+{
+	int i;
+
+	/* Header itself is a NOP packet */
+	if (num_nop == 1) {
+		amdgpu_ring_write(ring, ring->funcs->nop);
+		return;
+	}
+
+	/* Max HW optimization till 0x3ffe, followed by remaining one NOP at a time*/
+	amdgpu_ring_write(ring, PACKET3(PACKET3_NOP, min(num_nop - 2, 0x3ffe)));
+
+	/* Header is at index 0, followed by num_nops - 1 NOP packet's */
+	for (i = 1; i < num_nop; i++)
+		amdgpu_ring_write(ring, ring->funcs->nop);
+}
+
 static void gfx_v12_ip_print(void *handle, struct drm_printer *p)
 {
 	struct amdgpu_device *adev = (struct amdgpu_device *)handle;
@@ -5186,7 +5231,7 @@ static const struct amdgpu_ring_funcs gfx_v12_0_ring_funcs_gfx = {
 	.emit_hdp_flush = gfx_v12_0_ring_emit_hdp_flush,
 	.test_ring = gfx_v12_0_ring_test_ring,
 	.test_ib = gfx_v12_0_ring_test_ib,
-	.insert_nop = amdgpu_ring_insert_nop,
+	.insert_nop = gfx_v12_ring_insert_nop,
 	.pad_ib = amdgpu_ring_generic_pad_ib,
 	.emit_cntxcntl = gfx_v12_0_ring_emit_cntxcntl,
 	.init_cond_exec = gfx_v12_0_ring_emit_init_cond_exec,
@@ -5224,7 +5269,7 @@ static const struct amdgpu_ring_funcs gfx_v12_0_ring_funcs_compute = {
 	.emit_hdp_flush = gfx_v12_0_ring_emit_hdp_flush,
 	.test_ring = gfx_v12_0_ring_test_ring,
 	.test_ib = gfx_v12_0_ring_test_ib,
-	.insert_nop = amdgpu_ring_insert_nop,
+	.insert_nop = gfx_v12_ring_insert_nop,
 	.pad_ib = amdgpu_ring_generic_pad_ib,
 	.emit_wreg = gfx_v12_0_ring_emit_wreg,
 	.emit_reg_wait = gfx_v12_0_ring_emit_reg_wait,

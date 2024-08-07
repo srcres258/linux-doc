@@ -1286,10 +1286,10 @@ bool sched_can_stop_tick(struct rq *rq)
 	 * left. For CFS, if there's more than one we need the tick for
 	 * involuntary preemption. For SCX, ask.
 	 */
-	if (!scx_switched_all() && rq->nr_running > 1)
+	if (scx_enabled() && !scx_can_stop_tick(rq))
 		return false;
 
-	if (scx_enabled() && !scx_can_stop_tick(rq))
+	if (rq->cfs.nr_running > 1)
 		return false;
 
 	/*
@@ -2342,7 +2342,7 @@ static inline bool rq_has_pinned_tasks(struct rq *rq)
 static inline bool is_cpu_allowed(struct task_struct *p, int cpu)
 {
 	/* When not in the task's cpumask, no point in looking further. */
-	if (!cpumask_test_cpu(cpu, p->cpus_ptr))
+	if (!task_allowed_on_cpu(p, cpu))
 		return false;
 
 	/* migrate_disabled() must be allowed to finish. */
@@ -2351,7 +2351,7 @@ static inline bool is_cpu_allowed(struct task_struct *p, int cpu)
 
 	/* Non kernel threads are not allowed during either online or offline. */
 	if (!(p->flags & PF_KTHREAD))
-		return cpu_active(cpu) && task_cpu_possible(cpu, p);
+		return cpu_active(cpu);
 
 	/* KTHREAD_IS_PER_CPU is always allowed. */
 	if (kthread_is_per_cpu(p))
@@ -5857,7 +5857,6 @@ static inline void schedule_debug(struct task_struct *prev, bool preempt)
 static void put_prev_task_balance(struct rq *rq, struct task_struct *prev,
 				  struct rq_flags *rf)
 {
-#ifdef CONFIG_SMP
 	const struct sched_class *start_class = prev->sched_class;
 	const struct sched_class *class;
 
@@ -5867,7 +5866,7 @@ static void put_prev_task_balance(struct rq *rq, struct task_struct *prev,
 	 * when waking up from SCHED_IDLE. If @start_class is below SCX, start
 	 * from SCX instead.
 	 */
-	if (sched_class_above(&ext_sched_class, start_class))
+	if (scx_enabled() && sched_class_above(&ext_sched_class, start_class))
 		start_class = &ext_sched_class;
 #endif
 
@@ -5880,10 +5879,9 @@ static void put_prev_task_balance(struct rq *rq, struct task_struct *prev,
 	 * a runnable task of @class priority or higher.
 	 */
 	for_active_class_range(class, start_class, &idle_sched_class) {
-		if (class->balance(rq, prev, rf))
+		if (class->balance && class->balance(rq, prev, rf))
 			break;
 	}
-#endif
 
 	put_prev_task(rq, prev);
 

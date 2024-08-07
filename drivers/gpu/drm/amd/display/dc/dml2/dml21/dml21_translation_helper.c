@@ -725,18 +725,7 @@ static void populate_dml21_plane_config_from_plane_state(struct dml2_context *dm
 	const struct scaler_data *scaler_data = get_scaler_data_for_plane(dml_ctx, plane_state, context);
 	struct dc_stream_state *stream = context->streams[stream_index];
 
-	if (stream->cursor_attributes.color_format == CURSOR_MODE_MONO)
-		plane->cursor.cursor_bpp = 2;
-	else if (stream->cursor_attributes.color_format == CURSOR_MODE_COLOR_1BIT_AND
-		|| stream->cursor_attributes.color_format == CURSOR_MODE_COLOR_PRE_MULTIPLIED_ALPHA
-		|| stream->cursor_attributes.color_format == CURSOR_MODE_COLOR_UN_PRE_MULTIPLIED_ALPHA) {
-		plane->cursor.cursor_bpp = 32;
-	} else if (stream->cursor_attributes.color_format == CURSOR_MODE_COLOR_64BIT_FP_PRE_MULTIPLIED
-		|| stream->cursor_attributes.color_format == CURSOR_MODE_COLOR_64BIT_FP_UN_PRE_MULTIPLIED) {
-		plane->cursor.cursor_bpp = 64;
-	} else
-		plane->cursor.cursor_bpp = 32;
-
+	plane->cursor.cursor_bpp = 32;
 	plane->cursor.cursor_width = 256;
 	plane->cursor.num_cursors = 1;
 
@@ -827,6 +816,7 @@ static void populate_dml21_plane_config_from_plane_state(struct dml2_context *dm
 
 	if (plane_state->mcm_luts.lut3d_data.lut3d_src == DC_CM2_TRANSFER_FUNC_SOURCE_VIDMEM) {
 		plane->tdlut.setup_for_tdlut = true;
+
 		switch (plane_state->mcm_luts.lut3d_data.gpu_mem_params.layout) {
 		case DC_CM2_GPU_MEM_LAYOUT_3D_SWIZZLE_LINEAR_RGB:
 		case DC_CM2_GPU_MEM_LAYOUT_3D_SWIZZLE_LINEAR_BGR:
@@ -836,6 +826,7 @@ static void populate_dml21_plane_config_from_plane_state(struct dml2_context *dm
 			plane->tdlut.tdlut_addressing_mode = dml2_tdlut_simple_linear;
 			break;
 		}
+
 		switch (plane_state->mcm_luts.lut3d_data.gpu_mem_params.size) {
 		case DC_CM2_GPU_MEM_SIZE_171717:
 			plane->tdlut.tdlut_width_mode = dml2_tdlut_width_17_cube;
@@ -844,8 +835,8 @@ static void populate_dml21_plane_config_from_plane_state(struct dml2_context *dm
 			//plane->tdlut.tdlut_width_mode = dml2_tdlut_width_flatten; // dml2_tdlut_width_flatten undefined
 			break;
 		}
-	} else
-		plane->tdlut.setup_for_tdlut = false;
+	}
+	plane->tdlut.setup_for_tdlut |= dml_ctx->config.force_tdlut_enable;
 
 	plane->dynamic_meta_data.enable = false;
 	plane->dynamic_meta_data.lines_before_active_required = 0;

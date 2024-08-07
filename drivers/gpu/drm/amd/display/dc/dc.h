@@ -55,7 +55,7 @@ struct aux_payload;
 struct set_config_cmd_payload;
 struct dmub_notification;
 
-#define DC_VER "3.2.293"
+#define DC_VER "3.2.295"
 
 #define MAX_SURFACES 3
 #define MAX_PLANES 6
@@ -261,10 +261,7 @@ struct dc_caps {
 	bool zstate_support;
 	bool ips_support;
 	uint32_t num_of_internal_disp;
-	uint32_t max_dwb_htap;
-	uint32_t max_dwb_vtap;
 	enum dp_protocol_version max_dp_protocol_version;
-	bool spdif_aud;
 	unsigned int mall_size_per_mem_channel;
 	unsigned int mall_size_total;
 	unsigned int cursor_cache_size;
@@ -514,6 +511,7 @@ enum in_game_fams_config {
 	INGAME_FAMS_SINGLE_DISP_ENABLE, // enable in-game fams
 	INGAME_FAMS_DISABLE, // disable in-game fams
 	INGAME_FAMS_MULTI_DISP_ENABLE, //enable in-game fams for multi-display
+	INGAME_FAMS_MULTI_DISP_CLAMPED_ONLY, //enable in-game fams for multi-display only for clamped RR strategies
 };
 
 /**
@@ -982,6 +980,7 @@ struct dc_debug_options {
 	bool disable_z10;
 	bool enable_z9_disable_interface;
 	bool psr_skip_crtc_disable;
+	uint32_t ips_skip_crtc_disable_mask;
 	union dpia_debug_options dpia_debug;
 	bool disable_fixed_vs_aux_timeout_wa;
 	uint32_t fixed_vs_aux_delay_config_wa;
@@ -1370,7 +1369,6 @@ struct dc_plane_info {
 	int  global_alpha_value;
 	bool input_csc_enabled;
 	int layer_index;
-	bool front_buffer_rendering_active;
 	enum chroma_cositing cositing;
 };
 

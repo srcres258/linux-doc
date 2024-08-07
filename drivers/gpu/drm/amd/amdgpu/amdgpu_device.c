@@ -5277,23 +5277,6 @@ mode1_reset_failed:
 	return ret;
 }
 
-static int amdgpu_reset_reg_dumps(struct amdgpu_device *adev)
-{
-	int i;
-
-	lockdep_assert_held(&adev->reset_domain->sem);
-
-	for (i = 0; i < adev->reset_info.num_regs; i++) {
-		adev->reset_info.reset_dump_reg_value[i] =
-			RREG32(adev->reset_info.reset_dump_reg_list[i]);
-
-		trace_amdgpu_reset_reg_dumps(adev->reset_info.reset_dump_reg_list[i],
-					     adev->reset_info.reset_dump_reg_value[i]);
-	}
-
-	return 0;
-}
-
 int amdgpu_device_pre_asic_reset(struct amdgpu_device *adev,
 				 struct amdgpu_reset_context *reset_context)
 {
@@ -5359,8 +5342,6 @@ int amdgpu_device_pre_asic_reset(struct amdgpu_device *adev,
 		}
 
 		if (!test_bit(AMDGPU_SKIP_COREDUMP, &reset_context->flags)) {
-			amdgpu_reset_reg_dumps(tmp_adev);
-
 			dev_info(tmp_adev->dev, "Dumping IP State\n");
 			/* Trigger ip dump before we reset the asic */
 			for (i = 0; i < tmp_adev->num_ip_blocks; i++)
@@ -5517,7 +5498,7 @@ int amdgpu_do_asic_reset(struct list_head *device_list_handle,
 				 * bad_page_threshold value to fix this once
 				 * probing driver again.
 				 */
-				if (!amdgpu_ras_eeprom_check_err_threshold(tmp_adev)) {
+				if (!amdgpu_ras_is_rma(tmp_adev)) {
 					/* must succeed. */
 					amdgpu_ras_resume(tmp_adev);
 				} else {
@@ -5895,8 +5876,14 @@ skip_hw_reset:
 		tmp_adev->asic_reset_res = 0;
 
 		if (r) {
-			/* bad news, how to tell it to userspace ? */
-			dev_info(tmp_adev->dev, "GPU reset(%d) failed\n", atomic_read(&tmp_adev->gpu_reset_counter));
+			/* bad news, how to tell it to userspace ?
+			 * for ras error, we should report GPU bad status instead of
+			 * reset failure
+			 */
+			if (reset_context->src != AMDGPU_RESET_SRC_RAS ||
+			    !amdgpu_ras_eeprom_check_err_threshold(tmp_adev))
+				dev_info(tmp_adev->dev, "GPU reset(%d) failed\n",
+					atomic_read(&tmp_adev->gpu_reset_counter));
 			amdgpu_vf_error_put(tmp_adev, AMDGIM_ERROR_VF_GPU_RESET_FAIL, 0, r);
 		} else {
 			dev_info(tmp_adev->dev, "GPU reset(%d) succeeded!\n", atomic_read(&tmp_adev->gpu_reset_counter));

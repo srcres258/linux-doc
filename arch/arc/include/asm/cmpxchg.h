@@ -69,27 +69,14 @@
 	__typeof__(*(ptr)) _prev_;					\
 	unsigned long __flags;						\
 									\
-	switch(sizeof((_p_))) {						\
-	case 1:								\
-		__flags = cmpxchg_emu_u8((volatile u8 *)_p_, (uintptr_t)_o_, (uintptr_t)_n_);	\
-		_prev_ = (__typeof__(*(ptr)))__flags;			\
-		break;							\
-		break;							\
-	case 4:								\
-		/*							\
-		 * spin lock/unlock provide the needed smp_mb()		\
-		 * before/after						\
-		 */							\
-		atomic_ops_lock(__flags);				\
-		_prev_ = *_p_;						\
-		if (_prev_ == _o_)					\
-			*_p_ = _n_;					\
-		atomic_ops_unlock(__flags);				\
-		break;							\
-	default:							\
-		BUILD_BUG();						\
-	}								\
-									\
+	/*								\
+	 * spin lock/unlock provide the needed smp_mb() before/after	\
+	 */								\
+	atomic_ops_lock(__flags);					\
+	_prev_ = *_p_;							\
+	if (_prev_ == _o_)						\
+		*_p_ = _n_;						\
+	atomic_ops_unlock(__flags);					\
 	_prev_;								\
 })
 
