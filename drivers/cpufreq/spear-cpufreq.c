@@ -173,7 +173,7 @@ static int spear_cpufreq_probe(struct platform_device *pdev)
 	struct device_node *np;
 	struct cpufreq_frequency_table *freq_tbl;
 	u32 val;
-	int cnt, i, ret;
+	int cnt, ret, i = 0;
 
 	np = of_cpu_device_node_get(0);
 	if (!np) {
@@ -199,7 +199,7 @@ static int spear_cpufreq_probe(struct platform_device *pdev)
 	}
 
 	of_property_for_each_u32(np, "cpufreq_tbl", val)
-		freq_tbl[i].frequency = val;
+		freq_tbl[i++].frequency = val;
 
 	freq_tbl[cnt].frequency = CPUFREQ_TABLE_END;
 

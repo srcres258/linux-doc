@@ -699,13 +699,13 @@ annotation_line__print(struct annotation_line *al, struct symbol *sym, u64 start
 		       int percent_type)
 {
 	struct disasm_line *dl = container_of(al, struct disasm_line, al);
+	struct annotation *notes = symbol__annotation(sym);
 	static const char *prev_line;
 
 	if (al->offset != -1) {
 		double max_percent = 0.0;
 		int i, nr_percent = 1;
 		const char *color;
-		struct annotation *notes = symbol__annotation(sym);
 
 		for (i = 0; i < al->data_nr; i++) {
 			double percent;
@@ -775,13 +775,10 @@ annotation_line__print(struct annotation_line *al, struct symbol *sym, u64 start
 	} else if (max_lines && printed >= max_lines)
 		return 1;
 	else {
-		int width = symbol_conf.show_total_period ? 12 : 8;
+		int width = annotation__pcnt_width(notes);
 
 		if (queue)
 			return -1;
-
-		if (evsel__is_group_event(evsel))
-			width *= evsel->core.nr_members;
 
 		if (!*al->line)
 			printf(" %*s:\n", width, " ");
@@ -851,6 +848,10 @@ static void annotation__calc_percent(struct annotation *notes,
 
 			BUG_ON(i >= al->data_nr);
 
+			if (symbol_conf.skip_empty &&
+			    evsel__hists(evsel)->stats.nr_samples == 0)
+				continue;
+
 			data = &al->data[i++];
 
 			calc_percent(notes, evsel, data, al->offset, end);
@@ -904,7 +905,7 @@ int symbol__annotate(struct map_symbol *ms, struct evsel *evsel,
 		.options	= &annotate_opts,
 	};
 	struct arch *arch = NULL;
-	int err;
+	int err, nr;
 
 	err = evsel__get_arch(evsel, &arch);
 	if (err < 0)
@@ -924,6 +925,19 @@ int symbol__annotate(struct map_symbol *ms, struct evsel *evsel,
 		if (notes->src == NULL)
 			return -1;
 	}
+
+	nr = 0;
+	if (evsel__is_group_event(evsel)) {
+		struct evsel *pos;
+
+		for_each_group_evsel(pos, evsel) {
+			if (symbol_conf.skip_empty &&
+			    evsel__hists(pos)->stats.nr_samples == 0)
+				continue;
+			nr++;
+		}
+	}
+	notes->src->nr_events = nr ? nr : 1;
 
 	if (annotate_opts.full_addr)
 		notes->src->start = map__objdump_2mem(ms->map, ms->sym->start);
@@ -1106,7 +1120,7 @@ int symbol__annotate_printf(struct map_symbol *ms, struct evsel *evsel)
 	int more = 0;
 	bool context = opts->context;
 	u64 len;
-	int width = symbol_conf.show_total_period ? 12 : 8;
+	int width = annotation__pcnt_width(notes);
 	int graph_dotted_len;
 	char buf[512];
 
@@ -1122,7 +1136,6 @@ int symbol__annotate_printf(struct map_symbol *ms, struct evsel *evsel)
 	len = symbol__size(sym);
 
 	if (evsel__is_group_event(evsel)) {
-		width *= evsel->core.nr_members;
 		evsel__group_desc(evsel, buf, sizeof(buf));
 		evsel_name = buf;
 	}
@@ -1594,13 +1607,12 @@ bool ui__has_annotation(void)
 
 
 static double annotation_line__max_percent(struct annotation_line *al,
-					   struct annotation *notes,
 					   unsigned int percent_type)
 {
 	double percent_max = 0.0;
 	int i;
 
-	for (i = 0; i < notes->src->nr_events; i++) {
+	for (i = 0; i < al->data_nr; i++) {
 		double percent;
 
 		percent = annotation_data__percent(&al->data[i],
@@ -1672,7 +1684,7 @@ static void __annotation_line__write(struct annotation_line *al, struct annotati
 				     void (*obj__write_graph)(void *obj, int graph))
 
 {
-	double percent_max = annotation_line__max_percent(al, notes, percent_type);
+	double percent_max = annotation_line__max_percent(al, percent_type);
 	int pcnt_width = annotation__pcnt_width(notes),
 	    cycles_width = annotation__cycles_width(notes);
 	bool show_title = false;
@@ -1690,7 +1702,7 @@ static void __annotation_line__write(struct annotation_line *al, struct annotati
 	if (al->offset != -1 && percent_max != 0.0) {
 		int i;
 
-		for (i = 0; i < notes->src->nr_events; i++) {
+		for (i = 0; i < al->data_nr; i++) {
 			double percent;
 
 			percent = annotation_data__percent(&al->data[i], percent_type);
@@ -1699,10 +1711,10 @@ static void __annotation_line__write(struct annotation_line *al, struct annotati
 			if (symbol_conf.show_total_period) {
 				obj__printf(obj, "%11" PRIu64 " ", al->data[i].he.period);
 			} else if (symbol_conf.show_nr_samples) {
-				obj__printf(obj, "%6" PRIu64 " ",
+				obj__printf(obj, "%7" PRIu64 " ",
 						   al->data[i].he.nr_samples);
 			} else {
-				obj__printf(obj, "%6.2f ", percent);
+				obj__printf(obj, "%7.2f ", percent);
 			}
 		}
 	} else {
@@ -1843,10 +1855,7 @@ int symbol__annotate2(struct map_symbol *ms, struct evsel *evsel,
 	struct symbol *sym = ms->sym;
 	struct annotation *notes = symbol__annotation(sym);
 	size_t size = symbol__size(sym);
-	int nr_pcnt = 1, err;
-
-	if (evsel__is_group_event(evsel))
-		nr_pcnt = evsel->core.nr_members;
+	int err;
 
 	err = symbol__annotate(ms, evsel, parch);
 	if (err)
@@ -1862,8 +1871,6 @@ int symbol__annotate2(struct map_symbol *ms, struct evsel *evsel,
 		return err;
 
 	annotation__init_column_widths(notes, sym);
-	notes->src->nr_events = nr_pcnt;
-
 	annotation__update_column_widths(notes);
 	sym->annotate2 = 1;
 

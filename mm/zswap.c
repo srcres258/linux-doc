@@ -187,8 +187,8 @@ static struct shrinker *zswap_shrinker;
  *          decompression. For a same value filled page length is 0, and both
  *          pool and lru are invalid and must be ignored.
  * referenced - true if the entry recently entered the zswap pool. Unset by the
- *              dynamic shrinker. The entry is only reclaimed by the dynamic
- *              shrinker if referenced is unset. See comments in the shrinker
+ *              writeback logic. The entry is only reclaimed by the writeback
+ *              logic if referenced is unset. See comments in the shrinker
  *              section for context.
  * pool - the zswap_pool the entry's data is in
  * handle - zpool allocation handle that stores the compressed page data
@@ -704,8 +704,6 @@ static void zswap_lru_add(struct list_lru *list_lru, struct zswap_entry *entry)
 	int nid = entry_to_nid(entry);
 	struct mem_cgroup *memcg;
 
-	entry->referenced = true;
-
 	/*
 	 * Note that it is safe to use rcu_read_lock() here, even in the face of
 	 * concurrent memcg offlining. Thanks to the memcg->kmemcg_id indirection
@@ -739,7 +737,7 @@ static void zswap_lru_del(struct list_lru *list_lru, struct zswap_entry *entry)
 
 void zswap_lruvec_state_init(struct lruvec *lruvec)
 {
-	atomic_long_set(&lruvec->zswap_lruvec_state.nr_swapins, 0);
+	atomic_long_set(&lruvec->zswap_lruvec_state.nr_disk_swapins, 0);
 }
 
 void zswap_folio_swapin(struct folio *folio)
@@ -748,7 +746,7 @@ void zswap_folio_swapin(struct folio *folio)
 
 	if (folio) {
 		lruvec = folio_lruvec(folio);
-		atomic_long_inc(&lruvec->zswap_lruvec_state.nr_swapins);
+		atomic_long_inc(&lruvec->zswap_lruvec_state.nr_disk_swapins);
 	}
 }
 
@@ -1217,8 +1215,10 @@ static unsigned long zswap_shrinker_count(struct shrinker *shrinker,
 {
 	struct mem_cgroup *memcg = sc->memcg;
 	struct lruvec *lruvec = mem_cgroup_lruvec(memcg, NODE_DATA(sc->nid));
-	atomic_long_t *nr_swapins = &lruvec->zswap_lruvec_state.nr_swapins;
-	unsigned long nr_backing, nr_stored, lru_size, nr_swapins_cur, nr_remain;
+	atomic_long_t *nr_disk_swapins =
+		&lruvec->zswap_lruvec_state.nr_disk_swapins;
+	unsigned long nr_backing, nr_stored, nr_freeable, nr_disk_swapins_cur,
+		nr_remain;
 
 	if (!zswap_shrinker_enabled || !mem_cgroup_zswap_writeback_enabled(memcg))
 		return 0;
@@ -1251,25 +1251,26 @@ static unsigned long zswap_shrinker_count(struct shrinker *shrinker,
 	if (!nr_stored)
 		return 0;
 
-	lru_size = list_lru_shrink_count(&zswap_list_lru, sc);
-	if (!lru_size)
+	nr_freeable = list_lru_shrink_count(&zswap_list_lru, sc);
+	if (!nr_freeable)
 		return 0;
 
 	/*
-	 * Subtract the lru size by the number of pages that are recently swapped
-	 * in. The idea is that had we protect the zswap's LRU by this amount of
-	 * pages, these swap in would not have happened.
+	 * Subtract from the lru size the number of pages that are recently swapped
+	 * in from disk. The idea is that had we protect the zswap's LRU by this
+	 * amount of pages, these disk swapins would not have happened.
 	 */
-	nr_swapins_cur = atomic_long_read(nr_swapins);
+	nr_disk_swapins_cur = atomic_long_read(nr_disk_swapins);
 	do {
-		if (lru_size >= nr_swapins_cur)
+		if (nr_freeable >= nr_disk_swapins_cur)
 			nr_remain = 0;
 		else
-			nr_remain = nr_swapins_cur - lru_size;
-	} while (!atomic_long_try_cmpxchg(nr_swapins, &nr_swapins_cur, nr_remain));
+			nr_remain = nr_disk_swapins_cur - nr_freeable;
+	} while (!atomic_long_try_cmpxchg(
+		nr_disk_swapins, &nr_disk_swapins_cur, nr_remain));
 
-	lru_size -= nr_swapins_cur - nr_remain;
-	if (!lru_size)
+	nr_freeable -= nr_disk_swapins_cur - nr_remain;
+	if (!nr_freeable)
 		return 0;
 
 	/*
@@ -1473,6 +1474,7 @@ bool zswap_store(struct folio *folio)
 
 	entry->swpentry = swp;
 	entry->objcg = objcg;
+	entry->referenced = true;
 
 	old = xa_store(tree, offset, entry, GFP_KERNEL);
 	if (xa_is_err(old)) {

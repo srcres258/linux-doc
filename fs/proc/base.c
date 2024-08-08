@@ -130,8 +130,9 @@ static enum proc_mem_force proc_mem_force_override __ro_after_init =
 	PROC_MEM_FORCE_ALWAYS;
 
 static const struct constant_table proc_mem_force_table[] __initconst = {
-	{ "never", PROC_MEM_FORCE_NEVER },
+	{ "always", PROC_MEM_FORCE_ALWAYS },
 	{ "ptrace", PROC_MEM_FORCE_PTRACE },
+	{ "never", PROC_MEM_FORCE_NEVER },
 	{ }
 };
 
@@ -140,8 +141,12 @@ static int __init early_proc_mem_force_override(char *buf)
 	if (!buf)
 		return -EINVAL;
 
+	/*
+	 * lookup_constant() defaults to proc_mem_force_override to preseve
+	 * the initial Kconfig choice in case an invalid param gets passed.
+	 */
 	proc_mem_force_override = lookup_constant(proc_mem_force_table,
-						  buf, PROC_MEM_FORCE_ALWAYS);
+						  buf, proc_mem_force_override);
 
 	return 0;
 }
@@ -1006,7 +1011,9 @@ static bool proc_mem_foll_force(struct file *file, struct mm_struct *mm)
 	case PROC_MEM_FORCE_PTRACE:
 		task = get_proc_task(file_inode(file));
 		if (task) {
-			ptrace_active = task->ptrace && task->mm == mm && task->parent == current;
+			ptrace_active =	READ_ONCE(task->ptrace) &&
+					READ_ONCE(task->mm) == mm &&
+					READ_ONCE(task->parent) == current;
 			put_task_struct(task);
 		}
 		return ptrace_active;

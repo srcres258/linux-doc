@@ -13,7 +13,7 @@ extern atomic_t zswap_stored_pages;
 
 struct zswap_lruvec_state {
 	/*
-	 * Number of swapped in pages, i.e not found in the zswap pool.
+	 * Number of swapped in pages from disk, i.e not found in the zswap pool.
 	 *
 	 * This is consumed and subtracted from the lru size in
 	 * zswap_shrinker_count() to penalize past overshrinking that led to disk
@@ -21,7 +21,7 @@ struct zswap_lruvec_state {
 	 * LRU active/protected and not written them back, we would not have had to
 	 * swapped them in.
 	 */
-	atomic_long_t nr_swapins;
+	atomic_long_t nr_disk_swapins;
 };
 
 unsigned long zswap_total_pages(void);

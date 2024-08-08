@@ -1245,7 +1245,7 @@ retry:
 					goto keep_locked;
 				if (folio_test_large(folio)) {
 					/* cannot split folio, skip it */
-					if (!can_split_folio(folio, NULL))
+					if (!can_split_folio(folio, 1, NULL))
 						goto activate_locked;
 					/*
 					 * Split partially mapped folios right away.
@@ -6128,6 +6128,12 @@ static void shrink_node(pg_data_t *pgdat, struct scan_control *sc)
 {
 	unsigned long nr_reclaimed, nr_scanned, nr_node_reclaimed;
 	struct lruvec *target_lruvec;
+
+	/* Try to accept memory before going for reclaim */
+	if (node_try_to_accept_memory(pgdat, sc)) {
+		if (!should_continue_reclaim(pgdat, 0, sc))
+			return;
+	}
 
 	/* Try to accept memory before going for reclaim */
 	if (node_try_to_accept_memory(pgdat, sc)) {

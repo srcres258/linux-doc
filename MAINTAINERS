@@ -19743,12 +19743,10 @@ L:	linux-riscv@lists.infradead.org
 S:	Maintained
 Q:	https://patchwork.kernel.org/project/linux-riscv/list/
 T:	git https://git.kernel.org/pub/scm/linux/kernel/git/conor/linux.git/
-F:	Documentation/devicetree/bindings/riscv/
-F:	arch/riscv/boot/dts/
-X:	arch/riscv/boot/dts/allwinner/
-X:	arch/riscv/boot/dts/renesas/
-X:	arch/riscv/boot/dts/sophgo/
-X:	arch/riscv/boot/dts/thead/
+F:	arch/riscv/boot/dts/canaan/
+F:	arch/riscv/boot/dts/microchip/
+F:	arch/riscv/boot/dts/sifive/
+F:	arch/riscv/boot/dts/starfive/
 
 RISC-V PMU DRIVERS
 M:	Atish Patra <atishp@atishpatra.org>
@@ -23484,6 +23482,7 @@ U-BOOT ENVIRONMENT VARIABLES
 M:	Rafał Miłecki <rafal@milecki.pl>
 S:	Maintained
 F:	Documentation/devicetree/bindings/nvmem/u-boot,env.yaml
+F:	drivers/nvmem/layouts/u-boot-env.c
 F:	drivers/nvmem/u-boot-env.c
 
 UACCE ACCELERATOR FRAMEWORK
