@@ -256,7 +256,7 @@ static int add_marker(unsigned long start, unsigned long end, const char *name)
 	if (!oldsize)
 		markers = kvmalloc(newsize, GFP_KERNEL);
 	else
-		markers = kvrealloc(markers, oldsize, newsize, GFP_KERNEL);
+		markers = kvrealloc(markers, newsize, GFP_KERNEL);
 	if (!markers)
 		goto error;
 	markers[markers_cnt].is_start = 1;
