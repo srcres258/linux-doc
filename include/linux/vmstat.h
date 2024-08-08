@@ -625,7 +625,10 @@ static inline void lruvec_stat_sub_folio(struct folio *folio,
 	lruvec_stat_mod_folio(folio, idx, -folio_nr_pages(folio));
 }
 
-void __meminit mod_node_early_perpage_metadata(int nid, long delta);
-void __meminit store_early_perpage_metadata(void);
+void mod_memmap_boot(long delta);
+static inline void mod_memmap(long delta)
+{
+	count_vm_events(NR_MEMMAP, delta);
+}
 
 #endif /* _LINUX_VMSTAT_H */
