@@ -451,8 +451,8 @@ static int i915_driver_hw_probe(struct drm_i915_private *dev_priv)
 	if (HAS_PPGTT(dev_priv)) {
 		if (intel_vgpu_active(dev_priv) &&
 		    !intel_vgpu_has_full_ppgtt(dev_priv)) {
-			i915_report_error(dev_priv,
-					  "incompatible vGPU found, support for isolated ppGTT required\n");
+			drm_err(&dev_priv->drm,
+				"incompatible vGPU found, support for isolated ppGTT required\n");
 			return -ENXIO;
 		}
 	}
@@ -465,8 +465,8 @@ static int i915_driver_hw_probe(struct drm_i915_private *dev_priv)
 		 */
 		if (intel_vgpu_active(dev_priv) &&
 		    !intel_vgpu_has_hwsp_emulation(dev_priv)) {
-			i915_report_error(dev_priv,
-					  "old vGPU host found, support for HWSP emulation required\n");
+			drm_err(&dev_priv->drm,
+				"old vGPU host found, support for HWSP emulation required\n");
 			return -ENXIO;
 		}
 	}
@@ -1693,9 +1693,9 @@ static const struct drm_ioctl_desc i915_ioctls[] = {
 	DRM_IOCTL_DEF_DRV(I915_FREE, drm_noop, DRM_AUTH),
 	DRM_IOCTL_DEF_DRV(I915_INIT_HEAP, drm_noop, DRM_AUTH|DRM_MASTER|DRM_ROOT_ONLY),
 	DRM_IOCTL_DEF_DRV(I915_CMDBUFFER, drm_noop, DRM_AUTH),
-	DRM_IOCTL_DEF_DRV(I915_DESTROY_HEAP,  drm_noop, DRM_AUTH|DRM_MASTER|DRM_ROOT_ONLY),
-	DRM_IOCTL_DEF_DRV(I915_SET_VBLANK_PIPE,  drm_noop, DRM_AUTH|DRM_MASTER|DRM_ROOT_ONLY),
-	DRM_IOCTL_DEF_DRV(I915_GET_VBLANK_PIPE,  drm_noop, DRM_AUTH),
+	DRM_IOCTL_DEF_DRV(I915_DESTROY_HEAP, drm_noop, DRM_AUTH|DRM_MASTER|DRM_ROOT_ONLY),
+	DRM_IOCTL_DEF_DRV(I915_SET_VBLANK_PIPE, drm_noop, DRM_AUTH|DRM_MASTER|DRM_ROOT_ONLY),
+	DRM_IOCTL_DEF_DRV(I915_GET_VBLANK_PIPE, drm_noop, DRM_AUTH),
 	DRM_IOCTL_DEF_DRV(I915_VBLANK_SWAP, drm_noop, DRM_AUTH),
 	DRM_IOCTL_DEF_DRV(I915_HWS_ADDR, drm_noop, DRM_AUTH|DRM_MASTER|DRM_ROOT_ONLY),
 	DRM_IOCTL_DEF_DRV(I915_GEM_INIT, drm_noop, DRM_AUTH|DRM_MASTER|DRM_ROOT_ONLY),
