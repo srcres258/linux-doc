@@ -55,7 +55,7 @@ static struct xe_user_fence *user_fence_create(struct xe_device *xe, u64 addr,
 	struct xe_user_fence *ufence;
 	u64 __user *ptr = u64_to_user_ptr(addr);
 
-	if (!access_ok(ptr, sizeof(ptr)))
+	if (!access_ok(ptr, sizeof(*ptr)))
 		return ERR_PTR(-EFAULT);
 
 	ufence = kmalloc(sizeof(*ufence), GFP_KERNEL);
@@ -259,7 +259,7 @@ void xe_sync_entry_cleanup(struct xe_sync_entry *sync)
 	if (sync->fence)
 		dma_fence_put(sync->fence);
 	if (sync->chain_fence)
-		dma_fence_put(&sync->chain_fence->base);
+		dma_fence_chain_free(sync->chain_fence);
 	if (sync->ufence)
 		user_fence_put(sync->ufence);
 }
