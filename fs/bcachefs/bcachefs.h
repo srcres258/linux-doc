@@ -894,6 +894,8 @@ struct bch_fs {
 	struct bch_fs_usage_base __percpu *usage;
 	u64 __percpu		*online_reserved;
 
+	unsigned long		allocator_last_stuck;
+
 	struct io_clock		io_clock[2];
 
 	/* JOURNAL SEQ BLACKLIST */
@@ -1020,6 +1022,7 @@ struct bch_fs {
 	/* fs.c */
 	struct list_head	vfs_inodes_list;
 	struct mutex		vfs_inodes_lock;
+	struct rhashtable	vfs_inodes_table;
 
 	/* VFS IO PATH - fs-io.c */
 	struct bio_set		writepage_bioset;
@@ -1082,7 +1085,6 @@ struct bch_fs {
 	u64 __percpu		*counters;
 
 	unsigned		copy_gc_enabled:1;
-	bool			promote_whole_extents;
 
 	struct time_stats	times[BCH_TIME_STAT_NR];
 

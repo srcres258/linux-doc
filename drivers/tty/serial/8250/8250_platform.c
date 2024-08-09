@@ -108,7 +108,7 @@ void __init serial8250_isa_init_ports(void)
 static int serial8250_platform_probe(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
-	struct uart_8250_port uart = { 0 };
+	struct uart_8250_port uart = { };
 	struct resource *regs;
 	unsigned char iotype;
 	int ret, line;
@@ -281,7 +281,7 @@ static struct platform_driver serial8250_isa_driver = {
 	.resume		= serial8250_resume,
 	.driver		= {
 		.name	= "serial8250",
-		.acpi_match_table = ACPI_PTR(acpi_platform_serial_table),
+		.acpi_match_table = acpi_platform_serial_table,
 	},
 };
 

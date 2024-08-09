@@ -469,15 +469,10 @@ struct page * __meminit __populate_section_memmap(unsigned long pfn,
 	if (r < 0)
 		return NULL;
 
-	if (nid != NUMA_NO_NODE) {
-		if (system_state == SYSTEM_BOOTING) {
-			mod_node_early_perpage_metadata(nid, DIV_ROUND_UP(end - start,
-									  PAGE_SIZE));
-		} else {
-			mod_node_page_state(NODE_DATA(nid), NR_MEMMAP,
-					    DIV_ROUND_UP(end - start, PAGE_SIZE));
-		}
-	}
+	if (system_state == SYSTEM_BOOTING)
+		mod_memmap_boot(DIV_ROUND_UP(end - start, PAGE_SIZE));
+	else
+		mod_memmap(DIV_ROUND_UP(end - start, PAGE_SIZE));
 
 	return pfn_to_page(pfn);
 }

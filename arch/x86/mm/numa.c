@@ -126,6 +126,10 @@ static int __init numa_register_nodes(void)
 	for_each_node_mask(nid, node_possible_map) {
 		unsigned long start_pfn, end_pfn;
 
+		/*
+		 * Note, get_pfn_range_for_nid() depends on
+		 * memblock_set_node() having already happened
+		 */
 		get_pfn_range_for_nid(nid, &start_pfn, &end_pfn);
 		if (start_pfn >= end_pfn)
 			continue;

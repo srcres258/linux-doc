@@ -74,6 +74,7 @@ static unsigned long deferred_split_count(struct shrinker *shrink,
 					  struct shrink_control *sc);
 static unsigned long deferred_split_scan(struct shrinker *shrink,
 					 struct shrink_control *sc);
+static bool split_underutilized_thp = true;
 
 static atomic_t huge_zero_refcount;
 struct folio *huge_zero_folio __read_mostly;
@@ -442,69 +443,26 @@ static ssize_t hpage_pmd_size_show(struct kobject *kobj,
 static struct kobj_attribute hpage_pmd_size_attr =
 	__ATTR_RO(hpage_pmd_size);
 
-static ssize_t anon_orders_show(struct kobject *kobj,
-				struct kobj_attribute *attr, char *buf)
+static ssize_t split_underutilized_thp_show(struct kobject *kobj,
+			    struct kobj_attribute *attr, char *buf)
 {
-	return sysfs_emit(buf, "0x%08x\n", READ_ONCE(huge_anon_orders));
+	return sysfs_emit(buf, "%d\n", split_underutilized_thp);
 }
 
-static ssize_t anon_orders_store(struct kobject *kobj,
-				 struct kobj_attribute *attr,
-				 const char *buf, size_t count)
+static ssize_t split_underutilized_thp_store(struct kobject *kobj,
+			     struct kobj_attribute *attr,
+			     const char *buf, size_t count)
 {
-	int err;
-	int ret = count;
-	unsigned int orders;
-	int arch;
+	int err = kstrtobool(buf, &split_underutilized_thp);
 
-	if (sysfs_streq(buf, "recommend")) {
-		arch = max(arch_wants_pte_order(), PAGE_ALLOC_COSTLY_ORDER);
-		orders = BIT(arch);
-		orders |= BIT(PAGE_ALLOC_COSTLY_ORDER);
-		orders |= BIT(PMD_ORDER);
-	} else {
-		err = kstrtouint(buf, 0, &orders);
-		if (err)
-			ret = -EINVAL;
-	}
-
-	if (ret > 0) {
-		orders &= THP_ORDERS_ALL_ANON;
-		WRITE_ONCE(huge_anon_orders, orders);
-
-		err = start_stop_khugepaged();
-		if (err)
-			ret = err;
-	}
-
-	return ret;
-}
-
-static struct kobj_attribute anon_orders_attr = __ATTR_RW(anon_orders);
-
-static ssize_t anon_always_mask_show(struct kobject *kobj,
-				     struct kobj_attribute *attr, char *buf)
-{
-	return sysfs_emit(buf, "0x%08x\n", READ_ONCE(huge_anon_always_mask));
-}
-
-static ssize_t anon_always_mask_store(struct kobject *kobj,
-				      struct kobj_attribute *attr,
-				      const char *buf, size_t count)
-{
-	int err;
-	unsigned int always_mask;
-
-	err = kstrtouint(buf, 0, &always_mask);
-	if (err)
-		return -EINVAL;
-
-	WRITE_ONCE(huge_anon_always_mask, always_mask);
+	if (err < 0)
+		return err;
 
 	return count;
 }
 
-static struct kobj_attribute anon_always_mask_attr = __ATTR_RW(anon_always_mask);
+static struct kobj_attribute split_underutilized_thp_attr = __ATTR(
+	thp_low_util_shrinker, 0644, split_underutilized_thp_show, split_underutilized_thp_store);
 
 static struct attribute *hugepage_attr[] = {
 	&enabled_attr.attr,
@@ -516,6 +474,7 @@ static struct attribute *hugepage_attr[] = {
 #ifdef CONFIG_SHMEM
 	&shmem_enabled_attr.attr,
 #endif
+	&split_underutilized_thp_attr.attr,
 	NULL,
 };
 
@@ -1080,6 +1039,7 @@ static vm_fault_t __do_huge_pmd_anonymous_page(struct vm_fault *vmf,
 		update_mmu_cache_pmd(vma, vmf->address, vmf->pmd);
 		add_mm_counter(vma->vm_mm, MM_ANONPAGES, HPAGE_PMD_NR);
 		mm_inc_nr_ptes(vma->vm_mm);
+		deferred_split_folio(folio, false);
 		spin_unlock(vmf->ptl);
 		count_vm_event(THP_FAULT_ALLOC);
 		count_mthp_stat(HPAGE_PMD_ORDER, MTHP_STAT_ANON_FAULT_ALLOC);
@@ -1777,18 +1737,10 @@ vm_fault_t do_huge_pmd_numa_page(struct vm_fault *vmf)
 	if (!folio)
 		goto out_map;
 
-	/* See similar comment in do_numa_page for explanation */
-	if (!writable)
-		flags |= TNF_NO_GROUP;
-
 	nid = folio_nid(folio);
-	/*
-	 * For memory tiering mode, cpupid of slow memory page is used
-	 * to record page access time.  So use default value.
-	 */
-	if (!folio_use_access_time(folio))
-		last_cpupid = folio_last_cpupid(folio);
-	target_nid = numa_migrate_prep(folio, vmf, haddr, nid, &flags);
+
+	target_nid = numa_migrate_check(folio, vmf, haddr, &flags, writable,
+					&last_cpupid);
 	if (target_nid == NUMA_NO_NODE)
 		goto out_map;
 	if (migrate_misplaced_folio_prepare(folio, vma, target_nid)) {
@@ -1812,10 +1764,11 @@ vm_fault_t do_huge_pmd_numa_page(struct vm_fault *vmf)
 		goto out_map;
 	}
 
-out:
+count_fault:
 	if (nid != NUMA_NO_NODE)
 		task_numa_fault(last_cpupid, nid, HPAGE_PMD_NR, flags);
 
+out:
 	return 0;
 
 out_map:
@@ -1827,7 +1780,7 @@ out_map:
 	set_pmd_at(vma->vm_mm, haddr, vmf->pmd, pmd);
 	update_mmu_cache_pmd(vma, vmf->address, vmf->pmd);
 	spin_unlock(vmf->ptl);
-	goto out;
+	goto count_fault;
 }
 
 /*
@@ -2280,6 +2233,53 @@ unlock:
 	return ret;
 }
 
+/*
+ * Returns:
+ *
+ * - 0: if pud leaf changed from under us
+ * - 1: if pud can be skipped
+ * - HPAGE_PUD_NR: if pud was successfully processed
+ */
+#ifdef CONFIG_HAVE_ARCH_TRANSPARENT_HUGEPAGE_PUD
+int change_huge_pud(struct mmu_gather *tlb, struct vm_area_struct *vma,
+		    pud_t *pudp, unsigned long addr, pgprot_t newprot,
+		    unsigned long cp_flags)
+{
+	struct mm_struct *mm = vma->vm_mm;
+	pud_t oldpud, entry;
+	spinlock_t *ptl;
+
+	tlb_change_page_size(tlb, HPAGE_PUD_SIZE);
+
+	/* NUMA balancing doesn't apply to dax */
+	if (cp_flags & MM_CP_PROT_NUMA)
+		return 1;
+
+	/*
+	 * Huge entries on userfault-wp only works with anonymous, while we
+	 * don't have anonymous PUDs yet.
+	 */
+	if (WARN_ON_ONCE(cp_flags & MM_CP_UFFD_WP_ALL))
+		return 1;
+
+	ptl = __pud_trans_huge_lock(pudp, vma);
+	if (!ptl)
+		return 0;
+
+	/*
+	 * Can't clear PUD or it can race with concurrent zapping.  See
+	 * change_huge_pmd().
+	 */
+	oldpud = pudp_invalidate(vma, addr, pudp);
+	entry = pud_modify(oldpud, newprot);
+	set_pud_at(mm, addr, pudp, entry);
+	tlb_flush_pud_range(tlb, addr, HPAGE_PUD_SIZE);
+
+	spin_unlock(ptl);
+	return HPAGE_PUD_NR;
+}
+#endif
+
 #ifdef CONFIG_USERFAULTFD
 /*
  * The PT lock for src_pmd and dst_vma/src_vma (for reading) are locked by
@@ -2459,12 +2459,14 @@ int zap_huge_pud(struct mmu_gather *tlb, struct vm_area_struct *vma,
 		 pud_t *pud, unsigned long addr)
 {
 	spinlock_t *ptl;
+	pud_t orig_pud;
 
 	ptl = __pud_trans_huge_lock(pud, vma);
 	if (!ptl)
 		return 0;
 
-	pudp_huge_get_and_clear_full(vma, addr, pud, tlb->fullmm);
+	orig_pud = pudp_huge_get_and_clear_full(vma, addr, pud, tlb->fullmm);
+	arch_check_zapped_pud(vma, orig_pud);
 	tlb_remove_pud_tlb_entry(tlb, pud, addr);
 	if (vma_is_special_huge(vma)) {
 		spin_unlock(ptl);
@@ -2507,6 +2509,11 @@ void __split_huge_pud(struct vm_area_struct *vma, pud_t *pud,
 out:
 	spin_unlock(ptl);
 	mmu_notifier_invalidate_range_end(&range);
+}
+#else
+void __split_huge_pud(struct vm_area_struct *vma, pud_t *pud,
+		unsigned long address)
+{
 }
 #endif /* CONFIG_HAVE_ARCH_TRANSPARENT_HUGEPAGE_PUD */
 
@@ -2942,7 +2949,7 @@ bool unmap_huge_pmd_locked(struct vm_area_struct *vma, unsigned long addr,
 	return false;
 }
 
-static void remap_page(struct folio *folio, unsigned long nr)
+static void remap_page(struct folio *folio, unsigned long nr, bool map_unused_to_zeropage)
 {
 	int i = 0;
 
@@ -2950,7 +2957,7 @@ static void remap_page(struct folio *folio, unsigned long nr)
 	if (!folio_test_anon(folio))
 		return;
 	for (;;) {
-		remove_migration_ptes(folio, folio, true);
+		remove_migration_ptes(folio, folio, true, map_unused_to_zeropage);
 		i += folio_nr_pages(folio);
 		if (i >= nr)
 			break;
@@ -3090,7 +3097,9 @@ static void __split_huge_page(struct page *page, struct list_head *list,
 	unsigned int new_nr = 1 << new_order;
 	int order = folio_order(folio);
 	unsigned int nr = 1 << order;
+	struct folio_batch free_folios;
 
+	folio_batch_init(&free_folios);
 	/* complete memcg works before add pages to LRU */
 	split_page_memcg(head, order, new_order);
 
@@ -3158,7 +3167,7 @@ static void __split_huge_page(struct page *page, struct list_head *list,
 
 	if (nr_dropped)
 		shmem_uncharge(folio->mapping->host, nr_dropped);
-	remap_page(folio, nr);
+	remap_page(folio, nr, PageAnon(head));
 
 	/*
 	 * set page to its compound_head when split to non order-0 pages, so
@@ -3174,6 +3183,26 @@ static void __split_huge_page(struct page *page, struct list_head *list,
 		if (subpage == page)
 			continue;
 		folio_unlock(new_folio);
+		/*
+		 * If a folio has only two references left, one inherited
+		 * from the isolation of its head and the other from
+		 * lru_add_page_tail() which we are about to drop, it means this
+		 * folio was concurrently zapped. Then we can safely free it
+		 * and save page reclaim or migration the trouble of trying it.
+		 */
+		if (list && page_ref_freeze(subpage, 2)) {
+			VM_WARN_ON_ONCE_FOLIO(folio_test_lru(new_folio), new_folio);
+			VM_WARN_ON_ONCE_FOLIO(folio_test_large(new_folio), new_folio);
+			VM_WARN_ON_ONCE_FOLIO(folio_mapped(new_folio), new_folio);
+
+			folio_clear_active(new_folio);
+			folio_clear_unevictable(new_folio);
+			if (folio_batch_add(&free_folios, folio) == 0) {
+				mem_cgroup_uncharge_folios(&free_folios);
+				free_unref_folios(&free_folios);
+			}
+			continue;
+		}
 
 		/*
 		 * Subpages may be freed if there wasn't any mapping
@@ -3183,6 +3212,11 @@ static void __split_huge_page(struct page *page, struct list_head *list,
 		 * of the tail pages after the split is complete.
 		 */
 		free_page_and_swap_cache(subpage);
+	}
+
+	if (free_folios.nr) {
+		mem_cgroup_uncharge_folios(&free_folios);
+		free_unref_folios(&free_folios);
 	}
 }
 
@@ -3401,6 +3435,7 @@ int split_huge_page_to_list_to_order(struct page *page, struct list_head *list,
 			 * page_deferred_list.
 			 */
 			list_del_init(&folio->_deferred_list);
+			folio->_partially_mapped = false;
 		}
 		spin_unlock(&ds_queue->split_queue_lock);
 		if (mapping) {
@@ -3428,7 +3463,7 @@ fail:
 		if (mapping)
 			xas_unlock(&xas);
 		local_irq_enable();
-		remap_page(folio, folio_nr_pages(folio));
+		remap_page(folio, folio_nr_pages(folio), false);
 		ret = -EAGAIN;
 	}
 
@@ -3457,11 +3492,12 @@ void __folio_undo_large_rmappable(struct folio *folio)
 	if (!list_empty(&folio->_deferred_list)) {
 		ds_queue->split_queue_len--;
 		list_del_init(&folio->_deferred_list);
+		folio->_partially_mapped = false;
 	}
 	spin_unlock_irqrestore(&ds_queue->split_queue_lock, flags);
 }
 
-void deferred_split_folio(struct folio *folio)
+void deferred_split_folio(struct folio *folio, bool partially_mapped)
 {
 	struct deferred_split *ds_queue = get_deferred_split_queue(folio);
 #ifdef CONFIG_MEMCG
@@ -3477,6 +3513,9 @@ void deferred_split_folio(struct folio *folio)
 	if (order <= 1)
 		return;
 
+	if (!partially_mapped && !split_underutilized_thp)
+		return;
+
 	/*
 	 * The try_to_unmap() in page reclaim path might reach here too,
 	 * this may cause a race condition to corrupt deferred split queue.
@@ -3490,14 +3529,14 @@ void deferred_split_folio(struct folio *folio)
 	if (folio_test_swapcache(folio))
 		return;
 
-	if (!list_empty(&folio->_deferred_list))
-		return;
-
 	spin_lock_irqsave(&ds_queue->split_queue_lock, flags);
+	folio->_partially_mapped = partially_mapped;
 	if (list_empty(&folio->_deferred_list)) {
-		if (order >= HPAGE_PMD_ORDER)
-			count_vm_event(THP_DEFERRED_SPLIT_PAGE);
-		count_mthp_stat(folio_order(folio), MTHP_STAT_SPLIT_DEFERRED);
+		if (partially_mapped) {
+			if (folio_test_pmd_mappable(folio))
+				count_vm_event(THP_DEFERRED_SPLIT_PAGE);
+			count_mthp_stat(folio_order(folio), MTHP_STAT_SPLIT_DEFERRED);
+		}
 		list_add_tail(&folio->_deferred_list, &ds_queue->split_queue);
 		ds_queue->split_queue_len++;
 #ifdef CONFIG_MEMCG
@@ -3520,6 +3559,39 @@ static unsigned long deferred_split_count(struct shrinker *shrink,
 		ds_queue = &sc->memcg->deferred_split_queue;
 #endif
 	return READ_ONCE(ds_queue->split_queue_len);
+}
+
+static bool thp_underutilized(struct folio *folio)
+{
+	int num_zero_pages = 0, num_filled_pages = 0;
+	void *kaddr;
+	int i;
+
+	if (khugepaged_max_ptes_none == HPAGE_PMD_NR - 1)
+		return false;
+
+	for (i = 0; i < folio_nr_pages(folio); i++) {
+		kaddr = kmap_local_folio(folio, i * PAGE_SIZE);
+		if (memchr_inv(kaddr, 0, PAGE_SIZE) == NULL) {
+			num_zero_pages++;
+			if (num_zero_pages > khugepaged_max_ptes_none) {
+				kunmap_local(kaddr);
+				return true;
+			}
+		} else {
+			/*
+			 * Another path for early exit once the number
+			 * of non-zero filled pages exceeds threshold.
+			 */
+			num_filled_pages++;
+			if (num_filled_pages >= HPAGE_PMD_NR - khugepaged_max_ptes_none) {
+				kunmap_local(kaddr);
+				return false;
+			}
+		}
+		kunmap_local(kaddr);
+	}
+	return false;
 }
 
 static unsigned long deferred_split_scan(struct shrinker *shrink,
@@ -3546,6 +3618,7 @@ static unsigned long deferred_split_scan(struct shrinker *shrink,
 		} else {
 			/* We lost race with folio_put() */
 			list_del_init(&folio->_deferred_list);
+			folio->_partially_mapped = false;
 			ds_queue->split_queue_len--;
 		}
 		if (!--sc->nr_to_scan)
@@ -3554,18 +3627,45 @@ static unsigned long deferred_split_scan(struct shrinker *shrink,
 	spin_unlock_irqrestore(&ds_queue->split_queue_lock, flags);
 
 	list_for_each_entry_safe(folio, next, &list, _deferred_list) {
+		bool did_split = false;
+		bool underutilized = false;
+
+		if (folio->_partially_mapped)
+			goto split;
+		underutilized = thp_underutilized(folio);
+		if (underutilized)
+			goto split;
+		continue;
+split:
 		if (!folio_trylock(folio))
-			goto next;
-		/* split_huge_page() removes page from list on success */
-		if (!split_folio(folio))
-			split++;
+			continue;
+		did_split = !split_folio(folio);
 		folio_unlock(folio);
-next:
-		folio_put(folio);
+		if (did_split) {
+			/* Splitting removed folio from the list, drop reference here */
+			folio_put(folio);
+			if (underutilized)
+				count_vm_event(THP_UNDERUTILIZED_SPLIT_PAGE);
+			split++;
+		}
 	}
 
 	spin_lock_irqsave(&ds_queue->split_queue_lock, flags);
-	list_splice_tail(&list, &ds_queue->split_queue);
+	/*
+	 * Only add back to the queue if folio->_partially_mapped is set.
+	 * If thp_underutilized returns false, or if split_folio fails in
+	 * the case it was underutilized, then consider it used and don't
+	 * add it back to split_queue.
+	 */
+	list_for_each_entry_safe(folio, next, &list, _deferred_list) {
+		if (folio->_partially_mapped)
+			list_move(&folio->_deferred_list, &ds_queue->split_queue);
+		else {
+			list_del_init(&folio->_deferred_list);
+			ds_queue->split_queue_len--;
+		}
+		folio_put(folio);
+	}
 	spin_unlock_irqrestore(&ds_queue->split_queue_lock, flags);
 
 	/*

@@ -286,7 +286,7 @@ static struct promote_op *promote_alloc(struct btree_trans *trans,
 	 */
 	bool promote_full = (failed ||
 			     *read_full ||
-			     READ_ONCE(c->promote_whole_extents));
+			     READ_ONCE(c->opts.promote_whole_extents));
 	/* data might have to be decompressed in the write path: */
 	unsigned sectors = promote_full
 		? max(pick->crc.compressed_size, pick->crc.live_size)
@@ -406,6 +406,7 @@ static void bch2_read_retry_nodecode(struct bch_fs *c, struct bch_read_bio *rbio
 	bch2_trans_iter_init(trans, &iter, rbio->data_btree,
 			     rbio->read_pos, BTREE_ITER_slots);
 retry:
+	bch2_trans_begin(trans);
 	rbio->bio.bi_status = 0;
 
 	k = bch2_btree_iter_peek_slot(&iter);

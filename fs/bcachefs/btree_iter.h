@@ -809,6 +809,8 @@ transaction_restart:							\
 			    (_do) ?: bch2_trans_commit(_trans, (_disk_res),\
 					(_journal_seq), (_commit_flags)))
 
+struct bkey_s_c bch2_btree_iter_peek_and_restart_outlined(struct btree_iter *);
+
 #define for_each_btree_key_upto_norestart(_trans, _iter, _btree_id,	\
 			   _start, _end, _flags, _k, _ret)		\
 	for (bch2_trans_iter_init((_trans), &(_iter), (_btree_id),	\
@@ -849,7 +851,7 @@ transaction_restart:							\
 									\
 	if (bch2_err_matches(_ret, ENOMEM)) {				\
 		_gfp = GFP_KERNEL;					\
-		_ret = drop_locks_do(trans, _do);			\
+		_ret = drop_locks_do(_trans, _do);			\
 	}								\
 	_ret;								\
 })
@@ -862,7 +864,7 @@ transaction_restart:							\
 	_ret = 0;							\
 	if (unlikely(!_p)) {						\
 		_gfp = GFP_KERNEL;					\
-		_ret = drop_locks_do(trans, ((_p = _do), 0));		\
+		_ret = drop_locks_do(_trans, ((_p = _do), 0));		\
 	}								\
 	_p;								\
 })

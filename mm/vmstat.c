@@ -1256,8 +1256,6 @@ const char * const vmstat_text[] = {
 	"pgdemote_kswapd",
 	"pgdemote_direct",
 	"pgdemote_khugepaged",
-	"nr_memmap",
-	"nr_memmap_boot",
 	/* enum writeback_stat_item counters */
 	"nr_dirty_threshold",
 	"nr_dirty_background_threshold",
@@ -1368,6 +1366,7 @@ const char * const vmstat_text[] = {
 	"thp_split_page",
 	"thp_split_page_failed",
 	"thp_deferred_split_page",
+	"thp_underutilized_split_page",
 	"thp_split_pmd",
 	"thp_scan_exceed_none_pte",
 	"thp_scan_exceed_swap_pte",
@@ -1419,6 +1418,8 @@ const char * const vmstat_text[] = {
 	"vma_lock_retry",
 	"vma_lock_miss",
 #endif
+	"nr_memmap",
+	"nr_memmap_boot",
 #ifdef CONFIG_DEBUG_STACK_USAGE
 	"kstack_1k",
 #if THREAD_SIZE > 1024
@@ -2145,6 +2146,24 @@ static int vmstat_cpu_dead(unsigned int cpu)
 
 #endif
 
+/* nr_memmap_boot that is used prior to setup_per_cpu_areas() call */
+static atomic_long_t early_memmap_boot;
+static bool early_memmap_boot_finished;
+
+void mod_memmap_boot(long delta)
+{
+	if (early_memmap_boot_finished)
+		count_vm_events(NR_MEMMAP_BOOT, delta);
+	else
+		atomic_long_add(delta, &early_memmap_boot);
+}
+
+static void __init finish_early_memmap_boot(void)
+{
+	early_memmap_boot_finished = true;
+	mod_memmap_boot(atomic_long_read(&early_memmap_boot));
+}
+
 struct workqueue_struct *mm_percpu_wq;
 
 void __init init_mm_internals(void)
@@ -2177,6 +2196,7 @@ void __init init_mm_internals(void)
 	proc_create_seq("vmstat", 0444, NULL, &vmstat_op);
 	proc_create_seq("zoneinfo", 0444, NULL, &zoneinfo_op);
 #endif
+	finish_early_memmap_boot();
 }
 
 #if defined(CONFIG_DEBUG_FS) && defined(CONFIG_COMPACTION)
@@ -2313,25 +2333,3 @@ static int __init extfrag_debug_init(void)
 module_init(extfrag_debug_init);
 
 #endif
-
-/*
- * Page metadata size (struct page and page_ext) in pages
- */
-static unsigned long early_perpage_metadata[MAX_NUMNODES] __meminitdata;
-
-void __meminit mod_node_early_perpage_metadata(int nid, long delta)
-{
-	early_perpage_metadata[nid] += delta;
-}
-
-void __meminit store_early_perpage_metadata(void)
-{
-	int nid;
-	struct pglist_data *pgdat;
-
-	for_each_online_pgdat(pgdat) {
-		nid = pgdat->node_id;
-		mod_node_page_state(NODE_DATA(nid), NR_MEMMAP_BOOT,
-				    early_perpage_metadata[nid]);
-	}
-}

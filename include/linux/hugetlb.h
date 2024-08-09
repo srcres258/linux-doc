@@ -935,8 +935,9 @@ static inline bool htlb_allow_alloc_fallback(int reason)
 static inline spinlock_t *huge_pte_lockptr(struct hstate *h,
 					   struct mm_struct *mm, pte_t *pte)
 {
-	VM_WARN_ON(huge_page_size(h) == PAGE_SIZE);
-	VM_WARN_ON(huge_page_size(h) >= P4D_SIZE);
+	const unsigned long size = huge_page_size(h);
+
+	VM_WARN_ON(size == PAGE_SIZE);
 
 	/*
 	 * hugetlb must use the exact same PT locks as core-mm page table
@@ -952,12 +953,19 @@ static inline spinlock_t *huge_pte_lockptr(struct hstate *h,
 	 * If that does not hold for an architecture, then that architecture
 	 * must disable split PT locks such that all *_lockptr() functions
 	 * will give us the same result: the per-MM PT lock.
+	 *
+	 * Note that with e.g., CONFIG_PGTABLE_LEVELS=2 where
+	 * PGDIR_SIZE==P4D_SIZE==PUD_SIZE==PMD_SIZE, we'd use pud_lockptr()
+	 * and core-mm would use pmd_lockptr(). However, in such configurations
+	 * split PMD locks are disabled -- they don't make sense on a single
+	 * PGDIR page table -- and the end result is the same.
 	 */
-	if (huge_page_size(h) < PMD_SIZE)
-		return pte_lockptr(mm, pte);
-	else if (huge_page_size(h) < PUD_SIZE)
+	if (size >= PUD_SIZE)
+		return pud_lockptr(mm, (pud_t *) pte);
+	else if (size >= PMD_SIZE || IS_ENABLED(CONFIG_HIGHPTE))
 		return pmd_lockptr(mm, (pmd_t *) pte);
-	return pud_lockptr(mm, (pud_t *) pte);
+	/* pte_alloc_huge() only applies with !CONFIG_HIGHPTE */
+	return ptep_lockptr(mm, pte);
 }
 
 #ifndef hugepages_supported

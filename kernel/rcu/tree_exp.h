@@ -377,11 +377,11 @@ static void __sync_rcu_exp_select_node_cpus(struct rcu_exp_work *rewp)
 			 * post grace period updater's accesses is enforced by the
 			 * below acquire semantic.
 			 */
-			snap = ct_dynticks_cpu_acquire(cpu);
-			if (rcu_dynticks_in_eqs(snap))
+			snap = ct_rcu_watching_cpu_acquire(cpu);
+			if (rcu_watching_snap_in_eqs(snap))
 				mask_ofl_test |= mask;
 			else
-				rdp->exp_dynticks_snap = snap;
+				rdp->exp_watching_snap = snap;
 		}
 	}
 	mask_ofl_ipi = rnp->expmask & ~mask_ofl_test;
@@ -401,7 +401,7 @@ static void __sync_rcu_exp_select_node_cpus(struct rcu_exp_work *rewp)
 		unsigned long mask = rdp->grpmask;
 
 retry_ipi:
-		if (rcu_dynticks_in_eqs_since(rdp, rdp->exp_dynticks_snap)) {
+		if (rcu_watching_snap_stopped_since(rdp, rdp->exp_watching_snap)) {
 			mask_ofl_test |= mask;
 			continue;
 		}
@@ -598,9 +598,7 @@ static void synchronize_rcu_expedited_stall(unsigned long jiffies_start, unsigne
 			mask = leaf_node_cpu_bit(rnp, cpu);
 			if (!(READ_ONCE(rnp->expmask) & mask))
 				continue;
-			preempt_disable(); // For smp_processor_id() in dump_cpu_task().
 			dump_cpu_task(cpu);
-			preempt_enable();
 			nbcon_cpu_emergency_flush();
 		}
 		rcu_exp_print_detail_task_stall_rnp(rnp);

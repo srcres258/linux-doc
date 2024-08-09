@@ -1935,6 +1935,11 @@ struct btree *bch2_btree_iter_next_node(struct btree_iter *iter)
 	bch2_trans_verify_not_in_restart(trans);
 	bch2_btree_iter_verify(iter);
 
+	ret = bch2_btree_path_traverse(trans, iter->path, iter->flags);
+	if (ret)
+		goto err;
+
+
 	struct btree_path *path = btree_iter_path(trans, iter);
 
 	/* already at end? */
@@ -2719,6 +2724,19 @@ struct bkey_s_c bch2_btree_iter_prev_slot(struct btree_iter *iter)
 		return bkey_s_c_null;
 
 	return bch2_btree_iter_peek_slot(iter);
+}
+
+/* Obsolete, but still used by rust wrapper in -tools */
+struct bkey_s_c bch2_btree_iter_peek_and_restart_outlined(struct btree_iter *iter)
+{
+	struct bkey_s_c k;
+
+	while (btree_trans_too_many_iters(iter->trans) ||
+	       (k = bch2_btree_iter_peek_type(iter, iter->flags),
+		bch2_err_matches(bkey_err(k), BCH_ERR_transaction_restart)))
+		bch2_trans_begin(iter->trans);
+
+	return k;
 }
 
 /* new transactional stuff: */

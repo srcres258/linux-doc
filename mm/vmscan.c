@@ -1251,7 +1251,8 @@ retry:
 					 * Split partially mapped folios right away.
 					 * We can free the unmapped pages without IO.
 					 */
-					if (data_race(!list_empty(&folio->_deferred_list)) &&
+					if (data_race(!list_empty(&folio->_deferred_list) &&
+					    folio->_partially_mapped) &&
 					    split_folio_to_list(folio, folio_list))
 						goto activate_locked;
 				}
@@ -6128,6 +6129,12 @@ static void shrink_node(pg_data_t *pgdat, struct scan_control *sc)
 {
 	unsigned long nr_reclaimed, nr_scanned, nr_node_reclaimed;
 	struct lruvec *target_lruvec;
+
+	/* Try to accept memory before going for reclaim */
+	if (node_try_to_accept_memory(pgdat, sc)) {
+		if (!should_continue_reclaim(pgdat, 0, sc))
+			return;
+	}
 
 	/* Try to accept memory before going for reclaim */
 	if (node_try_to_accept_memory(pgdat, sc)) {

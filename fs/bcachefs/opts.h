@@ -265,6 +265,11 @@ enum fsck_err_opts {
 	  OPT_BOOL(),							\
 	  BCH2_NO_SB_OPT,		true,				\
 	  NULL,		"Enable inline data extents")			\
+	x(promote_whole_extents,	u8,				\
+	  OPT_FS|OPT_MOUNT|OPT_RUNTIME,					\
+	  OPT_BOOL(),							\
+	  BCH_SB_PROMOTE_WHOLE_EXTENTS,	true,				\
+	  NULL,		"Promote whole extents, instead of just part being read")\
 	x(acl,				u8,				\
 	  OPT_FS|OPT_FORMAT|OPT_MOUNT,					\
 	  OPT_BOOL(),							\
@@ -393,6 +398,11 @@ enum fsck_err_opts {
 	  OPT_BOOL(),							\
 	  BCH_SB_JOURNAL_TRANSACTION_NAMES, true,			\
 	  NULL,		"Log transaction function names in journal")	\
+	x(allocator_stuck_timeout,	u16,				\
+	  OPT_FS|OPT_FORMAT|OPT_MOUNT|OPT_RUNTIME,			\
+	  OPT_UINT(0, U16_MAX),						\
+	  BCH_SB_ALLOCATOR_STUCK_TIMEOUT, 30,				\
+	  NULL,		"Default timeout in seconds for stuck allocator messages")\
 	x(noexcl,			u8,				\
 	  OPT_FS|OPT_MOUNT,						\
 	  OPT_BOOL(),							\

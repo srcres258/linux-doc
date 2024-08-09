@@ -2456,10 +2456,10 @@ void memory_failure_queue(unsigned long pfn, int flags)
 	if (!buffer_overflow)
 		schedule_work_on(smp_processor_id(), &mf_cpu->work);
 	raw_spin_unlock_irqrestore(&mf_cpu->lock, proc_flags);
+	put_cpu_var(memory_failure_cpu);
 	if (buffer_overflow)
 		pr_err("buffer overflow when queuing memory failure at %#lx\n",
 		       pfn);
-	put_cpu_var(memory_failure_cpu);
 }
 EXPORT_SYMBOL_GPL(memory_failure_queue);
 

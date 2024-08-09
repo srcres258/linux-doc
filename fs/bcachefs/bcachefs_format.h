@@ -792,6 +792,8 @@ LE64_BITMASK(BCH_SB_HAS_ERRORS,		struct bch_sb, flags[0], 60, 61);
 LE64_BITMASK(BCH_SB_HAS_TOPOLOGY_ERRORS,struct bch_sb, flags[0], 61, 62);
 
 LE64_BITMASK(BCH_SB_BIG_ENDIAN,		struct bch_sb, flags[0], 62, 63);
+LE64_BITMASK(BCH_SB_PROMOTE_WHOLE_EXTENTS,
+					struct bch_sb, flags[0], 63, 64);
 
 LE64_BITMASK(BCH_SB_STR_HASH_TYPE,	struct bch_sb, flags[1],  0,  4);
 LE64_BITMASK(BCH_SB_COMPRESSION_TYPE_LO,struct bch_sb, flags[1],  4,  8);
@@ -836,6 +838,8 @@ LE64_BITMASK(BCH_SB_BACKGROUND_COMPRESSION_TYPE_HI,
 
 LE64_BITMASK(BCH_SB_VERSION_UPGRADE_COMPLETE,
 					struct bch_sb, flags[5],  0, 16);
+LE64_BITMASK(BCH_SB_ALLOCATOR_STUCK_TIMEOUT,
+					struct bch_sb, flags[5], 16, 32);
 
 static inline __u64 BCH_SB_COMPRESSION_TYPE(const struct bch_sb *sb)
 {

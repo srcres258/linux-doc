@@ -447,16 +447,10 @@ static inline void arch_check_zapped_pmd(struct vm_area_struct *vma,
 }
 #endif
 
-#ifndef arch_wants_pte_order
-/*
- * Returns preferred folio order for pte-mapped memory. Must be in range [0,
- * PMD_ORDER) and must not be order-1 since THP requires large folios to be at
- * least order-2. Negative value implies that the HW has no preference and mm
- * will choose it's own default order.
- */
-static inline int arch_wants_pte_order(void)
+#ifndef arch_check_zapped_pud
+static inline void arch_check_zapped_pud(struct vm_area_struct *vma,
+					 pud_t pud)
 {
-	return -1;
 }
 #endif
 

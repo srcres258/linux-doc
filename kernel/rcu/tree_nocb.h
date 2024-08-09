@@ -894,7 +894,7 @@ static void nocb_cb_wait(struct rcu_data *rdp)
 	WARN_ON_ONCE(!rcu_rdp_is_offloaded(rdp));
 
 	local_irq_save(flags);
-	rcu_momentary_dyntick_idle();
+	rcu_momentary_eqs();
 	local_irq_restore(flags);
 	/*
 	 * Disable BH to provide the expected environment.  Also, when
@@ -1079,7 +1079,7 @@ static int rcu_nocb_rdp_deoffload(struct rcu_data *rdp)
 		 * to iterate. Do it here instead. Locking doesn't look stricly necessary
 		 * but we stick to paranoia in this rare path.
 		 */
-		rcu_nocb_lock_irqsave(rdp, flags);
+		raw_spin_lock_irqsave(&rdp->nocb_lock, flags);
 		rcu_segcblist_clear_flags(&rdp->cblist, SEGCBLIST_OFFLOADED);
 		raw_spin_unlock_irqrestore(&rdp->nocb_lock, flags);
 

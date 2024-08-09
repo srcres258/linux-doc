@@ -219,7 +219,6 @@ read_attribute(copy_gc_wait);
 rw_attribute(rebalance_enabled);
 sysfs_pd_controller_attribute(rebalance);
 read_attribute(rebalance_status);
-rw_attribute(promote_whole_extents);
 
 read_attribute(new_stripes);
 
@@ -347,8 +346,6 @@ SHOW(bch2_fs)
 	if (attr == &sysfs_rebalance_status)
 		bch2_rebalance_status_to_text(out, c);
 
-	sysfs_print(promote_whole_extents,	c->promote_whole_extents);
-
 	/* Debugging: */
 
 	if (attr == &sysfs_journal_debug)
@@ -367,7 +364,7 @@ SHOW(bch2_fs)
 		bch2_stripes_heap_to_text(out, c);
 
 	if (attr == &sysfs_open_buckets)
-		bch2_open_buckets_to_text(out, c);
+		bch2_open_buckets_to_text(out, c, NULL);
 
 	if (attr == &sysfs_open_buckets_partial)
 		bch2_open_buckets_partial_to_text(out, c);
@@ -435,8 +432,6 @@ STORE(bch2_fs)
 	}
 
 	sysfs_pd_controller_store(rebalance,	&c->rebalance.pd);
-
-	sysfs_strtoul(promote_whole_extents,	c->promote_whole_extents);
 
 	/* Debugging: */
 
@@ -514,7 +509,7 @@ struct attribute *bch2_fs_files[] = {
 	&sysfs_btree_cache_size,
 	&sysfs_btree_write_stats,
 
-	&sysfs_promote_whole_extents,
+	&sysfs_rebalance_status,
 
 	&sysfs_compression_stats,
 
@@ -614,7 +609,6 @@ struct attribute *bch2_fs_internal_files[] = {
 	&sysfs_copy_gc_wait,
 
 	&sysfs_rebalance_enabled,
-	&sysfs_rebalance_status,
 	sysfs_pd_controller_files(rebalance),
 
 	&sysfs_moving_ctxts,
@@ -811,6 +805,9 @@ SHOW(bch2_dev)
 	if (attr == &sysfs_alloc_debug)
 		bch2_dev_alloc_debug_to_text(out, ca);
 
+	if (attr == &sysfs_open_buckets)
+		bch2_open_buckets_to_text(out, c, ca);
+
 	return 0;
 }
 
@@ -877,6 +874,7 @@ struct attribute *bch2_dev_files[] = {
 
 	/* debug: */
 	&sysfs_alloc_debug,
+	&sysfs_open_buckets,
 	NULL
 };
 
