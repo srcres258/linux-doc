@@ -396,10 +396,10 @@ static void print_annotate_item_stat(struct list_head *head, const char *title)
 	printf("total %d, ok %d (%.1f%%), bad %d (%.1f%%)\n\n", total,
 	       total_good, 100.0 * total_good / (total ?: 1),
 	       total_bad, 100.0 * total_bad / (total ?: 1));
-	printf("  %-10s: %5s %5s\n", "Name", "Good", "Bad");
+	printf("  %-20s: %5s %5s\n", "Name/opcode", "Good", "Bad");
 	printf("-----------------------------------------------------------\n");
 	list_for_each_entry(istat, head, list)
-		printf("  %-10s: %5d %5d\n", istat->name, istat->good, istat->bad);
+		printf("  %-20s: %5d %5d\n", istat->name, istat->good, istat->bad);
 	printf("\n");
 }
 
@@ -632,12 +632,22 @@ static int __cmd_annotate(struct perf_annotate *ann)
 	evlist__for_each_entry(session->evlist, pos) {
 		struct hists *hists = evsel__hists(pos);
 		u32 nr_samples = hists->stats.nr_samples;
+		struct ui_progress prog;
+		struct evsel *evsel;
+
+		if (!symbol_conf.event_group || !evsel__is_group_leader(pos))
+			continue;
+
+		for_each_group_member(evsel, pos)
+			nr_samples += evsel__hists(evsel)->stats.nr_samples;
 
 		if (nr_samples == 0)
 			continue;
 
-		if (!symbol_conf.event_group || !evsel__is_group_leader(pos))
-			continue;
+		ui_progress__init(&prog, nr_samples,
+				  "Sorting group events for output...");
+		evsel__output_resort(pos, &prog);
+		ui_progress__finish();
 
 		hists__find_annotations(hists, pos, ann);
 	}
@@ -795,6 +805,8 @@ int cmd_annotate(int argc, const char **argv)
 		    "Show stats for the data type annotation"),
 	OPT_BOOLEAN(0, "insn-stat", &annotate.insn_stat,
 		    "Show instruction stats for the data type annotation"),
+	OPT_BOOLEAN(0, "skip-empty", &symbol_conf.skip_empty,
+		    "Do not display empty (or dummy) events in the output"),
 	OPT_END()
 	};
 	int ret;
