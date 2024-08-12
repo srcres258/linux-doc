@@ -55,6 +55,20 @@ config ARM_SCMI_RAW_MODE_SUPPORT_COEX
 	  operate normally, thing which could make an SCMI test suite using the
 	  SCMI Raw mode support unreliable. If unsure, say N.
 
+config ARM_SCMI_DEBUG_COUNTERS
+	bool "Enable SCMI communication debug metrics tracking"
+	select ARM_SCMI_NEED_DEBUGFS
+	depends on DEBUG_FS
+	default n
+	help
+	  Enables tracking of some key communication metrics for debug
+	  purposes. It may track metrics like how many messages were sent
+	  or received, were there any failures, what kind of failures, ..etc.
+
+	  Enable this option to create a new debugfs directory which contains
+	  such useful debug counters. This can be helpful for debugging and
+	  SCMI monitoring.
+
 config ARM_SCMI_HAVE_TRANSPORT
 	bool
 	help
@@ -75,7 +89,7 @@ config ARM_SCMI_HAVE_MSG
 	  available.
 
 config ARM_SCMI_TRANSPORT_MAILBOX
-	bool "SCMI transport based on Mailbox"
+	tristate "SCMI transport based on Mailbox"
 	depends on MAILBOX
 	select ARM_SCMI_HAVE_TRANSPORT
 	select ARM_SCMI_HAVE_SHMEM
@@ -85,10 +99,12 @@ config ARM_SCMI_TRANSPORT_MAILBOX
 
 	  If you want the ARM SCMI PROTOCOL stack to include support for a
 	  transport based on mailboxes, answer Y.
+	  This driver can also be built as a module. If so, the module
+	  will be called scmi_transport_mailbox.
 
 config ARM_SCMI_TRANSPORT_OPTEE
-	bool "SCMI transport based on OP-TEE service"
-	depends on OPTEE=y || OPTEE=ARM_SCMI_PROTOCOL
+	tristate "SCMI transport based on OP-TEE service"
+	depends on OPTEE
 	select ARM_SCMI_HAVE_TRANSPORT
 	select ARM_SCMI_HAVE_SHMEM
 	select ARM_SCMI_HAVE_MSG
@@ -98,9 +114,11 @@ config ARM_SCMI_TRANSPORT_OPTEE
 
 	  If you want the ARM SCMI PROTOCOL stack to include support for a
 	  transport based on OP-TEE SCMI service, answer Y.
+	  This driver can also be built as a module. If so, the module
+	  will be called scmi_transport_optee.
 
 config ARM_SCMI_TRANSPORT_SMC
-	bool "SCMI transport based on SMC"
+	tristate "SCMI transport based on SMC"
 	depends on HAVE_ARM_SMCCC_DISCOVERY
 	select ARM_SCMI_HAVE_TRANSPORT
 	select ARM_SCMI_HAVE_SHMEM
@@ -110,6 +128,8 @@ config ARM_SCMI_TRANSPORT_SMC
 
 	  If you want the ARM SCMI PROTOCOL stack to include support for a
 	  transport based on SMC, answer Y.
+	  This driver can also be built as a module. If so, the module
+	  will be called scmi_transport_smc.
 
 config ARM_SCMI_TRANSPORT_SMC_ATOMIC_ENABLE
 	bool "Enable atomic mode support for SCMI SMC transport"
@@ -126,8 +146,8 @@ config ARM_SCMI_TRANSPORT_SMC_ATOMIC_ENABLE
 	  primitives all over instead. If unsure say N.
 
 config ARM_SCMI_TRANSPORT_VIRTIO
-	bool "SCMI transport based on VirtIO"
-	depends on VIRTIO=y || VIRTIO=ARM_SCMI_PROTOCOL
+	tristate "SCMI transport based on VirtIO"
+	depends on VIRTIO
 	select ARM_SCMI_HAVE_TRANSPORT
 	select ARM_SCMI_HAVE_MSG
 	help
@@ -135,6 +155,8 @@ config ARM_SCMI_TRANSPORT_VIRTIO
 
 	  If you want the ARM SCMI PROTOCOL stack to include support for a
 	  transport based on VirtIO, answer Y.
+	  This driver can also be built as a module. If so, the module
+	  will be called scmi_transport_virtio.
 
 config ARM_SCMI_TRANSPORT_VIRTIO_VERSION1_COMPLIANCE
 	bool "SCMI VirtIO transport Version 1 compliance"
