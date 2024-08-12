@@ -927,7 +927,7 @@ static inline int do_bch2_trans_commit(struct btree_trans *trans, unsigned flags
 static int journal_reclaim_wait_done(struct bch_fs *c)
 {
 	int ret = bch2_journal_error(&c->journal) ?:
-		!bch2_btree_key_cache_must_wait(c);
+		bch2_btree_key_cache_wait_done(c);
 
 	if (!ret)
 		journal_reclaim_kick(&c->journal);
@@ -973,9 +973,13 @@ int bch2_trans_commit_error(struct btree_trans *trans, unsigned flags,
 		bch2_trans_unlock(trans);
 
 		trace_and_count(c, trans_blocked_journal_reclaim, trans, trace_ip);
+		track_event_change(&c->times[BCH_TIME_blocked_key_cache_flush], true);
 
 		wait_event_freezable(c->journal.reclaim_wait,
 				     (ret = journal_reclaim_wait_done(c)));
+
+		track_event_change(&c->times[BCH_TIME_blocked_key_cache_flush], false);
+
 		if (ret < 0)
 			break;
 
