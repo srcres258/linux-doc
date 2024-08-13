@@ -1326,7 +1326,7 @@ static int ntlm_negotiate(struct ksmbd_work *work,
 	struct challenge_message *chgblob;
 	unsigned char *spnego_blob = NULL;
 	u16 spnego_blob_len;
-	char *neg_blob;
+	char *neg_blob, *spnego_off;
 	int sz, rc;
 
 	ksmbd_debug(SMB, "negotiate phase\n");
@@ -1370,7 +1370,8 @@ static int ntlm_negotiate(struct ksmbd_work *work,
 	}
 
 	sz = le16_to_cpu(rsp->SecurityBufferOffset);
-	memcpy((char *)&rsp->hdr.ProtocolId + sz, spnego_blob, spnego_blob_len);
+	spnego_off = (char *)&rsp->hdr.ProtocolId + sz;
+	memcpy(spnego_off, spnego_blob, spnego_blob_len);
 	rsp->SecurityBufferLength = cpu_to_le16(spnego_blob_len);
 
 out:
