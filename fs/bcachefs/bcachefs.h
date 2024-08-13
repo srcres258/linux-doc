@@ -447,6 +447,7 @@ BCH_DEBUG_PARAMS_DEBUG()
 	x(blocked_journal_low_on_space)		\
 	x(blocked_journal_low_on_pin)		\
 	x(blocked_journal_max_in_flight)	\
+	x(blocked_key_cache_flush)		\
 	x(blocked_allocate)			\
 	x(blocked_allocate_open_bucket)		\
 	x(blocked_write_buffer_full)		\
@@ -1022,6 +1023,7 @@ struct bch_fs {
 	/* fs.c */
 	struct list_head	vfs_inodes_list;
 	struct mutex		vfs_inodes_lock;
+	struct rhashtable	vfs_inodes_table;
 
 	/* VFS IO PATH - fs-io.c */
 	struct bio_set		writepage_bioset;
@@ -1084,7 +1086,6 @@ struct bch_fs {
 	u64 __percpu		*counters;
 
 	unsigned		copy_gc_enabled:1;
-	bool			promote_whole_extents;
 
 	struct bch2_time_stats	times[BCH_TIME_STAT_NR];
 
