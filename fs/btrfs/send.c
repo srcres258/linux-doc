@@ -62,7 +62,7 @@ struct fs_path {
 		/*
 		 * Average path length does not exceed 200 bytes, we'll have
 		 * better packing in the slab and higher chance to satisfy
-		 * a allocation later during send.
+		 * an allocation later during send.
 		 */
 		char pad[256];
 	};
@@ -347,7 +347,7 @@ struct name_cache_entry {
 	int ret;
 	int need_later_update;
 	int name_len;
-	char name[];
+	char name[] __counted_by(name_len);
 };
 
 /* See the comment at lru_cache.h about struct btrfs_lru_cache_entry. */
@@ -1136,7 +1136,7 @@ static int iterate_dir_item(struct btrfs_root *root, struct btrfs_path *path,
 	/*
 	 * Start with a small buffer (1 page). If later we end up needing more
 	 * space, which can happen for xattrs on a fs with a leaf size greater
-	 * then the page size, attempt to increase the buffer. Typically xattr
+	 * than the page size, attempt to increase the buffer. Typically xattr
 	 * values are small.
 	 */
 	buf_len = PATH_MAX;
