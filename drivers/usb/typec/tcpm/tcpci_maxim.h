@@ -20,28 +20,24 @@
 #define SBUOVPDIS                               BIT(7)
 #define CCOVPDIS                                BIT(6)
 #define SBURPCTRL                               BIT(5)
-#define CCLPMODESEL_MASK                        GENMASK(4, 3)
-#define ULTRA_LOW_POWER_MODE                    BIT(3)
-#define CCRPCTRL_MASK                           GENMASK(2, 0)
+#define CCLPMODESEL                             GENMASK(4, 3)
+#define ULTRA_LOW_POWER_MODE                    1
+#define CCRPCTRL                                GENMASK(2, 0)
 #define UA_1_SRC                                1
 #define UA_80_SRC                               3
 
 #define TCPC_VENDOR_CC_CTRL3                    0x8e
-#define CCWTRDEB_MASK                           GENMASK(7, 6)
-#define CCWTRDEB_SHIFT                          6
+#define CCWTRDEB                                GENMASK(7, 6)
 #define CCWTRDEB_1MS                            1
-#define CCWTRSEL_MASK                           GENMASK(5, 3)
-#define CCWTRSEL_SHIFT                          3
+#define CCWTRSEL                                GENMASK(5, 3)
 #define CCWTRSEL_1V                             0x4
 #define CCLADDERDIS                             BIT(2)
-#define WTRCYCLE_MASK                           BIT(0)
-#define WTRCYCLE_SHIFT                          0
+#define WTRCYCLE                                GENMASK(0, 0)
 #define WTRCYCLE_2_4_S                          0
 #define WTRCYCLE_4_8_S                          1
 
 #define TCPC_VENDOR_ADC_CTRL1                   0x91
-#define ADCINSEL_MASK                           GENMASK(7, 5)
-#define ADC_CHANNEL_OFFSET                      5
+#define ADCINSEL                                GENMASK(7, 5)
 #define ADCEN                                   BIT(0)
 
 enum contamiant_state {
