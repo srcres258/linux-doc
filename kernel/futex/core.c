@@ -36,6 +36,7 @@
 #include <linux/pagemap.h>
 #include <linux/plist.h>
 #include <linux/memblock.h>
+#include <linux/debugfs.h>
 #include <linux/fault-inject.h>
 #include <linux/slab.h>
 

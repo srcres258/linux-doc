@@ -8,6 +8,7 @@
 #include <linux/xarray.h>
 #include <linux/file.h>
 #include <linux/anon_inodes.h>
+#include <linux/debugfs.h>
 #include <linux/fault-inject.h>
 #include <linux/platform_device.h>
 #include <uapi/linux/iommufd.h>

@@ -9,6 +9,7 @@
 #include <linux/export.h>
 #include <linux/interrupt.h>
 #include <linux/stacktrace.h>
+#include <linux/debugfs.h>
 #include <linux/fault-inject.h>
 
 /*

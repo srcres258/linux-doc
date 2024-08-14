@@ -1346,8 +1346,8 @@ static void mas_node_count(struct ma_state *mas, int count)
  * Return:
  * - If mas->node is an error or not mas_start, return NULL.
  * - If it's an empty tree:     NULL & mas->status == ma_none
- * - If it's a single entry:    The entry & mas->status == mas_root
- * - If it's a tree:            NULL & mas->status == safe root node.
+ * - If it's a single entry:    The entry & mas->status == ma_root
+ * - If it's a tree:            NULL & mas->status == ma_active
  */
 static inline struct maple_enode *mas_start(struct ma_state *mas)
 {
@@ -5451,14 +5451,19 @@ EXPORT_SYMBOL_GPL(mas_store);
  */
 int mas_store_gfp(struct ma_state *mas, void *entry, gfp_t gfp)
 {
+	unsigned long index = mas->index;
+	unsigned long last = mas->last;
 	MA_WR_STATE(wr_mas, mas, entry);
 
 	mas_wr_store_setup(&wr_mas);
 	trace_ma_write(__func__, mas, 0, entry);
 retry:
 	mas_wr_store_entry(&wr_mas);
-	if (unlikely(mas_nomem(mas, gfp)))
+	if (unlikely(mas_nomem(mas, gfp))) {
+		if (!entry)
+			__mas_set_range(mas, index, last);
 		goto retry;
+	}
 
 	if (unlikely(mas_is_err(mas)))
 		return xa_err(mas->node);
@@ -6245,23 +6250,26 @@ EXPORT_SYMBOL_GPL(mas_find_range_rev);
 void *mas_erase(struct ma_state *mas)
 {
 	void *entry;
+	unsigned long index = mas->index;
 	MA_WR_STATE(wr_mas, mas, NULL);
 
 	if (!mas_is_active(mas) || !mas_is_start(mas))
 		mas->status = ma_start;
 
-	/* Retry unnecessary when holding the write lock. */
+write_retry:
 	entry = mas_state_walk(mas);
 	if (!entry)
 		return NULL;
 
-write_retry:
 	/* Must reset to ensure spanning writes of last slot are detected */
 	mas_reset(mas);
 	mas_wr_store_setup(&wr_mas);
 	mas_wr_store_entry(&wr_mas);
-	if (mas_nomem(mas, GFP_KERNEL))
+	if (mas_nomem(mas, GFP_KERNEL)) {
+		/* in case the range of entry changed when unlocked */
+		mas->index = mas->last = index;
 		goto write_retry;
+	}
 
 	return entry;
 }
@@ -6995,6 +7003,19 @@ extern void kmem_cache_set_non_kernel(struct kmem_cache *, unsigned int);
 void mt_set_non_kernel(unsigned int val)
 {
 	kmem_cache_set_non_kernel(maple_node_cache, val);
+}
+
+extern void kmem_cache_set_callback(struct kmem_cache *cachep,
+		void (*callback)(void *));
+void mt_set_callback(void (*callback)(void *))
+{
+	kmem_cache_set_callback(maple_node_cache, callback);
+}
+
+extern void kmem_cache_set_private(struct kmem_cache *cachep, void *private);
+void mt_set_private(void *private)
+{
+	kmem_cache_set_private(maple_node_cache, private);
 }
 
 extern unsigned long kmem_cache_get_alloc(struct kmem_cache *);
