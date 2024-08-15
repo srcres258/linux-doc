@@ -2887,6 +2887,13 @@ static inline spinlock_t *ptep_lockptr(struct mm_struct *mm, pte_t *pte)
 	return ptlock_ptr(virt_to_ptdesc(pte));
 }
 
+static inline spinlock_t *ptep_lockptr(struct mm_struct *mm, pte_t *pte)
+{
+	BUILD_BUG_ON(IS_ENABLED(CONFIG_HIGHPTE));
+	BUILD_BUG_ON(MAX_PTRS_PER_PTE * sizeof(pte_t) > PAGE_SIZE);
+	return ptlock_ptr(virt_to_ptdesc(pte));
+}
+
 static inline bool ptlock_init(struct ptdesc *ptdesc)
 {
 	/*
@@ -2908,6 +2915,10 @@ static inline bool ptlock_init(struct ptdesc *ptdesc)
  * We use mm->page_table_lock to guard all pagetable pages of the mm.
  */
 static inline spinlock_t *pte_lockptr(struct mm_struct *mm, pte_t *pte)
+{
+	return &mm->page_table_lock;
+}
+static inline spinlock_t *ptep_lockptr(struct mm_struct *mm, pte_t *pte)
 {
 	return &mm->page_table_lock;
 }
@@ -4102,18 +4113,18 @@ madvise_set_anon_name(struct mm_struct *mm, unsigned long start,
 
 #ifdef CONFIG_UNACCEPTED_MEMORY
 
-bool range_contains_unaccepted_memory(phys_addr_t start, phys_addr_t end);
-void accept_memory(phys_addr_t start, phys_addr_t end);
+bool range_contains_unaccepted_memory(phys_addr_t start, unsigned long size);
+void accept_memory(phys_addr_t start, unsigned long size);
 
 #else
 
 static inline bool range_contains_unaccepted_memory(phys_addr_t start,
-						    phys_addr_t end)
+						    unsigned long size)
 {
 	return false;
 }
 
-static inline void accept_memory(phys_addr_t start, phys_addr_t end)
+static inline void accept_memory(phys_addr_t start, unsigned long size)
 {
 }
 
@@ -4121,9 +4132,7 @@ static inline void accept_memory(phys_addr_t start, phys_addr_t end)
 
 static inline bool pfn_is_unaccepted_memory(unsigned long pfn)
 {
-	phys_addr_t paddr = pfn << PAGE_SHIFT;
-
-	return range_contains_unaccepted_memory(paddr, paddr + PAGE_SIZE);
+	return range_contains_unaccepted_memory(pfn << PAGE_SHIFT, PAGE_SIZE);
 }
 
 void vma_pgtable_walk_begin(struct vm_area_struct *vma);

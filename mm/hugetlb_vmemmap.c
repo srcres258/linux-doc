@@ -218,10 +218,10 @@ static int vmemmap_remap_range(unsigned long start, unsigned long end,
 static inline void free_vmemmap_page(struct page *page)
 {
 	if (PageReserved(page)) {
-		mod_memmap_boot(-1);
+		memmap_boot_pages_add(-1);
 		free_bootmem_page(page);
 	} else {
-		mod_memmap(-1);
+		memmap_pages_add(-1);
 		__free_page(page);
 	}
 }
@@ -374,7 +374,7 @@ static int vmemmap_remap_free(unsigned long start, unsigned long end,
 		copy_page(page_to_virt(walk.reuse_page),
 			  (void *)walk.reuse_addr);
 		list_add(&walk.reuse_page->lru, vmemmap_pages);
-		mod_memmap(1);
+		memmap_pages_add(1);
 	}
 
 	/*
@@ -429,7 +429,7 @@ static int alloc_vmemmap_page_list(unsigned long start, unsigned long end,
 			goto out;
 		list_add(&page->lru, list);
 	}
-	mod_memmap(nr_pages);
+	memmap_pages_add(nr_pages);
 
 	return 0;
 out:

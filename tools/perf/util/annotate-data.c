@@ -217,8 +217,13 @@ static int __add_member_cb(Dwarf_Die *die, void *arg)
 	strbuf_init(&sb, 32);
 	die_get_typename(die, &sb);
 
-	die_get_real_type(die, &member_type);
-	if (dwarf_aggregate_size(&member_type, &size) < 0)
+	__die_get_real_type(die, &member_type);
+	if (dwarf_tag(&member_type) == DW_TAG_typedef)
+		die_get_real_type(&member_type, &die_mem);
+	else
+		die_mem = member_type;
+
+	if (dwarf_aggregate_size(&die_mem, &size) < 0)
 		size = 0;
 
 	if (!dwarf_attr_integrate(die, DW_AT_data_member_location, &attr))
@@ -235,11 +240,11 @@ static int __add_member_cb(Dwarf_Die *die, void *arg)
 	INIT_LIST_HEAD(&member->children);
 	list_add_tail(&member->node, &parent->children);
 
-	tag = dwarf_tag(&member_type);
+	tag = dwarf_tag(&die_mem);
 	switch (tag) {
 	case DW_TAG_structure_type:
 	case DW_TAG_union_type:
-		die_find_child(&member_type, __add_member_cb, member, &die_mem);
+		die_find_child(&die_mem, __add_member_cb, member, &die_mem);
 		break;
 	default:
 		break;
@@ -281,6 +286,10 @@ static struct annotated_data_type *dso__findnew_data_type(struct dso *dso,
 	if (die_get_typename_from_type(type_die, &sb) < 0)
 		strbuf_add(&sb, "(unknown type)", 14);
 	type_name = strbuf_detach(&sb, NULL);
+
+	if (dwarf_tag(type_die) == DW_TAG_typedef)
+		die_get_real_type(type_die, type_die);
+
 	dwarf_aggregate_size(type_die, &size);
 
 	/* Check existing nodes in dso->data_types tree */
@@ -342,6 +351,7 @@ static int check_variable(struct data_loc_info *dloc, Dwarf_Die *var_die,
 {
 	Dwarf_Word size;
 	bool is_pointer = true;
+	Dwarf_Die sized_type;
 
 	if (reg == DWARF_REG_PC)
 		is_pointer = false;
@@ -351,7 +361,7 @@ static int check_variable(struct data_loc_info *dloc, Dwarf_Die *var_die,
 		is_pointer = false;
 
 	/* Get the type of the variable */
-	if (die_get_real_type(var_die, type_die) == NULL) {
+	if (__die_get_real_type(var_die, type_die) == NULL) {
 		pr_debug_dtp("variable has no type\n");
 		ann_data_stat.no_typeinfo++;
 		return -1;
@@ -365,15 +375,20 @@ static int check_variable(struct data_loc_info *dloc, Dwarf_Die *var_die,
 	if (is_pointer) {
 		if ((dwarf_tag(type_die) != DW_TAG_pointer_type &&
 		     dwarf_tag(type_die) != DW_TAG_array_type) ||
-		    die_get_real_type(type_die, type_die) == NULL) {
+		    __die_get_real_type(type_die, type_die) == NULL) {
 			pr_debug_dtp("no pointer or no type\n");
 			ann_data_stat.no_typeinfo++;
 			return -1;
 		}
 	}
 
+	if (dwarf_tag(type_die) == DW_TAG_typedef)
+		die_get_real_type(type_die, &sized_type);
+	else
+		sized_type = *type_die;
+
 	/* Get the size of the actual type */
-	if (dwarf_aggregate_size(type_die, &size) < 0) {
+	if (dwarf_aggregate_size(&sized_type, &size) < 0) {
 		pr_debug_dtp("type size is unknown\n");
 		ann_data_stat.invalid_size++;
 		return -1;
@@ -846,6 +861,7 @@ static int check_matching_type(struct type_state *state,
 
 	if (state->regs[reg].ok && state->regs[reg].kind == TSR_KIND_TYPE) {
 		int tag = dwarf_tag(&state->regs[reg].type);
+		Dwarf_Die sized_type;
 
 		/*
 		 * Normal registers should hold a pointer (or array) to
@@ -862,13 +878,18 @@ static int check_matching_type(struct type_state *state,
 		pr_debug_dtp("\n");
 
 		/* Remove the pointer and get the target type */
-		if (die_get_real_type(&state->regs[reg].type, type_die) == NULL)
+		if (__die_get_real_type(&state->regs[reg].type, type_die) == NULL)
 			return -1;
 
 		dloc->type_offset = dloc->op->offset;
 
+		if (dwarf_tag(type_die) == DW_TAG_typedef)
+			die_get_real_type(type_die, &sized_type);
+		else
+			sized_type = *type_die;
+
 		/* Get the size of the actual type */
-		if (dwarf_aggregate_size(type_die, &size) < 0 ||
+		if (dwarf_aggregate_size(&sized_type, &size) < 0 ||
 		    (unsigned)dloc->type_offset >= size)
 			return -1;
 
@@ -1345,15 +1366,8 @@ out:
  */
 struct annotated_data_type *find_data_type(struct data_loc_info *dloc)
 {
-	struct annotated_data_type *result = NULL;
 	struct dso *dso = map__dso(dloc->ms->map);
 	Dwarf_Die type_die;
-
-	dloc->di = debuginfo__new(dso__long_name(dso));
-	if (dloc->di == NULL) {
-		pr_debug_dtp("cannot get the debug info\n");
-		return NULL;
-	}
 
 	/*
 	 * The type offset is the same as instruction offset by default.
@@ -1364,13 +1378,9 @@ struct annotated_data_type *find_data_type(struct data_loc_info *dloc)
 	dloc->fbreg = -1;
 
 	if (find_data_type_die(dloc, &type_die) < 0)
-		goto out;
+		return NULL;
 
-	result = dso__findnew_data_type(dso, &type_die);
-
-out:
-	debuginfo__delete(dloc->di);
-	return result;
+	return dso__findnew_data_type(dso, &type_die);
 }
 
 static int alloc_data_type_histograms(struct annotated_data_type *adt, int nr_entries)
@@ -1492,10 +1502,15 @@ static void print_annotated_data_header(struct hist_entry *he, struct evsel *evs
 		struct evsel *pos;
 		int i = 0;
 
-		for_each_group_evsel(pos, evsel)
-			printf(" event[%d] = %s\n", i++, pos->name);
+		nr_members = 0;
+		for_each_group_evsel(pos, evsel) {
+			if (symbol_conf.skip_empty &&
+			    evsel__hists(pos)->stats.nr_samples == 0)
+				continue;
 
-		nr_members = evsel->core.nr_members;
+			printf(" event[%d] = %s\n", i++, pos->name);
+			nr_members++;
+		}
 	}
 
 	if (symbol_conf.show_total_period) {
@@ -1530,31 +1545,26 @@ static void print_annotated_data_type(struct annotated_data_type *mem_type,
 {
 	struct annotated_member *child;
 	struct type_hist *h = mem_type->histograms[evsel->core.idx];
-	int i, nr_events = 1, samples = 0;
+	int i, nr_events = 0, samples = 0;
 	u64 period = 0;
 	int width = symbol_conf.show_total_period ? 11 : 7;
+	struct evsel *pos;
 
-	for (i = 0; i < member->size; i++) {
-		samples += h->addr[member->offset + i].nr_samples;
-		period += h->addr[member->offset + i].period;
-	}
-	print_annotated_data_value(h, period, samples);
+	for_each_group_evsel(pos, evsel) {
+		h = mem_type->histograms[pos->core.idx];
 
-	if (evsel__is_group_event(evsel)) {
-		struct evsel *pos;
+		if (symbol_conf.skip_empty &&
+		    evsel__hists(pos)->stats.nr_samples == 0)
+			continue;
 
-		for_each_group_member(pos, evsel) {
-			h = mem_type->histograms[pos->core.idx];
-
-			samples = 0;
-			period = 0;
-			for (i = 0; i < member->size; i++) {
-				samples += h->addr[member->offset + i].nr_samples;
-				period += h->addr[member->offset + i].period;
-			}
-			print_annotated_data_value(h, period, samples);
+		samples = 0;
+		period = 0;
+		for (i = 0; i < member->size; i++) {
+			samples += h->addr[member->offset + i].nr_samples;
+			period += h->addr[member->offset + i].period;
 		}
-		nr_events = evsel->core.nr_members;
+		print_annotated_data_value(h, period, samples);
+		nr_events++;
 	}
 
 	printf(" %10d %10d  %*s%s\t%s",

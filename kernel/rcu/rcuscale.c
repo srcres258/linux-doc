@@ -1052,6 +1052,8 @@ rcu_scale_cleanup(void)
 		writer_durations = NULL;
 		kfree(writer_n_durations);
 		writer_n_durations = NULL;
+		kfree(writer_done);
+		writer_done = NULL;
 		kfree(writer_freelists);
 		writer_freelists = NULL;
 	}

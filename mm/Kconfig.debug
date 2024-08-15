@@ -73,7 +73,9 @@ config SLUB_DEBUG_ON
 config SLUB_RCU_DEBUG
 	bool "Enable UAF detection in TYPESAFE_BY_RCU caches (for KASAN)"
 	depends on SLUB_DEBUG
-	depends on KASAN # not a real dependency; currently useless without KASAN
+	# SLUB_RCU_DEBUG should build fine without KASAN, but is currently useless
+	# without KASAN, so mark it as a dependency of KASAN for now.
+	depends on KASAN
 	default KASAN_GENERIC || KASAN_SW_TAGS
 	help
 	  Make SLAB_TYPESAFE_BY_RCU caches behave approximately as if the cache

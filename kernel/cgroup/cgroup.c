@@ -5472,7 +5472,14 @@ static void css_release_work_fn(struct work_struct *work)
 			ss->css_released(css);
 
 		cgrp->nr_dying_subsys[ss->id]--;
-		WARN_ON_ONCE(css->nr_descendants || cgrp->nr_dying_subsys[ss->id]);
+		/*
+		 * When a css is released and ready to be freed, its
+		 * nr_descendants must be zero. However, the corresponding
+		 * cgrp->nr_dying_subsys[ss->id] may not be 0 if a subsystem
+		 * is activated and deactivated multiple times with one or
+		 * more of its previous activation leaving behind dying csses.
+		 */
+		WARN_ON_ONCE(css->nr_descendants);
 		parent_cgrp = cgroup_parent(cgrp);
 		while (parent_cgrp) {
 			parent_cgrp->nr_dying_subsys[ss->id]--;
@@ -6959,10 +6966,10 @@ struct cgroup *cgroup_v1v2_get_from_fd(int fd)
 {
 	struct cgroup *cgrp;
 	struct fd f = fdget_raw(fd);
-	if (!f.file)
+	if (!fd_file(f))
 		return ERR_PTR(-EBADF);
 
-	cgrp = cgroup_v1v2_get_from_file(f.file);
+	cgrp = cgroup_v1v2_get_from_file(fd_file(f));
 	fdput(f);
 	return cgrp;
 }

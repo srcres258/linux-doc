@@ -156,8 +156,6 @@ enum vm_event_item { PGPGIN, PGPGOUT, PSWPIN, PSWPOUT,
 		VMA_LOCK_RETRY,
 		VMA_LOCK_MISS,
 #endif
-		NR_MEMMAP, /* page metadata allocated through buddy allocator */
-		NR_MEMMAP_BOOT, /* page metadata allocated through boot allocator */
 #ifdef CONFIG_DEBUG_STACK_USAGE
 		KSTACK_1K,
 #if THREAD_SIZE > 1024

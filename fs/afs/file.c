@@ -243,10 +243,9 @@ static void afs_fetch_data_notify(struct afs_operation *op)
 
 	req->error = error;
 	if (subreq) {
-		subreq->rreq->i_size = req->file_size;
-		if (req->pos + req->actual_len >= req->file_size)
-			__set_bit(NETFS_SREQ_HIT_EOF, &subreq->flags);
-		netfs_read_subreq_terminated(subreq, error, false);
+		if (subreq->rreq->origin != NETFS_DIO_READ)
+			__set_bit(NETFS_SREQ_CLEAR_TAIL, &subreq->flags);
+		netfs_subreq_terminated(subreq, error ?: req->actual_len, false);
 		req->subreq = NULL;
 	} else if (req->done) {
 		req->done(req);

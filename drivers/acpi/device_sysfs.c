@@ -439,11 +439,34 @@ static ssize_t description_show(struct device *dev,
 				char *buf)
 {
 	struct acpi_device *acpi_dev = to_acpi_device(dev);
+	struct acpi_buffer buffer = {ACPI_ALLOCATE_BUFFER, NULL};
+	union acpi_object *str_obj;
+	acpi_status status;
+	int result;
 
-	if (acpi_dev->pnp.str == NULL)
-		return 0;
+	status = acpi_evaluate_object_typed(acpi_dev->handle, "_STR",
+					    NULL, &buffer,
+					    ACPI_TYPE_BUFFER);
+	if (ACPI_FAILURE(status))
+		return -EIO;
 
-	return sysfs_emit("%s\n", acpi_dev->pnp.str);
+	str_obj = buffer.pointer;
+
+	/*
+	 * The _STR object contains a Unicode identifier for a device.
+	 * We need to convert to utf-8 so it can be displayed.
+	 */
+	result = utf16s_to_utf8s(
+		(wchar_t *)str_obj->buffer.pointer,
+		str_obj->buffer.length,
+		UTF16_LITTLE_ENDIAN, buf,
+		PAGE_SIZE - 1);
+
+	buf[result++] = '\n';
+
+	kfree(str_obj);
+
+	return result;
 }
 static DEVICE_ATTR_RO(description);
 
@@ -521,11 +544,8 @@ static bool acpi_show_attr(struct acpi_device *dev, const struct device_attribut
 	if (attr == &dev_attr_hid || attr == &dev_attr_modalias)
 		return !list_empty(&dev->pnp.ids);
 
-	/*
-	 * If device has _STR, 'description' file is created
-	 */
 	if (attr == &dev_attr_description)
-		return dev->pnp.str;
+		return acpi_has_method(dev->handle, "_STR");
 
 	if (attr == &dev_attr_adr)
 		return dev->pnp.type.bus_address;
@@ -581,47 +601,12 @@ const struct attribute_group *acpi_groups[] = {
 	NULL
 };
 
-static const char *devm_acpi_device_str(struct acpi_device *dev)
-{
-	struct acpi_buffer buffer = {ACPI_ALLOCATE_BUFFER, NULL};
-	union acpi_object *str_obj;
-	acpi_status status;
-	const char *ret;
-	char buf[512];
-	int result;
-
-	if (!acpi_has_method(dev->handle, "_STR"))
-		return NULL;
-
-	status = acpi_evaluate_object(dev->handle, "_STR",
-				      NULL, &buffer);
-	if (ACPI_FAILURE(status))
-		return NULL;
-
-	str_obj = buffer.pointer;
-	/*
-	 * The _STR object contains a Unicode identifier for a device.
-	 * We need to convert to utf-8 so it can be displayed.
-	 */
-	result = utf16s_to_utf8s((wchar_t *)str_obj->buffer.pointer,
-				 str_obj->buffer.length,
-				 UTF16_LITTLE_ENDIAN,
-				 buf, sizeof(buf) - 1);
-	buf[result++] = '\0';
-
-	ret = devm_kstrdup(&dev->dev, buf, GFP_KERNEL);
-	kfree(buffer.pointer);
-
-	return ret;
-}
-
 /**
  * acpi_device_setup_files - Create sysfs attributes of an ACPI device.
  * @dev: ACPI device object.
  */
 void acpi_device_setup_files(struct acpi_device *dev)
 {
-	dev->pnp.str = devm_acpi_device_str(dev);
 	acpi_expose_nondev_subnodes(&dev->dev.kobj, &dev->data);
 }
 

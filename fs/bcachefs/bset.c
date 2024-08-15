@@ -585,8 +585,7 @@ static unsigned rw_aux_tree_bsearch(struct btree *b,
 }
 
 static inline unsigned bkey_mantissa(const struct bkey_packed *k,
-				     const struct bkey_float *f,
-				     unsigned idx)
+				     const struct bkey_float *f)
 {
 	u64 v;
 
@@ -668,7 +667,7 @@ static __always_inline void make_bfloat(struct btree *b, struct bset_tree *t,
 	EBUG_ON(shift < 0 || shift >= BFLOAT_FAILED);
 
 	f->exponent = shift;
-	mantissa = bkey_mantissa(m, f, j);
+	mantissa = bkey_mantissa(m, f);
 
 	/*
 	 * If we've got garbage bits, set them to all 1s - it's legal for the
@@ -733,7 +732,7 @@ retry:
 		return;
 	}
 
-	t->extra = (t->size - rounddown_pow_of_two(t->size - 1)) << 1;
+	t->extra = eytzinger1_extra(t->size - 1);
 
 	/* First we figure out where the first key in each cacheline is */
 	eytzinger1_for_each(j, t->size - 1) {
@@ -753,9 +752,6 @@ retry:
 		EBUG_ON(tree_to_prev_bkey(b, t, j) != prev);
 		EBUG_ON(tree_to_bkey(b, t, j) != k);
 	}
-
-	while (k != btree_bkey_last(b, t))
-		prev = k, k = bkey_p_next(k);
 
 	if (!bkey_pack_pos(bkey_to_packed(&min_key), b->data->min_key, b)) {
 		bkey_init(&min_key.k);
@@ -1098,8 +1094,7 @@ static inline void prefetch_four_cachelines(void *p)
 }
 
 static inline bool bkey_mantissa_bits_dropped(const struct btree *b,
-					      const struct bkey_float *f,
-					      unsigned idx)
+					      const struct bkey_float *f)
 {
 #if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
 	unsigned key_bits_start = b->format.key_u64s * 64 - b->nr_key_bits;
@@ -1133,9 +1128,9 @@ static struct bkey_packed *bset_search_tree(const struct btree *b,
 			goto slowpath;
 
 		l = f->mantissa;
-		r = bkey_mantissa(packed_search, f, n);
+		r = bkey_mantissa(packed_search, f);
 
-		if (unlikely(l == r) && bkey_mantissa_bits_dropped(b, f, n))
+		if (unlikely(l == r) && bkey_mantissa_bits_dropped(b, f))
 			goto slowpath;
 
 		n = n * 2 + (l < r);

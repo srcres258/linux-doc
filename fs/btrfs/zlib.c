@@ -20,7 +20,6 @@
 #include <linux/refcount.h>
 #include "btrfs_inode.h"
 #include "compression.h"
-#include "btrfs_inode.h"
 #include "fs.h"
 #include "subpage.h"
 

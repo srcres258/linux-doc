@@ -168,7 +168,7 @@ static __be32 nfsd_check_obj_isreg(struct svc_fh *fh)
 		return nfserr_isdir;
 	if (S_ISLNK(mode))
 		return nfserr_symlink;
-	return nfserr_wrong_type;
+	return nfserr_wrong_type_open;
 }
 
 static void nfsd4_set_open_owner_reply_cache(struct nfsd4_compound_state *cstate, struct nfsd4_open *open, struct svc_fh *resfh)

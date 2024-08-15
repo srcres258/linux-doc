@@ -992,8 +992,8 @@ code.
 +-----------------------------------------------------------------------+
 | **Quick Quiz**:                                                       |
 +-----------------------------------------------------------------------+
-| Why not simply combine the ``->nesting`` and                 |
-| ``->nmi_nesting`` counters into a single counter that just   |
+| Why not simply combine the ``->nesting`` and                          |
+| ``->nmi_nesting`` counters into a single counter that just            |
 | counts the number of reasons that the corresponding CPU is non-idle?  |
 +-----------------------------------------------------------------------+
 | **Answer**:                                                           |

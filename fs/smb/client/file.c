@@ -218,7 +218,8 @@ static void cifs_issue_read(struct netfs_io_subrequest *subreq)
 			goto failed;
 	}
 
-	__set_bit(NETFS_SREQ_CLEAR_TAIL, &subreq->flags);
+	if (subreq->rreq->origin != NETFS_DIO_READ)
+		__set_bit(NETFS_SREQ_CLEAR_TAIL, &subreq->flags);
 
 	trace_netfs_sreq(subreq, netfs_sreq_trace_submit);
 	rc = rdata->server->ops->async_readv(rdata);
@@ -312,15 +313,6 @@ static void cifs_free_subrequest(struct netfs_io_subrequest *subreq)
 			rdata->mr = NULL;
 		}
 #endif
-
-	if (rdata->credits.value != 0)
-		trace_smb3_rw_credits(rdata->rreq->debug_id,
-				      rdata->subreq.debug_index,
-				      rdata->credits.value,
-				      rdata->server ? rdata->server->credits : 0,
-				      rdata->server ? rdata->server->in_flight : 0,
-				      -rdata->credits.value,
-				      cifs_trace_rw_credits_free_subreq);
 
 	if (rdata->credits.value != 0) {
 		trace_smb3_rw_credits(rdata->rreq->debug_id,

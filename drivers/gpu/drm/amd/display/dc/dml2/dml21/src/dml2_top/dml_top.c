@@ -266,15 +266,24 @@ bool dml2_build_mode_programming(struct dml2_build_mode_programming_in_out *in_o
 
 	vmin_success = dml2_top_optimization_perform_optimization_phase(&l->optimization_phase_locals, &l->vmin_phase);
 
-	if (vmin_success) {
+	if (l->optimized_display_config_with_meta.stage4.performed) {
+		/*
+		 * when performed is true, optimization has applied to
+		 * optimized_display_config_with_meta and it has passed mode
+		 * support. However it may or may not pass the test function to
+		 * reach actual Vmin. As long as voltage is optimized even if it
+		 * doesn't reach Vmin level, there is still power benefit so in
+		 * this case we will still copy this optimization into base
+		 * display config.
+		 */
 		memcpy(&l->base_display_config_with_meta, &l->optimized_display_config_with_meta, sizeof(struct display_configuation_with_meta));
-		l->base_display_config_with_meta.stage4.success = true;
+		l->base_display_config_with_meta.stage4.success = vmin_success;
 	}
 
 	/*
 	* Phase 5: Optimize for Stutter
 	*/
-	memset(&l->vmin_phase, 0, sizeof(struct optimization_phase_params));
+	memset(&l->stutter_phase, 0, sizeof(struct optimization_phase_params));
 	l->stutter_phase.dml = dml;
 	l->stutter_phase.display_config = &l->base_display_config_with_meta;
 	l->stutter_phase.init_function = dml2_top_optimization_init_function_stutter;
@@ -287,7 +296,7 @@ bool dml2_build_mode_programming(struct dml2_build_mode_programming_in_out *in_o
 
 	if (stutter_success) {
 		memcpy(&l->base_display_config_with_meta, &l->optimized_display_config_with_meta, sizeof(struct display_configuation_with_meta));
-		l->base_display_config_with_meta.stage4.success = true;
+		l->base_display_config_with_meta.stage5.success = true;
 	}
 
 	/*

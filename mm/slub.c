@@ -2223,6 +2223,9 @@ static __always_inline
 bool slab_free_hook(struct kmem_cache *s, void *x, bool init,
 		    bool after_rcu_delay)
 {
+	/* Are the object contents still accessible? */
+	bool still_accessible = (s->flags & SLAB_TYPESAFE_BY_RCU) && !after_rcu_delay;
+
 	kmemleak_free_recursive(x, s->flags);
 	kmsan_slab_free(s, x);
 
@@ -2232,7 +2235,7 @@ bool slab_free_hook(struct kmem_cache *s, void *x, bool init,
 		debug_check_no_obj_freed(x, s->object_size);
 
 	/* Use KCSAN to help debug racy use-after-free. */
-	if (!(s->flags & SLAB_TYPESAFE_BY_RCU) || after_rcu_delay)
+	if (!still_accessible)
 		__kcsan_check_access(x, s->object_size,
 				     KCSAN_ACCESS_WRITE | KCSAN_ACCESS_ASSERT);
 
@@ -2247,7 +2250,7 @@ bool slab_free_hook(struct kmem_cache *s, void *x, bool init,
 		return false;
 
 #ifdef CONFIG_SLUB_RCU_DEBUG
-	if ((s->flags & SLAB_TYPESAFE_BY_RCU) && !after_rcu_delay) {
+	if (still_accessible) {
 		struct rcu_delayed_free *delayed_free;
 
 		delayed_free = kmalloc(sizeof(*delayed_free), GFP_NOWAIT);
@@ -2291,7 +2294,7 @@ bool slab_free_hook(struct kmem_cache *s, void *x, bool init,
 		       s->size - inuse - rsize);
 	}
 	/* KASAN might put x into memory quarantine, delaying its reuse. */
-	return !kasan_slab_free(s, x, init, after_rcu_delay);
+	return !kasan_slab_free(s, x, init, still_accessible);
 }
 
 static __fastpath_inline
@@ -3501,7 +3504,8 @@ slab_out_of_memory(struct kmem_cache *s, gfp_t gfpflags, int nid)
 	if ((gfpflags & __GFP_NOWARN) || !__ratelimit(&slub_oom_rs))
 		return;
 
-	pr_warn("SLUB: Unable to allocate memory on node %d, gfp=%#x(%pGg)\n",
+	pr_warn("SLUB: Unable to allocate memory for CPU %u on node %d, gfp=%#x(%pGg)\n",
+		preemptible() ? raw_smp_processor_id() : smp_processor_id(),
 		nid, gfpflags, &gfpflags);
 	pr_warn("  cache: %s, object size: %u, buffer size: %u, default order: %u, min order: %u\n",
 		s->name, s->object_size, s->size, oo_order(s->oo),
@@ -4586,7 +4590,9 @@ static void slab_free_after_rcu_debug(struct rcu_head *rcu_head)
 	struct slab *slab = virt_to_slab(object);
 	struct kmem_cache *s;
 
-	if (WARN_ON(is_kfence_address(rcu_head)))
+	kfree(delayed_free);
+
+	if (WARN_ON(is_kfence_address(object)))
 		return;
 
 	/* find the object and the cache again */
@@ -4597,10 +4603,8 @@ static void slab_free_after_rcu_debug(struct rcu_head *rcu_head)
 		return;
 
 	/* resume freeing */
-	if (!slab_free_hook(s, object, slab_want_init_on_free(s), true))
-		return;
-	do_slab_free(s, slab, object, object, 1, _THIS_IP_);
-	kfree(delayed_free);
+	if (slab_free_hook(s, object, slab_want_init_on_free(s), true))
+		do_slab_free(s, slab, object, object, 1, _THIS_IP_);
 }
 #endif /* CONFIG_SLUB_RCU_DEBUG */
 

@@ -1579,7 +1579,7 @@ static __always_inline void __folio_remove_rmap(struct folio *folio,
 	 */
 	if (partially_mapped && folio_test_anon(folio) &&
 	    list_empty(&folio->_deferred_list))
-			deferred_split_folio(folio, true);
+		deferred_split_folio(folio);
 	__folio_mod_stat(folio, -nr, -nr_pmdmapped);
 
 	/*

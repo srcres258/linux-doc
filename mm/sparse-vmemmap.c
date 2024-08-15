@@ -470,9 +470,9 @@ struct page * __meminit __populate_section_memmap(unsigned long pfn,
 		return NULL;
 
 	if (system_state == SYSTEM_BOOTING)
-		mod_memmap_boot(DIV_ROUND_UP(end - start, PAGE_SIZE));
+		memmap_boot_pages_add(DIV_ROUND_UP(end - start, PAGE_SIZE));
 	else
-		mod_memmap(DIV_ROUND_UP(end - start, PAGE_SIZE));
+		memmap_pages_add(DIV_ROUND_UP(end - start, PAGE_SIZE));
 
 	return pfn_to_page(pfn);
 }
