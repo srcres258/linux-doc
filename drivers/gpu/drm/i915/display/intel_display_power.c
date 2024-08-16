@@ -198,20 +198,8 @@ intel_display_power_domain_str(enum intel_display_power_domain domain)
 	}
 }
 
-/**
- * __intel_display_power_is_enabled - unlocked check for a power domain
- * @dev_priv: i915 device instance
- * @domain: power domain to check
- *
- * This is the unlocked version of intel_display_power_is_enabled() and should
- * only be used from error capture and recovery code where deadlocks are
- * possible.
- *
- * Returns:
- * True when the power domain is enabled, false otherwise.
- */
-bool __intel_display_power_is_enabled(struct drm_i915_private *dev_priv,
-				      enum intel_display_power_domain domain)
+static bool __intel_display_power_is_enabled(struct drm_i915_private *dev_priv,
+					     enum intel_display_power_domain domain)
 {
 	struct i915_power_well *power_well;
 	bool is_enabled;
@@ -1704,6 +1692,14 @@ static void icl_display_core_init(struct drm_i915_private *dev_priv,
 	/* Wa_14011503030:xelpd */
 	if (DISPLAY_VER(dev_priv) == 13)
 		intel_de_write(dev_priv, XELPD_DISPLAY_ERR_FATAL_MASK, ~0);
+
+	/* Wa_15013987218 */
+	if (DISPLAY_VER(dev_priv) == 20) {
+		intel_de_rmw(dev_priv, SOUTH_DSPCLK_GATE_D,
+			     0, PCH_GMBUSUNIT_CLOCK_GATE_DISABLE);
+		intel_de_rmw(dev_priv, SOUTH_DSPCLK_GATE_D,
+			     PCH_GMBUSUNIT_CLOCK_GATE_DISABLE, 0);
+	}
 }
 
 static void icl_display_core_uninit(struct drm_i915_private *dev_priv)
