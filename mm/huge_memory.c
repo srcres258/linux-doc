@@ -82,6 +82,7 @@ unsigned long huge_zero_pfn __read_mostly = ~0UL;
 unsigned long huge_anon_orders_always __read_mostly;
 unsigned long huge_anon_orders_madvise __read_mostly;
 unsigned long huge_anon_orders_inherit __read_mostly;
+static bool anon_orders_configured;
 
 unsigned long __thp_vma_allowable_orders(struct vm_area_struct *vma,
 					 unsigned long vm_flags,
@@ -761,7 +762,10 @@ static int __init hugepage_init_sysfs(struct kobject **hugepage_kobj)
 	 * disable all other sizes. powerpc's PMD_ORDER isn't a compile-time
 	 * constant so we have to do this here.
 	 */
-	huge_anon_orders_inherit = BIT(PMD_ORDER);
+	if (!anon_orders_configured) {
+		huge_anon_orders_inherit = BIT(PMD_ORDER);
+		anon_orders_configured = true;
+	}
 
 	*hugepage_kobj = kobject_create_and_add("transparent_hugepage", mm_kobj);
 	if (unlikely(!*hugepage_kobj)) {
@@ -946,6 +950,96 @@ out:
 	return ret;
 }
 __setup("transparent_hugepage=", setup_transparent_hugepage);
+
+static inline int get_order_from_str(const char *size_str)
+{
+	unsigned long size;
+	char *endptr;
+	int order;
+
+	size = memparse(size_str, &endptr);
+	order = fls(size >> PAGE_SHIFT) - 1;
+	if ((1 << order) & ~THP_ORDERS_ALL_ANON) {
+		pr_err("invalid size %s(order %d) in thp_anon boot parameter\n",
+			size_str, order);
+		return -EINVAL;
+	}
+
+	return order;
+}
+
+static char str_dup[PAGE_SIZE] __meminitdata;
+static int __init setup_thp_anon(char *str)
+{
+	char *token, *range, *policy, *subtoken;
+	unsigned long always, inherit, madvise;
+	char *start_size, *end_size;
+	int start, end;
+	char *p;
+
+	if (!str || strlen(str) + 1 > PAGE_SIZE)
+		goto err;
+	strcpy(str_dup, str);
+
+	always = huge_anon_orders_always;
+	madvise = huge_anon_orders_madvise;
+	inherit = huge_anon_orders_inherit;
+	p = str_dup;
+	while ((token = strsep(&p, ";")) != NULL) {
+		range = strsep(&token, ":");
+		policy = token;
+
+		if (!policy)
+			goto err;
+
+		while ((subtoken = strsep(&range, ",")) != NULL) {
+			if (strchr(subtoken, '-')) {
+				start_size = strsep(&subtoken, "-");
+				end_size = subtoken;
+
+				start = get_order_from_str(start_size);
+				end = get_order_from_str(end_size);
+			} else {
+				start = end = get_order_from_str(subtoken);
+			}
+
+			if (start < 0 || end < 0 || start > end)
+				goto err;
+
+			if (!strcmp(policy, "always")) {
+				bitmap_set(&always, start, end - start + 1);
+				bitmap_clear(&inherit, start, end - start + 1);
+				bitmap_clear(&madvise, start, end - start + 1);
+			} else if (!strcmp(policy, "madvise")) {
+				bitmap_set(&madvise, start, end - start + 1);
+				bitmap_clear(&inherit, start, end - start + 1);
+				bitmap_clear(&always, start, end - start + 1);
+			} else if (!strcmp(policy, "inherit")) {
+				bitmap_set(&inherit, start, end - start + 1);
+				bitmap_clear(&madvise, start, end - start + 1);
+				bitmap_clear(&always, start, end - start + 1);
+			} else if (!strcmp(policy, "never")) {
+				bitmap_clear(&inherit, start, end - start + 1);
+				bitmap_clear(&madvise, start, end - start + 1);
+				bitmap_clear(&always, start, end - start + 1);
+			} else {
+				pr_err("invalid policy %s in thp_anon boot parameter\n", policy);
+				goto err;
+			}
+		}
+	}
+
+	huge_anon_orders_always = always;
+	huge_anon_orders_madvise = madvise;
+	huge_anon_orders_inherit = inherit;
+	anon_orders_configured = true;
+	return 1;
+
+err:
+	pr_warn("thp_anon=%s: cannot parse, ignored\n", str);
+	return 0;
+}
+__setup("thp_anon=", setup_thp_anon);
 
 pmd_t maybe_pmd_mkwrite(pmd_t pmd, struct vm_area_struct *vma)
 {
@@ -3023,7 +3117,7 @@ bool unmap_huge_pmd_locked(struct vm_area_struct *vma, unsigned long addr,
 	return false;
 }
 
-static void remap_page(struct folio *folio, unsigned long nr, bool map_unused_to_zeropage)
+static void remap_page(struct folio *folio, unsigned long nr, int flags)
 {
 	int i = 0;
 
@@ -3031,7 +3125,7 @@ static void remap_page(struct folio *folio, unsigned long nr, bool map_unused_to
 	if (!folio_test_anon(folio))
 		return;
 	for (;;) {
-		remove_migration_ptes(folio, folio, true, map_unused_to_zeropage);
+		remove_migration_ptes(folio, folio, RMP_LOCKED | flags);
 		i += folio_nr_pages(folio);
 		if (i >= nr)
 			break;
@@ -3241,7 +3335,7 @@ static void __split_huge_page(struct page *page, struct list_head *list,
 
 	if (nr_dropped)
 		shmem_uncharge(folio->mapping->host, nr_dropped);
-	remap_page(folio, nr, PageAnon(head));
+	remap_page(folio, nr, PageAnon(head) ? RMP_USE_SHARED_ZEROPAGE : 0);
 
 	/*
 	 * set page to its compound_head when split to non order-0 pages, so
@@ -3264,14 +3358,14 @@ static void __split_huge_page(struct page *page, struct list_head *list,
 		 * folio was concurrently zapped. Then we can safely free it
 		 * and save page reclaim or migration the trouble of trying it.
 		 */
-		if (list && page_ref_freeze(subpage, 2)) {
+		if (list && folio_ref_freeze(new_folio, 2)) {
 			VM_WARN_ON_ONCE_FOLIO(folio_test_lru(new_folio), new_folio);
 			VM_WARN_ON_ONCE_FOLIO(folio_test_large(new_folio), new_folio);
 			VM_WARN_ON_ONCE_FOLIO(folio_mapped(new_folio), new_folio);
 
 			folio_clear_active(new_folio);
 			folio_clear_unevictable(new_folio);
-			if (folio_batch_add(&free_folios, folio) == 0) {
+			if (!folio_batch_add(&free_folios, folio)) {
 				mem_cgroup_uncharge_folios(&free_folios);
 				free_unref_folios(&free_folios);
 			}
@@ -3509,7 +3603,7 @@ int split_huge_page_to_list_to_order(struct page *page, struct list_head *list,
 			 * page_deferred_list.
 			 */
 			list_del_init(&folio->_deferred_list);
-			folio->_partially_mapped = false;
+			folio_clear_partially_mapped(folio);
 		}
 		spin_unlock(&ds_queue->split_queue_lock);
 		if (mapping) {
@@ -3537,7 +3631,7 @@ fail:
 		if (mapping)
 			xas_unlock(&xas);
 		local_irq_enable();
-		remap_page(folio, folio_nr_pages(folio), false);
+		remap_page(folio, folio_nr_pages(folio), 0);
 		ret = -EAGAIN;
 	}
 
@@ -3566,11 +3660,12 @@ void __folio_undo_large_rmappable(struct folio *folio)
 	if (!list_empty(&folio->_deferred_list)) {
 		ds_queue->split_queue_len--;
 		list_del_init(&folio->_deferred_list);
-		folio->_partially_mapped = false;
+		folio_clear_partially_mapped(folio);
 	}
 	spin_unlock_irqrestore(&ds_queue->split_queue_lock, flags);
 }
 
+/* partially_mapped=false won't clear PG_partially_mapped folio flag */
 void deferred_split_folio(struct folio *folio, bool partially_mapped)
 {
 	struct deferred_split *ds_queue = get_deferred_split_queue(folio);
@@ -3590,6 +3685,9 @@ void deferred_split_folio(struct folio *folio, bool partially_mapped)
 	if (!partially_mapped && !split_underutilized_thp)
 		return;
 
+	if (!partially_mapped && !split_underutilized_thp)
+		return;
+
 	/*
 	 * The try_to_unmap() in page reclaim path might reach here too,
 	 * this may cause a race condition to corrupt deferred split queue.
@@ -3604,13 +3702,16 @@ void deferred_split_folio(struct folio *folio, bool partially_mapped)
 		return;
 
 	spin_lock_irqsave(&ds_queue->split_queue_lock, flags);
-	folio->_partially_mapped = partially_mapped;
+	if (partially_mapped) {
+		folio_set_partially_mapped(folio);
+		if (folio_test_pmd_mappable(folio))
+			count_vm_event(THP_DEFERRED_SPLIT_PAGE);
+		count_mthp_stat(folio_order(folio), MTHP_STAT_SPLIT_DEFERRED);
+	} else {
+		/* partially mapped folios cannont become partially unmapped */
+		VM_WARN_ON_FOLIO(folio_test_partially_mapped(folio), folio);
+	}
 	if (list_empty(&folio->_deferred_list)) {
-		if (partially_mapped) {
-			if (folio_test_pmd_mappable(folio))
-				count_vm_event(THP_DEFERRED_SPLIT_PAGE);
-			count_mthp_stat(folio_order(folio), MTHP_STAT_SPLIT_DEFERRED);
-		}
 		list_add_tail(&folio->_deferred_list, &ds_queue->split_queue);
 		ds_queue->split_queue_len++;
 #ifdef CONFIG_MEMCG
@@ -3646,7 +3747,7 @@ static bool thp_underutilized(struct folio *folio)
 
 	for (i = 0; i < folio_nr_pages(folio); i++) {
 		kaddr = kmap_local_folio(folio, i * PAGE_SIZE);
-		if (memchr_inv(kaddr, 0, PAGE_SIZE) == NULL) {
+		if (!memchr_inv(kaddr, 0, PAGE_SIZE)) {
 			num_zero_pages++;
 			if (num_zero_pages > khugepaged_max_ptes_none) {
 				kunmap_local(kaddr);
@@ -3692,7 +3793,7 @@ static unsigned long deferred_split_scan(struct shrinker *shrink,
 		} else {
 			/* We lost race with folio_put() */
 			list_del_init(&folio->_deferred_list);
-			folio->_partially_mapped = false;
+			folio_clear_partially_mapped(folio);
 			ds_queue->split_queue_len--;
 		}
 		if (!--sc->nr_to_scan)
@@ -3704,7 +3805,7 @@ static unsigned long deferred_split_scan(struct shrinker *shrink,
 		bool did_split = false;
 		bool underutilized = false;
 
-		if (folio->_partially_mapped)
+		if (folio_test_partially_mapped(folio))
 			goto split;
 		underutilized = thp_underutilized(folio);
 		if (underutilized)
@@ -3726,13 +3827,13 @@ split:
 
 	spin_lock_irqsave(&ds_queue->split_queue_lock, flags);
 	/*
-	 * Only add back to the queue if folio->_partially_mapped is set.
+	 * Only add back to the queue if folio is partially mapped.
 	 * If thp_underutilized returns false, or if split_folio fails in
 	 * the case it was underutilized, then consider it used and don't
 	 * add it back to split_queue.
 	 */
 	list_for_each_entry_safe(folio, next, &list, _deferred_list) {
-		if (folio->_partially_mapped)
+		if (folio_test_partially_mapped(folio))
 			list_move(&folio->_deferred_list, &ds_queue->split_queue);
 		else {
 			list_del_init(&folio->_deferred_list);

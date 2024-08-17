@@ -448,8 +448,7 @@ static inline void arch_check_zapped_pmd(struct vm_area_struct *vma,
 #endif
 
 #ifndef arch_check_zapped_pud
-static inline void arch_check_zapped_pud(struct vm_area_struct *vma,
-					 pud_t pud)
+static inline void arch_check_zapped_pud(struct vm_area_struct *vma, pud_t pud)
 {
 }
 #endif

@@ -159,7 +159,6 @@ enum store_type {
 	wr_append,
 	wr_node_store,
 	wr_slot_store,
-	wr_bnode
 };
 
 /**

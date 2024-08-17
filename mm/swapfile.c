@@ -632,9 +632,6 @@ out:
 		if (READ_ONCE(map[offset]))
 			return false;
 
-	if (need_reclaim)
-		return cluster_reclaim_range(si, ci, start, end);
-
 	return true;
 }
 

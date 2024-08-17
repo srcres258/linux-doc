@@ -5731,13 +5731,6 @@ static __be32 nfsd4_map_status(__be32 status, u32 minor)
 		if (minor == 0)
 			status = nfserr_inval;
 		break;
-	case nfserr_wrong_type_open:
-		/* RFC 7530 - 16.16.6 */
-		if (minor == 0)
-			status = nfserr_symlink;
-		else
-			status = nfserr_wrong_type;
-		break;
 	case nfserr_symlink_not_dir:
 		status = nfserr_symlink;
 		break;

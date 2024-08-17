@@ -55,7 +55,7 @@ static __always_inline void rcu_task_enter(void)
 }
 
 /* Turn on heavyweight RCU tasks trace readers on kernel exit. */
-static __always_inline void rcu_task_trace_exit(void)
+static __always_inline void rcu_task_trace_heavyweight_enter(void)
 {
 #ifdef CONFIG_TASKS_TRACE_RCU
 	if (IS_ENABLED(CONFIG_TASKS_TRACE_RCU_READ_MB))
@@ -64,7 +64,7 @@ static __always_inline void rcu_task_trace_exit(void)
 }
 
 /* Turn off heavyweight RCU tasks trace readers on kernel entry. */
-static __always_inline void rcu_task_trace_enter(void)
+static __always_inline void rcu_task_trace_heavyweight_exit(void)
 {
 #ifdef CONFIG_TASKS_TRACE_RCU
 	if (IS_ENABLED(CONFIG_TASKS_TRACE_RCU_READ_MB))
@@ -87,7 +87,7 @@ static noinstr void ct_kernel_exit_state(int offset)
 	 * critical sections, and we also must force ordering with the
 	 * next idle sojourn.
 	 */
-	rcu_task_trace_exit();  // Before CT state update!
+	rcu_task_trace_heavyweight_enter();  // Before CT state update!
 	seq = ct_state_inc(offset);
 	// RCU is no longer watching.  Better be in extended quiescent state!
 	WARN_ON_ONCE(IS_ENABLED(CONFIG_RCU_EQS_DEBUG) && (seq & CT_RCU_WATCHING));
@@ -109,7 +109,7 @@ static noinstr void ct_kernel_enter_state(int offset)
 	 */
 	seq = ct_state_inc(offset);
 	// RCU is now watching.  Better not be in an extended quiescent state!
-	rcu_task_trace_enter();  // After CT state update!
+	rcu_task_trace_heavyweight_exit();  // After CT state update!
 	WARN_ON_ONCE(IS_ENABLED(CONFIG_RCU_EQS_DEBUG) && !(seq & CT_RCU_WATCHING));
 }
 

@@ -41,6 +41,7 @@
 #include "namespaces.h"
 #include "thread.h"
 #include "hashmap.h"
+#include "strbuf.h"
 #include <regex.h>
 #include <linux/bitops.h>
 #include <linux/kernel.h>
@@ -48,6 +49,7 @@
 #include <linux/zalloc.h>
 #include <subcmd/parse-options.h>
 #include <subcmd/run-command.h>
+#include <math.h>
 
 /* FIXME: For the HE_COLORSET */
 #include "ui/browser.h"
@@ -266,22 +268,30 @@ struct annotated_branch *annotation__get_branch(struct annotation *notes)
 	return notes->branch;
 }
 
-static struct cyc_hist *symbol__cycles_hist(struct symbol *sym)
+static struct annotated_branch *symbol__find_branch_hist(struct symbol *sym,
+							 unsigned int br_cntr_nr)
 {
 	struct annotation *notes = symbol__annotation(sym);
 	struct annotated_branch *branch;
+	const size_t size = symbol__size(sym);
 
 	branch = annotation__get_branch(notes);
 	if (branch == NULL)
 		return NULL;
 
 	if (branch->cycles_hist == NULL) {
-		const size_t size = symbol__size(sym);
-
 		branch->cycles_hist = calloc(size, sizeof(struct cyc_hist));
+		if (!branch->cycles_hist)
+			return NULL;
 	}
 
-	return branch->cycles_hist;
+	if (br_cntr_nr && branch->br_cntr == NULL) {
+		branch->br_cntr = calloc(br_cntr_nr * size, sizeof(u64));
+		if (!branch->br_cntr)
+			return NULL;
+	}
+
+	return branch;
 }
 
 struct annotated_source *symbol__hists(struct symbol *sym, int nr_hists)
@@ -316,16 +326,44 @@ static int symbol__inc_addr_samples(struct map_symbol *ms,
 	return src ? __symbol__inc_addr_samples(ms, src, evsel->core.idx, addr, sample) : 0;
 }
 
-static int symbol__account_cycles(u64 addr, u64 start,
-				  struct symbol *sym, unsigned cycles)
+static int symbol__account_br_cntr(struct annotated_branch *branch,
+				   struct evsel *evsel,
+				   unsigned offset,
+				   u64 br_cntr)
 {
-	struct cyc_hist *cycles_hist;
+	unsigned int br_cntr_nr = evsel__leader(evsel)->br_cntr_nr;
+	unsigned int base = evsel__leader(evsel)->br_cntr_idx;
+	unsigned int width = evsel__env(evsel)->br_cntr_width;
+	unsigned int off = offset * evsel->evlist->nr_br_cntr;
+	unsigned int i, mask = (1L << width) - 1;
+	u64 *branch_br_cntr = branch->br_cntr;
+
+	if (!br_cntr || !branch_br_cntr)
+		return 0;
+
+	for (i = 0; i < br_cntr_nr; i++) {
+		u64 cntr = (br_cntr >> i * width) & mask;
+
+		branch_br_cntr[off + i + base] += cntr;
+		if (cntr == mask)
+			branch_br_cntr[off + i + base] |= ANNOTATION__BR_CNTR_SATURATED_FLAG;
+	}
+
+	return 0;
+}
+
+static int symbol__account_cycles(u64 addr, u64 start, struct symbol *sym,
+				  unsigned cycles, struct evsel *evsel,
+				  u64 br_cntr)
+{
+	struct annotated_branch *branch;
 	unsigned offset;
+	int ret;
 
 	if (sym == NULL)
 		return 0;
-	cycles_hist = symbol__cycles_hist(sym);
-	if (cycles_hist == NULL)
+	branch = symbol__find_branch_hist(sym, evsel->evlist->nr_br_cntr);
+	if (!branch)
 		return -ENOMEM;
 	if (addr < sym->start || addr >= sym->end)
 		return -ERANGE;
@@ -337,15 +375,22 @@ static int symbol__account_cycles(u64 addr, u64 start,
 			start = 0;
 	}
 	offset = addr - sym->start;
-	return __symbol__account_cycles(cycles_hist,
+	ret = __symbol__account_cycles(branch->cycles_hist,
 					start ? start - sym->start : 0,
 					offset, cycles,
 					!!start);
+
+	if (ret)
+		return ret;
+
+	return symbol__account_br_cntr(branch, evsel, offset, br_cntr);
 }
 
 int addr_map_symbol__account_cycles(struct addr_map_symbol *ams,
 				    struct addr_map_symbol *start,
-				    unsigned cycles)
+				    unsigned cycles,
+				    struct evsel *evsel,
+				    u64 br_cntr)
 {
 	u64 saddr = 0;
 	int err;
@@ -371,7 +416,7 @@ int addr_map_symbol__account_cycles(struct addr_map_symbol *ams,
 			start ? start->addr : 0,
 			ams->ms.sym ? ams->ms.sym->start + map__start(ams->ms.map) : 0,
 			saddr);
-	err = symbol__account_cycles(ams->al_addr, saddr, ams->ms.sym, cycles);
+	err = symbol__account_cycles(ams->al_addr, saddr, ams->ms.sym, cycles, evsel, br_cntr);
 	if (err)
 		pr_debug2("account_cycles failed %d\n", err);
 	return err;
@@ -412,6 +457,7 @@ static void annotated_branch__delete(struct annotated_branch *branch)
 {
 	if (branch) {
 		zfree(&branch->cycles_hist);
+		free(branch->br_cntr);
 		free(branch);
 	}
 }
@@ -455,8 +501,10 @@ static void annotation__count_and_fill(struct annotation *notes, u64 start, u64 
 	}
 }
 
-static int annotation__compute_ipc(struct annotation *notes, size_t size)
+static int annotation__compute_ipc(struct annotation *notes, size_t size,
+				   struct evsel *evsel)
 {
+	unsigned int br_cntr_nr = evsel->evlist->nr_br_cntr;
 	int err = 0;
 	s64 offset;
 
@@ -491,6 +539,20 @@ static int annotation__compute_ipc(struct annotation *notes, size_t size)
 				al->cycles->max = ch->cycles_max;
 				al->cycles->min = ch->cycles_min;
 			}
+			if (al && notes->branch->br_cntr) {
+				if (!al->br_cntr) {
+					al->br_cntr = calloc(br_cntr_nr, sizeof(u64));
+					if (!al->br_cntr) {
+						err = ENOMEM;
+						break;
+					}
+				}
+				al->num_aggr = ch->num_aggr;
+				al->br_cntr_nr = br_cntr_nr;
+				al->evsel = evsel;
+				memcpy(al->br_cntr, &notes->branch->br_cntr[offset * br_cntr_nr],
+				       br_cntr_nr * sizeof(u64));
+			}
 		}
 	}
 
@@ -502,8 +564,10 @@ static int annotation__compute_ipc(struct annotation *notes, size_t size)
 				struct annotation_line *al;
 
 				al = annotated_source__get_line(notes->src, offset);
-				if (al)
+				if (al) {
 					zfree(&al->cycles);
+					zfree(&al->br_cntr);
+				}
 			}
 		}
 	}
@@ -1675,6 +1739,149 @@ static void ipc_coverage_string(char *bf, int size, struct annotation *notes)
 		  ipc, coverage);
 }
 
+int annotation_br_cntr_abbr_list(char **str, struct evsel *evsel, bool header)
+{
+	struct evsel *pos;
+	struct strbuf sb;
+
+	if (evsel->evlist->nr_br_cntr <= 0)
+		return -ENOTSUP;
+
+	strbuf_init(&sb, /*hint=*/ 0);
+
+	if (header && strbuf_addf(&sb, "# Branch counter abbr list:\n"))
+		goto err;
+
+	evlist__for_each_entry(evsel->evlist, pos) {
+		if (!(pos->core.attr.branch_sample_type & PERF_SAMPLE_BRANCH_COUNTERS))
+			continue;
+		if (header && strbuf_addf(&sb, "#"))
+			goto err;
+
+		if (strbuf_addf(&sb, " %s = %s\n", pos->name, pos->abbr_name))
+			goto err;
+	}
+
+	if (header && strbuf_addf(&sb, "#"))
+		goto err;
+	if (strbuf_addf(&sb, " '-' No event occurs\n"))
+		goto err;
+
+	if (header && strbuf_addf(&sb, "#"))
+		goto err;
+	if (strbuf_addf(&sb, " '+' Event occurrences may be lost due to branch counter saturated\n"))
+		goto err;
+
+	*str = strbuf_detach(&sb, NULL);
+
+	return 0;
+err:
+	strbuf_release(&sb);
+	return -ENOMEM;
+}
+
+/* Assume the branch counter saturated at 3 */
+#define ANNOTATION_BR_CNTR_SATURATION		3
+
+int annotation_br_cntr_entry(char **str, int br_cntr_nr,
+			     u64 *br_cntr, int num_aggr,
+			     struct evsel *evsel)
+{
+	struct evsel *pos = evsel ? evlist__first(evsel->evlist) : NULL;
+	bool saturated = false;
+	int i, j, avg, used;
+	struct strbuf sb;
+
+	strbuf_init(&sb, /*hint=*/ 0);
+	for (i = 0; i < br_cntr_nr; i++) {
+		used = 0;
+		avg = ceil((double)(br_cntr[i] & ~ANNOTATION__BR_CNTR_SATURATED_FLAG) /
+			   (double)num_aggr);
+
+		/*
+		 * A histogram with the abbr name is displayed by default.
+		 * With -v, the exact number of branch counter is displayed.
+		 */
+		if (verbose) {
+			evlist__for_each_entry_from(evsel->evlist, pos) {
+				if ((pos->core.attr.branch_sample_type & PERF_SAMPLE_BRANCH_COUNTERS) &&
+				    (pos->br_cntr_idx == i))
+				break;
+			}
+			if (strbuf_addstr(&sb, pos->abbr_name))
+				goto err;
+
+			if (!br_cntr[i]) {
+				if (strbuf_addstr(&sb, "=-"))
+					goto err;
+			} else {
+				if (strbuf_addf(&sb, "=%d", avg))
+					goto err;
+			}
+			if (br_cntr[i] & ANNOTATION__BR_CNTR_SATURATED_FLAG) {
+				if (strbuf_addch(&sb, '+'))
+					goto err;
+			} else {
+				if (strbuf_addch(&sb, ' '))
+					goto err;
+			}
+
+			if ((i < br_cntr_nr - 1) && strbuf_addch(&sb, ','))
+				goto err;
+			continue;
+		}
+
+		if (strbuf_addch(&sb, '|'))
+			goto err;
+
+		if (!br_cntr[i]) {
+			if (strbuf_addch(&sb, '-'))
+				goto err;
+			used++;
+		} else {
+			evlist__for_each_entry_from(evsel->evlist, pos) {
+				if ((pos->core.attr.branch_sample_type & PERF_SAMPLE_BRANCH_COUNTERS) &&
+				    (pos->br_cntr_idx == i))
+					break;
+			}
+			if (br_cntr[i] & ANNOTATION__BR_CNTR_SATURATED_FLAG)
+				saturated = true;
+
+			for (j = 0; j < avg; j++, used++) {
+				/* Print + if the number of logged events > 3 */
+				if (j >= ANNOTATION_BR_CNTR_SATURATION) {
+					saturated = true;
+					break;
+				}
+				if (strbuf_addstr(&sb, pos->abbr_name))
+					goto err;
+			}
+
+			if (saturated) {
+				if (strbuf_addch(&sb, '+'))
+					goto err;
+				used++;
+			}
+			pos = list_next_entry(pos, core.node);
+		}
+
+		for (j = used; j < ANNOTATION_BR_CNTR_SATURATION + 1; j++) {
+			if (strbuf_addch(&sb, ' '))
+				goto err;
+		}
+	}
+
+	if (!verbose && strbuf_addch(&sb, br_cntr_nr ? '|' : ' '))
+		goto err;
+
+	*str = strbuf_detach(&sb, NULL);
+
+	return 0;
+err:
+	strbuf_release(&sb);
+	return -ENOMEM;
+}
+
 static void __annotation_line__write(struct annotation_line *al, struct annotation *notes,
 				     bool first_line, bool current_entry, bool change_color, int width,
 				     void *obj, unsigned int percent_type,
@@ -1769,6 +1976,22 @@ static void __annotation_line__write(struct annotation_line *al, struct annotati
 				obj__printf(obj, "%*s ",
 					    ANNOTATION__MINMAX_CYCLES_WIDTH - 1,
 					    "Cycle(min/max)");
+		}
+
+		if (annotate_opts.show_br_cntr) {
+			if (show_title) {
+				obj__printf(obj, "%*s ",
+					    ANNOTATION__BR_CNTR_WIDTH,
+					    "Branch Counter");
+			} else {
+				char *buf;
+
+				if (!annotation_br_cntr_entry(&buf, al->br_cntr_nr, al->br_cntr,
+							      al->num_aggr, al->evsel)) {
+					obj__printf(obj, "%*s ", ANNOTATION__BR_CNTR_WIDTH, buf);
+					free(buf);
+				}
+			}
 		}
 
 		if (show_title && !*al->line) {
@@ -1867,7 +2090,7 @@ int symbol__annotate2(struct map_symbol *ms, struct evsel *evsel,
 	annotation__set_index(notes);
 	annotation__mark_jump_targets(notes, sym);
 
-	err = annotation__compute_ipc(notes, size);
+	err = annotation__compute_ipc(notes, size, evsel);
 	if (err)
 		return err;
 

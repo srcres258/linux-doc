@@ -2525,7 +2525,7 @@ static void rcu_torture_stall_one(int rep, int irqsoff)
 }
 
 /*
- * CPU-stall kthread.  Invokes rcu_torture_stall() once, and then as many
+ * CPU-stall kthread.  Invokes rcu_torture_stall_one() once, and then as many
  * additional times as specified by the stall_cpu_repeat module parameter.
  * Note that stall_cpu_irqsoff is ignored on the second and subsequent
  * stall.

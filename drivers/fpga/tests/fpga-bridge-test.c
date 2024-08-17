@@ -25,6 +25,13 @@ struct bridge_ctx {
 	struct bridge_stats stats;
 };
 
+/*
+ * Wrapper to avoid a cast warning when passing the action function directly
+ * to kunit_add_action().
+ */
+KUNIT_DEFINE_ACTION_WRAPPER(fpga_bridge_unregister_wrapper, fpga_bridge_unregister,
+			    struct fpga_bridge *);
+
 static int op_enable_set(struct fpga_bridge *bridge, bool enable)
 {
 	struct bridge_stats *stats = bridge->priv;
@@ -52,6 +59,7 @@ static const struct fpga_bridge_ops fake_bridge_ops = {
 static struct bridge_ctx *register_test_bridge(struct kunit *test, const char *dev_name)
 {
 	struct bridge_ctx *ctx;
+	int ret;
 
 	ctx = kunit_kzalloc(test, sizeof(*ctx), GFP_KERNEL);
 	KUNIT_ASSERT_NOT_ERR_OR_NULL(test, ctx);
@@ -63,13 +71,10 @@ static struct bridge_ctx *register_test_bridge(struct kunit *test, const char *d
 					   &ctx->stats);
 	KUNIT_ASSERT_FALSE(test, IS_ERR_OR_NULL(ctx->bridge));
 
-	return ctx;
-}
+	ret = kunit_add_action_or_reset(test, fpga_bridge_unregister_wrapper, ctx->bridge);
+	KUNIT_ASSERT_EQ(test, ret, 0);
 
-static void unregister_test_bridge(struct kunit *test, struct bridge_ctx *ctx)
-{
-	fpga_bridge_unregister(ctx->bridge);
-	kunit_device_unregister(test, ctx->dev);
+	return ctx;
 }
 
 static void fpga_bridge_test_get(struct kunit *test)
@@ -143,8 +148,6 @@ static void fpga_bridge_test_get_put_list(struct kunit *test)
 	fpga_bridges_put(&bridge_list);
 
 	KUNIT_EXPECT_TRUE(test, list_empty(&bridge_list));
-
-	unregister_test_bridge(test, ctx_1);
 }
 
 TEST_PLATFORM_DRIVER(test_platform_driver);
@@ -166,11 +169,6 @@ static int fpga_bridge_test_init(struct kunit *test)
 	return 0;
 }
 
-static void fpga_bridge_test_exit(struct kunit *test)
-{
-	unregister_test_bridge(test, test->priv);
-}
-
 static struct kunit_case fpga_bridge_test_cases[] = {
 	KUNIT_CASE(fpga_bridge_test_get),
 	KUNIT_CASE(fpga_bridge_test_toggle),
@@ -183,7 +181,6 @@ static struct kunit_suite fpga_bridge_suite = {
 	.suite_init = fpga_bridge_test_suite_init,
 	.suite_exit = fpga_bridge_test_suite_exit,
 	.init = fpga_bridge_test_init,
-	.exit = fpga_bridge_test_exit,
 	.test_cases = fpga_bridge_test_cases,
 };
 

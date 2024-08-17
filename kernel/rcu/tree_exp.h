@@ -599,7 +599,6 @@ static void synchronize_rcu_expedited_stall(unsigned long jiffies_start, unsigne
 			if (!(READ_ONCE(rnp->expmask) & mask))
 				continue;
 			dump_cpu_task(cpu);
-			nbcon_cpu_emergency_flush();
 		}
 		rcu_exp_print_detail_task_stall_rnp(rnp);
 	}

@@ -50,7 +50,6 @@ static u32 cond_le32_to_cpu(__le32 value, bool has_be_header_quirk);
 #define CREATE_TRACE_POINTS
 #include <trace/events/firewire_ohci.h>
 
-#define ohci_info(ohci, f, args...)	dev_info(ohci->card.device, f, ##args)
 #define ohci_notice(ohci, f, args...)	dev_notice(ohci->card.device, f, ##args)
 #define ohci_err(ohci, f, args...)	dev_err(ohci->card.device, f, ##args)
 
@@ -77,7 +76,7 @@ struct descriptor {
 	__le32 branch_address;
 	__le16 res_count;
 	__le16 transfer_status;
-} __attribute__((aligned(16)));
+} __aligned(16);
 
 #define CONTROL_SET(regs)	(regs)
 #define CONTROL_CLEAR(regs)	((regs) + 4)
@@ -175,7 +174,7 @@ struct iso_context {
 	u8 tags;
 };
 
-#define CONFIG_ROM_SIZE 1024
+#define CONFIG_ROM_SIZE		(CSR_CONFIG_ROM_END - CSR_CONFIG_ROM)
 
 struct fw_ohci {
 	struct fw_card card;

@@ -841,7 +841,7 @@ static ssize_t path_getxattrat(int dfd, const char __user *pathname,
 
 	if (at_flags & AT_EMPTY_PATH && vfs_empty_path(dfd, pathname)) {
 		CLASS(fd, f)(dfd);
-		if (!fd_file(f))
+		if (fd_empty(f))
 			return -EBADF;
 		audit_file(fd_file(f));
 		return getxattr(file_mnt_idmap(fd_file(f)), file_dentry(fd_file(f)),
@@ -961,7 +961,7 @@ static ssize_t path_listxattrat(int dfd, const char __user *pathname,
 
 	if (at_flags & AT_EMPTY_PATH && vfs_empty_path(dfd, pathname)) {
 		CLASS(fd, f)(dfd);
-		if (!fd_file(f))
+		if (fd_empty(f))
 			return -EBADF;
 		audit_file(fd_file(f));
 		return listxattr(file_dentry(fd_file(f)), list, size);
@@ -1030,7 +1030,7 @@ static int do_fremovexattr(int fd, const char __user *name)
 	int error = -EBADF;
 
 	CLASS(fd, f)(fd);
-	if (!fd_file(f))
+	if (fd_empty(f))
 		return error;
 	audit_file(fd_file(f));
 

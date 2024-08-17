@@ -360,7 +360,7 @@ static void call_rcu_tasks_generic(struct rcu_head *rhp, rcu_callback_t func,
 	rcu_read_lock();
 	ideal_cpu = smp_processor_id() >> READ_ONCE(rtp->percpu_enqueue_shift);
 	chosen_cpu = cpumask_next(ideal_cpu - 1, cpu_possible_mask);
-	WARN_ON_ONCE(chosen_cpu >= nr_cpu_ids);
+	WARN_ON_ONCE(chosen_cpu >= rcu_task_cpu_ids);
 	rtpcp = per_cpu_ptr(rtp->rtpcpu, chosen_cpu);
 	if (!raw_spin_trylock_rcu_node(rtpcp)) { // irqs already disabled.
 		raw_spin_lock_rcu_node(rtpcp); // irqs already disabled.
@@ -1249,6 +1249,7 @@ void show_rcu_tasks_classic_gp_kthread(void)
 	show_rcu_tasks_generic_gp_kthread(&rcu_tasks, "");
 }
 EXPORT_SYMBOL_GPL(show_rcu_tasks_classic_gp_kthread);
+
 void rcu_tasks_torture_stats_print(char *tt, char *tf)
 {
 	rcu_tasks_torture_stats_print_generic(&rcu_tasks, tt, tf, "");
@@ -1414,6 +1415,7 @@ void show_rcu_tasks_rude_gp_kthread(void)
 	show_rcu_tasks_generic_gp_kthread(&rcu_tasks_rude, "");
 }
 EXPORT_SYMBOL_GPL(show_rcu_tasks_rude_gp_kthread);
+
 void rcu_tasks_rude_torture_stats_print(char *tt, char *tf)
 {
 	rcu_tasks_torture_stats_print_generic(&rcu_tasks_rude, tt, tf, "");
@@ -2081,6 +2083,7 @@ void show_rcu_tasks_trace_gp_kthread(void)
 	show_rcu_tasks_generic_gp_kthread(&rcu_tasks_trace, buf);
 }
 EXPORT_SYMBOL_GPL(show_rcu_tasks_trace_gp_kthread);
+
 void rcu_tasks_trace_torture_stats_print(char *tt, char *tf)
 {
 	rcu_tasks_torture_stats_print_generic(&rcu_tasks_trace, tt, tf, "");

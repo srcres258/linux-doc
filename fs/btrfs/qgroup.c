@@ -1998,7 +1998,7 @@ out:
  *
  * Return 0 for success insert
  * Return >0 for existing record, caller can free @record safely.
- * Return <0 for insertion failed, caller can free @record safely.
+ * Return <0 for insertion failure, caller can free @record safely.
  */
 int btrfs_qgroup_trace_extent_nolock(struct btrfs_fs_info *fs_info,
 				struct btrfs_delayed_ref_root *delayed_refs,

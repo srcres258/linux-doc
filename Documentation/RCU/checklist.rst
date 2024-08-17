@@ -327,7 +327,7 @@ over a rather long period of time, but improvements are always welcome!
 
 	The same cautions apply to call_srcu(), call_rcu_tasks(), and
 	call_rcu_tasks_trace().  This is why there is an srcu_barrier(),
-	and rcu_barrier_tasks(), respectively.
+	rcu_barrier_tasks(), and rcu_barrier_tasks_trace(), respectively.
 
 	Note that although these primitives do take action to avoid
 	memory exhaustion when any given CPU has too many callbacks,

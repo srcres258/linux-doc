@@ -664,7 +664,7 @@ static inline void prep_compound_head(struct page *page, unsigned int order)
 	atomic_set(&folio->_pincount, 0);
 	if (order > 1) {
 		INIT_LIST_HEAD(&folio->_deferred_list);
-		folio->_partially_mapped = false;
+		folio_clear_partially_mapped(folio);
 	}
 }
 
