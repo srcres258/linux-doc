@@ -98,6 +98,7 @@ struct evsel {
 		bool			bpf_counter;
 		bool			use_config_name;
 		bool			skippable;
+		bool			retire_lat;
 		int			bpf_fd;
 		struct bpf_object	*bpf_obj;
 		struct list_head	config_terms;
@@ -146,6 +147,20 @@ struct evsel {
 	 * See also evsel__has_callchain().
 	 */
 	__u64			synth_sample_type;
+
+	/*
+	 * Store the branch counter related information.
+	 * br_cntr_idx: The idx of the branch counter event in the evlist
+	 * br_cntr_nr:  The number of the branch counter event in the group
+	 *	        (Only available for the leader event)
+	 * abbr_name:   The abbreviation name assigned to an event which is
+	 *		logged by the branch counter.
+	 *		The abbr name is from A to Z9. NA is applied if out
+	 *		of the range.
+	 */
+	int			br_cntr_idx;
+	int			br_cntr_nr;
+	char			abbr_name[3];
 
 	/*
 	 * bpf_counter_ops serves two use cases:
@@ -308,6 +323,11 @@ const char *evsel__metric_id(const struct evsel *evsel);
 static inline bool evsel__is_tool(const struct evsel *evsel)
 {
 	return evsel->tool_event != PERF_TOOL_NONE;
+}
+
+static inline bool evsel__is_retire_lat(const struct evsel *evsel)
+{
+	return evsel->retire_lat;
 }
 
 const char *evsel__group_name(struct evsel *evsel);
