@@ -790,7 +790,7 @@ const char *btf_str_by_offset(const struct btf *btf, u32 offset)
 	return NULL;
 }
 
-static bool __btf_name_valid(const struct btf *btf, u32 offset)
+static bool btf_name_valid_identifier(const struct btf *btf, u32 offset)
 {
 	/* offset must be valid */
 	const char *src = btf_str_by_offset(btf, offset);
@@ -809,11 +809,6 @@ static bool __btf_name_valid(const struct btf *btf, u32 offset)
 	}
 
 	return !*src;
-}
-
-static bool btf_name_valid_identifier(const struct btf *btf, u32 offset)
-{
-	return __btf_name_valid(btf, offset);
 }
 
 /* Allow any printable character in DATASEC names */
@@ -4629,7 +4624,7 @@ static s32 btf_var_check_meta(struct btf_verifier_env *env,
 	}
 
 	if (!t->name_off ||
-	    !__btf_name_valid(env->btf, t->name_off)) {
+	    !btf_name_valid_identifier(env->btf, t->name_off)) {
 		btf_verifier_log_type(env, t, "Invalid name");
 		return -EINVAL;
 	}
@@ -6416,8 +6411,11 @@ bool btf_ctx_access(int off, int size, enum bpf_access_type type,
 
 	if (arg == nr_args) {
 		switch (prog->expected_attach_type) {
-		case BPF_LSM_CGROUP:
 		case BPF_LSM_MAC:
+			/* mark we are accessing the return value */
+			info->is_retval = true;
+			fallthrough;
+		case BPF_LSM_CGROUP:
 		case BPF_TRACE_FEXIT:
 			/* When LSM programs are attached to void LSM hooks
 			 * they use FEXIT trampolines and when attached to
@@ -7673,21 +7671,16 @@ int btf_new_fd(const union bpf_attr *attr, bpfptr_t uattr, u32 uattr_size)
 struct btf *btf_get_by_fd(int fd)
 {
 	struct btf *btf;
-	struct fd f;
+	CLASS(fd, f)(fd);
 
-	f = fdget(fd);
-
-	if (!f.file)
+	if (fd_empty(f))
 		return ERR_PTR(-EBADF);
 
-	if (f.file->f_op != &btf_fops) {
-		fdput(f);
+	if (fd_file(f)->f_op != &btf_fops)
 		return ERR_PTR(-EINVAL);
-	}
 
-	btf = f.file->private_data;
+	btf = fd_file(f)->private_data;
 	refcount_inc(&btf->refcnt);
-	fdput(f);
 
 	return btf;
 }
