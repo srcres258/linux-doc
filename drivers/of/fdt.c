@@ -1238,8 +1238,8 @@ void __init unflatten_device_tree(void)
 
 	unittest_unflatten_overlay_base();
 
-	/* initialize the reserved memory regions */
-	of_scan_reserved_mem_reg_nodes();
+	/* Save the statically-placed regions in the reserved_mem array */
+	fdt_scan_reserved_mem_reg_nodes();
 }
 
 /**

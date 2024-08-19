@@ -62,12 +62,48 @@ static int __init early_init_dt_alloc_reserved_memory_arch(phys_addr_t size,
  * alloc_reserved_mem_array() - allocate memory for the reserved_mem
  * array using memblock
  *
- * This function is used to allocate memory for the reserved_mem array
- * according to the total number of reserved memory regions defined in
- * the DT.
- * After the new array is allocated, the information stored in the
- * initial static array is copied over to this new array and the new
- * array is used from this point on.
+ * This function is used to allocate memory for the reserved_mem
+ * array according to the total number of reserved memory regions
+ * defined in the DT.
+ * After the new array is allocated, the information stored in
+ * the initial static array is copied over to this new array and
+ * the new array is used from this point on.
+ */
+static void __init alloc_reserved_mem_array(void)
+{
+	struct reserved_mem *new_array;
+	size_t alloc_size, copy_size, memset_size;
+
+	alloc_size = array_size(total_reserved_mem_cnt, sizeof(*new_array));
+	if (alloc_size == SIZE_MAX) {
+		pr_err("Failed to allocate memory for reserved_mem array with err: %d", -EOVERFLOW);
+		return;
+	}
+
+	new_array = memblock_alloc(alloc_size, SMP_CACHE_BYTES);
+	if (!new_array) {
+		pr_err("Failed to allocate memory for reserved_mem array with err: %d", -ENOMEM);
+		return;
+	}
+
+	copy_size = array_size(reserved_mem_count, sizeof(*new_array));
+	if (copy_size == SIZE_MAX) {
+		memblock_free(new_array, alloc_size);
+		total_reserved_mem_cnt = MAX_RESERVED_REGIONS;
+		pr_err("Failed to allocate memory for reserved_mem array with err: %d", -EOVERFLOW);
+		return;
+	}
+
+	memset_size = alloc_size - copy_size;
+
+	memcpy(new_array, reserved_mem, copy_size);
+	memset(new_array + reserved_mem_count, 0, memset_size);
+
+	reserved_mem = new_array;
+}
+
+/*
+ * fdt_reserved_mem_save_node() - save fdt node for second pass initialization
  */
 static void __init alloc_reserved_mem_array(void)
 {
@@ -145,6 +181,8 @@ static int __init early_init_dt_reserve_memory(phys_addr_t base,
 	return memblock_reserve(base, size);
 }
 
+static void __init fdt_init_reserved_mem_node(unsigned long node, const char *uname,
+					      phys_addr_t base, phys_addr_t size);
 /*
  * __reserved_mem_reserve_reg() - reserve all memory described in 'reg' property
  */
@@ -182,6 +220,11 @@ static int __init __reserved_mem_reserve_reg(unsigned long node,
 			       uname, &base, (unsigned long)(size / SZ_1M));
 
 		len -= t_len;
+		if (first) {
+			/* Call region specific initialization function */
+			fdt_init_reserved_mem_node(node, uname, base, size);
+			first = 0;
+		}
 	}
 	return 0;
 }
@@ -212,57 +255,64 @@ static int __init __fdt_reserved_mem_check_root(unsigned long node)
 static void __init __rmem_check_for_overlap(void);
 
 /**
- * of_scan_reserved_mem_reg_nodes() - Store info for the "reg" defined
+ * fdt_scan_reserved_mem_reg_nodes() - Store info for the "reg" defined
  * reserved memory regions.
  *
  * This function is used to scan through the DT and store the
  * information for the reserved memory regions that are defined using
  * the "reg" property. The region node number, name, base address, and
  * size are all stored in the reserved_mem array by calling the
- * of_reserved_mem_save_node() function.
+ * fdt_reserved_mem_save_node() function.
  */
-void __init of_scan_reserved_mem_reg_nodes(void)
+void __init fdt_scan_reserved_mem_reg_nodes(void)
 {
-	struct device_node *node, *child;
+	int t_len = (dt_root_addr_cells + dt_root_size_cells) * sizeof(__be32);
+	const void *fdt = initial_boot_params;
 	phys_addr_t base, size;
+	const __be32 *prop;
+	int node, child;
+	int len;
 
-	node = of_find_node_by_path("/reserved-memory");
-	if (!node) {
+	node = fdt_path_offset(fdt, "/reserved-memory");
+	if (node < 0) {
 		pr_info("Reserved memory: No reserved-memory node in the DT\n");
 		return;
 	}
 
+	if (__reserved_mem_check_root(node)) {
+		pr_err("Reserved memory: unsupported node format, ignoring\n");
+		return;
+	}
+
 	/*
-	 * Before moving forward, allocate the exact size needed for the
-	 * reserved_mem array and copy all previously saved contents
-	 * into the new array if successful.
+	 * Allocate the exact size needed for the reserved_mem array and
+	 * copy all the contents from the previous array if allocation
+	 * is successful.
 	 */
 	alloc_reserved_mem_array();
 
-	for_each_child_of_node(node, child) {
-		int ret = 0;
+	fdt_for_each_subnode(child, fdt, node) {
 		const char *uname;
-		struct resource res;
-		struct reserved_mem *rmem;
 
-		if (!of_device_is_available(child))
+		prop = of_get_flat_dt_prop(child, "reg", &len);
+		if (!prop)
+			continue;
+		if (!of_fdt_device_is_available(fdt, child))
 			continue;
 
-		ret = of_address_to_resource(child, 0, &res);
-		if (ret) {
-			rmem = of_reserved_mem_lookup(child);
-			if (rmem)
-				rmem->dev_node = child;
+		uname = fdt_get_name(fdt, child, NULL);
+		if (len && len % t_len != 0) {
+			pr_err("Reserved memory: invalid reg property in '%s', skipping node.\n",
+			       uname);
 			continue;
 		}
-		uname = of_node_full_name(child);
-
-		base = res.start;
-		size = res.end - res.start + 1;
+		base = dt_mem_next_cell(dt_root_addr_cells, &prop);
+		size = dt_mem_next_cell(dt_root_size_cells, &prop);
 
 		if (size)
-			of_reserved_mem_save_node(child, uname, base, size);
+			fdt_reserved_mem_save_node(child, uname, base, size);
 	}
+
 	/* check for overlapping reserved regions */
 	__rmem_check_for_overlap();
 }
@@ -300,6 +350,7 @@ int __init fdt_scan_reserved_mem(void)
 		err = __reserved_mem_reserve_reg(child, uname);
 		if (!err)
 			count++;
+
 		/*
 		 * Save the nodes for the dynamically-placed regions
 		 * into an array which will be used for allocation right
@@ -318,12 +369,11 @@ int __init fdt_scan_reserved_mem(void)
 
 		child = dynamic_nodes[i];
 		uname = fdt_get_name(fdt, child, NULL);
-
 		err = __reserved_mem_alloc_size(child, uname);
 		if (!err)
 			count++;
 	}
-	total_reserved_mem_cnt = count++;
+	total_reserved_mem_cnt = count;
 	return 0;
 }
 
@@ -461,7 +511,12 @@ static int __init __reserved_mem_alloc_size(unsigned long node, const char *unam
 		       uname, (unsigned long)(size / SZ_1M));
 		return -ENOMEM;
 	}
-	of_reserved_mem_save_node(NULL, uname, base, size);
+
+	/* Call region specific initialization function */
+	fdt_init_reserved_mem_node(node, uname, base, size);
+
+	/* Save region in the reserved_mem array */
+	fdt_reserved_mem_save_node(node, uname, base, size);
 	return 0;
 }
 
@@ -545,38 +600,47 @@ static void __init __rmem_check_for_overlap(void)
 }
 
 /**
- * of_init_reserved_mem_node() - Initialize a saved reserved memory region.
- * @rmem: reserved_mem object of the memory region to be initialized.
+ * fdt_init_reserved_mem_node() - Initialize a reserved memory region
+ * @node: fdt node for the region to be initialized.
+ * @uname: name of the region to be initialized.
+ * @base: base address of the region to be initialized.
+ * @size: size of the region to be initialized.
  *
  * This function is used to call the region specific initialization
- * function on the rmem object passed as an argument. The rmem object
- * will contain the base address, size, node name, and device_node of
- * the reserved memory region to be initialized.
+ * function on a reserved memory region described by the node, name,
+ * base address and size being passed in as arguments.
  */
-static void __init of_init_reserved_mem_node(struct reserved_mem *rmem)
+static void __init fdt_init_reserved_mem_node(unsigned long node, const char *uname,
+					      phys_addr_t base, phys_addr_t size)
 {
-	int err;
+	int err = 0;
 	bool nomap;
-	struct device_node *node = rmem->dev_node;
+	struct reserved_mem rmem = {
+		.fdt_node = node,
+		.name = uname,
+		.base = base,
+		.size = size
+	};
 
-	nomap = of_property_present(node, "no-map");
+	nomap = of_get_flat_dt_prop(node, "no-map", NULL) != NULL;
 
-	err = __reserved_mem_init_node(rmem);
+	err = __reserved_mem_init_node(&rmem);
 	if (err != 0 && err != -ENOENT) {
-		pr_info("node %s compatible matching fail\n", rmem->name);
+		pr_info("node %s compatible matching fail\n", rmem.name);
 		if (nomap)
-			memblock_clear_nomap(rmem->base, rmem->size);
+			memblock_clear_nomap(rmem.base, rmem.size);
 		else
-			memblock_phys_free(rmem->base, rmem->size);
+			memblock_phys_free(rmem.base, rmem.size);
 	} else {
-		phys_addr_t end = rmem->base + rmem->size - 1;
-		bool reusable = of_property_present(node, "reusable");
+		phys_addr_t end = rmem.base + rmem.size - 1;
+		bool reusable =
+			(of_get_flat_dt_prop(node, "reusable", NULL)) != NULL;
 
 		pr_info("%pa..%pa (%lu KiB) %s %s %s\n",
-			&rmem->base, &end, (unsigned long)(rmem->size / SZ_1K),
+			&rmem.base, &end, (unsigned long)(rmem.size / SZ_1K),
 			nomap ? "nomap" : "map",
 			reusable ? "reusable" : "non-reusable",
-			rmem->name ? rmem->name : "unknown");
+			rmem.name ? rmem.name : "unknown");
 	}
 }
 

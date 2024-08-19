@@ -4570,7 +4570,7 @@ mwifiex_cfg80211_probe_client(struct wiphy *wiphy,
 }
 
 /* station cfg80211 operations */
-static struct cfg80211_ops mwifiex_cfg80211_ops = {
+static const struct cfg80211_ops mwifiex_cfg80211_ops = {
 	.add_virtual_intf = mwifiex_add_virtual_intf,
 	.del_virtual_intf = mwifiex_del_virtual_intf,
 	.change_virtual_intf = mwifiex_cfg80211_change_virtual_intf,
@@ -4705,24 +4705,28 @@ int mwifiex_register_cfg80211(struct mwifiex_adapter *adapter)
 	struct mwifiex_private *priv = adapter->priv[MWIFIEX_BSS_TYPE_STA];
 	u8 *country_code;
 	u32 thr, retry;
+	struct cfg80211_ops *ops;
+
+	ops = devm_kmemdup(adapter->dev, &mwifiex_cfg80211_ops,
+			   sizeof(mwifiex_cfg80211_ops), GFP_KERNEL);
+	if (!ops)
+		return -ENOMEM;
 
 	/* create a new wiphy for use with cfg80211 */
-	wiphy = wiphy_new(&mwifiex_cfg80211_ops,
-			  sizeof(struct mwifiex_adapter *));
+	wiphy = wiphy_new(ops, sizeof(struct mwifiex_adapter *));
 	if (!wiphy) {
 		mwifiex_dbg(adapter, ERROR,
 			    "%s: creating new wiphy\n", __func__);
 		return -ENOMEM;
 	}
 	if (adapter->host_mlme_enabled) {
-		mwifiex_cfg80211_ops.auth = mwifiex_cfg80211_authenticate;
-		mwifiex_cfg80211_ops.assoc = mwifiex_cfg80211_associate;
-		mwifiex_cfg80211_ops.deauth = mwifiex_cfg80211_deauthenticate;
-		mwifiex_cfg80211_ops.disassoc = mwifiex_cfg80211_disassociate;
-		mwifiex_cfg80211_ops.disconnect = NULL;
-		mwifiex_cfg80211_ops.connect = NULL;
-		mwifiex_cfg80211_ops.probe_client =
-			mwifiex_cfg80211_probe_client;
+		ops->auth = mwifiex_cfg80211_authenticate;
+		ops->assoc = mwifiex_cfg80211_associate;
+		ops->deauth = mwifiex_cfg80211_deauthenticate;
+		ops->disassoc = mwifiex_cfg80211_disassociate;
+		ops->disconnect = NULL;
+		ops->connect = NULL;
+		ops->probe_client = mwifiex_cfg80211_probe_client;
 	}
 	wiphy->max_scan_ssids = MWIFIEX_MAX_SSID_LIST_LENGTH;
 	wiphy->max_scan_ie_len = MWIFIEX_MAX_VSIE_LEN;
@@ -4756,11 +4760,27 @@ int mwifiex_register_cfg80211(struct mwifiex_adapter *adapter)
 	if (ISSUPP_ADHOC_ENABLED(adapter->fw_cap_info))
 		wiphy->interface_modes |= BIT(NL80211_IFTYPE_ADHOC);
 
-	wiphy->bands[NL80211_BAND_2GHZ] = &mwifiex_band_2ghz;
-	if (adapter->config_bands & BAND_A)
-		wiphy->bands[NL80211_BAND_5GHZ] = &mwifiex_band_5ghz;
-	else
+	wiphy->bands[NL80211_BAND_2GHZ] = devm_kmemdup(adapter->dev,
+						       &mwifiex_band_2ghz,
+						       sizeof(mwifiex_band_2ghz),
+						       GFP_KERNEL);
+	if (!wiphy->bands[NL80211_BAND_2GHZ]) {
+		ret = -ENOMEM;
+		goto err;
+	}
+
+	if (adapter->config_bands & BAND_A) {
+		wiphy->bands[NL80211_BAND_5GHZ] = devm_kmemdup(adapter->dev,
+							       &mwifiex_band_5ghz,
+							       sizeof(mwifiex_band_5ghz),
+							       GFP_KERNEL);
+		if (!wiphy->bands[NL80211_BAND_5GHZ]) {
+			ret = -ENOMEM;
+			goto err;
+		}
+	} else {
 		wiphy->bands[NL80211_BAND_5GHZ] = NULL;
+	}
 
 	if (adapter->drcs_enabled && ISSUPP_DRCS_ENABLED(adapter->fw_cap_info))
 		wiphy->iface_combinations = &mwifiex_iface_comb_ap_sta_drcs;
@@ -4861,8 +4881,7 @@ int mwifiex_register_cfg80211(struct mwifiex_adapter *adapter)
 	if (ret < 0) {
 		mwifiex_dbg(adapter, ERROR,
 			    "%s: wiphy_register failed: %d\n", __func__, ret);
-		wiphy_free(wiphy);
-		return ret;
+		goto err;
 	}
 
 	if (!adapter->regd) {
@@ -4903,5 +4922,10 @@ int mwifiex_register_cfg80211(struct mwifiex_adapter *adapter)
 	wiphy->retry_long = (u8) retry;
 
 	adapter->wiphy = wiphy;
+	return ret;
+
+err:
+	wiphy_free(wiphy);
+
 	return ret;
 }

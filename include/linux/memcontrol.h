@@ -70,6 +70,7 @@ struct mem_cgroup_id {
 };
 
 struct memcg_vmstats_percpu;
+struct memcg1_events_percpu;
 struct memcg_vmstats;
 struct lruvec_stats_percpu;
 struct lruvec_stats;
@@ -274,6 +275,8 @@ struct mem_cgroup {
 	/* Legacy consumer-oriented counters */
 	struct page_counter kmem;		/* v1 only */
 	struct page_counter tcpmem;		/* v1 only */
+
+	struct memcg1_events_percpu __percpu *events_percpu;
 
 	unsigned long soft_limit;
 

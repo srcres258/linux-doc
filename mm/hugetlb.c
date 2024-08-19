@@ -1696,8 +1696,8 @@ static void __update_and_free_hugetlb_folio(struct hstate *h,
 		folio_clear_hugetlb_hwpoison(folio);
 
 	folio_ref_unfreeze(folio, 1);
+
 	INIT_LIST_HEAD(&folio->_deferred_list);
-	folio_clear_partially_mapped(folio);
 	hugetlb_free_folio(folio);
 }
 

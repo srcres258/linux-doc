@@ -137,6 +137,33 @@ static void putback_movable_folio(struct folio *folio)
 	folio_clear_isolated(folio);
 }
 
+/* Must be called with an elevated refcount on the non-hugetlb folio */
+bool isolate_folio_to_list(struct folio *folio, struct list_head *list)
+{
+	bool isolated = false;
+
+	if (folio_test_hugetlb(folio)) {
+		isolated = isolate_hugetlb(folio, list);
+	} else {
+		bool lru = !__folio_test_movable(folio);
+
+		if (lru)
+			isolated = folio_isolate_lru(folio);
+		else
+			isolated = isolate_movable_page(&folio->page,
+							ISOLATE_UNEVICTABLE);
+
+		if (isolated) {
+			list_add(&folio->lru, list);
+			if (lru)
+				node_stat_add_folio(folio, NR_ISOLATED_ANON +
+						    folio_is_file_lru(folio));
+		}
+	}
+
+	return isolated;
+}
+
 /*
  * Put previously isolated pages back onto the appropriate lists
  * from where they were once taken off for compaction/migration.
@@ -1749,8 +1776,7 @@ static int migrate_pages_batch(struct list_head *from,
 			 * use _deferred_list.
 			 */
 			if (nr_pages > 2 &&
-			   !list_empty(&folio->_deferred_list) &&
-			   folio_test_partially_mapped(folio)) {
+			   !list_empty(&folio->_deferred_list)) {
 				if (!try_split_folio(folio, split_folios, mode)) {
 					nr_failed++;
 					stats->nr_thp_failed += is_thp;

@@ -482,7 +482,7 @@ static bool armv8pmu_event_is_chained(struct perf_event *event)
 	return !armv8pmu_event_has_user_read(event) &&
 	       armv8pmu_event_is_64bit(event) &&
 	       !armv8pmu_has_long_event(cpu_pmu) &&
-	       (idx <= ARMV8_PMU_MAX_GENERAL_COUNTERS);
+	       (idx < ARMV8_PMU_MAX_GENERAL_COUNTERS);
 }
 
 /*

@@ -603,21 +603,6 @@ if (processed->inode == inode && processed->uptodate == uptodate &&
 	return;
 }
 
-tree = &processed->inode->io_tree;
-/*
- * Now we don't have range contiguous to the processed range, release
- * the processed range now.
- */
-unlock_extent(tree, processed->start, processed->end, &cached);
-
-update:
-/* Update processed to current range */
-processed->inode = inode;
-processed->start = start;
-processed->end = end;
-processed->uptodate = uptodate;
-}
-
 static void begin_folio_read(struct btrfs_fs_info *fs_info, struct folio *folio)
 {
 	ASSERT(folio_test_locked(folio));
@@ -1301,12 +1286,12 @@ btrfs_lock_and_flush_ordered_range(inode, start, end, NULL);
 	ret = btrfs_do_readpage(folio, &em_cached, &bio_ctrl, NULL);
 	free_extent_map(em_cached);
 
-/*
- * If btrfs_do_readpage() failed we will want to submit the assembled
- * bio to do the cleanup.
- */
-submit_one_bio(&bio_ctrl);
-return ret;
+	/*
+	 * If btrfs_do_readpage() failed we will want to submit the assembled
+	 * bio to do the cleanup.
+	 */
+	submit_one_bio(&bio_ctrl);
+	return ret;
 }
 
 /*

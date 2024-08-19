@@ -250,17 +250,27 @@ static int __bch2_xattr_emit(const char *prefix,
 	return 0;
 }
 
+static inline const char *bch2_xattr_prefix(unsigned type, struct dentry *dentry)
+{
+	const struct xattr_handler *handler = bch2_xattr_type_to_handler(type);
+
+	if (!xattr_handler_can_list(handler, dentry))
+		return NULL;
+
+	return xattr_prefix(handler);
+}
+
 static int bch2_xattr_emit(struct dentry *dentry,
 			    const struct bch_xattr *xattr,
 			    struct xattr_buf *buf)
 {
-	const struct xattr_handler *handler =
-		bch2_xattr_type_to_handler(xattr->x_type);
+	const char *prefix;
 
-	return handler && (!handler->list || handler->list(dentry))
-		? __bch2_xattr_emit(handler->prefix ?: handler->name,
-				    xattr->x_name, xattr->x_name_len, buf)
-		: 0;
+	prefix = bch2_xattr_prefix(xattr->x_type, dentry);
+	if (!prefix)
+		return 0;
+
+	return __bch2_xattr_emit(prefix, xattr->x_name, xattr->x_name_len, buf);
 }
 
 static int bch2_xattr_list_bcachefs(struct bch_fs *c,
@@ -581,20 +591,26 @@ static int bch2_xattr_bcachefs_get_effective(
 					 name, buffer, size, true);
 }
 
+/* Noop - xattrs in the bcachefs_effective namespace are inherited */
+static int bch2_xattr_bcachefs_set_effective(const struct xattr_handler *handler,
+				   struct mnt_idmap *idmap,
+				   struct dentry *dentry, struct inode *vinode,
+				   const char *name, const void *value,
+				   size_t size, int flags)
+{
+	return 0;
+}
+
 static const struct xattr_handler bch_xattr_bcachefs_effective_handler = {
 	.prefix	= "bcachefs_effective.",
 	.get	= bch2_xattr_bcachefs_get_effective,
-	.set	= bch2_xattr_bcachefs_set,
+	.set	= bch2_xattr_bcachefs_set_effective,
 };
 
 #endif /* NO_BCACHEFS_FS */
 
 const struct xattr_handler *bch2_xattr_handlers[] = {
 	&bch_xattr_user_handler,
-#ifdef CONFIG_BCACHEFS_POSIX_ACL
-	&nop_posix_acl_access,
-	&nop_posix_acl_default,
-#endif
 	&bch_xattr_trusted_handler,
 	&bch_xattr_security_handler,
 #ifndef NO_BCACHEFS_FS

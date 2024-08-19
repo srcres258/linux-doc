@@ -541,18 +541,48 @@ static int __region_intersects(struct resource *parent, resource_size_t start,
 {
 	struct resource res;
 	int type = 0; int other = 0;
-	struct resource *p;
+	struct resource *p, *dp;
+	resource_size_t ostart, oend;
+	bool is_type;
 
 	res.start = start;
 	res.end = start + size - 1;
 
 	for (p = parent->child; p ; p = p->sibling) {
-		bool is_type = (((p->flags & flags) == flags) &&
-				((desc == IORES_DESC_NONE) ||
-				 (desc == p->desc)));
-
-		if (resource_overlaps(p, &res))
-			is_type ? type++ : other++;
+		if (!resource_overlaps(p, &res))
+			continue;
+		is_type = (((p->flags & flags) == flags) &&
+			   ((desc == IORES_DESC_NONE) || (desc == p->desc)));
+		if (is_type) {
+			type++;
+			continue;
+		}
+		/*
+		 * Continue to search in descendant resources.  Unless
+		 * the matched descendant resources cover the whole
+		 * overlapped range, increase 'other', because it
+		 * overlaps with 'p' at least.
+		 */
+		other++;
+		ostart = max(res.start, p->start);
+		oend = min(res.end, p->end);
+		for_each_resource(p, dp, false) {
+			if (!resource_overlaps(dp, &res))
+				continue;
+			is_type = (((dp->flags & flags) == flags) &&
+				   ((desc == IORES_DESC_NONE) ||
+				    (desc == dp->desc)));
+			if (is_type) {
+				type++;
+				if (dp->start > ostart)
+					break;
+				if (dp->end >= oend) {
+					other--;
+					break;
+				}
+				ostart = dp->end + 1;
+			}
+		}
 	}
 
 	if (type == 0)
@@ -1825,8 +1855,7 @@ static resource_size_t gfr_start(struct resource *base, resource_size_t size,
 	if (flags & GFR_DESCENDING) {
 		resource_size_t end;
 
-		end = min_t(resource_size_t, base->end,
-			    (1ULL << MAX_PHYSMEM_BITS) - 1);
+		end = min_t(resource_size_t, base->end, PHYSMEM_END);
 		return end - size + 1;
 	}
 
@@ -1843,8 +1872,7 @@ static bool gfr_continue(struct resource *base, resource_size_t addr,
 	 * @size did not wrap 0.
 	 */
 	return addr > addr - size &&
-	       addr <= min_t(resource_size_t, base->end,
-			     (1ULL << MAX_PHYSMEM_BITS) - 1);
+	       addr <= min_t(resource_size_t, base->end, PHYSMEM_END);
 }
 
 static resource_size_t gfr_next(resource_size_t addr, resource_size_t size,
