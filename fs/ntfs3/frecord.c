@@ -1906,7 +1906,7 @@ static int fiemap_fill_next_extent_k(struct fiemap_extent_info *fieinfo,
 				     u64 logical, u64 phys, u64 len, u32 flags)
 {
 	struct fiemap_extent extent;
-	struct fiemap_extent __user *dest = fieinfo->fi_extents_start;
+	struct fiemap_extent *dest = fieinfo->fi_extents_start;
 
 	/* only count the extents */
 	if (fieinfo->fi_extents_max == 0) {
