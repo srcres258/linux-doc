@@ -556,7 +556,7 @@ int bch2_bucket_gens_init(struct bch_fs *c)
 		struct bpos pos = alloc_gens_pos(iter.pos, &offset);
 		int ret2 = 0;
 
-		if (have_bucket_gens_key && bkey_cmp(iter.pos, pos)) {
+		if (have_bucket_gens_key && !bkey_eq(g.k.p, pos)) {
 			ret2 =  bch2_btree_insert_trans(trans, BTREE_ID_bucket_gens, &g.k_i, 0) ?:
 				bch2_trans_commit(trans, NULL, NULL, BCH_TRANS_COMMIT_no_enospc);
 			if (ret2)
@@ -829,7 +829,7 @@ int bch2_trigger_alloc(struct btree_trans *trans,
 	if (likely(new.k->type == KEY_TYPE_alloc_v4)) {
 		new_a = bkey_s_to_alloc_v4(new).v;
 	} else {
-		BUG_ON(!(flags & BTREE_TRIGGER_gc));
+		BUG_ON(!(flags & (BTREE_TRIGGER_gc|BTREE_TRIGGER_check_repair)));
 
 		struct bkey_i_alloc_v4 *new_ka = bch2_alloc_to_v4_mut_inlined(trans, new.s_c);
 		ret = PTR_ERR_OR_ZERO(new_ka);
