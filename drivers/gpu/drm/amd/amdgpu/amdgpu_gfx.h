@@ -138,6 +138,10 @@ struct kiq_pm4_funcs {
 	void (*kiq_invalidate_tlbs)(struct amdgpu_ring *kiq_ring,
 				uint16_t pasid, uint32_t flush_type,
 				bool all_hub);
+	void (*kiq_reset_hw_queue)(struct amdgpu_ring *kiq_ring,
+				   uint32_t queue_type, uint32_t me_id,
+				   uint32_t pipe_id, uint32_t queue_id,
+				   uint32_t xcc_id, uint32_t vmid);
 	/* Packet sizes */
 	int set_resources_size;
 	int map_queues_size;
@@ -391,6 +395,7 @@ struct amdgpu_gfx {
 	struct amdgpu_irq_src		eop_irq;
 	struct amdgpu_irq_src		priv_reg_irq;
 	struct amdgpu_irq_src		priv_inst_irq;
+	struct amdgpu_irq_src		bad_op_irq;
 	struct amdgpu_irq_src		cp_ecc_error_irq;
 	struct amdgpu_irq_src		sq_irq;
 	struct amdgpu_irq_src		rlc_gc_fed_irq;
@@ -439,6 +444,16 @@ struct amdgpu_gfx {
 	uint32_t			*ip_dump_core;
 	uint32_t			*ip_dump_compute_queues;
 	uint32_t			*ip_dump_gfx_queues;
+
+	struct mutex			reset_sem_mutex;
+
+	/* cleaner shader */
+	struct amdgpu_bo		*cleaner_shader_obj;
+	unsigned int                    cleaner_shader_size;
+	u64				cleaner_shader_gpu_addr;
+	void				*cleaner_shader_cpu_ptr;
+	const void			*cleaner_shader_ptr;
+	bool				enable_cleaner_shader;
 };
 
 struct amdgpu_gfx_ras_reg_entry {
@@ -540,6 +555,12 @@ void amdgpu_gfx_ras_error_func(struct amdgpu_device *adev,
 		void *ras_error_status,
 		void (*func)(struct amdgpu_device *adev, void *ras_error_status,
 				int xcc_id));
+int amdgpu_gfx_cleaner_shader_sw_init(struct amdgpu_device *adev,
+				      unsigned int cleaner_shader_size);
+void amdgpu_gfx_cleaner_shader_sw_fini(struct amdgpu_device *adev);
+void amdgpu_gfx_cleaner_shader_init(struct amdgpu_device *adev,
+				    unsigned int cleaner_shader_size,
+				    const void *cleaner_shader_ptr);
 
 static inline const char *amdgpu_gfx_compute_mode_desc(int mode)
 {
