@@ -1,0 +1,14 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+
+/dts-v1/;
+
+#include "meson-g12b-radxa-zero2.dtsi"
+
+/ {
+	compatible = "radxa,zero-2-pro", "amlogic,a311d", "amlogic,g12b";
+	model = "Radxa ZERO 2 Pro";
+};
+
+&sound {
+	model = "RADXA-ZERO2PRO";
+};
