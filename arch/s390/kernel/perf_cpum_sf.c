@@ -24,6 +24,22 @@
 #include <asm/timex.h>
 #include <linux/io.h>
 
+/* Perf PMU definitions for the sampling facility */
+#define PERF_CPUM_SF_MAX_CTR		2
+#define PERF_EVENT_CPUM_SF		0xB0000UL /* Event: Basic-sampling */
+#define PERF_EVENT_CPUM_SF_DIAG		0xBD000UL /* Event: Combined-sampling */
+#define PERF_CPUM_SF_BASIC_MODE		0x0001	  /* Basic-sampling flag */
+#define PERF_CPUM_SF_DIAG_MODE		0x0002	  /* Diagnostic-sampling flag */
+#define PERF_CPUM_SF_FREQ_MODE		0x0008	  /* Sampling with frequency */
+
+#define OVERFLOW_REG(hwc)	((hwc)->extra_reg.config)
+#define SFB_ALLOC_REG(hwc)	((hwc)->extra_reg.alloc)
+#define TEAR_REG(hwc)		((hwc)->last_tag)
+#define SAMPL_RATE(hwc)		((hwc)->event_base)
+#define SAMPL_FLAGS(hwc)	((hwc)->config_base)
+#define SAMPL_DIAG_MODE(hwc)	(SAMPL_FLAGS(hwc) & PERF_CPUM_SF_DIAG_MODE)
+#define SAMPL_FREQ_MODE(hwc)	(SAMPL_FLAGS(hwc) & PERF_CPUM_SF_FREQ_MODE)
+
 /* Minimum number of sample-data-block-tables:
  * At least one table is required for the sampling buffer structure.
  * A single table contains up to 511 pointers to sample-data-blocks.
@@ -585,7 +601,7 @@ static void extend_sampling_buffer(struct sf_buffer *sfb,
 }
 
 /* Number of perf events counting hardware events */
-static atomic_t num_events;
+static refcount_t num_events;
 /* Used to avoid races in calling reserve/release_cpumf_hardware */
 static DEFINE_MUTEX(pmc_reserve_mutex);
 
@@ -594,23 +610,23 @@ static DEFINE_MUTEX(pmc_reserve_mutex);
 #define PMC_FAILURE   2
 static void setup_pmc_cpu(void *flags)
 {
-	struct cpu_hw_sf *cpusf = this_cpu_ptr(&cpu_hw_sf);
+	struct cpu_hw_sf *cpuhw = this_cpu_ptr(&cpu_hw_sf);
 	int err = 0;
 
 	switch (*((int *)flags)) {
 	case PMC_INIT:
-		memset(cpusf, 0, sizeof(*cpusf));
-		err = qsi(&cpusf->qsi);
+		memset(cpuhw, 0, sizeof(*cpuhw));
+		err = qsi(&cpuhw->qsi);
 		if (err)
 			break;
-		cpusf->flags |= PMU_F_RESERVED;
+		cpuhw->flags |= PMU_F_RESERVED;
 		err = sf_disable();
 		break;
 	case PMC_RELEASE:
-		cpusf->flags &= ~PMU_F_RESERVED;
+		cpuhw->flags &= ~PMU_F_RESERVED;
 		err = sf_disable();
 		if (!err)
-			deallocate_buffers(cpusf);
+			deallocate_buffers(cpuhw);
 		break;
 	}
 	if (err) {
@@ -644,10 +660,8 @@ static int reserve_pmc_hardware(void)
 static void hw_perf_event_destroy(struct perf_event *event)
 {
 	/* Release PMC if this is the last perf event */
-	if (!atomic_add_unless(&num_events, -1, 1)) {
-		mutex_lock(&pmc_reserve_mutex);
-		if (atomic_dec_return(&num_events) == 0)
-			release_pmc_hardware();
+	if (refcount_dec_and_mutex_lock(&num_events, &pmc_reserve_mutex)) {
+		release_pmc_hardware();
 		mutex_unlock(&pmc_reserve_mutex);
 	}
 }
@@ -800,7 +814,7 @@ static int __hw_perf_event_init_rate(struct perf_event *event,
 	hw_init_period(hwc, SAMPL_RATE(hwc));
 	debug_sprintf_event(sfdbg, 4, "%s: cpu %d period %#llx freq %d,%#lx\n",
 			    __func__, event->cpu, event->attr.sample_period,
-			    event->attr.freq, SAMPLE_FREQ_MODE(hwc));
+			    event->attr.freq, SAMPL_FREQ_MODE(hwc));
 	return 0;
 }
 
@@ -810,22 +824,19 @@ static int __hw_perf_event_init(struct perf_event *event)
 	struct hws_qsi_info_block si;
 	struct perf_event_attr *attr = &event->attr;
 	struct hw_perf_event *hwc = &event->hw;
-	int cpu, err;
+	int cpu, err = 0;
 
 	/* Reserve CPU-measurement sampling facility */
-	err = 0;
-	if (!atomic_inc_not_zero(&num_events)) {
-		mutex_lock(&pmc_reserve_mutex);
-		if (atomic_read(&num_events) == 0 && reserve_pmc_hardware())
-			err = -EBUSY;
-		else
-			atomic_inc(&num_events);
-		mutex_unlock(&pmc_reserve_mutex);
+	mutex_lock(&pmc_reserve_mutex);
+	if (!refcount_inc_not_zero(&num_events)) {
+		err = reserve_pmc_hardware();
+		if (!err)
+			refcount_set(&num_events, 1);
 	}
-	event->destroy = hw_perf_event_destroy;
-
+	mutex_unlock(&pmc_reserve_mutex);
 	if (err)
 		goto out;
+	event->destroy = hw_perf_event_destroy;
 
 	/* Access per-CPU sampling information (query sampling info) */
 	/*
@@ -880,10 +891,6 @@ static int __hw_perf_event_init(struct perf_event *event)
 	err =  __hw_perf_event_init_rate(event, &si);
 	if (err)
 		goto out;
-
-	/* Initialize sample data overflow accounting */
-	hwc->extra_reg.reg = REG_OVERFLOW;
-	OVERFLOW_REG(hwc) = 0;
 
 	/* Use AUX buffer. No need to allocate it by ourself */
 	if (attr->config == PERF_EVENT_CPUM_SF_DIAG)
@@ -1007,7 +1014,7 @@ static void cpumsf_pmu_enable(struct pmu *pmu)
 			extend_sampling_buffer(&cpuhw->sfb, hwc);
 		}
 		/* Rate may be adjusted with ioctl() */
-		cpuhw->lsctl.interval = SAMPL_RATE(&cpuhw->event->hw);
+		cpuhw->lsctl.interval = SAMPL_RATE(hwc);
 	}
 
 	/* (Re)enable the PMU and sampling facility */
@@ -1284,7 +1291,7 @@ static void hw_perf_event_update(struct perf_event *event, int flush_all)
 	 * AUX buffer is used when in diagnostic sampling mode.
 	 * No perf events/samples are created.
 	 */
-	if (SAMPL_DIAG_MODE(&event->hw))
+	if (SAMPL_DIAG_MODE(hwc))
 		return;
 
 	sdbt = (unsigned long *)TEAR_REG(hwc);
@@ -1340,7 +1347,7 @@ static void hw_perf_event_update(struct perf_event *event, int flush_all)
 			sdbt = get_next_sdbt(sdbt);
 
 		/* Update event hardware registers */
-		TEAR_REG(hwc) = (unsigned long) sdbt;
+		TEAR_REG(hwc) = (unsigned long)sdbt;
 
 		/* Stop processing sample-data if all samples of the current
 		 * sample-data-block were flushed even if it was not full.
@@ -1874,7 +1881,7 @@ static int cpumsf_pmu_check_period(struct perf_event *event, u64 value)
 		si = cpuhw->qsi;
 	}
 
-	do_freq = !!SAMPLE_FREQ_MODE(&event->hw);
+	do_freq = !!SAMPL_FREQ_MODE(&event->hw);
 	rate = getrate(do_freq, value, &si);
 	if (!rate)
 		return -EINVAL;
@@ -1936,7 +1943,7 @@ static int cpumsf_pmu_add(struct perf_event *event, int flags)
 {
 	struct cpu_hw_sf *cpuhw = this_cpu_ptr(&cpu_hw_sf);
 	struct aux_buffer *aux;
-	int err;
+	int err = 0;
 
 	if (cpuhw->flags & PMU_F_IN_USE)
 		return -EAGAIN;
@@ -1944,7 +1951,6 @@ static int cpumsf_pmu_add(struct perf_event *event, int flags)
 	if (!SAMPL_DIAG_MODE(&event->hw) && !cpuhw->sfb.sdbt)
 		return -EINVAL;
 
-	err = 0;
 	perf_pmu_disable(event->pmu);
 
 	event->hw.state = PERF_HES_UPTODATE | PERF_HES_STOPPED;
@@ -2143,7 +2149,7 @@ static int cpusf_pmu_setup(unsigned int cpu, int flags)
 	/* Ignore the notification if no events are scheduled on the PMU.
 	 * This might be racy...
 	 */
-	if (!atomic_read(&num_events))
+	if (!refcount_read(&num_events))
 		return 0;
 
 	local_irq_disable();
