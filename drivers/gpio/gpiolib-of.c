@@ -338,11 +338,10 @@ static void of_gpio_flags_quirks(const struct device_node *np,
 	 */
 	if (IS_ENABLED(CONFIG_SPI_MASTER) && !strcmp(propname, "cs-gpios") &&
 	    of_property_read_bool(np, "cs-gpios")) {
-		struct device_node *child;
 		u32 cs;
 		int ret;
 
-		for_each_child_of_node(np, child) {
+		for_each_child_of_node_scoped(np, child) {
 			ret = of_property_read_u32(child, "reg", &cs);
 			if (ret)
 				continue;
@@ -363,7 +362,6 @@ static void of_gpio_flags_quirks(const struct device_node *np,
 								"spi-cs-high");
 				of_gpio_quirk_polarity(child, active_high,
 						       flags);
-				of_node_put(child);
 				break;
 			}
 		}
@@ -836,18 +834,15 @@ static int of_gpiochip_add_hog(struct gpio_chip *chip, struct device_node *hog)
  */
 static int of_gpiochip_scan_gpios(struct gpio_chip *chip)
 {
-	struct device_node *np;
 	int ret;
 
-	for_each_available_child_of_node(dev_of_node(&chip->gpiodev->dev), np) {
+	for_each_available_child_of_node_scoped(dev_of_node(&chip->gpiodev->dev), np) {
 		if (!of_property_read_bool(np, "gpio-hog"))
 			continue;
 
 		ret = of_gpiochip_add_hog(chip, np);
-		if (ret < 0) {
-			of_node_put(np);
+		if (ret < 0)
 			return ret;
-		}
 
 		of_node_set_flag(np, OF_POPULATED);
 	}
@@ -1058,13 +1053,13 @@ static int of_gpiochip_add_pin_range(struct gpio_chip *chip)
 	int index = 0, ret, trim;
 	const char *name;
 	static const char group_names_propname[] = "gpio-ranges-group-names";
-	struct property *group_names;
+	bool has_group_names;
 
 	np = dev_of_node(&chip->gpiodev->dev);
 	if (!np)
 		return 0;
 
-	group_names = of_find_property(np, group_names_propname, NULL);
+	has_group_names = of_property_present(np, group_names_propname);
 
 	for (;; index++) {
 		ret = of_parse_phandle_with_fixed_args(np, "gpio-ranges", 3,
@@ -1085,7 +1080,7 @@ static int of_gpiochip_add_pin_range(struct gpio_chip *chip)
 
 		if (pinspec.args[2]) {
 			/* npins != 0: linear range */
-			if (group_names) {
+			if (has_group_names) {
 				of_property_read_string_index(np,
 						group_names_propname,
 						index, &name);
@@ -1123,7 +1118,7 @@ static int of_gpiochip_add_pin_range(struct gpio_chip *chip)
 				break;
 			}
 
-			if (!group_names) {
+			if (!has_group_names) {
 				pr_err("%pOF: GPIO group range requested but no %s property.\n",
 					np, group_names_propname);
 				break;
