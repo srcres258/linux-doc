@@ -93,8 +93,7 @@ struct lsm_id {
  * @lsm: The name of the lsm that owns this hook.
  */
 struct security_hook_list {
-	struct hlist_node list;
-	struct hlist_head *head;
+	struct lsm_static_call *scalls;
 	union security_list_options hook;
 	const struct lsm_id *lsmid;
 } __randomize_layout;
@@ -116,6 +115,7 @@ struct lsm_blob_sizes {
 	int lbs_task;
 	int lbs_xattr_count; /* number of xattr slots in new_xattrs array */
 	int lbs_tun_dev;
+	int lbs_bdev;
 };
 
 /*
@@ -169,7 +169,6 @@ struct lsm_info {
 
 /* DO NOT tamper with these variables outside of the LSM framework */
 extern char *lsm_names;
-extern struct security_hook_heads security_hook_heads;
 extern struct lsm_static_calls_table static_calls_table __ro_after_init;
 extern struct lsm_info __start_lsm_info[], __end_lsm_info[];
 extern struct lsm_info __start_early_lsm_info[], __end_early_lsm_info[];

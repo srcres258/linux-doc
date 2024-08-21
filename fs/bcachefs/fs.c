@@ -193,13 +193,19 @@ repeat:
 	inode = rhashtable_lookup_fast(&c->vfs_inodes_table, &inum, bch2_vfs_inodes_params);
 	if (inode) {
 		spin_lock(&inode->v.i_lock);
+		if (!test_bit(EI_INODE_HASHED, &inode->ei_flags)) {
+			spin_unlock(&inode->v.i_lock);
+			return NULL;
+		}
 		if ((inode->v.i_state & (I_FREEING|I_WILL_FREE))) {
-			if (trans)
+			if (!trans) {
+				__wait_on_freeing_inode(&inode->v);
+			} else {
 				bch2_trans_unlock(trans);
-			__wait_on_freeing_inode(&inode->v);
-			if (trans) {
-				trace_and_count(c, trans_restart_freeing_inode, trans, _THIS_IP_);
-				return ERR_PTR(btree_trans_restart(trans, BCH_ERR_transaction_restart_freeing_inode));
+				__wait_on_freeing_inode(&inode->v);
+				int ret = bch2_trans_relock(trans);
+				if (ret)
+					return ERR_PTR(ret);
 			}
 			goto repeat;
 		}
@@ -212,11 +218,14 @@ repeat:
 
 static void bch2_inode_hash_remove(struct bch_fs *c, struct bch_inode_info *inode)
 {
-	if (test_bit(EI_INODE_HASHED, &inode->ei_flags)) {
+	spin_lock(&inode->v.i_lock);
+	bool remove = test_and_clear_bit(EI_INODE_HASHED, &inode->ei_flags);
+	spin_unlock(&inode->v.i_lock);
+
+	if (remove) {
 		int ret = rhashtable_remove_fast(&c->vfs_inodes_table,
 					&inode->hash, bch2_vfs_inodes_params);
 		BUG_ON(ret);
-		clear_bit(EI_INODE_HASHED, &inode->ei_flags);
 		inode->v.i_hash.pprev = NULL;
 	}
 }
@@ -226,6 +235,8 @@ static struct bch_inode_info *bch2_inode_hash_insert(struct bch_fs *c,
 						     struct bch_inode_info *inode)
 {
 	struct bch_inode_info *old = inode;
+
+	set_bit(EI_INODE_HASHED, &inode->ei_flags);
 retry:
 	if (unlikely(rhashtable_lookup_insert_fast(&c->vfs_inodes_table,
 					&inode->hash,
@@ -233,8 +244,8 @@ retry:
 		old = bch2_inode_hash_find(c, trans, inode->ei_inum);
 		if (!old)
 			goto retry;
-		if (IS_ERR(old))
-			return old;
+
+		clear_bit(EI_INODE_HASHED, &inode->ei_flags);
 
 		/*
 		 * bcachefs doesn't use I_NEW; we have no use for it since we
@@ -249,9 +260,8 @@ retry:
 		 */
 		set_nlink(&inode->v, 1);
 		discard_new_inode(&inode->v);
-		inode = old;
+		return old;
 	} else {
-		set_bit(EI_INODE_HASHED, &inode->ei_flags);
 		inode_fake_hash(&inode->v);
 
 		inode_sb_list_add(&inode->v);
@@ -259,9 +269,8 @@ retry:
 		mutex_lock(&c->vfs_inodes_lock);
 		list_add(&inode->ei_vfs_inode_list, &c->vfs_inodes_list);
 		mutex_unlock(&c->vfs_inodes_lock);
+		return inode;
 	}
-
-	return inode;
 }
 
 #define memalloc_flags_do(_flags, _do)						\
@@ -333,14 +342,7 @@ static struct bch_inode_info *bch2_inode_hash_init_insert(struct btree_trans *tr
 
 	bch2_vfs_inode_init(trans, inum, inode, bi, subvol);
 
-	struct bch_inode_info *ret = bch2_inode_hash_insert(trans->c, trans, inode);
-	if (IS_ERR(ret)) {
-		inode->v.i_state |= I_NEW;
-		set_nlink(&inode->v, 1);
-		discard_new_inode(&inode->v);
-	}
-
-	return ret;
+	return bch2_inode_hash_insert(trans->c, trans, inode);
 
 }
 
@@ -1656,6 +1658,10 @@ static void bch2_evict_inode(struct inode *vinode)
 	struct bch_fs *c = vinode->i_sb->s_fs_info;
 	struct bch_inode_info *inode = to_bch_ei(vinode);
 
+	/*
+	 * evict() has waited for outstanding writeback, we'll do no more IO
+	 * through this inode: it's safe to remove from VFS inode hashtable here
+	 */
 	bch2_inode_hash_remove(c, inode);
 
 	truncate_inode_pages_final(&inode->v.i_data);

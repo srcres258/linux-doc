@@ -29,6 +29,7 @@
 #include <linux/msg.h>
 #include <linux/overflow.h>
 #include <linux/perf_event.h>
+#include <linux/fs.h>
 #include <net/flow.h>
 #include <net/sock.h>
 
@@ -53,7 +54,27 @@
 	(IS_ENABLED(CONFIG_BPF_LSM) ? 1 : 0) + \
 	(IS_ENABLED(CONFIG_SECURITY_LANDLOCK) ? 1 : 0) + \
 	(IS_ENABLED(CONFIG_IMA) ? 1 : 0) + \
-	(IS_ENABLED(CONFIG_EVM) ? 1 : 0))
+	(IS_ENABLED(CONFIG_EVM) ? 1 : 0) + \
+	(IS_ENABLED(CONFIG_SECURITY_IPE) ? 1 : 0))
+
+#define SECURITY_HOOK_ACTIVE_KEY(HOOK, IDX) security_hook_active_##HOOK##_##IDX
+
+/*
+ * Identifier for the LSM static calls.
+ * HOOK is an LSM hook as defined in linux/lsm_hookdefs.h
+ * IDX is the index of the static call. 0 <= NUM < MAX_LSM_COUNT
+ */
+#define LSM_STATIC_CALL(HOOK, IDX) lsm_static_call_##HOOK##_##IDX
+
+/*
+ * Call the macro M for each LSM hook MAX_LSM_COUNT times.
+ */
+#define LSM_LOOP_UNROLL(M, ...) 		\
+do {						\
+	UNROLL(MAX_LSM_COUNT, M, __VA_ARGS__)	\
+} while (0)
+
+#define LSM_DEFINE_UNROLL(M, ...) UNROLL(MAX_LSM_COUNT, M, __VA_ARGS__)
 
 #define SECURITY_HOOK_ACTIVE_KEY(HOOK, IDX) security_hook_active_##HOOK##_##IDX
 
@@ -157,8 +178,14 @@ static __initdata struct lsm_info *exclusive;
  * DEFINE_STATIC_CALL_NULL invocation above generates a key (STATIC_CALL_KEY)
  * and a trampoline (STATIC_CALL_TRAMP) which are used to call
  * __static_call_update when updating the static call.
+ *
+ * The static calls table is used by early LSMs, some architectures can fault on
+ * unaligned accesses and the fault handling code may not be ready by then.
+ * Thus, the static calls table should be aligned to avoid any unhandled faults
+ * in early init.
  */
-struct lsm_static_calls_table static_calls_table __ro_after_init = {
+struct lsm_static_calls_table
+	static_calls_table __ro_after_init __aligned(sizeof(u64)) = {
 #define INIT_LSM_STATIC_CALL(NUM, NAME)					\
 	(struct lsm_static_call) {					\
 		.key = &STATIC_CALL_KEY(LSM_STATIC_CALL(NAME, NUM)),	\
@@ -172,7 +199,7 @@ struct lsm_static_calls_table static_calls_table __ro_after_init = {
 #include <linux/lsm_hook_defs.h>
 #undef LSM_HOOK
 #undef INIT_LSM_STATIC_CALL
-};
+	};
 
 static __initdata bool debug;
 #define init_debug(...)						\
@@ -299,6 +326,7 @@ static void __init lsm_set_blob_sizes(struct lsm_blob_sizes *needed)
 	lsm_set_blob_size(&needed->lbs_tun_dev, &blob_sizes.lbs_tun_dev);
 	lsm_set_blob_size(&needed->lbs_xattr_count,
 			  &blob_sizes.lbs_xattr_count);
+	lsm_set_blob_size(&needed->lbs_bdev, &blob_sizes.lbs_bdev);
 }
 
 /* Prepare LSM for initialization. */
@@ -498,6 +526,7 @@ static void __init ordered_lsm_init(void)
 	init_debug("task blob size       = %d\n", blob_sizes.lbs_task);
 	init_debug("tun device blob size = %d\n", blob_sizes.lbs_tun_dev);
 	init_debug("xattr slots          = %d\n", blob_sizes.lbs_xattr_count);
+	init_debug("bdev blob size       = %d\n", blob_sizes.lbs_bdev);
 
 	/*
 	 * Create any kmem_caches needed for blobs
@@ -830,6 +859,28 @@ static int lsm_msg_msg_alloc(struct msg_msg *mp)
 {
 	return lsm_blob_alloc(&mp->security, blob_sizes.lbs_msg_msg,
 			      GFP_KERNEL);
+}
+
+/**
+ * lsm_bdev_alloc - allocate a composite block_device blob
+ * @bdev: the block_device that needs a blob
+ *
+ * Allocate the block_device blob for all the modules
+ *
+ * Returns 0, or -ENOMEM if memory can't be allocated.
+ */
+static int lsm_bdev_alloc(struct block_device *bdev)
+{
+	if (blob_sizes.lbs_bdev == 0) {
+		bdev->bd_security = NULL;
+		return 0;
+	}
+
+	bdev->bd_security = kzalloc(blob_sizes.lbs_bdev, GFP_KERNEL);
+	if (!bdev->bd_security)
+		return -ENOMEM;
+
+	return 0;
 }
 
 /**
@@ -1223,8 +1274,8 @@ int security_vm_enough_memory_mm(struct mm_struct *mm, long pages)
 	 * agree that it should be set it will. If any module thinks it should
 	 * not be set it won't.
 	 */
-	hlist_for_each_entry(hp, &security_hook_heads.vm_enough_memory, list) {
-		rc = hp->hook.vm_enough_memory(mm, pages);
+	lsm_for_each_hook(scall, vm_enough_memory) {
+		rc = scall->hl->hook.vm_enough_memory(mm, pages);
 		if (rc < 0) {
 			cap_sys_admin = 0;
 			break;
@@ -2775,6 +2826,26 @@ int security_inode_copy_up_xattr(struct dentry *src, const char *name)
 	return LSM_RET_DEFAULT(inode_copy_up_xattr);
 }
 EXPORT_SYMBOL(security_inode_copy_up_xattr);
+
+/**
+ * security_inode_setintegrity() - Set the inode's integrity data
+ * @inode: inode
+ * @type: type of integrity, e.g. hash digest, signature, etc
+ * @value: the integrity value
+ * @size: size of the integrity value
+ *
+ * Register a verified integrity measurement of a inode with LSMs.
+ * LSMs should free the previously saved data if @value is NULL.
+ *
+ * Return: Returns 0 on success, negative values on failure.
+ */
+int security_inode_setintegrity(const struct inode *inode,
+				enum lsm_integrity_type type, const void *value,
+				size_t size)
+{
+	return call_int_hook(inode_setintegrity, inode, type, value, size);
+}
+EXPORT_SYMBOL(security_inode_setintegrity);
 
 /**
  * security_kernfs_init_security() - Init LSM context for a kernfs node
@@ -5742,6 +5813,85 @@ int security_locked_down(enum lockdown_reason what)
 }
 EXPORT_SYMBOL(security_locked_down);
 
+/**
+ * security_bdev_alloc() - Allocate a block device LSM blob
+ * @bdev: block device
+ *
+ * Allocate and attach a security structure to @bdev->bd_security.  The
+ * security field is initialized to NULL when the bdev structure is
+ * allocated.
+ *
+ * Return: Return 0 if operation was successful.
+ */
+int security_bdev_alloc(struct block_device *bdev)
+{
+	int rc = 0;
+
+	rc = lsm_bdev_alloc(bdev);
+	if (unlikely(rc))
+		return rc;
+
+	rc = call_int_hook(bdev_alloc_security, bdev);
+	if (unlikely(rc))
+		security_bdev_free(bdev);
+
+	return rc;
+}
+EXPORT_SYMBOL(security_bdev_alloc);
+
+/**
+ * security_bdev_free() - Free a block device's LSM blob
+ * @bdev: block device
+ *
+ * Deallocate the bdev security structure and set @bdev->bd_security to NULL.
+ */
+void security_bdev_free(struct block_device *bdev)
+{
+	if (!bdev->bd_security)
+		return;
+
+	call_void_hook(bdev_free_security, bdev);
+
+	kfree(bdev->bd_security);
+	bdev->bd_security = NULL;
+}
+EXPORT_SYMBOL(security_bdev_free);
+
+/**
+ * security_bdev_setintegrity() - Set the device's integrity data
+ * @bdev: block device
+ * @type: type of integrity, e.g. hash digest, signature, etc
+ * @value: the integrity value
+ * @size: size of the integrity value
+ *
+ * Register a verified integrity measurement of a bdev with LSMs.
+ * LSMs should free the previously saved data if @value is NULL.
+ * Please note that the new hook should be invoked every time the security
+ * information is updated to keep these data current. For example, in dm-verity,
+ * if the mapping table is reloaded and configured to use a different dm-verity
+ * target with a new roothash and signing information, the previously stored
+ * data in the LSM blob will become obsolete. It is crucial to re-invoke the
+ * hook to refresh these data and ensure they are up to date. This necessity
+ * arises from the design of device-mapper, where a device-mapper device is
+ * first created, and then targets are subsequently loaded into it. These
+ * targets can be modified multiple times during the device's lifetime.
+ * Therefore, while the LSM blob is allocated during the creation of the block
+ * device, its actual contents are not initialized at this stage and can change
+ * substantially over time. This includes alterations from data that the LSMs
+ * 'trusts' to those they do not, making it essential to handle these changes
+ * correctly. Failure to address this dynamic aspect could potentially allow
+ * for bypassing LSM checks.
+ *
+ * Return: Returns 0 on success, negative values on failure.
+ */
+int security_bdev_setintegrity(struct block_device *bdev,
+			       enum lsm_integrity_type type, const void *value,
+			       size_t size)
+{
+	return call_int_hook(bdev_setintegrity, bdev, type, value, size);
+}
+EXPORT_SYMBOL(security_bdev_setintegrity);
+
 #ifdef CONFIG_PERF_EVENTS
 /**
  * security_perf_event_open() - Check if a perf event open is allowed
@@ -5862,3 +6012,13 @@ int security_uring_cmd(struct io_uring_cmd *ioucmd)
 	return call_int_hook(uring_cmd, ioucmd);
 }
 #endif /* CONFIG_IO_URING */
+
+/**
+ * security_initramfs_populated() - Notify LSMs that initramfs has been loaded
+ *
+ * Tells the LSMs the initramfs has been unpacked into the rootfs.
+ */
+void security_initramfs_populated(void)
+{
+	call_void_hook(initramfs_populated);
+}

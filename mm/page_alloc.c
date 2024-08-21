@@ -1838,27 +1838,6 @@ static unsigned long find_large_buddy(unsigned long start_pfn)
 	return start_pfn;
 }
 
-/* Split a multi-block free page into its individual pageblocks */
-static void split_large_buddy(struct zone *zone, struct page *page,
-			      unsigned long pfn, int order)
-{
-	unsigned long end_pfn = pfn + (1 << order);
-
-	VM_WARN_ON_ONCE(order <= pageblock_order);
-	VM_WARN_ON_ONCE(pfn & (pageblock_nr_pages - 1));
-
-	/* Caller removed page from freelist, buddy info cleared! */
-	VM_WARN_ON_ONCE(PageBuddy(page));
-
-	while (pfn != end_pfn) {
-		int mt = get_pfnblock_migratetype(page, pfn);
-
-		__free_one_page(page, pfn, zone, pageblock_order, mt, FPI_NONE);
-		pfn += pageblock_nr_pages;
-		page = pfn_to_page(pfn);
-	}
-}
-
 /**
  * move_freepages_block_isolate - move free pages in block for page isolation
  * @zone: the zone
@@ -1899,7 +1878,7 @@ bool move_freepages_block_isolate(struct zone *zone, struct page *page,
 		del_page_from_free_list(buddy, zone, order,
 					get_pfnblock_migratetype(buddy, pfn));
 		set_pageblock_migratetype(page, migratetype);
-		split_large_buddy(zone, buddy, pfn, order);
+		split_large_buddy(zone, buddy, pfn, order, FPI_NONE);
 		return true;
 	}
 
@@ -1910,7 +1889,7 @@ bool move_freepages_block_isolate(struct zone *zone, struct page *page,
 		del_page_from_free_list(page, zone, order,
 					get_pfnblock_migratetype(page, pfn));
 		set_pageblock_migratetype(page, migratetype);
-		split_large_buddy(zone, page, pfn, order);
+		split_large_buddy(zone, page, pfn, order, FPI_NONE);
 		return true;
 	}
 move:

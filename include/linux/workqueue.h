@@ -534,7 +534,7 @@ alloc_workqueue_lockdep_map(const char *fmt, unsigned int flags, int max_active,
  * @fmt: printf format for the name of the workqueue
  * @flags: WQ_* flags (only WQ_FREEZABLE and WQ_MEM_RECLAIM are meaningful)
  * @lockdep_map: user-defined lockdep_map
- * @args: args for @fmt
+ * @...: args for @fmt
  *
  * Same as alloc_ordered_workqueue but with the a user-define lockdep_map.
  * Useful for workqueues created with the same purpose and to avoid leaking a
@@ -543,20 +543,8 @@ alloc_workqueue_lockdep_map(const char *fmt, unsigned int flags, int max_active,
  * RETURNS:
  * Pointer to the allocated workqueue on success, %NULL on failure.
  */
-__printf(1, 4) static inline struct workqueue_struct *
-alloc_ordered_workqueue_lockdep_map(const char *fmt, unsigned int flags,
-				    struct lockdep_map *lockdep_map, ...)
-{
-	struct workqueue_struct *wq;
-	va_list args;
-
-	va_start(args, lockdep_map);
-	wq = alloc_workqueue_lockdep_map(fmt, WQ_UNBOUND | __WQ_ORDERED | flags,
-					 1, lockdep_map, args);
-	va_end(args);
-
-	return wq;
-}
+#define alloc_ordered_workqueue_lockdep_map(fmt, flags, lockdep_map, args...)	\
+	alloc_workqueue_lockdep_map(fmt, WQ_UNBOUND | __WQ_ORDERED | (flags), 1, lockdep_map, ##args)
 #endif
 
 /**

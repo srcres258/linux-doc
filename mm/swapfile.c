@@ -855,7 +855,7 @@ new_cluster:
 		goto done;
 
 	/* Order 0 stealing from higher order */
-	for (int o = 1; o < PMD_ORDER; o++) {
+	for (int o = 1; o < SWAP_NR_ORDERS; o++) {
 		/*
 		 * Clusters here have at least one usable slots and can't fail order 0
 		 * allocation, but reclaim may drop si->lock and race with another user.

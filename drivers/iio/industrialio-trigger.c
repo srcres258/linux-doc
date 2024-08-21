@@ -347,6 +347,7 @@ int iio_trigger_detach_poll_func(struct iio_trigger *trig,
 	iio_trigger_put_irq(trig, pf->irq);
 	free_irq(pf->irq, pf);
 	module_put(iio_dev_opaque->driver_module);
+	pf->irq = 0;
 
 	return ret;
 }
