@@ -1388,9 +1388,9 @@ static int qcom_battmgr_probe(struct auxiliary_device *adev,
 	}
 
 	battmgr->client = devm_pmic_glink_client_alloc(dev, PMIC_GLINK_OWNER_BATTMGR,
-						     qcom_battmgr_callback,
-						     qcom_battmgr_pdr_notify,
-						     battmgr);
+						       qcom_battmgr_callback,
+						       qcom_battmgr_pdr_notify,
+						       battmgr);
 	if (IS_ERR(battmgr->client))
 		return PTR_ERR(battmgr->client);
 

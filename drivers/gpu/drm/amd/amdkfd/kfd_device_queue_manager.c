@@ -319,6 +319,46 @@ static int remove_all_queues_mes(struct device_queue_manager *dqm)
 	return retval;
 }
 
+static int suspend_all_queues_mes(struct device_queue_manager *dqm)
+{
+	struct amdgpu_device *adev = (struct amdgpu_device *)dqm->dev->adev;
+	int r = 0;
+
+	if (!down_read_trylock(&adev->reset_domain->sem))
+		return -EIO;
+
+	r = amdgpu_mes_suspend(adev);
+	up_read(&adev->reset_domain->sem);
+
+	if (r) {
+		dev_err(adev->dev, "failed to suspend gangs from MES\n");
+		dev_err(adev->dev, "MES might be in unrecoverable state, issue a GPU reset\n");
+		kfd_hws_hang(dqm);
+	}
+
+	return r;
+}
+
+static int resume_all_queues_mes(struct device_queue_manager *dqm)
+{
+	struct amdgpu_device *adev = (struct amdgpu_device *)dqm->dev->adev;
+	int r = 0;
+
+	if (!down_read_trylock(&adev->reset_domain->sem))
+		return -EIO;
+
+	r = amdgpu_mes_resume(adev);
+	up_read(&adev->reset_domain->sem);
+
+	if (r) {
+		dev_err(adev->dev, "failed to resume gangs from MES\n");
+		dev_err(adev->dev, "MES might be in unrecoverable state, issue a GPU reset\n");
+		kfd_hws_hang(dqm);
+	}
+
+	return r;
+}
+
 static void increment_queue_count(struct device_queue_manager *dqm,
 				  struct qcm_process_device *qpd,
 				  struct queue *q)
@@ -1679,6 +1719,60 @@ static int initialize_cpsch(struct device_queue_manager *dqm)
 	return 0;
 }
 
+/* halt_cpsch:
+ * Unmap queues so the schedule doesn't continue remaining jobs in the queue.
+ * Then set dqm->sched_halt so queues don't map to runlist until unhalt_cpsch
+ * is called.
+ */
+static int halt_cpsch(struct device_queue_manager *dqm)
+{
+	int ret = 0;
+
+	dqm_lock(dqm);
+	if (!dqm->sched_running) {
+		dqm_unlock(dqm);
+		return 0;
+	}
+
+	WARN_ONCE(dqm->sched_halt, "Scheduling is already on halt\n");
+
+	if (!dqm->is_hws_hang) {
+		if (!dqm->dev->kfd->shared_resources.enable_mes)
+			ret = unmap_queues_cpsch(dqm,
+						 KFD_UNMAP_QUEUES_FILTER_ALL_QUEUES, 0,
+				USE_DEFAULT_GRACE_PERIOD, false);
+		else
+			ret = remove_all_queues_mes(dqm);
+	}
+	dqm->sched_halt = true;
+	dqm_unlock(dqm);
+
+	return ret;
+}
+
+/* unhalt_cpsch
+ * Unset dqm->sched_halt and map queues back to runlist
+ */
+static int unhalt_cpsch(struct device_queue_manager *dqm)
+{
+	int ret = 0;
+
+	dqm_lock(dqm);
+	if (!dqm->sched_running || !dqm->sched_halt) {
+		WARN_ONCE(!dqm->sched_halt, "Scheduling is not on halt.\n");
+		dqm_unlock(dqm);
+		return 0;
+	}
+	dqm->sched_halt = false;
+	if (!dqm->dev->kfd->shared_resources.enable_mes)
+		ret = execute_queues_cpsch(dqm,
+					   KFD_UNMAP_QUEUES_FILTER_DYNAMIC_QUEUES,
+			0, USE_DEFAULT_GRACE_PERIOD);
+	dqm_unlock(dqm);
+
+	return ret;
+}
+
 static int start_cpsch(struct device_queue_manager *dqm)
 {
 	struct device *dev = dqm->dev->adev->dev;
@@ -1984,7 +2078,7 @@ static int map_queues_cpsch(struct device_queue_manager *dqm)
 	struct device *dev = dqm->dev->adev->dev;
 	int retval;
 
-	if (!dqm->sched_running)
+	if (!dqm->sched_running || dqm->sched_halt)
 		return 0;
 	if (dqm->active_queue_count <= 0 || dqm->processes_count <= 0)
 		return 0;
@@ -2727,6 +2821,8 @@ struct device_queue_manager *device_queue_manager_init(struct kfd_node *dev)
 		dqm->ops.initialize = initialize_cpsch;
 		dqm->ops.start = start_cpsch;
 		dqm->ops.stop = stop_cpsch;
+		dqm->ops.halt = halt_cpsch;
+		dqm->ops.unhalt = unhalt_cpsch;
 		dqm->ops.destroy_queue = destroy_queue_cpsch;
 		dqm->ops.update_queue = update_queue;
 		dqm->ops.register_process = register_process;
@@ -2835,6 +2931,95 @@ void device_queue_manager_uninit(struct device_queue_manager *dqm)
 	kfree(dqm);
 }
 
+int kfd_dqm_suspend_bad_queue_mes(struct kfd_node *knode, u32 pasid, u32 doorbell_id)
+{
+	struct kfd_process_device *pdd;
+	struct kfd_process *p = kfd_lookup_process_by_pasid(pasid);
+	struct device_queue_manager *dqm = knode->dqm;
+	struct device *dev = dqm->dev->adev->dev;
+	struct qcm_process_device *qpd;
+	struct queue *q = NULL;
+	int ret = 0;
+
+	if (!p)
+		return -EINVAL;
+
+	dqm_lock(dqm);
+
+	pdd = kfd_get_process_device_data(dqm->dev, p);
+	if (pdd) {
+		qpd = &pdd->qpd;
+
+		list_for_each_entry(q, &qpd->queues_list, list) {
+			if (q->doorbell_id == doorbell_id && q->properties.is_active) {
+				ret = suspend_all_queues_mes(dqm);
+				if (ret) {
+					dev_err(dev, "Suspending all queues failed");
+					goto out;
+				}
+
+				q->properties.is_evicted = true;
+				q->properties.is_active = false;
+				decrement_queue_count(dqm, qpd, q);
+
+				ret = remove_queue_mes(dqm, q, qpd);
+				if (ret) {
+					dev_err(dev, "Removing bad queue failed");
+					goto out;
+				}
+
+				ret = resume_all_queues_mes(dqm);
+				if (ret)
+					dev_err(dev, "Resuming all queues failed");
+
+				break;
+			}
+		}
+	}
+
+out:
+	dqm_unlock(dqm);
+	return ret;
+}
+
+static int kfd_dqm_evict_pasid_mes(struct device_queue_manager *dqm,
+				   struct qcm_process_device *qpd)
+{
+	struct device *dev = dqm->dev->adev->dev;
+	int ret = 0;
+
+	/* Check if process is already evicted */
+	dqm_lock(dqm);
+	if (qpd->evicted) {
+		/* Increment the evicted count to make sure the
+		 * process stays evicted before its terminated.
+		 */
+		qpd->evicted++;
+		dqm_unlock(dqm);
+		goto out;
+	}
+	dqm_unlock(dqm);
+
+	ret = suspend_all_queues_mes(dqm);
+	if (ret) {
+		dev_err(dev, "Suspending all queues failed");
+		goto out;
+	}
+
+	ret = dqm->ops.evict_process_queues(dqm, qpd);
+	if (ret) {
+		dev_err(dev, "Evicting process queues failed");
+		goto out;
+	}
+
+	ret = resume_all_queues_mes(dqm);
+	if (ret)
+		dev_err(dev, "Resuming all queues failed");
+
+out:
+	return ret;
+}
+
 int kfd_dqm_evict_pasid(struct device_queue_manager *dqm, u32 pasid)
 {
 	struct kfd_process_device *pdd;
@@ -2845,8 +3030,13 @@ int kfd_dqm_evict_pasid(struct device_queue_manager *dqm, u32 pasid)
 		return -EINVAL;
 	WARN(debug_evictions, "Evicting pid %d", p->lead_thread->pid);
 	pdd = kfd_get_process_device_data(dqm->dev, p);
-	if (pdd)
-		ret = dqm->ops.evict_process_queues(dqm, &pdd->qpd);
+	if (pdd) {
+		if (dqm->dev->kfd->shared_resources.enable_mes)
+			ret = kfd_dqm_evict_pasid_mes(dqm, &pdd->qpd);
+		else
+			ret = dqm->ops.evict_process_queues(dqm, &pdd->qpd);
+	}
+
 	kfd_unref_process(p);
 
 	return ret;

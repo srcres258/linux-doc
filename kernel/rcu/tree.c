@@ -3929,6 +3929,12 @@ void kvfree_rcu_barrier(void)
 	for_each_possible_cpu(cpu) {
 		krcp = per_cpu_ptr(&krc, cpu);
 
+		/*
+		 * A monitor work can drain ready to reclaim objects
+		 * directly. Wait its completion if running or pending.
+		 */
+		cancel_delayed_work_sync(&krcp->monitor_work);
+
 		for (i = 0; i < KFREE_N_BATCHES; i++) {
 			krwp = &(krcp->krw_arr[i]);
 			flush_rcu_work(&krwp->rcu_work);

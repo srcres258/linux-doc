@@ -46,8 +46,6 @@ int main(void)
 	if (shmid < 0)
 		ksft_exit_fail_msg("shmget: %s\n", strerror(errno));
 
-	ksft_print_msg("shmid: 0x%x\n", shmid);
-
 	shmaddr = shmat(shmid, NULL, 0);
 	if (shmaddr == (char *)-1) {
 		shmctl(shmid, IPC_RMID, NULL);

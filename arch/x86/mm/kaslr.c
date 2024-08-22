@@ -141,11 +141,18 @@ void __init kernel_randomize_memory(void)
 		vaddr += entropy;
 		*kaslr_regions[i].base = vaddr;
 
-		/*
-		 * Jump the region and add a minimum padding based on
-		 * randomization alignment.
-		 */
+		/* Calculate the end of the region */
 		vaddr += get_padding(&kaslr_regions[i]);
+		/*
+		 * KASLR trims the maximum possible size of the
+		 * direct-map. Update the physmem_end boundary.
+		 * No rounding required as the region starts
+		 * PUD aligned and size is in units of TB.
+		 */
+		if (kaslr_regions[i].end)
+			*kaslr_regions[i].end = __pa_nodebug(vaddr - 1);
+
+		/* Add a minimum padding based on randomization alignment. */
 		vaddr = round_up(vaddr + 1, PUD_SIZE);
 
 		/*

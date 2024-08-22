@@ -385,9 +385,9 @@ static int pmic_glink_ucsi_probe(struct auxiliary_device *adev,
 	}
 
 	ucsi->client = devm_pmic_glink_client_alloc(dev, PMIC_GLINK_OWNER_USBC,
-						  pmic_glink_ucsi_callback,
-						  pmic_glink_ucsi_pdr_notify,
-						  ucsi);
+						    pmic_glink_ucsi_callback,
+						    pmic_glink_ucsi_pdr_notify,
+						    ucsi);
 	if (IS_ERR(ucsi->client))
 		return PTR_ERR(ucsi->client);
 

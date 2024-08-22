@@ -55,7 +55,7 @@ struct aux_payload;
 struct set_config_cmd_payload;
 struct dmub_notification;
 
-#define DC_VER "3.2.296"
+#define DC_VER "3.2.297"
 
 #define MAX_SURFACES 3
 #define MAX_PLANES 6
@@ -1760,6 +1760,7 @@ struct dc_link {
 		bool dongle_mode_timing_override;
 		bool blank_stream_on_ocs_change;
 		bool read_dpcd204h_on_irq_hpd;
+		bool disable_assr_for_uhbr;
 	} wa_flags;
 	struct link_mst_stream_allocation_table mst_stream_alloc_table;
 

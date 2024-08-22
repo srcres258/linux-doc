@@ -349,7 +349,7 @@ struct console {
 	/**
 	 * @write_atomic:
 	 *
-	 * NBCON callback to write out text in any context.
+	 * NBCON callback to write out text in any context. (Optional)
 	 *
 	 * This callback is called with the console already acquired. However,
 	 * a higher priority context is allowed to take it over by default.
@@ -555,14 +555,12 @@ static inline bool console_is_registered(const struct console *con)
 #ifdef CONFIG_PRINTK
 extern void nbcon_cpu_emergency_enter(void);
 extern void nbcon_cpu_emergency_exit(void);
-extern void nbcon_cpu_emergency_flush(void);
 extern bool nbcon_can_proceed(struct nbcon_write_context *wctxt);
 extern bool nbcon_enter_unsafe(struct nbcon_write_context *wctxt);
 extern bool nbcon_exit_unsafe(struct nbcon_write_context *wctxt);
 #else
 static inline void nbcon_cpu_emergency_enter(void) { }
 static inline void nbcon_cpu_emergency_exit(void) { }
-static inline void nbcon_cpu_emergency_flush(void) { }
 static inline bool nbcon_can_proceed(struct nbcon_write_context *wctxt) { return false; }
 static inline bool nbcon_enter_unsafe(struct nbcon_write_context *wctxt) { return false; }
 static inline bool nbcon_exit_unsafe(struct nbcon_write_context *wctxt) { return false; }

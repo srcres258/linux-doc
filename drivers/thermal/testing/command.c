@@ -202,7 +202,7 @@ static const struct file_operations tt_command_fops = {
 static int __init thermal_testing_init(void)
 {
 	d_testing = debugfs_create_dir("thermal-testing", NULL);
-	if (d_testing)
+	if (!IS_ERR(d_testing))
 		debugfs_create_file("command", 0200, d_testing, NULL,
 				    &tt_command_fops);
 

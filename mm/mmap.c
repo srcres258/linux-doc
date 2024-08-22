@@ -1757,16 +1757,7 @@ int do_vma_munmap(struct vma_iterator *vmi, struct vm_area_struct *vma,
 		unsigned long start, unsigned long end, struct list_head *uf,
 		bool unlock)
 {
-	struct mm_struct *mm = vma->vm_mm;
-
-	/*
-	 * Check if memory is sealed, prevent unmapping a sealed VMA.
-	 * can_modify_mm assumes we have acquired the lock on MM.
-	 */
-	if (unlikely(!can_modify_mm(mm, start, end)))
-		return -EPERM;
-
-	return do_vmi_align_munmap(vmi, vma, mm, start, end, uf, unlock);
+	return do_vmi_align_munmap(vmi, vma, vma->vm_mm, start, end, uf, unlock);
 }
 
 /*
@@ -2123,27 +2114,17 @@ static const struct vm_operations_struct special_mapping_vmops = {
 	.may_split = special_mapping_split,
 };
 
-static const struct vm_operations_struct legacy_special_mapping_vmops = {
-	.close = special_mapping_close,
-	.fault = special_mapping_fault,
-};
-
 static vm_fault_t special_mapping_fault(struct vm_fault *vmf)
 {
 	struct vm_area_struct *vma = vmf->vma;
 	pgoff_t pgoff;
 	struct page **pages;
+	struct vm_special_mapping *sm = vma->vm_private_data;
 
-	if (vma->vm_ops == &legacy_special_mapping_vmops) {
-		pages = vma->vm_private_data;
-	} else {
-		struct vm_special_mapping *sm = vma->vm_private_data;
+	if (sm->fault)
+		return sm->fault(sm, vmf->vma, vmf);
 
-		if (sm->fault)
-			return sm->fault(sm, vmf->vma, vmf);
-
-		pages = sm->pages;
-	}
+	pages = sm->pages;
 
 	for (pgoff = vmf->pgoff; pgoff && *pages; ++pages)
 		pgoff--;
@@ -2198,8 +2179,7 @@ bool vma_is_special_mapping(const struct vm_area_struct *vma,
 	const struct vm_special_mapping *sm)
 {
 	return vma->vm_private_data == sm &&
-		(vma->vm_ops == &special_mapping_vmops ||
-		 vma->vm_ops == &legacy_special_mapping_vmops);
+		vma->vm_ops == &special_mapping_vmops;
 }
 
 /*
@@ -2218,17 +2198,6 @@ struct vm_area_struct *_install_special_mapping(
 {
 	return __install_special_mapping(mm, addr, len, vm_flags, (void *)spec,
 					&special_mapping_vmops);
-}
-
-int install_special_mapping(struct mm_struct *mm,
-			    unsigned long addr, unsigned long len,
-			    unsigned long vm_flags, struct page **pages)
-{
-	struct vm_area_struct *vma = __install_special_mapping(
-		mm, addr, len, vm_flags, (void *)pages,
-		&legacy_special_mapping_vmops);
-
-	return PTR_ERR_OR_ZERO(vma);
 }
 
 /*

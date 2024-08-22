@@ -241,6 +241,13 @@ static int nbcon_context_try_acquire_direct(struct nbcon_context *ctxt,
 	struct nbcon_state new;
 
 	do {
+		/*
+		 * Panic does not imply that the console is owned. However, it
+		 * is critical that non-panic CPUs during panic are unable to
+		 * acquire ownership in order to satisfy the assumptions of
+		 * nbcon_waiter_matches(). In particular, the assumption that
+		 * lower priorities are ignored during panic.
+		 */
 		if (other_cpu_in_panic())
 			return -EPERM;
 
@@ -272,18 +279,29 @@ static bool nbcon_waiter_matches(struct nbcon_state *cur, int expected_prio)
 	/*
 	 * The request context is well defined by the @req_prio because:
 	 *
-	 * - Only a context with a higher priority can take over the request.
+	 * - Only a context with a priority higher than the owner can become
+	 *   a waiter.
+	 * - Only a context with a priority higher than the waiter can
+	 *   directly take over the request.
 	 * - There are only three priorities.
 	 * - Only one CPU is allowed to request PANIC priority.
 	 * - Lower priorities are ignored during panic() until reboot.
 	 *
 	 * As a result, the following scenario is *not* possible:
 	 *
-	 * 1. Another context with a higher priority directly takes ownership.
-	 * 2. The higher priority context releases the ownership.
-	 * 3. A lower priority context takes the ownership.
-	 * 4. Another context with the same priority as this context
+	 * 1. This context is currently a waiter.
+	 * 2. Another context with a higher priority than this context
+	 *    directly takes ownership.
+	 * 3. The higher priority context releases the ownership.
+	 * 4. Another lower priority context takes the ownership.
+	 * 5. Another context with the same priority as this context
 	 *    creates a request and starts waiting.
+	 *
+	 * Event #1 implies this context is EMERGENCY.
+	 * Event #2 implies the new context is PANIC.
+	 * Event #3 occurs when panic() has flushed the console.
+	 * Events #4 and #5 are not possible due to the other_cpu_in_panic()
+	 * check in nbcon_context_try_acquire_direct().
 	 */
 
 	return (cur->req_prio == expected_prio);
@@ -591,11 +609,29 @@ static bool nbcon_owner_matches(struct nbcon_state *cur, int expected_cpu,
 				int expected_prio)
 {
 	/*
-	 * Since consoles can only be acquired by higher priorities,
-	 * owning contexts are uniquely identified by @prio. However,
-	 * since contexts can unexpectedly lose ownership, it is
-	 * possible that later another owner appears with the same
-	 * priority. For this reason @cpu is also needed.
+	 * A similar function, nbcon_waiter_matches(), only deals with
+	 * EMERGENCY and PANIC priorities. However, this function must also
+	 * deal with the NORMAL priority, which requires additional checks
+	 * and constraints.
+	 *
+	 * For the case where preemption and interrupts are disabled, it is
+	 * enough to also verify that the owning CPU has not changed.
+	 *
+	 * For the case where preemption or interrupts are enabled, an
+	 * external synchronization method *must* be used. In particular,
+	 * the driver-specific locking mechanism used in device_lock()
+	 * (including disabling migration) should be used. It prevents
+	 * scenarios such as:
+	 *
+	 * 1. [Task A] owns a context with NBCON_PRIO_NORMAL on [CPU X] and
+	 *    is scheduled out.
+	 * 2. Another context takes over the lock with NBCON_PRIO_EMERGENCY
+	 *    and releases it.
+	 * 3. [Task B] acquires a context with NBCON_PRIO_NORMAL on [CPU X]
+	 *    and is scheduled out.
+	 * 4. [Task A] gets running on [CPU X] and sees that the console is
+	 *    still owned by a task on [CPU X] with NBON_PRIO_NORMAL. Thus
+	 *    [Task A] thinks it is the owner when it is not.
 	 */
 
 	if (cur->prio != expected_prio)
@@ -948,9 +984,9 @@ static unsigned int early_nbcon_pcpu_emergency_nesting __initdata;
  * Return:	Either a pointer to the per CPU emergency nesting counter of
  *		the current CPU or to the init data during early boot.
  *
- * Allowing migration enabled for reading relies on preemption being disabled
- * while the current CPU is in the emergency state. See also
- * nbcon_cpu_emergency_enter().
+ * The function is safe for reading per-CPU variables in any context because
+ * preemption is disabled if the current CPU is in the emergency state. See
+ * also nbcon_cpu_emergency_enter().
  */
 static __ref unsigned int *nbcon_get_cpu_emergency_nesting(void)
 {
@@ -970,9 +1006,13 @@ static __ref unsigned int *nbcon_get_cpu_emergency_nesting(void)
  * nbcon_get_default_prio - The appropriate nbcon priority to use for nbcon
  *				printing on the current CPU
  *
- * Context:	Any context which could not be migrated to another CPU.
+ * Context:	Any context.
  * Return:	The nbcon_prio to use for acquiring an nbcon console in this
  *		context for printing.
+ *
+ * The function is safe for reading per-CPU data in any context because
+ * preemption is disabled if the current CPU is in the emergency or panic
+ * state.
  */
 enum nbcon_prio nbcon_get_default_prio(void)
 {
@@ -1222,8 +1262,9 @@ static void __nbcon_atomic_flush_pending(u64 stop_seq, bool allow_unsafe_takeove
  *				write_atomic() callback
  *
  * Flush the backlog up through the currently newest record. Any new
- * records added while flushing will not be flushed. This is to avoid
- * one CPU printing unbounded because other CPUs continue to add records.
+ * records added while flushing will not be flushed if there is another
+ * context available to handle the flushing. This is to avoid one CPU
+ * printing unbounded because other CPUs continue to add records.
  */
 void nbcon_atomic_flush_pending(void)
 {
@@ -1244,16 +1285,12 @@ void nbcon_atomic_flush_unsafe(void)
 
 /**
  * nbcon_cpu_emergency_enter - Enter an emergency section where printk()
- *				messages for that CPU are only stored
- *
- * Upon exiting the emergency section, all stored messages are flushed.
+ *				messages for that CPU are flushed directly
  *
  * Context:	Any context. Disables preemption.
  *
- * When within an emergency section, no printing occurs on that CPU. This
- * is to allow all emergency messages to be dumped into the ringbuffer before
- * flushing the ringbuffer. The actual printing occurs when exiting the
- * outermost emergency section.
+ * When within an emergency section, printk() calls will attempt to flush any
+ * pending messages in the ringbuffer.
  */
 void nbcon_cpu_emergency_enter(void)
 {
@@ -1266,102 +1303,39 @@ void nbcon_cpu_emergency_enter(void)
 }
 
 /**
- * nbcon_cpu_emergency_exit - Exit an emergency section and flush the
- *				stored messages
+ * nbcon_cpu_emergency_exit - Exit an emergency section
  *
- * Flushing only occurs when exiting all nesting for the CPU.
- *
- * Context:	Any context. Enables preemption.
+ * Context:	Within an emergency section. Enables preemption.
  */
 void nbcon_cpu_emergency_exit(void)
 {
 	unsigned int *cpu_emergency_nesting;
-	bool do_trigger_flush = false;
 
 	cpu_emergency_nesting = nbcon_get_cpu_emergency_nesting();
-
-	/*
-	 * Flush the messages before enabling preemtion to see them ASAP.
-	 *
-	 * Reduce the risk of potential softlockup by using the
-	 * flush_pending() variant which ignores messages added later. It is
-	 * called before decrementing the counter so that the printing context
-	 * for the emergency messages is NBCON_PRIO_EMERGENCY.
-	 */
-	if (*cpu_emergency_nesting == 1) {
-		nbcon_atomic_flush_pending();
-
-		/*
-		 * Safely attempt to flush the legacy consoles in this
-		 * context. Otherwise an irq_work context is triggered
-		 * to handle it.
-		 */
-		do_trigger_flush = true;
-		if (printing_via_unlock && !is_printk_deferred()) {
-			if (console_trylock()) {
-				do_trigger_flush = false;
-				console_unlock();
-			}
-		}
-	}
 
 	if (!WARN_ON_ONCE(*cpu_emergency_nesting == 0))
 		(*cpu_emergency_nesting)--;
 
 	preempt_enable();
-
-	if (do_trigger_flush)
-		printk_trigger_flush();
 }
 
 /**
- * nbcon_cpu_emergency_flush - Explicitly flush consoles while
- *				within emergency context
+ * nbcon_alloc - Allocate and init the nbcon console specific data
+ * @con:	Console to initialize
  *
- * Both nbcon and legacy consoles are flushed.
+ * Return:	True if the console was fully allocated and initialized.
+ *		Otherwise @con must not be registered.
  *
- * It should be used only when there are too many messages printed
- * in emergency context, for example, printing backtraces of all
- * CPUs or processes. It is typically needed when the watchdogs
- * need to be touched as well.
- */
-void nbcon_cpu_emergency_flush(void)
-{
-	bool is_emergency;
-
-	/*
-	 * If this context is not an emergency context, preemption might be
-	 * enabled. To be sure, disable preemption when checking if this is
-	 * an emergency context.
-	 */
-	preempt_disable();
-	is_emergency = (*nbcon_get_cpu_emergency_nesting() != 0);
-	preempt_enable();
-
-	/* The explicit flush is needed only in the emergency context. */
-	if (!is_emergency)
-		return;
-
-	nbcon_atomic_flush_pending();
-
-	if (printing_via_unlock && !is_printk_deferred()) {
-		if (console_trylock())
-			console_unlock();
-	}
-}
-
-/**
- * nbcon_alloc - Allocate buffers needed by the nbcon console
- * @con:	Console to allocate buffers for
- *
- * Return:	True on success. False otherwise and the console cannot
- *		be used.
- *
- * This is not part of nbcon_init() because buffer allocation must
- * be performed earlier in the console registration process.
+ * When allocation and init was successful, the console must be properly
+ * freed using nbcon_free() once it is no longer needed.
  */
 bool nbcon_alloc(struct console *con)
 {
+	struct nbcon_state state = { };
+
+	nbcon_state_set(con, &state);
+	atomic_long_set(&ACCESS_PRIVATE(con, nbcon_seq), 0);
+
 	if (con->flags & CON_BOOT) {
 		/*
 		 * Boot console printing is synchronized with legacy console
@@ -1378,25 +1352,6 @@ bool nbcon_alloc(struct console *con)
 	}
 
 	return true;
-}
-
-/**
- * nbcon_init - Initialize the nbcon console specific data
- * @con:	Console to initialize
- * @init_seq:	Sequence number of the first record to be emitted
- *
- * nbcon_alloc() *must* be called and succeed before this function
- * is called.
- */
-void nbcon_init(struct console *con, u64 init_seq)
-{
-	struct nbcon_state state = { };
-
-	/* nbcon_alloc() must have been called and successful! */
-	BUG_ON(!con->pbufs);
-
-	nbcon_seq_force(con, init_seq);
-	nbcon_state_set(con, &state);
 }
 
 /**
@@ -1462,6 +1417,7 @@ EXPORT_SYMBOL_GPL(nbcon_device_try_acquire);
 void nbcon_device_release(struct console *con)
 {
 	struct nbcon_context *ctxt = &ACCESS_PRIVATE(con, nbcon_device_ctxt);
+	struct console_flush_type ft;
 	int cookie;
 
 	if (!nbcon_context_exit_unsafe(ctxt))
@@ -1477,7 +1433,19 @@ void nbcon_device_release(struct console *con)
 	cookie = console_srcu_read_lock();
 	if (console_is_usable(con, console_srcu_read_flags(con)) &&
 	    prb_read_valid(prb, nbcon_seq_read(con), NULL)) {
-		__nbcon_atomic_flush_pending_con(con, prb_next_reserve_seq(prb), false);
+		/*
+		 * If nbcon_atomic flushing is not available, fallback to
+		 * using the legacy loop.
+		 */
+		printk_get_console_flush_type(&ft);
+		if (ft.nbcon_atomic) {
+			__nbcon_atomic_flush_pending_con(con, prb_next_reserve_seq(prb), false);
+		} else if (ft.legacy_direct) {
+			if (console_trylock())
+				console_unlock();
+		} else if (ft.legacy_offload) {
+			printk_trigger_flush();
+		}
 	}
 	console_srcu_read_unlock(cookie);
 }

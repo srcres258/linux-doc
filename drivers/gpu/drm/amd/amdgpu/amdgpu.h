@@ -118,6 +118,8 @@
 
 #define MAX_GPU_INSTANCE		64
 
+#define GFX_SLICE_PERIOD		msecs_to_jiffies(250)
+
 struct amdgpu_gpu_instance {
 	struct amdgpu_device		*adev;
 	int				mgpu_fan_enabled;
@@ -1164,6 +1166,8 @@ struct amdgpu_device {
 	bool                            debug_enable_ras_aca;
 
 	bool				enforce_isolation[MAX_XCP];
+	/* Added this mutex for cleaner shader isolation between GFX and compute processes */
+	struct mutex                    enforce_isolation_mutex;
 };
 
 static inline uint32_t amdgpu_ip_version(const struct amdgpu_device *adev,

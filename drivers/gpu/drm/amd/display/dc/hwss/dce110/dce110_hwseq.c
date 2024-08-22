@@ -1232,18 +1232,19 @@ void dce110_blank_stream(struct pipe_ctx *pipe_ctx)
 			 * has changed or they enter protection state and hang.
 			 */
 			msleep(60);
-		} else if (pipe_ctx->stream->signal == SIGNAL_TYPE_EDP) {
-			if (!link->dc->config.edp_no_power_sequencing) {
-				/*
-				 * Sometimes, DP receiver chip power-controlled externally by an
-				 * Embedded Controller could be treated and used as eDP,
-				 * if it drives mobile display. In this case,
-				 * we shouldn't be doing power-sequencing, hence we can skip
-				 * waiting for T9-ready.
-				 */
-				link->dc->link_srv->edp_receiver_ready_T9(link);
-			}
 		}
+	}
+
+	if (pipe_ctx->stream->signal == SIGNAL_TYPE_EDP &&
+	    !link->dc->config.edp_no_power_sequencing) {
+			/*
+			 * Sometimes, DP receiver chip power-controlled externally by an
+			 * Embedded Controller could be treated and used as eDP,
+			 * if it drives mobile display. In this case,
+			 * we shouldn't be doing power-sequencing, hence we can skip
+			 * waiting for T9-ready.
+			 */
+		link->dc->link_srv->edp_receiver_ready_T9(link);
 	}
 
 }
@@ -2350,19 +2351,6 @@ static void dce110_setup_audio_dto(
 	}
 }
 
-static bool dce110_is_hpo_enabled(struct dc_state *context)
-{
-	int i;
-
-	for (i = 0; i < MAX_HPO_DP2_ENCODERS; i++) {
-		if (context->res_ctx.is_hpo_dp_stream_enc_acquired[i]) {
-			return true;
-		}
-	}
-
-	return false;
-}
-
 enum dc_status dce110_apply_ctx_to_hw(
 		struct dc *dc,
 		struct dc_state *context)
@@ -2371,8 +2359,8 @@ enum dc_status dce110_apply_ctx_to_hw(
 	struct dc_bios *dcb = dc->ctx->dc_bios;
 	enum dc_status status;
 	int i;
-	bool was_hpo_enabled = dce110_is_hpo_enabled(dc->current_state);
-	bool is_hpo_enabled = dce110_is_hpo_enabled(context);
+	bool was_hpo_acquired = resource_is_hpo_acquired(dc->current_state);
+	bool is_hpo_acquired = resource_is_hpo_acquired(context);
 
 	/* reset syncd pipes from disabled pipes */
 	if (dc->config.use_pipe_ctx_sync_logic)
@@ -2415,8 +2403,8 @@ enum dc_status dce110_apply_ctx_to_hw(
 
 	dce110_setup_audio_dto(dc, context);
 
-	if (dc->hwseq->funcs.setup_hpo_hw_control && was_hpo_enabled != is_hpo_enabled) {
-		dc->hwseq->funcs.setup_hpo_hw_control(dc->hwseq, is_hpo_enabled);
+	if (dc->hwseq->funcs.setup_hpo_hw_control && was_hpo_acquired != is_hpo_acquired) {
+		dc->hwseq->funcs.setup_hpo_hw_control(dc->hwseq, is_hpo_acquired);
 	}
 
 	for (i = 0; i < dc->res_pool->pipe_count; i++) {
