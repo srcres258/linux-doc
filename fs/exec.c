@@ -148,7 +148,8 @@ SYSCALL_DEFINE1(uselib, const char __user *, library)
 	 * Check do_open_execat() for an explanation.
 	 */
 	error = -EACCES;
-	if (WARN_ON_ONCE(!S_ISREG(file_inode(file)->i_mode)))
+	if (WARN_ON_ONCE(!S_ISREG(file_inode(file)->i_mode)) ||
+	    path_noexec(&file->f_path))
 		goto exit;
 
 	error = -ENOEXEC;
@@ -901,13 +902,12 @@ static struct file *do_open_execat(int fd, struct filename *name, int flags)
 		return file;
 
 	/*
-	 * Validate the type.
-	 *
 	 * In the past the regular type check was here. It moved to may_open() in
 	 * 633fb6ac3980 ("exec: move S_ISREG() check earlier"). Since then it is
 	 * an invariant that all non-regular files error out before we get here.
 	 */
-	if (WARN_ON_ONCE(!S_ISREG(file_inode(file)->i_mode))) {
+	if (WARN_ON_ONCE(!S_ISREG(file_inode(file)->i_mode)) ||
+	    path_noexec(&file->f_path)) {
 		fput(file);
 		return ERR_PTR(-EACCES);
 	}

@@ -451,10 +451,9 @@ void startup_kernel(void)
 	 */
 	kaslr_large_page_offset = __kaslr_offset & ~_SEGMENT_MASK;
 	if (kaslr_enabled()) {
-		unsigned long end = ident_map_size - kaslr_large_page_offset;
 		unsigned long size = vmlinux_size + kaslr_large_page_offset;
 
-		text_lma = randomize_within_range(size, _SEGMENT_SIZE, TEXT_OFFSET, end);
+		text_lma = randomize_within_range(size, _SEGMENT_SIZE, TEXT_OFFSET, ident_map_size);
 	}
 	if (!text_lma)
 		text_lma = nokaslr_text_lma;

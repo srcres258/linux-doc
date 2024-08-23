@@ -1457,8 +1457,8 @@ static bool aux_set_alert(struct aux_buffer *aux, unsigned long alert_index,
 static bool aux_reset_buffer(struct aux_buffer *aux, unsigned long range,
 			     unsigned long long *overflow)
 {
-	unsigned long i, range_scan, idx, idx_old;
 	union hws_trailer_header old, prev, new;
+	unsigned long i, range_scan, idx;
 	unsigned long long orig_overflow;
 	struct hws_trailer_entry *te;
 
@@ -1484,7 +1484,7 @@ static bool aux_reset_buffer(struct aux_buffer *aux, unsigned long range,
 	 * indicator fall into this range, set it.
 	 */
 	range_scan = range - aux_sdb_num_empty(aux);
-	idx_old = idx = aux->empty_mark + 1;
+	idx = aux->empty_mark + 1;
 	for (i = 0; i < range_scan; i++, idx++) {
 		te = aux_sdb_trailer(aux, idx);
 		prev.val = READ_ONCE_ALIGNED_128(te->header.val);

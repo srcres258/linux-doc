@@ -1004,9 +1004,9 @@ struct file {
 		struct callback_head 	f_task_work;
 		/* fput() must use workqueue (most kernel threads). */
 		struct llist_node	f_llist;
-		unsigned int 		f_iocb_flags;
+		/* Invalid during file->f_op->release().*/
+		u64			f_version;
 	};
-
 	/*
 	 * Protects f_ep, f_flags.
 	 * Must not be taken from IRQ context.
@@ -1017,6 +1017,7 @@ struct file {
 	struct mutex		f_pos_lock;
 	loff_t			f_pos;
 	unsigned int		f_flags;
+	unsigned int 		f_iocb_flags;
 	struct fown_struct	*f_owner;
 	const struct cred	*f_cred;
 	struct file_ra_state	f_ra;
@@ -1024,7 +1025,6 @@ struct file {
 	struct inode		*f_inode;	/* cached value */
 	const struct file_operations	*__data_racy f_op;
 
-	u64			f_version;
 #ifdef CONFIG_SECURITY
 	void			*f_security;
 #endif
@@ -1285,7 +1285,7 @@ struct super_block {
 	time64_t		   s_time_min;
 	time64_t		   s_time_max;
 #ifdef CONFIG_FSNOTIFY
-	__u32			s_fsnotify_mask;
+	u32			s_fsnotify_mask;
 	struct fsnotify_sb_info	*s_fsnotify_info;
 #endif
 

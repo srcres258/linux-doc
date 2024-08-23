@@ -96,6 +96,12 @@
 #define EVM_ENABLED
 #endif
 
+#if IS_ENABLED(CONFIG_SECURITY_IPE)
+#define IPE_ENABLED 1,
+#else
+#define IPE_ENABLED
+#endif
+
 /*
  *  There is a trailing comma that we need to be accounted for. This is done by
  *  using a skipped argument in __COUNT_LSMS
@@ -117,7 +123,8 @@
 		BPF_LSM_ENABLED		\
 		LANDLOCK_ENABLED	\
 		IMA_ENABLED		\
-		EVM_ENABLED)
+		EVM_ENABLED		\
+		IPE_ENABLED)
 
 #else
 

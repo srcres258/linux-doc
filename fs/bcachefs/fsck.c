@@ -2006,7 +2006,6 @@ static int check_dirent_to_subvol(struct btree_trans *trans, struct btree_iter *
 	if (ret) {
 		bch_err(c, "subvol %u points to missing inode root %llu", target_subvol, target_inum);
 		ret = -BCH_ERR_fsck_repair_unimplemented;
-		ret = 0;
 		goto err;
 	}
 
@@ -2216,6 +2215,8 @@ int bch2_check_xattrs(struct bch_fs *c)
 			NULL, NULL,
 			BCH_TRANS_COMMIT_no_enospc,
 		check_xattr(trans, &iter, k, &hash_info, &inode)));
+
+	inode_walker_exit(&inode);
 	bch_err_fn(c, ret);
 	return ret;
 }

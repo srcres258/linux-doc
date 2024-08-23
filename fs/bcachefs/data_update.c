@@ -79,6 +79,8 @@ static bool bkey_nocow_lock(struct bch_fs *c, struct moving_context *ctxt, struc
 				bkey_for_each_ptr(ptrs, ptr2) {
 					if (ptr2 == ptr)
 						break;
+
+					bucket = PTR_BUCKET_POS(ca, ptr2);
 					bch2_bucket_nocow_unlock(&c->nocow_locks, bucket, 0);
 				}
 				return false;

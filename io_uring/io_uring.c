@@ -2363,6 +2363,7 @@ static enum hrtimer_restart io_cqring_timer_wakeup(struct hrtimer *timer)
 	struct io_wait_queue *iowq = container_of(timer, struct io_wait_queue, t);
 
 	WRITE_ONCE(iowq->hit_timeout, 1);
+	iowq->min_timeout = 0;
 	wake_up_process(iowq->wq.private);
 	return HRTIMER_NORESTART;
 }
@@ -2451,7 +2452,7 @@ static int __io_cqring_wait_schedule(struct io_ring_ctx *ctx,
 	 */
 	if (current_pending_io())
 		current->in_iowait = 1;
-	if (iowq->timeout != KTIME_MAX || iowq->min_timeout != KTIME_MAX)
+	if (iowq->timeout != KTIME_MAX || iowq->min_timeout)
 		ret = io_cqring_schedule_timeout(iowq, ctx->clockid, start_time);
 	else
 		schedule();
@@ -2548,8 +2549,15 @@ static int io_cqring_wait(struct io_ring_ctx *ctx, int min_events, u32 flags,
 
 	trace_io_uring_cqring_wait(ctx, min_events);
 	do {
-		int nr_wait = (int) iowq.cq_tail - READ_ONCE(ctx->rings->cq.tail);
 		unsigned long check_cq;
+		int nr_wait;
+
+		/* if min timeout has been hit, don't reset wait count */
+		if (!iowq.hit_timeout)
+			nr_wait = (int) iowq.cq_tail -
+					READ_ONCE(ctx->rings->cq.tail);
+		else
+			nr_wait = 1;
 
 		if (ctx->flags & IORING_SETUP_DEFER_TASKRUN) {
 			/* if min timeout has been hit, don't reset wait count */

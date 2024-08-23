@@ -35,7 +35,7 @@
  * @temp: Temperature value.
  * @tz_temp: Current thermal zone temperature (after registration).
  * @num_trips: Number of trip points in the @trips list.
- * @refcont: Reference counter for usage and removal synchronization.
+ * @refcount: Reference counter for usage and removal synchronization.
  */
 struct tt_thermal_zone {
 	struct list_head list_node;
@@ -59,8 +59,7 @@ DEFINE_GUARD(tt_zone, struct tt_thermal_zone *, mutex_lock(&_T->lock), mutex_unl
  * Represents a template of a trip point to be used for populating a trip point
  * during the registration of a thermal zone based on a given zone template.
  *
- * @list_node: Node in the list of all trip template in @tt_zone.
- * @tt_zone: Zone template this trip template belongs to.
+ * @list_node: Node in the list of all trip templates in the zone template.
  * @trip: Trip point data to use for thernal zone registration.
  * @id: The ID of this trip template for the debugfs interface.
  */
