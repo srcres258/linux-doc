@@ -138,15 +138,15 @@ static int compression_decompress_bio(struct list_head *ws,
 }
 
 static int compression_decompress(int type, struct list_head *ws,
-		const u8 *data_in, struct page *dest_page,
+		const u8 *data_in, struct folio *dest_folio,
 		unsigned long dest_pgoff, size_t srclen, size_t destlen)
 {
 	switch (type) {
-	case BTRFS_COMPRESS_ZLIB: return zlib_decompress(ws, data_in, dest_page,
+	case BTRFS_COMPRESS_ZLIB: return zlib_decompress(ws, data_in, dest_folio,
 						dest_pgoff, srclen, destlen);
-	case BTRFS_COMPRESS_LZO:  return lzo_decompress(ws, data_in, dest_page,
+	case BTRFS_COMPRESS_LZO:  return lzo_decompress(ws, data_in, dest_folio,
 						dest_pgoff, srclen, destlen);
-	case BTRFS_COMPRESS_ZSTD: return zstd_decompress(ws, data_in, dest_page,
+	case BTRFS_COMPRESS_ZSTD: return zstd_decompress(ws, data_in, dest_folio,
 						dest_pgoff, srclen, destlen);
 	case BTRFS_COMPRESS_NONE:
 	default:
@@ -424,11 +424,9 @@ static noinline int add_ra_bio_pages(struct inode *inode,
 	struct extent_map *em;
 	struct address_space *mapping = inode->i_mapping;
 	struct extent_map_tree *em_tree;
-	struct extent_io_tree *tree;
 	int sectors_missed = 0;
 
 	em_tree = &BTRFS_I(inode)->extent_tree;
-	tree = &BTRFS_I(inode)->io_tree;
 
 	if (isize == 0)
 		return 0;
@@ -499,7 +497,6 @@ static noinline int add_ra_bio_pages(struct inode *inode,
 		}
 
 		page_end = (pg_index << PAGE_SHIFT) + folio_size(folio) - 1;
-		lock_extent(tree, cur, page_end, NULL);
 		read_lock(&em_tree->lock);
 		em = lookup_extent_mapping(em_tree, cur, page_end + 1 - cur);
 		read_unlock(&em_tree->lock);
@@ -514,7 +511,6 @@ static noinline int add_ra_bio_pages(struct inode *inode,
 		    (extent_map_block_start(em) >> SECTOR_SHIFT) !=
 		    orig_bio->bi_iter.bi_sector) {
 			free_extent_map(em);
-			unlock_extent(tree, cur, page_end, NULL);
 			folio_unlock(folio);
 			folio_put(folio);
 			break;
@@ -534,7 +530,6 @@ static noinline int add_ra_bio_pages(struct inode *inode,
 
 		if (!bio_add_folio(orig_bio, folio, add_size,
 				   offset_in_folio(folio, cur))) {
-			unlock_extent(tree, cur, page_end, NULL);
 			folio_unlock(folio);
 			folio_put(folio);
 			break;
@@ -1061,10 +1056,10 @@ static int btrfs_decompress_bio(struct compressed_bio *cb)
  * single page, and we want to read a single page out of it.
  * start_byte tells us the offset into the compressed data we're interested in
  */
-int btrfs_decompress(int type, const u8 *data_in, struct page *dest_page,
+int btrfs_decompress(int type, const u8 *data_in, struct folio *dest_folio,
 		     unsigned long dest_pgoff, size_t srclen, size_t destlen)
 {
-	struct btrfs_fs_info *fs_info = page_to_fs_info(dest_page);
+	struct btrfs_fs_info *fs_info = folio_to_fs_info(dest_folio);
 	struct list_head *workspace;
 	const u32 sectorsize = fs_info->sectorsize;
 	int ret;
@@ -1077,7 +1072,7 @@ int btrfs_decompress(int type, const u8 *data_in, struct page *dest_page,
 	ASSERT(dest_pgoff + destlen <= PAGE_SIZE && destlen <= sectorsize);
 
 	workspace = get_workspace(type, 0);
-	ret = compression_decompress(type, workspace, data_in, dest_page,
+	ret = compression_decompress(type, workspace, data_in, dest_folio,
 				     dest_pgoff, srclen, destlen);
 	put_workspace(type, workspace);
 
