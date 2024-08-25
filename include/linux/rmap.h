@@ -257,6 +257,7 @@ void folio_remove_rmap_ptes(struct folio *, struct page *, int nr_pages,
 	folio_remove_rmap_ptes(folio, page, 1, vma)
 void folio_remove_rmap_pmd(struct folio *, struct page *,
 		struct vm_area_struct *);
+void folio_remove_anon_avc(struct folio *, struct vm_area_struct *);
 
 void hugetlb_add_anon_rmap(struct folio *, struct vm_area_struct *,
 		unsigned long address, rmap_t flags);
@@ -331,7 +332,7 @@ static __always_inline void __folio_dup_file_rmap(struct folio *folio,
 	switch (level) {
 	case RMAP_LEVEL_PTE:
 		if (!folio_test_large(folio)) {
-			atomic_inc(&page->_mapcount);
+			atomic_inc(&folio->_mapcount);
 			break;
 		}
 
@@ -425,7 +426,7 @@ static __always_inline int __folio_try_dup_anon_rmap(struct folio *folio,
 		if (!folio_test_large(folio)) {
 			if (PageAnonExclusive(page))
 				ClearPageAnonExclusive(page);
-			atomic_inc(&page->_mapcount);
+			atomic_inc(&folio->_mapcount);
 			break;
 		}
 
