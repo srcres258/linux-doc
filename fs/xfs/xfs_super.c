@@ -1638,28 +1638,16 @@ xfs_fs_fill_super(
 		goto out_free_sb;
 	}
 
+	/*
+	 * Until this is fixed only page-sized or smaller data blocks work.
+	 */
 	if (mp->m_sb.sb_blocksize > PAGE_SIZE) {
-		size_t max_folio_size = mapping_max_folio_size_supported();
-
-		if (!xfs_has_crc(mp)) {
-			xfs_warn(mp,
-"V4 Filesystem with blocksize %d bytes. Only pagesize (%ld) or less is supported.",
-				mp->m_sb.sb_blocksize, PAGE_SIZE);
-			error = -ENOSYS;
-			goto out_free_sb;
-		}
-
-		if (mp->m_sb.sb_blocksize > max_folio_size) {
-			xfs_warn(mp,
-"block size (%u bytes) not supported; Only block size (%ld) or less is supported",
-				mp->m_sb.sb_blocksize, max_folio_size);
-			error = -ENOSYS;
-			goto out_free_sb;
-		}
-
 		xfs_warn(mp,
-"EXPERIMENTAL: V5 Filesystem with Large Block Size (%d bytes) enabled.",
-			mp->m_sb.sb_blocksize);
+		"File system with blocksize %d bytes. "
+		"Only pagesize (%ld) or less will currently work.",
+				mp->m_sb.sb_blocksize, PAGE_SIZE);
+		error = -ENOSYS;
+		goto out_free_sb;
 	}
 
 	/* Ensure this filesystem fits in the page cache limits */
