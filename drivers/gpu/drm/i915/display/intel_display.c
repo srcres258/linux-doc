@@ -6260,6 +6260,8 @@ static int intel_async_flip_check_hw(struct intel_atomic_state *state, struct in
 		case I915_FORMAT_MOD_Y_TILED:
 		case I915_FORMAT_MOD_Yf_TILED:
 		case I915_FORMAT_MOD_4_TILED:
+		case I915_FORMAT_MOD_4_TILED_BMG_CCS:
+		case I915_FORMAT_MOD_4_TILED_LNL_CCS:
 			break;
 		default:
 			drm_dbg_kms(&i915->drm,
@@ -7933,7 +7935,7 @@ void intel_setup_outputs(struct drm_i915_private *dev_priv)
 			g4x_dp_init(dev_priv, DP_D, PORT_D);
 
 		if (SUPPORTS_TV(dev_priv))
-			intel_tv_init(dev_priv);
+			intel_tv_init(display);
 	} else if (DISPLAY_VER(dev_priv) == 2) {
 		if (IS_I85X(dev_priv))
 			intel_lvds_init(dev_priv);
