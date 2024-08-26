@@ -635,6 +635,9 @@ void swap_read_folio(struct folio *folio, struct swap_iocb **plug)
 	if (swap_read_folio_zeromap(folio)) {
 		folio_unlock(folio);
 		goto finish;
+	} else if (zswap_load(folio)) {
+		folio_unlock(folio);
+		goto finish;
 	}
 
 	/* We have to read from slower devices. Increase zswap protection. */

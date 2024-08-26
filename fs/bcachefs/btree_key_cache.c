@@ -736,10 +736,10 @@ void bch2_fs_btree_key_cache_exit(struct btree_key_cache *bc)
 	if (bc->table_init_done)
 		rhashtable_destroy(&bc->table);
 
-	free_percpu(bc->nr_pending);
-
 	rcu_pending_exit(&bc->pending[0]);
 	rcu_pending_exit(&bc->pending[1]);
+
+	free_percpu(bc->nr_pending);
 }
 
 void bch2_fs_btree_key_cache_init_early(struct btree_key_cache *c)
@@ -751,12 +751,12 @@ int bch2_fs_btree_key_cache_init(struct btree_key_cache *bc)
 	struct bch_fs *c = container_of(bc, struct bch_fs, btree_key_cache);
 	struct shrinker *shrink;
 
-	if (rcu_pending_init(&bc->pending[0], &c->btree_trans_barrier, __bkey_cached_free) ||
-	    rcu_pending_init(&bc->pending[1], &c->btree_trans_barrier, __bkey_cached_free))
-		return -BCH_ERR_ENOMEM_fs_btree_cache_init;
-
 	bc->nr_pending = alloc_percpu(size_t);
 	if (!bc->nr_pending)
+		return -BCH_ERR_ENOMEM_fs_btree_cache_init;
+
+	if (rcu_pending_init(&bc->pending[0], &c->btree_trans_barrier, __bkey_cached_free) ||
+	    rcu_pending_init(&bc->pending[1], &c->btree_trans_barrier, __bkey_cached_free))
 		return -BCH_ERR_ENOMEM_fs_btree_cache_init;
 
 	if (rhashtable_init(&bc->table, &bch2_btree_key_cache_params))

@@ -1024,7 +1024,7 @@ int spacc_set_operation(struct spacc_device *spacc, int handle, int op,
 	int ret = CRYPTO_OK;
 	struct spacc_job *job = NULL;
 
-	if (handle < 0 || handle > SPACC_MAX_JOBS)
+	if (handle < 0 || handle >= SPACC_MAX_JOBS)
 		return -ENXIO;
 
 	job = &spacc->job[handle];
@@ -1103,9 +1103,9 @@ int spacc_packet_enqueue_ddt_ex(struct spacc_device *spacc, int use_jb,
 {
 	int i;
 	struct spacc_job *job;
-	int ret = CRYPTO_OK, proc_len;
+	int proc_len;
 
-	if (job_idx < 0 || job_idx > SPACC_MAX_JOBS)
+	if (job_idx < 0 || job_idx >= SPACC_MAX_JOBS)
 		return -ENXIO;
 
 	switch (prio)  {
@@ -1222,7 +1222,7 @@ int spacc_packet_enqueue_ddt_ex(struct spacc_device *spacc, int use_jb,
 		job->ctrl &= ~SPACC_CTRL_MASK(SPACC_CTRL_KEY_EXP);
 	}
 
-	return ret;
+	return CRYPTO_OK;
 
 fifo_full:
 	/* try to add a job to the job buffers*/
@@ -1248,7 +1248,7 @@ fifo_full:
 
 	spacc->jb_head = i;
 
-	return CRYPTO_USED_JB;
+	return CRYPTO_OK;
 }
 
 int spacc_packet_enqueue_ddt(struct spacc_device *spacc, int job_idx,
@@ -1295,7 +1295,7 @@ int spacc_isenabled(struct spacc_device *spacc, int mode, int keysize)
 {
 	int x;
 
-	if (mode < 0 || mode > CRYPTO_MODE_LAST)
+	if (mode < 0 || mode >= CRYPTO_MODE_LAST)
 		return 0;
 
 	if (mode == CRYPTO_MODE_NULL    ||
@@ -1331,7 +1331,7 @@ static int spacc_set_auxinfo(struct spacc_device *spacc, int jobid,
 	int ret = CRYPTO_OK;
 	struct spacc_job *job;
 
-	if (jobid < 0 || jobid > SPACC_MAX_JOBS)
+	if (jobid < 0 || jobid >= SPACC_MAX_JOBS)
 		return -ENXIO;
 
 	job = &spacc->job[jobid];
@@ -1904,7 +1904,8 @@ int spacc_open(struct spacc_device *spacc, int enc, int hash, int ctxid,
 		ctrl |= SPACC_CTRL_SET(SPACC_CTRL_HASH_ALG,
 				H_SHAKE256);
 		ctrl |= SPACC_CTRL_SET(SPACC_CTRL_HASH_MODE,
-				HM_SHAKE_KMAC); break;
+				HM_SHAKE_KMAC);
+		break;
 	case CRYPTO_MODE_MAC_KMACXOF128:
 		ctrl |= SPACC_CTRL_SET(SPACC_CTRL_HASH_ALG,
 				H_SHAKE128);
@@ -2364,7 +2365,7 @@ int spacc_set_key_exp(struct spacc_device *spacc, int job_idx)
 	struct spacc_ctx *ctx = NULL;
 	struct spacc_job *job = NULL;
 
-	if (job_idx < 0 || job_idx > SPACC_MAX_JOBS) {
+	if (job_idx < 0 || job_idx >= SPACC_MAX_JOBS) {
 		pr_debug("ERR: Invalid Job id specified (out of range)\n");
 		return -ENXIO;
 	}

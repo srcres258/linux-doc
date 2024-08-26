@@ -352,6 +352,9 @@ static int test_zswap_writeback(const char *root, bool wb)
 	int ret = KSFT_FAIL;
 	char *test_group, *test_group_child = NULL;
 
+	if (cg_read_strcmp(root, "memory.zswap.writeback", "1"))
+		return KSFT_SKIP;
+
 	test_group = cg_name(root, "zswap_writeback_test");
 	if (!test_group)
 		goto out;
@@ -363,6 +366,9 @@ static int test_zswap_writeback(const char *root, bool wb)
 	if (test_zswap_writeback_one(test_group, wb))
 		goto out;
 
+	/* Reset memory.zswap.max to max (modified by attempt_writeback), and
+	 * set up child cgroup, whose memory.zswap.writeback is hardcoded to 1.
+	 * Thus, the parent's setting shall be what's in effect. */
 	if (cg_write(test_group, "memory.zswap.max", "max"))
 		goto out;
 	if (cg_write(test_group, "cgroup.subtree_control", "+memory"))

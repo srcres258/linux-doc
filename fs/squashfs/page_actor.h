@@ -33,15 +33,12 @@ extern struct squashfs_page_actor *squashfs_page_actor_init_special(
 				loff_t start_index);
 static inline struct page *squashfs_page_actor_free(struct squashfs_page_actor *actor)
 {
-	struct page *last_page = actor->last_page;
+	struct page *last_page = actor->next_page == actor->pages ? actor->last_page : ERR_PTR(-EIO);
 
 	kfree(actor->tmp_buffer);
 	kfree(actor);
 
-	if (actor->next_page == actor->pages)
-		return last_page;
-	else
-		return ERR_PTR(-EIO);
+	return last_page;
 }
 static inline void *squashfs_first_page(struct squashfs_page_actor *actor)
 {

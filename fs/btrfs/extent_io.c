@@ -955,19 +955,18 @@ folio_attach_private(folio, (void *)EXTENT_FOLIO_PRIVATE);
 return 0;
 }
 
-void clear_page_extent_mapped(struct page *page)
+void clear_page_extent_mapped(struct folio *folio)
 {
-struct folio *folio = page_folio(page);
-struct btrfs_fs_info *fs_info;
+	struct btrfs_fs_info *fs_info;
 
-ASSERT(page->mapping);
+	ASSERT(folio->mapping);
 
 if (!folio_test_private(folio))
 	return;
 
-fs_info = page_to_fs_info(page);
-if (btrfs_is_subpage(fs_info, page->mapping))
-	return btrfs_detach_subpage(fs_info, folio);
+	fs_info = folio_to_fs_info(folio);
+	if (btrfs_is_subpage(fs_info, folio->mapping))
+		return btrfs_detach_subpage(fs_info, folio);
 
 folio_detach_private(folio);
 }
@@ -1841,27 +1840,26 @@ btrfs_submit_bio(bbio, 0);
 }
 
 /*
-* Submit one subpage btree page.
-*
-* The main difference to submit_eb_page() is:
-* - Page locking
-*   For subpage, we don't rely on page locking at all.
-*
-* - Flush write bio
-*   We only flush bio if we may be unable to fit current extent buffers into
-*   current bio.
-*
-* Return >=0 for the number of submitted extent buffers.
-* Return <0 for fatal error.
-*/
-static int submit_eb_subpage(struct page *page, struct writeback_control *wbc)
+ * Submit one subpage btree page.
+ *
+ * The main difference to submit_eb_page() is:
+ * - Page locking
+ *   For subpage, we don't rely on page locking at all.
+ *
+ * - Flush write bio
+ *   We only flush bio if we may be unable to fit current extent buffers into
+ *   current bio.
+ *
+ * Return >=0 for the number of submitted extent buffers.
+ * Return <0 for fatal error.
+ */
+static int submit_eb_subpage(struct folio *folio, struct writeback_control *wbc)
 {
-struct btrfs_fs_info *fs_info = page_to_fs_info(page);
-struct folio *folio = page_folio(page);
-int submitted = 0;
-u64 page_start = page_offset(page);
-int bit_start = 0;
-int sectors_per_node = fs_info->nodesize >> fs_info->sectorsize_bits;
+	struct btrfs_fs_info *fs_info = folio_to_fs_info(folio);
+	int submitted = 0;
+	u64 folio_start = folio_pos(folio);
+	int bit_start = 0;
+	int sectors_per_node = fs_info->nodesize >> fs_info->sectorsize_bits;
 
 /* Lock and write each dirty extent buffers in the range */
 while (bit_start < fs_info->subpage_info->bitmap_nr_bits) {
@@ -1870,22 +1868,48 @@ while (bit_start < fs_info->subpage_info->bitmap_nr_bits) {
 	unsigned long flags;
 	u64 start;
 
-	/*
-	 * Take private lock to ensure the subpage won't be detached
-	 * in the meantime.
-	 */
-	spin_lock(&page->mapping->i_private_lock);
-	if (!folio_test_private(folio)) {
-		spin_unlock(&page->mapping->i_private_lock);
-		break;
-	}
-	spin_lock_irqsave(&subpage->lock, flags);
-	if (!test_bit(bit_start + fs_info->subpage_info->dirty_offset,
-		      subpage->bitmaps)) {
+		/*
+		 * Take private lock to ensure the subpage won't be detached
+		 * in the meantime.
+		 */
+		spin_lock(&folio->mapping->i_private_lock);
+		if (!folio_test_private(folio)) {
+			spin_unlock(&folio->mapping->i_private_lock);
+			break;
+		}
+		spin_lock_irqsave(&subpage->lock, flags);
+		if (!test_bit(bit_start + fs_info->subpage_info->dirty_offset,
+			      subpage->bitmaps)) {
+			spin_unlock_irqrestore(&subpage->lock, flags);
+			spin_unlock(&folio->mapping->i_private_lock);
+			bit_start++;
+			continue;
+		}
+
+		start = folio_start + bit_start * fs_info->sectorsize;
+		bit_start += sectors_per_node;
+
+		/*
+		 * Here we just want to grab the eb without touching extra
+		 * spin locks, so call find_extent_buffer_nolock().
+		 */
+		eb = find_extent_buffer_nolock(fs_info, start);
 		spin_unlock_irqrestore(&subpage->lock, flags);
-		spin_unlock(&page->mapping->i_private_lock);
-		bit_start++;
-		continue;
+		spin_unlock(&folio->mapping->i_private_lock);
+
+		/*
+		 * The eb has already reached 0 refs thus find_extent_buffer()
+		 * doesn't return it. We don't need to write back such eb
+		 * anyway.
+		 */
+		if (!eb)
+			continue;
+
+		if (lock_extent_buffer_for_io(eb, wbc)) {
+			write_one_eb(eb, wbc);
+			submitted++;
+		}
+		free_extent_buffer(eb);
 	}
 
 	start = page_start + bit_start * fs_info->sectorsize;
@@ -1917,38 +1941,37 @@ return submitted;
 }
 
 /*
-* Submit all page(s) of one extent buffer.
-*
-* @page:	the page of one extent buffer
-* @eb_context:	to determine if we need to submit this page, if current page
-*		belongs to this eb, we don't need to submit
-*
-* The caller should pass each page in their bytenr order, and here we use
-* @eb_context to determine if we have submitted pages of one extent buffer.
-*
-* If we have, we just skip until we hit a new page that doesn't belong to
-* current @eb_context.
-*
-* If not, we submit all the page(s) of the extent buffer.
-*
-* Return >0 if we have submitted the extent buffer successfully.
-* Return 0 if we don't need to submit the page, as it's already submitted by
-* previous call.
-* Return <0 for fatal error.
-*/
-static int submit_eb_page(struct page *page, struct btrfs_eb_write_context *ctx)
+ * Submit all page(s) of one extent buffer.
+ *
+ * @page:	the page of one extent buffer
+ * @eb_context:	to determine if we need to submit this page, if current page
+ *		belongs to this eb, we don't need to submit
+ *
+ * The caller should pass each page in their bytenr order, and here we use
+ * @eb_context to determine if we have submitted pages of one extent buffer.
+ *
+ * If we have, we just skip until we hit a new page that doesn't belong to
+ * current @eb_context.
+ *
+ * If not, we submit all the page(s) of the extent buffer.
+ *
+ * Return >0 if we have submitted the extent buffer successfully.
+ * Return 0 if we don't need to submit the page, as it's already submitted by
+ * previous call.
+ * Return <0 for fatal error.
+ */
+static int submit_eb_page(struct folio *folio, struct btrfs_eb_write_context *ctx)
 {
-struct writeback_control *wbc = ctx->wbc;
-struct address_space *mapping = page->mapping;
-struct folio *folio = page_folio(page);
-struct extent_buffer *eb;
-int ret;
+	struct writeback_control *wbc = ctx->wbc;
+	struct address_space *mapping = folio->mapping;
+	struct extent_buffer *eb;
+	int ret;
 
 if (!folio_test_private(folio))
 	return 0;
 
-if (page_to_fs_info(page)->nodesize < PAGE_SIZE)
-	return submit_eb_subpage(page, wbc);
+	if (folio_to_fs_info(folio)->nodesize < PAGE_SIZE)
+		return submit_eb_subpage(folio, wbc);
 
 spin_lock(&mapping->i_private_lock);
 if (!folio_test_private(folio)) {
@@ -2016,10 +2039,63 @@ pgoff_t end;		/* Inclusive */
 int scanned = 0;
 xa_mark_t tag;
 
-folio_batch_init(&fbatch);
-if (wbc->range_cyclic) {
-	index = mapping->writeback_index; /* Start from prev offset */
-	end = -1;
+	folio_batch_init(&fbatch);
+	if (wbc->range_cyclic) {
+		index = mapping->writeback_index; /* Start from prev offset */
+		end = -1;
+		/*
+		 * Start from the beginning does not need to cycle over the
+		 * range, mark it as scanned.
+		 */
+		scanned = (index == 0);
+	} else {
+		index = wbc->range_start >> PAGE_SHIFT;
+		end = wbc->range_end >> PAGE_SHIFT;
+		scanned = 1;
+	}
+	if (wbc->sync_mode == WB_SYNC_ALL)
+		tag = PAGECACHE_TAG_TOWRITE;
+	else
+		tag = PAGECACHE_TAG_DIRTY;
+	btrfs_zoned_meta_io_lock(fs_info);
+retry:
+	if (wbc->sync_mode == WB_SYNC_ALL)
+		tag_pages_for_writeback(mapping, index, end);
+	while (!done && !nr_to_write_done && (index <= end) &&
+	       (nr_folios = filemap_get_folios_tag(mapping, &index, end,
+					    tag, &fbatch))) {
+		unsigned i;
+
+		for (i = 0; i < nr_folios; i++) {
+			struct folio *folio = fbatch.folios[i];
+
+			ret = submit_eb_page(folio, &ctx);
+			if (ret == 0)
+				continue;
+			if (ret < 0) {
+				done = 1;
+				break;
+			}
+
+			/*
+			 * the filesystem may choose to bump up nr_to_write.
+			 * We have to make sure to honor the new nr_to_write
+			 * at any time
+			 */
+			nr_to_write_done = wbc->nr_to_write <= 0;
+		}
+		folio_batch_release(&fbatch);
+		cond_resched();
+	}
+	if (!scanned && !done) {
+		/*
+		 * We hit the last page and there is more work to be done: wrap
+		 * back to the start of the file
+		 */
+		scanned = 1;
+		index = 0;
+		goto retry;
+	}
 	/*
 	 * If something went wrong, don't allow any metadata write bio to be
 	 * submitted.
@@ -2466,9 +2542,9 @@ if (wbc->range_cyclic) {
  * not race in and drop the bit.
  */
 static bool try_release_extent_state(struct extent_io_tree *tree,
-				    struct page *page, gfp_t mask)
+				    struct folio *folio, gfp_t mask)
 {
-	u64 start = page_offset(page);
+	u64 start = folio_pos(folio);
 	u64 end = start + PAGE_SIZE - 1;
 	bool ret;
 
@@ -2528,11 +2604,11 @@ return ret;
  * in the range corresponding to the page, both state records and extent
  * map records are removed
  */
-bool try_release_extent_mapping(struct page *page, gfp_t mask)
+bool try_release_extent_mapping(struct folio *folio, gfp_t mask)
 {
-	u64 start = page_offset(page);
+	u64 start = folio_pos(folio);
 	u64 end = start + PAGE_SIZE - 1;
-	struct btrfs_inode *inode = page_to_inode(page);
+	struct btrfs_inode *inode = folio_to_inode(folio);
 	struct extent_io_tree *io_tree = &inode->io_tree;
 
 	while (start <= end) {
@@ -2918,7 +2994,7 @@ next:
 
 		cond_resched(); /* Allow large-extent preemption. */
 	}
-	return try_release_extent_state(io_tree, page, mask);
+	return try_release_extent_state(io_tree, folio, mask);
 }
 
 static void __free_extent_buffer(struct extent_buffer *eb)
@@ -4861,17 +4937,17 @@ void memmove_extent_buffer(const struct extent_buffer *dst,
 
 #define GANG_LOOKUP_SIZE	16
 static struct extent_buffer *get_next_extent_buffer(
-		const struct btrfs_fs_info *fs_info, struct page *page, u64 bytenr)
+		const struct btrfs_fs_info *fs_info, struct folio *folio, u64 bytenr)
 {
 	struct extent_buffer *gang[GANG_LOOKUP_SIZE];
 	struct extent_buffer *found = NULL;
-	u64 page_start = page_offset(page);
-	u64 cur = page_start;
+	u64 folio_start = folio_pos(folio);
+	u64 cur = folio_start;
 
-	ASSERT(in_range(bytenr, page_start, PAGE_SIZE));
+	ASSERT(in_range(bytenr, folio_start, PAGE_SIZE));
 	lockdep_assert_held(&fs_info->buffer_lock);
 
-	while (cur < page_start + PAGE_SIZE) {
+	while (cur < folio_start + PAGE_SIZE) {
 		int ret;
 		int i;
 
@@ -4883,7 +4959,7 @@ static struct extent_buffer *get_next_extent_buffer(
 			goto out;
 		for (i = 0; i < ret; i++) {
 			/* Already beyond page end */
-			if (gang[i]->start >= page_start + PAGE_SIZE)
+			if (gang[i]->start >= folio_start + PAGE_SIZE)
 				goto out;
 			/* Found one */
 			if (gang[i]->start >= bytenr) {
@@ -4897,11 +4973,11 @@ out:
 	return found;
 }
 
-static int try_release_subpage_extent_buffer(struct page *page)
+static int try_release_subpage_extent_buffer(struct folio *folio)
 {
-	struct btrfs_fs_info *fs_info = page_to_fs_info(page);
-	u64 cur = page_offset(page);
-	const u64 end = page_offset(page) + PAGE_SIZE;
+	struct btrfs_fs_info *fs_info = folio_to_fs_info(folio);
+	u64 cur = folio_pos(folio);
+	const u64 end = cur + PAGE_SIZE;
 	int ret;
 
 	while (cur < end) {
@@ -4916,7 +4992,7 @@ static int try_release_subpage_extent_buffer(struct page *page)
 		 * with spinlock rather than RCU.
 		 */
 		spin_lock(&fs_info->buffer_lock);
-		eb = get_next_extent_buffer(fs_info, page, cur);
+		eb = get_next_extent_buffer(fs_info, folio, cur);
 		if (!eb) {
 			/* No more eb in the page range after or at cur */
 			spin_unlock(&fs_info->buffer_lock);
@@ -4957,31 +5033,30 @@ static int try_release_subpage_extent_buffer(struct page *page)
 	 * Finally to check if we have cleared folio private, as if we have
 	 * released all ebs in the page, the folio private should be cleared now.
 	 */
-	spin_lock(&page->mapping->i_private_lock);
-	if (!folio_test_private(page_folio(page)))
+	spin_lock(&folio->mapping->i_private_lock);
+	if (!folio_test_private(folio))
 		ret = 1;
 	else
 		ret = 0;
-	spin_unlock(&page->mapping->i_private_lock);
+	spin_unlock(&folio->mapping->i_private_lock);
 	return ret;
 
 }
 
-int try_release_extent_buffer(struct page *page)
+int try_release_extent_buffer(struct folio *folio)
 {
-	struct folio *folio = page_folio(page);
 	struct extent_buffer *eb;
 
-	if (page_to_fs_info(page)->nodesize < PAGE_SIZE)
-		return try_release_subpage_extent_buffer(page);
+	if (folio_to_fs_info(folio)->nodesize < PAGE_SIZE)
+		return try_release_subpage_extent_buffer(folio);
 
 	/*
 	 * We need to make sure nobody is changing folio private, as we rely on
 	 * folio private as the pointer to extent buffer.
 	 */
-	spin_lock(&page->mapping->i_private_lock);
+	spin_lock(&folio->mapping->i_private_lock);
 	if (!folio_test_private(folio)) {
-		spin_unlock(&page->mapping->i_private_lock);
+		spin_unlock(&folio->mapping->i_private_lock);
 		return 1;
 	}
 
@@ -4996,10 +5071,10 @@ int try_release_extent_buffer(struct page *page)
 	spin_lock(&eb->refs_lock);
 	if (atomic_read(&eb->refs) != 1 || extent_buffer_under_io(eb)) {
 		spin_unlock(&eb->refs_lock);
-		spin_unlock(&page->mapping->i_private_lock);
+		spin_unlock(&folio->mapping->i_private_lock);
 		return 0;
 	}
-	spin_unlock(&page->mapping->i_private_lock);
+	spin_unlock(&folio->mapping->i_private_lock);
 
 	/*
 	 * If tree ref isn't set then we know the ref on this eb is a real ref,

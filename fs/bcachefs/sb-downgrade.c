@@ -77,6 +77,9 @@
 	  BCH_FSCK_ERR_accounting_key_junk_at_end)		\
 	x(disk_accounting_inum,					\
 	  BIT_ULL(BCH_RECOVERY_PASS_check_allocations),		\
+	  BCH_FSCK_ERR_accounting_mismatch)			\
+	x(rebalance_work_acct_fix,				\
+	  BIT_ULL(BCH_RECOVERY_PASS_check_allocations),		\
 	  BCH_FSCK_ERR_accounting_mismatch)
 
 #define DOWNGRADE_TABLE()					\
@@ -110,7 +113,10 @@
 	  BCH_FSCK_ERR_fs_usage_persistent_reserved_wrong,	\
 	  BCH_FSCK_ERR_fs_usage_replicas_wrong,			\
 	  BCH_FSCK_ERR_accounting_replicas_not_marked,		\
-	  BCH_FSCK_ERR_bkey_version_in_future)
+	  BCH_FSCK_ERR_bkey_version_in_future)			\
+	x(rebalance_work_acct_fix,				\
+	  BIT_ULL(BCH_RECOVERY_PASS_check_allocations),		\
+	  BCH_FSCK_ERR_accounting_mismatch)
 
 struct upgrade_downgrade_entry {
 	u64		recovery_passes;

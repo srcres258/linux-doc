@@ -35,6 +35,7 @@ mkdir -p "${destdir}"
 	echo Module.symvers
 	echo "arch/${SRCARCH}/include/generated"
 	echo include/config/auto.conf
+	echo include/config/kernel.release
 	echo include/generated
 	find_in_scripts
 

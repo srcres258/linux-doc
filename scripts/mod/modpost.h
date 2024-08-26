@@ -65,11 +65,7 @@
 #define TO_NATIVE(x)	\
 	(target_is_big_endian == host_is_big_endian ? x : bswap(x))
 
-#define NOFAIL(ptr)   do_nofail((ptr), #ptr)
-
 #define ARRAY_SIZE(arr) (sizeof(arr) / sizeof((arr)[0]))
-
-void *do_nofail(void *ptr, const char *expr);
 
 struct buffer {
 	char *p;
@@ -186,13 +182,8 @@ char *read_text_file(const char *filename);
 char *get_line(char **stringp);
 void *sym_get_data(const struct elf_info *info, const Elf_Sym *sym);
 
-enum loglevel {
-	LOG_WARN,
-	LOG_ERROR,
-};
-
 void __attribute__((format(printf, 2, 3)))
-modpost_log(enum loglevel loglevel, const char *fmt, ...);
+modpost_log(bool is_error, const char *fmt, ...);
 
 /*
  * warn - show the given message, then let modpost continue running, still
@@ -207,6 +198,6 @@ modpost_log(enum loglevel loglevel, const char *fmt, ...);
  * fatal - show the given message, and bail out immediately. This should be
  *         used when there is no point to continue running modpost.
  */
-#define warn(fmt, args...)	modpost_log(LOG_WARN, fmt, ##args)
-#define error(fmt, args...)	modpost_log(LOG_ERROR, fmt, ##args)
+#define warn(fmt, args...)	modpost_log(false, fmt, ##args)
+#define error(fmt, args...)	modpost_log(true, fmt, ##args)
 #define fatal(fmt, args...)	do { error(fmt, ##args); exit(1); } while (1)
