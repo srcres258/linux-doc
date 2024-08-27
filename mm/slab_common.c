@@ -103,10 +103,9 @@ static int kmem_cache_sanity_check(const char *name, unsigned int size)
 		return -EINVAL;
 	}
 
-	if (kmem_cache_is_duplicate_name(name)) {
-		/* Duplicate names will confuse slabtop, et al */
-		pr_warn("%s: name %s already exists as a cache\n", __func__, name);
-	}
+	/* Duplicate names will confuse slabtop, et al */
+	WARN(kmem_cache_is_duplicate_name(name),
+			"kmem_cache of name '%s' already exists\n", name);
 
 	WARN_ON(strchr(name, ' '));	/* It confuses parsers */
 	return 0;

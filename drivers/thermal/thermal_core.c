@@ -323,11 +323,15 @@ static void thermal_zone_broken_disable(struct thermal_zone_device *tz)
 static void thermal_zone_device_set_polling(struct thermal_zone_device *tz,
 					    unsigned long delay)
 {
-	if (delay)
-		mod_delayed_work(system_freezable_power_efficient_wq,
-				 &tz->poll_queue, delay);
-	else
+	if (!delay) {
 		cancel_delayed_work(&tz->poll_queue);
+		return;
+	}
+
+	if (delay > HZ)
+		delay = round_jiffies_relative(delay);
+
+	mod_delayed_work(system_freezable_power_efficient_wq, &tz->poll_queue, delay);
 }
 
 static void thermal_zone_recheck(struct thermal_zone_device *tz, int error)
@@ -783,12 +787,6 @@ static int thermal_bind_cdev_to_trip(struct thermal_zone_device *tz,
 	bool upper_no_limit;
 	int result;
 
-	lockdep_assert_held(&thermal_list_lock);
-	lockdep_assert_held(&tz->lock);
-
-	if (list_empty(&tz->node) || list_empty(&cdev->node))
-		return -EINVAL;
-
 	/* lower default 0, upper default max_state */
 	if (cool_spec->lower == THERMAL_NO_LIMIT)
 		cool_spec->lower = 0;
@@ -806,7 +804,7 @@ static int thermal_bind_cdev_to_trip(struct thermal_zone_device *tz,
 	dev = kzalloc(sizeof(*dev), GFP_KERNEL);
 	if (!dev)
 		return -ENOMEM;
-	dev->tz = tz;
+
 	dev->cdev = cdev;
 	dev->trip = trip;
 	dev->upper = cool_spec->upper;
@@ -951,8 +949,8 @@ void print_bind_err_msg(struct thermal_zone_device *tz,
 		cdev->type, thermal_zone_trip_id(tz, trip), ret);
 }
 
-static void thermal_zone_cdev_binding(struct thermal_zone_device *tz,
-				      struct thermal_cooling_device *cdev)
+static void thermal_zone_cdev_bind(struct thermal_zone_device *tz,
+				   struct thermal_cooling_device *cdev)
 {
 	struct thermal_trip_desc *td;
 
@@ -1077,7 +1075,7 @@ __thermal_cooling_device_register(struct device_node *np,
 
 	/* Update binding information for 'this' new cdev */
 	list_for_each_entry(pos, &thermal_tz_list, node)
-		thermal_zone_cdev_binding(pos, cdev);
+		thermal_zone_cdev_bind(pos, cdev);
 
 	list_for_each_entry(pos, &thermal_tz_list, node)
 		if (atomic_cmpxchg(&pos->need_update, 1, 0))
@@ -1278,8 +1276,8 @@ unlock_list:
 }
 EXPORT_SYMBOL_GPL(thermal_cooling_device_update);
 
-static void thermal_zone_cdev_unbinding(struct thermal_zone_device *tz,
-					struct thermal_cooling_device *cdev)
+static void thermal_zone_cdev_unbind(struct thermal_zone_device *tz,
+				     struct thermal_cooling_device *cdev)
 {
 	struct thermal_trip_desc *td;
 
@@ -1318,20 +1316,13 @@ void thermal_cooling_device_unregister(struct thermal_cooling_device *cdev)
 
 	/* Unbind all thermal zones associated with 'this' cdev */
 	list_for_each_entry(tz, &thermal_tz_list, node)
-		thermal_zone_cdev_unbinding(tz, cdev);
+		thermal_zone_cdev_unbind(tz, cdev);
 
 	mutex_unlock(&thermal_list_lock);
 
 	device_unregister(&cdev->device);
 }
 EXPORT_SYMBOL_GPL(thermal_cooling_device_unregister);
-
-static void thermal_set_delay_jiffies(unsigned long *delay_jiffies, int delay_ms)
-{
-	*delay_jiffies = msecs_to_jiffies(delay_ms);
-	if (delay_ms > 1000)
-		*delay_jiffies = round_jiffies(*delay_jiffies);
-}
 
 int thermal_zone_get_crit_temp(struct thermal_zone_device *tz, int *temp)
 {
@@ -1479,8 +1470,8 @@ thermal_zone_device_register_with_trips(const char *type,
 		td->threshold = INT_MAX;
 	}
 
-	thermal_set_delay_jiffies(&tz->passive_delay_jiffies, passive_delay);
-	thermal_set_delay_jiffies(&tz->polling_delay_jiffies, polling_delay);
+	tz->polling_delay_jiffies = msecs_to_jiffies(polling_delay);
+	tz->passive_delay_jiffies = msecs_to_jiffies(passive_delay);
 	tz->recheck_delay_jiffies = THERMAL_RECHECK_DELAY;
 
 	/* sys I/F */
@@ -1531,7 +1522,7 @@ thermal_zone_device_register_with_trips(const char *type,
 
 	/* Bind cooling devices for this zone */
 	list_for_each_entry(cdev, &thermal_cdev_list, node)
-		thermal_zone_cdev_binding(tz, cdev);
+		thermal_zone_cdev_bind(tz, cdev);
 
 	mutex_unlock(&thermal_list_lock);
 
@@ -1625,7 +1616,7 @@ void thermal_zone_device_unregister(struct thermal_zone_device *tz)
 
 	/* Unbind all cdevs associated with 'this' thermal zone */
 	list_for_each_entry(cdev, &thermal_cdev_list, node)
-		thermal_zone_cdev_unbinding(tz, cdev);
+		thermal_zone_cdev_unbind(tz, cdev);
 
 	mutex_unlock(&thermal_list_lock);
 

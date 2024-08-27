@@ -219,9 +219,9 @@ static noinline void __process_finished_items(struct rcu_pending *pending,
 			BUILD_BUG_ON(ARCH_SLAB_MINALIGN == 0);
 
 			void *ptr = (void *)(((unsigned long) obj->func) & ~1UL);
-			kvfree(ptr);
-
 			bool free_head = ((unsigned long) obj->func) & 1UL;
+
+			kvfree(ptr);
 			if (free_head)
 				kfree(obj);
 		}

@@ -236,6 +236,7 @@ static const struct acpi_device_id acpi_apd_device_ids[] = {
 	{ "AMD0030", },
 	{ "AMD0040", APD_ADDR(fch_misc_desc)},
 	{ "AMDI0010", APD_ADDR(wt_i2c_desc) },
+	{ "AMDI0015", APD_ADDR(wt_i3c_desc) },
 	{ "AMDI0019", APD_ADDR(wt_i2c_desc) },
 	{ "AMDI0015", APD_ADDR(wt_i3c_desc) },
 	{ "AMDI0020", APD_ADDR(cz_uart_desc) },
