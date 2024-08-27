@@ -29,6 +29,7 @@
 #include <linux/fileattr.h>
 #include <linux/fsverity.h>
 #include <linux/sched/xacct.h>
+#include <linux/io_uring/cmd.h>
 #include "ctree.h"
 #include "disk-io.h"
 #include "export.h"
@@ -4509,24 +4510,54 @@ static int _btrfs_ioctl_send(struct btrfs_inode *inode, void __user *argp, bool 
 	return ret;
 }
 
-static int btrfs_ioctl_encoded_read(struct file *file, void __user *argp,
-				    bool compat)
+ssize_t btrfs_encoded_read_finish(struct btrfs_encoded_read_private *priv,
+				  ssize_t ret)
 {
-	struct btrfs_ioctl_encoded_io_args args = { 0 };
+	size_t copy_end_kernel = offsetofend(struct btrfs_ioctl_encoded_io_args,
+					     flags);
+	unsigned long i;
+
+	if (ret == -EIOCBQUEUED)
+		ret = btrfs_encoded_read_regular_end(priv);
+
+	if (ret >= 0) {
+		fsnotify_access(priv->file);
+		if (copy_to_user(priv->copy_out,
+				 (char *)&priv->args + copy_end_kernel,
+				 sizeof(priv->args) - copy_end_kernel))
+			ret = -EFAULT;
+	}
+
+	for (i = 0; i < priv->nr_pages; i++) {
+		if (priv->pages[i])
+			__free_page(priv->pages[i]);
+	}
+	kfree(priv->pages);
+	kfree(priv->iov);
+
+	if (ret > 0)
+		add_rchar(current, ret);
+	inc_syscr(current);
+	return ret;
+}
+
+static ssize_t btrfs_prepare_encoded_read(struct btrfs_encoded_read_private *priv,
+					  struct file *file, bool compat,
+					  void __user *argp)
+{
 	size_t copy_end_kernel = offsetofend(struct btrfs_ioctl_encoded_io_args,
 					     flags);
 	size_t copy_end;
-	struct iovec iovstack[UIO_FASTIOV];
-	struct iovec *iov = iovstack;
-	struct iov_iter iter;
 	loff_t pos;
-	struct kiocb kiocb;
 	ssize_t ret;
 
-	if (!capable(CAP_SYS_ADMIN)) {
-		ret = -EPERM;
-		goto out_acct;
-	}
+	memset(priv, 0, sizeof(*priv));
+
+	atomic_set(&priv->pending, 1);
+	priv->file = file;
+
+	if (!capable(CAP_SYS_ADMIN))
+		return -EPERM;
 
 	if (compat) {
 #if defined(CONFIG_64BIT) && defined(CONFIG_COMPAT)
@@ -4534,62 +4565,65 @@ static int btrfs_ioctl_encoded_read(struct file *file, void __user *argp,
 
 		copy_end = offsetofend(struct btrfs_ioctl_encoded_io_args_32,
 				       flags);
-		if (copy_from_user(&args32, argp, copy_end)) {
-			ret = -EFAULT;
-			goto out_acct;
-		}
-		args.iov = compat_ptr(args32.iov);
-		args.iovcnt = args32.iovcnt;
-		args.offset = args32.offset;
-		args.flags = args32.flags;
+		if (copy_from_user(&args32, argp, copy_end))
+			return -EFAULT;
+
+		priv->args.iov = compat_ptr(args32.iov);
+		priv->args.iovcnt = args32.iovcnt;
+		priv->args.offset = args32.offset;
+		priv->args.flags = args32.flags;
 #else
 		return -ENOTTY;
 #endif
 	} else {
 		copy_end = copy_end_kernel;
-		if (copy_from_user(&args, argp, copy_end)) {
-			ret = -EFAULT;
-			goto out_acct;
-		}
-	}
-	if (args.flags != 0) {
-		ret = -EINVAL;
-		goto out_acct;
+		if (copy_from_user(&priv->args, argp, copy_end))
+			return -EFAULT;
 	}
 
-	ret = import_iovec(ITER_DEST, args.iov, args.iovcnt, ARRAY_SIZE(iovstack),
-			   &iov, &iter);
+	if (priv->args.flags != 0)
+		return -EINVAL;
+
+	priv->iov = priv->iovstack;
+	ret = import_iovec(ITER_DEST, priv->args.iov, priv->args.iovcnt,
+			   ARRAY_SIZE(priv->iovstack), &priv->iov, &priv->iter);
+	if (ret < 0) {
+		priv->iov = NULL;
+		return ret;
+	}
+
+	pos = priv->args.offset;
+	ret = rw_verify_area(READ, priv->file, &pos, priv->args.len);
 	if (ret < 0)
-		goto out_acct;
+		return ret;
 
-	if (iov_iter_count(&iter) == 0) {
-		ret = 0;
-		goto out_iov;
+	priv->copy_out = argp + copy_end;
+
+	return 0;
+}
+
+static int btrfs_ioctl_encoded_read(struct file *file, void __user *argp,
+				    bool compat)
+{
+	ssize_t ret;
+	struct btrfs_encoded_read_private priv;
+
+	ret = btrfs_prepare_encoded_read(&priv, file, compat, argp);
+	if (ret)
+		goto out;
+
+	if (iov_iter_count(&priv.iter) == 0)
+		goto out;
+
+	ret = btrfs_encoded_read(&priv);
+
+	if (ret == -EIOCBQUEUED) {
+		if (atomic_dec_return(&priv.pending))
+			io_wait_event(priv.wait, !atomic_read(&priv.pending));
 	}
-	pos = args.offset;
-	ret = rw_verify_area(READ, file, &pos, args.len);
-	if (ret < 0)
-		goto out_iov;
 
-	init_sync_kiocb(&kiocb, file);
-	kiocb.ki_pos = pos;
-
-	ret = btrfs_encoded_read(&kiocb, &iter, &args);
-	if (ret >= 0) {
-		fsnotify_access(file);
-		if (copy_to_user(argp + copy_end,
-				 (char *)&args + copy_end_kernel,
-				 sizeof(args) - copy_end_kernel))
-			ret = -EFAULT;
-	}
-
-out_iov:
-	kfree(iov);
-out_acct:
-	if (ret > 0)
-		add_rchar(current, ret);
-	inc_syscr(current);
-	return ret;
+out:
+	return btrfs_encoded_read_finish(&priv, ret);
 }
 
 static int btrfs_ioctl_encoded_write(struct file *file, void __user *argp, bool compat)
@@ -4690,6 +4724,60 @@ out_acct:
 		add_wchar(current, ret);
 	inc_syscw(current);
 	return ret;
+}
+
+static void btrfs_uring_encoded_read(struct io_uring_cmd *cmd,
+				     unsigned int issue_flags)
+{
+	ssize_t ret;
+	void __user *argp = (void __user *)(uintptr_t)cmd->sqe->addr;
+	struct btrfs_encoded_read_private *priv;
+	bool compat = issue_flags & IO_URING_F_COMPAT;
+
+	priv = kmalloc(sizeof(*priv), GFP_KERNEL);
+	if (!priv) {
+		ret = -ENOMEM;
+		goto out_uring;
+	}
+
+	ret = btrfs_prepare_encoded_read(priv, cmd->file, compat, argp);
+	if (ret)
+		goto out_finish;
+
+	if (iov_iter_count(&priv->iter) == 0) {
+		ret = 0;
+		goto out_finish;
+	}
+
+	*(struct btrfs_encoded_read_private **)cmd->pdu = priv;
+	priv->cmd = cmd;
+	priv->issue_flags = issue_flags;
+	ret = btrfs_encoded_read(priv);
+
+	if (ret == -EIOCBQUEUED && atomic_dec_return(&priv->pending))
+		return;
+
+out_finish:
+	ret = btrfs_encoded_read_finish(priv, ret);
+	kfree(priv);
+
+out_uring:
+	io_uring_cmd_done(cmd, ret, 0, issue_flags);
+}
+
+int btrfs_uring_cmd(struct io_uring_cmd *cmd, unsigned int issue_flags)
+{
+	switch (cmd->cmd_op) {
+	case BTRFS_IOC_ENCODED_READ:
+#if defined(CONFIG_64BIT) && defined(CONFIG_COMPAT)
+	case BTRFS_IOC_ENCODED_READ_32:
+#endif
+		btrfs_uring_encoded_read(cmd, issue_flags);
+		return -EIOCBQUEUED;
+	}
+
+	io_uring_cmd_done(cmd, -EINVAL, 0, issue_flags);
+	return -EIOCBQUEUED;
 }
 
 long btrfs_ioctl(struct file *file, unsigned int
