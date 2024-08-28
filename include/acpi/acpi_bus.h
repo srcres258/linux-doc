@@ -228,10 +228,12 @@ struct acpi_device_dir {
 
 /* Plug and Play */
 
+#define MAX_ACPI_DEVICE_NAME_LEN	40
+#define MAX_ACPI_CLASS_NAME_LEN		20
 typedef char acpi_bus_id[8];
 typedef u64 acpi_bus_address;
-typedef char acpi_device_name[40];
-typedef char acpi_device_class[20];
+typedef char acpi_device_name[MAX_ACPI_DEVICE_NAME_LEN];
+typedef char acpi_device_class[MAX_ACPI_CLASS_NAME_LEN];
 
 struct acpi_hardware_id {
 	struct list_head list;
@@ -255,7 +257,6 @@ struct acpi_device_pnp {
 	struct list_head ids;		/* _HID and _CIDs */
 	acpi_device_name device_name;	/* Driver-determined */
 	acpi_device_class device_class;	/*        "          */
-	union acpi_object *str_obj;	/* unicode string for _STR method */
 };
 
 #define acpi_device_bid(d)	((d)->pnp.bus_id)
