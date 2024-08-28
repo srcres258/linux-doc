@@ -26,6 +26,7 @@
 /* PCI VID definitions */
 #define PCI_VENDOR_ID_THALES	0x1269
 #define PCI_VENDOR_ID_QUECTEL	0x1eac
+#define PCI_VENDOR_ID_NETPRISMA	0x203e
 
 #define MHI_EDL_DB			91
 #define MHI_EDL_COOKIE			0xEDEDEDED
@@ -680,6 +681,35 @@ static const struct mhi_pci_dev_info mhi_telit_fn990_info = {
 	.mru_default = 32768,
 };
 
+static const struct mhi_pci_dev_info mhi_telit_fe990a_info = {
+	.name = "telit-fe990a",
+	.config = &modem_telit_fn990_config,
+	.bar_num = MHI_PCI_DEFAULT_BAR_NUM,
+	.dma_data_width = 32,
+	.sideband_wake = false,
+	.mru_default = 32768,
+};
+
+static const struct mhi_pci_dev_info mhi_netprisma_lcur57_info = {
+	.name = "netprisma-lcur57",
+	.edl = "qcom/prog_firehose_sdx24.mbn",
+	.config = &modem_quectel_em1xx_config,
+	.bar_num = MHI_PCI_DEFAULT_BAR_NUM,
+	.dma_data_width = 32,
+	.mru_default = 32768,
+	.sideband_wake = true,
+};
+
+static const struct mhi_pci_dev_info mhi_netprisma_fcun69_info = {
+	.name = "netprisma-fcun69",
+	.edl = "qcom/prog_firehose_sdx6x.elf",
+	.config = &modem_quectel_em1xx_config,
+	.bar_num = MHI_PCI_DEFAULT_BAR_NUM,
+	.dma_data_width = 32,
+	.mru_default = 32768,
+	.sideband_wake = true,
+};
+
 /* Keep the list sorted based on the PID. New VID should be added as the last entry */
 static const struct pci_device_id mhi_pci_id_table[] = {
 	{ PCI_DEVICE(PCI_VENDOR_ID_QCOM, 0x0304),
@@ -697,9 +727,9 @@ static const struct pci_device_id mhi_pci_id_table[] = {
 	/* Telit FN990 */
 	{ PCI_DEVICE_SUB(PCI_VENDOR_ID_QCOM, 0x0308, 0x1c5d, 0x2010),
 		.driver_data = (kernel_ulong_t) &mhi_telit_fn990_info },
-	/* Telit FE990 */
+	/* Telit FE990A */
 	{ PCI_DEVICE_SUB(PCI_VENDOR_ID_QCOM, 0x0308, 0x1c5d, 0x2015),
-		.driver_data = (kernel_ulong_t) &mhi_telit_fn990_info },
+		.driver_data = (kernel_ulong_t) &mhi_telit_fe990a_info },
 	{ PCI_DEVICE(PCI_VENDOR_ID_QCOM, 0x0308),
 		.driver_data = (kernel_ulong_t) &mhi_qcom_sdx65_info },
 	{ PCI_DEVICE(PCI_VENDOR_ID_QCOM, 0x0309),
@@ -778,6 +808,12 @@ static const struct pci_device_id mhi_pci_id_table[] = {
 	/* T99W175 (sdx55), HP variant */
 	{ PCI_DEVICE(0x03f0, 0x0a6c),
 		.driver_data = (kernel_ulong_t) &mhi_foxconn_t99w175_info },
+	/* NETPRISMA LCUR57 (SDX24) */
+	{ PCI_DEVICE(PCI_VENDOR_ID_NETPRISMA, 0x1000),
+		.driver_data = (kernel_ulong_t) &mhi_netprisma_lcur57_info },
+	/* NETPRISMA FCUN69 (SDX6X) */
+	{ PCI_DEVICE(PCI_VENDOR_ID_NETPRISMA, 0x1001),
+		.driver_data = (kernel_ulong_t) &mhi_netprisma_fcun69_info },
 	{  }
 };
 MODULE_DEVICE_TABLE(pci, mhi_pci_id_table);
