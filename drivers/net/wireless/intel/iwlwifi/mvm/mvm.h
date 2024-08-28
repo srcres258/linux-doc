@@ -368,6 +368,7 @@ struct iwl_mvm_vif_link_info {
  *	preventing the enablement of EMLSR
  * @IWL_MVM_ESR_EXIT_CSA: CSA happened, so exit EMLSR
  * @IWL_MVM_ESR_EXIT_LINK_USAGE: Exit EMLSR due to low tpt on secondary link
+ * @IWL_MVM_ESR_EXIT_FAIL_ENTRY: Exit EMLSR due to entry failure
  */
 enum iwl_mvm_esr_state {
 	IWL_MVM_ESR_BLOCKED_PREVENTION	= 0x1,
@@ -382,6 +383,7 @@ enum iwl_mvm_esr_state {
 	IWL_MVM_ESR_EXIT_BANDWIDTH	= 0x80000,
 	IWL_MVM_ESR_EXIT_CSA		= 0x100000,
 	IWL_MVM_ESR_EXIT_LINK_USAGE	= 0x200000,
+	IWL_MVM_ESR_EXIT_FAIL_ENTRY	= 0x400000,
 };
 
 #define IWL_MVM_BLOCK_ESR_REASONS 0xffff
@@ -1164,7 +1166,7 @@ struct iwl_mvm {
 
 	struct ieee80211_vif __rcu *vif_id_to_mac[NUM_MAC_INDEX_DRIVER];
 
-	struct ieee80211_bss_conf __rcu *link_id_to_link_conf[IWL_MVM_FW_MAX_LINK_ID + 1];
+	struct ieee80211_bss_conf __rcu *link_id_to_link_conf[IWL_FW_MAX_LINK_ID + 1];
 
 	/* -1 for always, 0 for never, >0 for that many times */
 	s8 fw_restart;
@@ -1200,8 +1202,11 @@ struct iwl_mvm {
 
 	wait_queue_head_t rx_sync_waitq;
 
-	/* BT-Coex */
-	struct iwl_bt_coex_profile_notif last_bt_notif;
+	/* BT-Coex - only one of those will be used */
+	union {
+		struct iwl_bt_coex_prof_old_notif last_bt_notif;
+		struct iwl_bt_coex_profile_notif last_bt_wifi_loss;
+	};
 	struct iwl_bt_coex_ci_cmd last_bt_ci_cmd;
 
 	u8 bt_tx_prio;
@@ -1365,6 +1370,7 @@ struct iwl_mvm {
 	struct iwl_mvm_acs_survey *acs_survey;
 
 	bool statistics_clear;
+	u32 bios_enable_puncturing;
 };
 
 /* Extract MVM priv from op_mode and _hw */
@@ -1745,7 +1751,7 @@ static inline int iwl_mvm_max_active_links(struct iwl_mvm *mvm,
 	if (iwl_mvm_is_esr_supported(trans) ||
 	    (CSR_HW_RFID_TYPE(trans->hw_rf_id) == IWL_CFG_RF_TYPE_FM &&
 	     CSR_HW_RFID_IS_CDB(trans->hw_rf_id)))
-		return IWL_MVM_FW_MAX_ACTIVE_LINKS_NUM;
+		return IWL_FW_MAX_ACTIVE_LINKS_NUM;
 
 	return 1;
 }
@@ -1762,6 +1768,13 @@ static inline u8 iwl_mvm_mac_ac_to_tx_fifo(struct iwl_mvm *mvm,
 	if (iwl_mvm_has_new_tx_api(mvm))
 		return iwl_mvm_ac_to_gen2_tx_fifo[ac];
 	return iwl_mvm_ac_to_tx_fifo[ac];
+}
+
+static inline bool iwl_mvm_has_rlc_offload(struct iwl_mvm *mvm)
+{
+	return iwl_fw_lookup_cmd_ver(mvm->fw,
+				     WIDE_ID(DATA_PATH_GROUP, RLC_CONFIG_CMD),
+				     0) >= 3;
 }
 
 struct iwl_rate_info {
@@ -2062,6 +2075,8 @@ void iwl_mvm_rx_beacon_notif(struct iwl_mvm *mvm,
 			     struct iwl_rx_cmd_buffer *rxb);
 void iwl_mvm_rx_missed_beacons_notif(struct iwl_mvm *mvm,
 				     struct iwl_rx_cmd_buffer *rxb);
+void iwl_mvm_rx_missed_beacons_notif_legacy(struct iwl_mvm *mvm,
+					    struct iwl_rx_cmd_buffer *rxb);
 void iwl_mvm_rx_stored_beacon_notif(struct iwl_mvm *mvm,
 				    struct iwl_rx_cmd_buffer *rxb);
 void iwl_mvm_mu_mimo_grp_notif(struct iwl_mvm *mvm,
@@ -2322,6 +2337,8 @@ int iwl_mvm_send_proto_offload(struct iwl_mvm *mvm,
 
 /* BT Coex */
 int iwl_mvm_send_bt_init_conf(struct iwl_mvm *mvm);
+void iwl_mvm_rx_bt_coex_old_notif(struct iwl_mvm *mvm,
+				  struct iwl_rx_cmd_buffer *rxb);
 void iwl_mvm_rx_bt_coex_notif(struct iwl_mvm *mvm,
 			      struct iwl_rx_cmd_buffer *rxb);
 void iwl_mvm_bt_rssi_event(struct iwl_mvm *mvm, struct ieee80211_vif *vif,
@@ -2570,8 +2587,7 @@ u8 iwl_mvm_tcm_load_percentage(u32 airtime, u32 elapsed);
 
 void iwl_mvm_nic_restart(struct iwl_mvm *mvm, bool fw_error);
 unsigned int iwl_mvm_get_wd_timeout(struct iwl_mvm *mvm,
-				    struct ieee80211_vif *vif,
-				    bool tdls, bool cmd_q);
+				    struct ieee80211_vif *vif);
 void iwl_mvm_connection_loss(struct iwl_mvm *mvm, struct ieee80211_vif *vif,
 			     const char *errmsg);
 void iwl_mvm_event_frame_timeout_callback(struct iwl_mvm *mvm,

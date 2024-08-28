@@ -546,7 +546,7 @@ bio_for_each_folio_all(fi, bio) {
 					    !error);
 	}
 
-bio_put(bio);
+	bio_put(bio);
 }
 
 static void begin_folio_read(struct btrfs_fs_info *fs_info, struct folio *folio)
@@ -993,7 +993,6 @@ ASSERT(em_cached);
 	}
 
 	btrfs_lock_and_flush_ordered_range(BTRFS_I(inode), start, start + len - 1, &cached_state);
-
 	em = btrfs_get_extent(BTRFS_I(inode), folio, start, len);
 	if (!IS_ERR(em)) {
 		BUG_ON(*em_cached);
@@ -1476,9 +1475,9 @@ static noinline_for_stack int __extent_writepage_io(struct btrfs_inode *inode,
 	}
 
 	if (btrfs_is_subpage(fs_info, inode->vfs_inode.i_mapping)) {
-		ASSERT(fs_info->subpage_info);
+		ASSERT(fs_info->sectors_per_page > 1);
 		btrfs_get_subpage_dirty_bitmap(fs_info, folio, &dirty_bitmap);
-		bitmap_size = fs_info->subpage_info->bitmap_nr_bits;
+		bitmap_size = fs_info->sectors_per_page;
 	}
 	for (cur = start; cur < start + len; cur += fs_info->sectorsize)
 		set_bit((cur - folio_start) >> fs_info->sectorsize_bits, &range_bitmap);
@@ -1861,12 +1860,12 @@ static int submit_eb_subpage(struct folio *folio, struct writeback_control *wbc)
 	int bit_start = 0;
 	int sectors_per_node = fs_info->nodesize >> fs_info->sectorsize_bits;
 
-/* Lock and write each dirty extent buffers in the range */
-while (bit_start < fs_info->subpage_info->bitmap_nr_bits) {
-	struct btrfs_subpage *subpage = folio_get_private(folio);
-	struct extent_buffer *eb;
-	unsigned long flags;
-	u64 start;
+	/* Lock and write each dirty extent buffers in the range */
+	while (bit_start < fs_info->sectors_per_page) {
+		struct btrfs_subpage *subpage = folio_get_private(folio);
+		struct extent_buffer *eb;
+		unsigned long flags;
+		u64 start;
 
 		/*
 		 * Take private lock to ensure the subpage won't be detached
@@ -1878,7 +1877,7 @@ while (bit_start < fs_info->subpage_info->bitmap_nr_bits) {
 			break;
 		}
 		spin_lock_irqsave(&subpage->lock, flags);
-		if (!test_bit(bit_start + fs_info->subpage_info->dirty_offset,
+		if (!test_bit(bit_start + btrfs_bitmap_nr_dirty * fs_info->sectors_per_page,
 			      subpage->bitmaps)) {
 			spin_unlock_irqrestore(&subpage->lock, flags);
 			spin_unlock(&folio->mapping->i_private_lock);
