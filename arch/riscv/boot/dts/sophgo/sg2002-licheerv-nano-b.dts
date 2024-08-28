@@ -1,15 +1,15 @@
 // SPDX-License-Identifier: (GPL-2.0 OR MIT)
 /*
- * Copyright (C) 2023 Inochi Amaoto <inochiama@outlook.com>
+ * Copyright (C) 2024 Thomas Bonnefille <thomas.bonnefille@bootlin.com>
  */
 
 /dts-v1/;
 
-#include "cv1812h.dtsi"
+#include "sg2002.dtsi"
 
 / {
-	model = "Huashan Pi";
-	compatible = "sophgo,huashan-pi", "sophgo,cv1812h";
+	model = "LicheeRV Nano B";
+	compatible = "sipeed,licheerv-nano-b", "sipeed,licheerv-nano", "sophgo,sg2002";
 
 	aliases {
 		gpio0 = &gpio0;
@@ -25,17 +25,6 @@
 
 	chosen {
 		stdout-path = "serial0:115200n8";
-	};
-
-	reserved-memory {
-		#address-cells = <1>;
-		#size-cells = <1>;
-		ranges;
-
-		coprocessor_rtos: region@8fe00000 {
-			reg = <0x8fe00000 0x200000>;
-			no-map;
-		};
 	};
 };
 
@@ -53,5 +42,13 @@
 };
 
 &uart0 {
+	status = "okay";
+};
+
+&uart1 {
+	status = "okay";
+};
+
+&i2c0 {
 	status = "okay";
 };
