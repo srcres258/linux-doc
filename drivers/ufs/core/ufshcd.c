@@ -39,7 +39,7 @@
 #include <asm/unaligned.h>
 
 #define CREATE_TRACE_POINTS
-#include <trace/events/ufs.h>
+#include "ufs_trace.h"
 
 #define UFSHCD_ENABLE_INTRS	(UTP_TRANSFER_REQ_COMPL |\
 				 UTP_TASK_REQ_COMPL |\
@@ -1804,8 +1804,6 @@ static void ufshcd_remove_clk_scaling_sysfs(struct ufs_hba *hba)
 
 static void ufshcd_init_clk_scaling(struct ufs_hba *hba)
 {
-	char wq_name[sizeof("ufs_clkscaling_00")];
-
 	if (!ufshcd_is_clkscaling_supported(hba))
 		return;
 
@@ -1817,9 +1815,8 @@ static void ufshcd_init_clk_scaling(struct ufs_hba *hba)
 	INIT_WORK(&hba->clk_scaling.resume_work,
 		  ufshcd_clk_scaling_resume_work);
 
-	snprintf(wq_name, sizeof(wq_name), "ufs_clkscaling_%d",
-		 hba->host->host_no);
-	hba->clk_scaling.workq = create_singlethread_workqueue(wq_name);
+	hba->clk_scaling.workq = alloc_ordered_workqueue(
+		"ufs_clkscaling_%d", WQ_MEM_RECLAIM, hba->host->host_no);
 
 	hba->clk_scaling.is_initialized = true;
 }
@@ -2143,8 +2140,6 @@ static void ufshcd_remove_clk_gating_sysfs(struct ufs_hba *hba)
 
 static void ufshcd_init_clk_gating(struct ufs_hba *hba)
 {
-	char wq_name[sizeof("ufs_clk_gating_00")];
-
 	if (!ufshcd_is_clkgating_allowed(hba))
 		return;
 
@@ -2154,10 +2149,9 @@ static void ufshcd_init_clk_gating(struct ufs_hba *hba)
 	INIT_DELAYED_WORK(&hba->clk_gating.gate_work, ufshcd_gate_work);
 	INIT_WORK(&hba->clk_gating.ungate_work, ufshcd_ungate_work);
 
-	snprintf(wq_name, ARRAY_SIZE(wq_name), "ufs_clk_gating_%d",
-		 hba->host->host_no);
-	hba->clk_gating.clk_gating_workq = alloc_ordered_workqueue(wq_name,
-					WQ_MEM_RECLAIM | WQ_HIGHPRI);
+	hba->clk_gating.clk_gating_workq = alloc_ordered_workqueue(
+		"ufs_clk_gating_%d", WQ_MEM_RECLAIM | WQ_HIGHPRI,
+		hba->host->host_no);
 
 	ufshcd_init_clk_gating_sysfs(hba);
 
@@ -5895,12 +5889,11 @@ static inline int ufshcd_get_bkops_status(struct ufs_hba *hba, u32 *status)
 /**
  * ufshcd_bkops_ctrl - control the auto bkops based on current bkops status
  * @hba: per-adapter instance
- * @status: bkops_status value
  *
  * Read the bkops_status from the UFS device and Enable fBackgroundOpsEn
  * flag in the device to permit background operations if the device
- * bkops_status is greater than or equal to "status" argument passed to
- * this function, disable otherwise.
+ * bkops_status is greater than or equal to the "hba->urgent_bkops_lvl",
+ * disable otherwise.
  *
  * Return: 0 for success, non-zero in case of failure.
  *
@@ -5908,11 +5901,11 @@ static inline int ufshcd_get_bkops_status(struct ufs_hba *hba, u32 *status)
  * to know whether auto bkops is enabled or disabled after this function
  * returns control to it.
  */
-static int ufshcd_bkops_ctrl(struct ufs_hba *hba,
-			     enum bkops_status status)
+static int ufshcd_bkops_ctrl(struct ufs_hba *hba)
 {
-	int err;
+	enum bkops_status status = hba->urgent_bkops_lvl;
 	u32 curr_status = 0;
+	int err;
 
 	err = ufshcd_get_bkops_status(hba, &curr_status);
 	if (err) {
@@ -5932,23 +5925,6 @@ static int ufshcd_bkops_ctrl(struct ufs_hba *hba,
 		err = ufshcd_disable_auto_bkops(hba);
 out:
 	return err;
-}
-
-/**
- * ufshcd_urgent_bkops - handle urgent bkops exception event
- * @hba: per-adapter instance
- *
- * Enable fBackgroundOpsEn flag in the device to permit background
- * operations.
- *
- * If BKOPs is enabled, this function returns 0, 1 if the bkops in not enabled
- * and negative error value for any other failure.
- *
- * Return: 0 upon success; < 0 upon failure.
- */
-static int ufshcd_urgent_bkops(struct ufs_hba *hba)
-{
-	return ufshcd_bkops_ctrl(hba, hba->urgent_bkops_lvl);
 }
 
 static inline int ufshcd_get_ee_status(struct ufs_hba *hba, u32 *status)
@@ -9711,7 +9687,7 @@ static int __ufshcd_wl_suspend(struct ufs_hba *hba, enum ufs_pm_op pm_op)
 			 * allow background operations if bkops status shows
 			 * that performance might be impacted.
 			 */
-			ret = ufshcd_urgent_bkops(hba);
+			ret = ufshcd_bkops_ctrl(hba);
 			if (ret) {
 				/*
 				 * If return err in suspend flow, IO will hang.
@@ -9900,7 +9876,7 @@ static int __ufshcd_wl_resume(struct ufs_hba *hba, enum ufs_pm_op pm_op)
 		 * If BKOPs operations are urgently needed at this moment then
 		 * keep auto-bkops enabled or else disable it.
 		 */
-		ufshcd_urgent_bkops(hba);
+		ufshcd_bkops_ctrl(hba);
 
 	if (hba->ee_usr_mask)
 		ufshcd_write_ee_control(hba);
@@ -10414,7 +10390,6 @@ int ufshcd_init(struct ufs_hba *hba, void __iomem *mmio_base, unsigned int irq)
 	int err;
 	struct Scsi_Host *host = hba->host;
 	struct device *dev = hba->dev;
-	char eh_wq_name[sizeof("ufs_eh_wq_00")];
 
 	/*
 	 * dev_set_drvdata() must be called before any callbacks are registered
@@ -10481,9 +10456,8 @@ int ufshcd_init(struct ufs_hba *hba, void __iomem *mmio_base, unsigned int irq)
 	hba->max_pwr_info.is_valid = false;
 
 	/* Initialize work queues */
-	snprintf(eh_wq_name, sizeof(eh_wq_name), "ufs_eh_wq_%d",
-		 hba->host->host_no);
-	hba->eh_wq = create_singlethread_workqueue(eh_wq_name);
+	hba->eh_wq = alloc_ordered_workqueue("ufs_eh_wq_%d", WQ_MEM_RECLAIM,
+					     hba->host->host_no);
 	if (!hba->eh_wq) {
 		dev_err(hba->dev, "%s: failed to create eh workqueue\n",
 			__func__);
