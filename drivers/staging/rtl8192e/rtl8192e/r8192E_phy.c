@@ -416,6 +416,7 @@ static bool _rtl92e_bb_config_para_file(struct net_device *dev)
 
 	return rtStatus;
 }
+
 bool rtl92e_config_bb(struct net_device *dev)
 {
 	_rtl92e_init_bb_rf_reg_def(dev);
@@ -552,18 +553,18 @@ static u8 _rtl92e_phy_switch_channel_step(struct net_device *dev, u8 channel,
 		_rtl92e_phy_set_sw_chnl_cmd_array(dev, ieee->PreCommonCmd,
 						  PreCommonCmdCnt++,
 						  MAX_PRECMD_CNT,
-						  CmdID_SetTxPowerLevel,
+						  cmd_id_set_tx_power_level,
 						  0, 0, 0);
 		_rtl92e_phy_set_sw_chnl_cmd_array(dev, ieee->PreCommonCmd,
 						  PreCommonCmdCnt++,
-						  MAX_PRECMD_CNT, CmdID_End,
+						  MAX_PRECMD_CNT, cmd_id_end,
 						  0, 0, 0);
 
 		PostCommonCmdCnt = 0;
 
 		_rtl92e_phy_set_sw_chnl_cmd_array(dev, ieee->PostCommonCmd,
 						  PostCommonCmdCnt++,
-						  MAX_POSTCMD_CNT, CmdID_End,
+						  MAX_POSTCMD_CNT, cmd_id_end,
 						  0, 0, 0);
 
 		RfDependCmdCnt = 0;
@@ -585,7 +586,7 @@ static u8 _rtl92e_phy_switch_channel_step(struct net_device *dev, u8 channel,
 						  ieee->RfDependCmd,
 						  RfDependCmdCnt++,
 						  MAX_RFDEPENDCMD_CNT,
-						  CmdID_End, 0, 0, 0);
+						  cmd_id_end, 0, 0, 0);
 
 		do {
 			switch (*stage) {
@@ -600,7 +601,7 @@ static u8 _rtl92e_phy_switch_channel_step(struct net_device *dev, u8 channel,
 				break;
 			}
 
-			if (CurrentCmd && CurrentCmd->CmdID == CmdID_End) {
+			if (CurrentCmd && CurrentCmd->CmdID == cmd_id_end) {
 				if ((*stage) == 2)
 					return true;
 				(*stage)++;
@@ -611,20 +612,20 @@ static u8 _rtl92e_phy_switch_channel_step(struct net_device *dev, u8 channel,
 			if (!CurrentCmd)
 				continue;
 			switch (CurrentCmd->CmdID) {
-			case CmdID_SetTxPowerLevel:
+			case cmd_id_set_tx_power_level:
 				if (priv->ic_cut > VERSION_8190_BD)
 					_rtl92e_set_tx_power_level(dev,
 								   channel);
 				break;
-			case CmdID_WritePortUlong:
+			case cmd_id_write_port_ulong:
 				rtl92e_writel(dev, CurrentCmd->Para1,
 					      CurrentCmd->Para2);
 				break;
-			case CmdID_WritePortUshort:
+			case cmd_id_write_port_ushort:
 				rtl92e_writew(dev, CurrentCmd->Para1,
 					      CurrentCmd->Para2);
 				break;
-			case CmdID_WritePortUchar:
+			case cmd_id_write_port_uchar:
 				rtl92e_writeb(dev, CurrentCmd->Para1,
 					      CurrentCmd->Para2);
 				break;
@@ -944,19 +945,19 @@ void rtl92e_init_gain(struct net_device *dev, u8 Operation)
 		case IG_Restore:
 			BitMask = 0x7f;
 			rtl92e_set_bb_reg(dev, rOFDM0_XAAGCCore1, BitMask,
-					 (u32)priv->initgain_backup.xaagccore1);
+					  (u32)priv->initgain_backup.xaagccore1);
 			rtl92e_set_bb_reg(dev, rOFDM0_XBAGCCore1, BitMask,
-					 (u32)priv->initgain_backup.xbagccore1);
+					  (u32)priv->initgain_backup.xbagccore1);
 			rtl92e_set_bb_reg(dev, rOFDM0_XCAGCCore1, BitMask,
-					 (u32)priv->initgain_backup.xcagccore1);
+					  (u32)priv->initgain_backup.xcagccore1);
 			rtl92e_set_bb_reg(dev, rOFDM0_XDAGCCore1, BitMask,
-					 (u32)priv->initgain_backup.xdagccore1);
+					  (u32)priv->initgain_backup.xdagccore1);
 			BitMask  = bMaskByte2;
 			rtl92e_set_bb_reg(dev, rCCK0_CCA, BitMask,
-					 (u32)priv->initgain_backup.cca);
+					  (u32)priv->initgain_backup.cca);
 
 			rtl92e_set_tx_power(dev,
-					 priv->rtllib->current_network.channel);
+					    priv->rtllib->current_network.channel);
 			break;
 		}
 	}
