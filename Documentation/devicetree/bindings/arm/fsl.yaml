@@ -809,19 +809,19 @@ properties:
           - const: kontron,sl-imx6ull   # Kontron SL i.MX6ULL SoM
           - const: fsl,imx6ull
 
-      - description: TQ Systems TQMa6ULLx SoM on MBa6ULx board
+      - description: TQ-Systems TQMa6ULLx SoM on MBa6ULx board
         items:
           - enum:
-              - tq,imx6ull-tqma6ull2-mba6ulx
-          - const: tq,imx6ull-tqma6ull2      # MCIMX6Y2
+              - tq,imx6ull-tqma6ull2-mba6ulx # TQMa6ULL socketable SoM with MCIMX6Y2 on MBa6ULx EVK
+          - const: tq,imx6ull-tqma6ull2      # TQMa6ULL socketable SoM with MCIMX6Y2
           - const: fsl,imx6ull
 
-      - description: TQ Systems TQMa6ULLxL SoM on MBa6ULx[L] board
+      - description: TQ-Systems TQMa6ULLxL SoM on MBa6ULx[L] board
         items:
           - enum:
-              - tq,imx6ull-tqma6ull2l-mba6ulx # using LGA adapter
-              - tq,imx6ull-tqma6ull2l-mba6ulxl
-          - const: tq,imx6ull-tqma6ull2l      # MCIMX6Y2, LGA SoM variant
+              - tq,imx6ull-tqma6ull2l-mba6ulx  # TQMa6ULLxL LGA SoM with socketable Adapter on MBa6ULx EVK
+              - tq,imx6ull-tqma6ull2l-mba6ulxl # TQMa6ULLxL LGA SoM on MBa6ULxL gateway board
+          - const: tq,imx6ull-tqma6ull2l       # TQMa6ULLxL LGA SoM with MCIMX6Y2
           - const: fsl,imx6ull
 
       - description: Seeed Stuido i.MX6ULL SoM on dev boards
@@ -1293,6 +1293,7 @@ properties:
           - enum:
               - fsl,imx93-9x9-qsb         # i.MX93 9x9 QSB Board
               - fsl,imx93-11x11-evk       # i.MX93 11x11 EVK Board
+              - fsl,imx93-14x14-evk       # i.MX93 14x14 EVK Board
           - const: fsl,imx93
 
       - description: i.MX95 based Boards
@@ -1342,6 +1343,12 @@ properties:
         items:
           - const: variscite,var-som-mx93-symphony
           - const: variscite,var-som-mx93
+          - const: fsl,imx93
+
+      - description: Kontron OSM-S i.MX93 SoM based boards
+        items:
+          - const: kontron,imx93-bl-osm-s # Kontron BL i.MX93 OSM-S board
+          - const: kontron,imx93-osm-s    # Kontron OSM-S i.MX93 SoM
           - const: fsl,imx93
 
       - description:
@@ -1522,6 +1529,12 @@ properties:
               - fsl,ls2080a-qds
               - fsl,ls2080a-rdb
           - const: fsl,ls2080a
+
+      - description: LS2081A based Boards
+        items:
+          - enum:
+              - fsl,ls2081a-rdb
+          - const: fsl,ls2081a
 
       - description: LS2088A based Boards
         items:
