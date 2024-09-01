@@ -191,6 +191,8 @@ struct ec_stripe_head {
 	unsigned		redundancy;
 	enum bch_watermark	watermark;
 
+	u64			nr_created;
+
 	struct bch_devs_mask	devs;
 	unsigned		nr_active_devs;
 
