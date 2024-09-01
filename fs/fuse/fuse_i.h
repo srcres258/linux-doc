@@ -298,7 +298,6 @@ struct fuse_args {
 	uint8_t out_numargs;
 	uint8_t ext_idx;
 	bool force:1;
-	bool noreply:1;
 	bool nocreds:1;
 	bool in_pages:1;
 	bool out_pages:1;
@@ -449,22 +448,19 @@ struct fuse_iqueue;
  */
 struct fuse_iqueue_ops {
 	/**
-	 * Signal that a forget has been queued
+	 * Send one forget
 	 */
-	void (*wake_forget_and_unlock)(struct fuse_iqueue *fiq)
-		__releases(fiq->lock);
+	void (*send_forget)(struct fuse_iqueue *fiq, struct fuse_forget_link *link);
 
 	/**
-	 * Signal that an INTERRUPT request has been queued
+	 * Send interrupt for request
 	 */
-	void (*wake_interrupt_and_unlock)(struct fuse_iqueue *fiq)
-		__releases(fiq->lock);
+	void (*send_interrupt)(struct fuse_iqueue *fiq, struct fuse_req *req);
 
 	/**
-	 * Signal that a request has been queued
+	 * Send one request
 	 */
-	void (*wake_pending_and_unlock)(struct fuse_iqueue *fiq)
-		__releases(fiq->lock);
+	void (*send_req)(struct fuse_iqueue *fiq, struct fuse_req *req);
 
 	/**
 	 * Clean up when fuse_iqueue is destroyed
@@ -860,6 +856,9 @@ struct fuse_conn {
 	/** Passthrough support for read/write IO */
 	unsigned int passthrough:1;
 
+	/** Is forget not implemented by fs? */
+	unsigned int no_forget:1;
+
 	/** Maximum stack depth for passthrough backing files */
 	int max_stack_depth;
 
@@ -869,7 +868,7 @@ struct fuse_conn {
 	/** Negotiated minor version */
 	unsigned minor;
 
-	/** Entry on the fuse_mount_list */
+	/** Entry on the fuse_conn_list */
 	struct list_head entry;
 
 	/** Device ID from the root super block */
@@ -1029,6 +1028,26 @@ static inline void fuse_sync_bucket_dec(struct fuse_sync_bucket *bucket)
 	rcu_read_unlock();
 }
 
+static inline void fuse_inc_nlookup(struct fuse_conn *fc, struct fuse_inode *fi)
+{
+	if (fc->no_forget)
+		return;
+
+	spin_lock(&fi->lock);
+	fi->nlookup++;
+	spin_lock(&fi->lock);
+}
+
+static inline void fuse_dec_nlookup(struct fuse_conn *fc, struct fuse_inode *fi)
+{
+	if (fc->no_forget)
+		return;
+
+	spin_lock(&fi->lock);
+	fi->nlookup--;
+	spin_lock(&fi->lock);
+}
+
 /** Device operations */
 extern const struct file_operations fuse_dev_operations;
 
@@ -1051,11 +1070,10 @@ int fuse_lookup_name(struct super_block *sb, u64 nodeid, const struct qstr *name
 void fuse_queue_forget(struct fuse_conn *fc, struct fuse_forget_link *forget,
 		       u64 nodeid, u64 nlookup);
 
-struct fuse_forget_link *fuse_alloc_forget(void);
-
-struct fuse_forget_link *fuse_dequeue_forget(struct fuse_iqueue *fiq,
-					     unsigned int max,
-					     unsigned int *countp);
+static inline struct fuse_forget_link *fuse_alloc_forget(gfp_t flags)
+{
+	return kzalloc(sizeof(struct fuse_forget_link), flags);
+}
 
 /*
  * Initialize READ or READDIR request
