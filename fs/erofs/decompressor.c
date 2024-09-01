@@ -534,18 +534,18 @@ int z_erofs_parse_cfgs(struct super_block *sb, struct erofs_super_block *dsb)
 
 int __init z_erofs_init_decompressor(void)
 {
-	int i, err;
+	int i, err = 0;
 
 	for (i = 0; i < Z_EROFS_COMPRESSION_MAX; ++i) {
 		err = z_erofs_decomp[i] ? z_erofs_decomp[i]->init() : 0;
-		if (err) {
-			while (--i)
+		if (err && i) {
+			while (i--)
 				if (z_erofs_decomp[i])
 					z_erofs_decomp[i]->exit();
-			return err;
+			break;
 		}
 	}
-	return 0;
+	return err;
 }
 
 void z_erofs_exit_decompressor(void)
