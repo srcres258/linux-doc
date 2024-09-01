@@ -155,7 +155,7 @@ static unsigned long shmem_default_max_inodes(void)
 
 static int shmem_swapin_folio(struct inode *inode, pgoff_t index,
 			struct folio **foliop, enum sgp_type sgp, gfp_t gfp,
-			struct mm_struct *fault_mm, vm_fault_t *fault_type);
+			struct vm_area_struct *vma, vm_fault_t *fault_type);
 
 static inline struct shmem_sb_info *SHMEM_SB(struct super_block *sb)
 {
@@ -636,15 +636,14 @@ static const char *shmem_format_huge(int huge)
 #endif
 
 static unsigned long shmem_unused_huge_shrink(struct shmem_sb_info *sbinfo,
-		struct shrink_control *sc, unsigned long nr_to_split)
+		struct shrink_control *sc, unsigned long nr_to_free)
 {
 	LIST_HEAD(list), *pos, *next;
-	LIST_HEAD(to_remove);
 	struct inode *inode;
 	struct shmem_inode_info *info;
 	struct folio *folio;
 	unsigned long batch = sc ? sc->nr_to_scan : 128;
-	int split = 0;
+	unsigned long split = 0, freed = 0;
 
 	if (list_empty(&sbinfo->shrinklist))
 		return SHRINK_STOP;
@@ -662,13 +661,6 @@ static unsigned long shmem_unused_huge_shrink(struct shmem_sb_info *sbinfo,
 			goto next;
 		}
 
-		/* Check if there's anything to gain */
-		if (round_up(inode->i_size, PAGE_SIZE) ==
-				round_up(inode->i_size, HPAGE_PMD_SIZE)) {
-			list_move(&info->shrinklist, &to_remove);
-			goto next;
-		}
-
 		list_move(&info->shrinklist, &list);
 next:
 		sbinfo->shrinklist_len--;
@@ -677,30 +669,32 @@ next:
 	}
 	spin_unlock(&sbinfo->shrinklist_lock);
 
-	list_for_each_safe(pos, next, &to_remove) {
-		info = list_entry(pos, struct shmem_inode_info, shrinklist);
-		inode = &info->vfs_inode;
-		list_del_init(&info->shrinklist);
-		iput(inode);
-	}
-
 	list_for_each_safe(pos, next, &list) {
+		pgoff_t next, end;
+		loff_t i_size;
 		int ret;
-		pgoff_t index;
 
 		info = list_entry(pos, struct shmem_inode_info, shrinklist);
 		inode = &info->vfs_inode;
 
-		if (nr_to_split && split >= nr_to_split)
+		if (nr_to_free && freed >= nr_to_free)
 			goto move_back;
 
-		index = (inode->i_size & HPAGE_PMD_MASK) >> PAGE_SHIFT;
-		folio = filemap_get_folio(inode->i_mapping, index);
-		if (IS_ERR(folio))
+		i_size = i_size_read(inode);
+		folio = filemap_get_entry(inode->i_mapping, i_size / PAGE_SIZE);
+		if (!folio || xa_is_value(folio))
 			goto drop;
 
-		/* No huge page at the end of the file: nothing to split */
+		/* No large folio at the end of the file: nothing to split */
 		if (!folio_test_large(folio)) {
+			folio_put(folio);
+			goto drop;
+		}
+
+		/* Check if there is anything to gain from splitting */
+		next = folio_next_index(folio);
+		end = shmem_fallocend(inode, DIV_ROUND_UP(i_size, PAGE_SIZE));
+		if (end <= folio->index || end >= next) {
 			folio_put(folio);
 			goto drop;
 		}
@@ -725,6 +719,7 @@ next:
 		if (ret)
 			goto move_back;
 
+		freed += next - end;
 		split++;
 drop:
 		list_del_init(&info->shrinklist);
@@ -769,7 +764,7 @@ static long shmem_unused_huge_count(struct super_block *sb,
 #define shmem_huge SHMEM_HUGE_DENY
 
 static unsigned long shmem_unused_huge_shrink(struct shmem_sb_info *sbinfo,
-		struct shrink_control *sc, unsigned long nr_to_split)
+		struct shrink_control *sc, unsigned long nr_to_free)
 {
 	return 0;
 }
@@ -1459,6 +1454,7 @@ static int shmem_writepage(struct page *page, struct writeback_control *wbc)
 	swp_entry_t swap;
 	pgoff_t index;
 	int nr_pages;
+	bool split = false;
 
 	/*
 	 * Our capabilities prevent regular writeback or sync from ever calling
@@ -1477,11 +1473,22 @@ static int shmem_writepage(struct page *page, struct writeback_control *wbc)
 		goto redirty;
 
 	/*
-	 * If /sys/kernel/mm/transparent_hugepage/shmem_enabled is "always" or
-	 * "force", drivers/gpu/drm/i915/gem/i915_gem_shmem.c gets huge pages,
-	 * and its shmem_writeback() needs them to be split when swapping.
+	 * If CONFIG_THP_SWAP is not enabled, the large folio should be
+	 * split when swapping.
+	 *
+	 * And shrinkage of pages beyond i_size does not split swap, so
+	 * swapout of a large folio crossing i_size needs to split too
+	 * (unless fallocate has been used to preallocate beyond EOF).
 	 */
-	if (wbc->split_large_folio && folio_test_large(folio)) {
+	if (folio_test_large(folio)) {
+		index = shmem_fallocend(inode,
+			DIV_ROUND_UP(i_size_read(inode), PAGE_SIZE));
+		if ((index > folio->index && index < folio_next_index(folio)) ||
+		    !IS_ENABLED(CONFIG_THP_SWAP))
+			split = true;
+	}
+
+	if (split) {
 try_split:
 		/* Ensure the subpages are still dirty */
 		folio_test_set_dirty(folio);
@@ -1839,7 +1846,7 @@ allocated:
 		 * Try to reclaim some space by splitting a few
 		 * large folios beyond i_size on the filesystem.
 		 */
-		shmem_unused_huge_shrink(sbinfo, NULL, 2);
+		shmem_unused_huge_shrink(sbinfo, NULL, pages);
 		/*
 		 * And do a shmem_recalc_inode() to account for freed pages:
 		 * except our folio is there in cache, so not quite balanced.
@@ -1887,7 +1894,8 @@ static bool shmem_should_replace_folio(struct folio *folio, gfp_t gfp)
 }
 
 static int shmem_replace_folio(struct folio **foliop, gfp_t gfp,
-				struct shmem_inode_info *info, pgoff_t index)
+				struct shmem_inode_info *info, pgoff_t index,
+				struct vm_area_struct *vma)
 {
 	struct folio *new, *old = *foliop;
 	swp_entry_t entry = old->swap;
@@ -1902,6 +1910,14 @@ static int shmem_replace_folio(struct folio **foliop, gfp_t gfp,
 	 * limit chance of success by further cpuset and node constraints.
 	 */
 	gfp &= ~GFP_CONSTRAINT_MASK;
+#ifdef CONFIG_TRANSPARENT_HUGEPAGE
+	if (nr_pages > 1) {
+		gfp_t huge_gfp = vma_thp_gfp_mask(vma);
+
+		gfp = limit_gfp_mask(huge_gfp, gfp);
+	}
+#endif
+
 	new = shmem_alloc_folio(gfp, folio_order(old), info, index);
 	if (!new)
 		return -ENOMEM;
@@ -1992,12 +2008,15 @@ static void shmem_set_folio_swapin_error(struct inode *inode, pgoff_t index,
 }
 
 static int shmem_split_large_entry(struct inode *inode, pgoff_t index,
-				   swp_entry_t swap, int new_order, gfp_t gfp)
+				   swp_entry_t swap, gfp_t gfp)
 {
 	struct address_space *mapping = inode->i_mapping;
-	XA_STATE_ORDER(xas, &mapping->i_pages, index, new_order);
+	XA_STATE_ORDER(xas, &mapping->i_pages, index, 0);
 	void *alloced_shadow = NULL;
 	int alloced_order = 0, i;
+
+	/* Convert user data gfp flags to xarray node gfp flags */
+	gfp &= GFP_RECLAIM_MASK;
 
 	for (;;) {
 		int order = -1, split_order = 0;
@@ -2020,7 +2039,7 @@ static int shmem_split_large_entry(struct inode *inode, pgoff_t index,
 		}
 
 		/* Try to split large swap entry in pagecache */
-		if (order > 0 && order > new_order) {
+		if (order > 0) {
 			if (!alloced_order) {
 				split_order = order;
 				goto unlock;
@@ -2031,7 +2050,7 @@ static int shmem_split_large_entry(struct inode *inode, pgoff_t index,
 			 * Re-set the swap entry after splitting, and the swap
 			 * offset of the original large entry must be continuous.
 			 */
-			for (i = 0; i < 1 << order; i += (1 << new_order)) {
+			for (i = 0; i < 1 << order; i++) {
 				pgoff_t aligned_index = round_down(index, 1 << order);
 				swp_entry_t tmp;
 
@@ -2074,10 +2093,11 @@ error:
  */
 static int shmem_swapin_folio(struct inode *inode, pgoff_t index,
 			     struct folio **foliop, enum sgp_type sgp,
-			     gfp_t gfp, struct mm_struct *fault_mm,
+			     gfp_t gfp, struct vm_area_struct *vma,
 			     vm_fault_t *fault_type)
 {
 	struct address_space *mapping = inode->i_mapping;
+	struct mm_struct *fault_mm = vma ? vma->vm_mm : NULL;
 	struct shmem_inode_info *info = SHMEM_I(inode);
 	struct swap_info_struct *si;
 	struct folio *folio = NULL;
@@ -2116,7 +2136,7 @@ static int shmem_swapin_folio(struct inode *inode, pgoff_t index,
 		 * should split the large swap entry stored in the pagecache
 		 * if necessary.
 		 */
-		split_order = shmem_split_large_entry(inode, index, swap, 0, gfp);
+		split_order = shmem_split_large_entry(inode, index, swap, gfp);
 		if (split_order < 0) {
 			error = split_order;
 			goto failed;
@@ -2163,7 +2183,7 @@ static int shmem_swapin_folio(struct inode *inode, pgoff_t index,
 	arch_swap_restore(folio_swap(swap, folio), folio);
 
 	if (shmem_should_replace_folio(folio, gfp)) {
-		error = shmem_replace_folio(&folio, gfp, info, index);
+		error = shmem_replace_folio(&folio, gfp, info, index, vma);
 		if (error)
 			goto failed;
 	}
@@ -2244,7 +2264,7 @@ repeat:
 
 	if (xa_is_value(folio)) {
 		error = shmem_swapin_folio(inode, index, &folio,
-					   sgp, gfp, fault_mm, fault_type);
+					   sgp, gfp, vma, fault_type);
 		if (error == -EEXIST)
 			goto repeat;
 
@@ -2323,7 +2343,7 @@ alloced:
 	alloced = true;
 	if (folio_test_large(folio) &&
 	    DIV_ROUND_UP(i_size_read(inode), PAGE_SIZE) <
-					folio_next_index(folio) - 1) {
+					folio_next_index(folio)) {
 		struct shmem_sb_info *sbinfo = SHMEM_SB(inode->i_sb);
 		struct shmem_inode_info *info = SHMEM_I(inode);
 		/*

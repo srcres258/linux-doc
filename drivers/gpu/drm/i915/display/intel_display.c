@@ -1032,8 +1032,8 @@ static bool intel_crtc_vrr_enabling(struct intel_atomic_state *state,
 		  vrr_params_changed(old_crtc_state, new_crtc_state)));
 }
 
-static bool intel_crtc_vrr_disabling(struct intel_atomic_state *state,
-				     struct intel_crtc *crtc)
+bool intel_crtc_vrr_disabling(struct intel_atomic_state *state,
+			      struct intel_crtc *crtc)
 {
 	const struct intel_crtc_state *old_crtc_state =
 		intel_atomic_get_old_crtc_state(state, crtc);
@@ -7512,7 +7512,8 @@ static void intel_atomic_commit_tail(struct intel_atomic_state *state)
 		 *
 		 * FIXME get rid of this funny new->old swapping
 		 */
-		old_crtc_state->dsb = fetch_and_zero(&new_crtc_state->dsb);
+		old_crtc_state->dsb_color_vblank = fetch_and_zero(&new_crtc_state->dsb_color_vblank);
+		old_crtc_state->dsb_color_commit = fetch_and_zero(&new_crtc_state->dsb_color_commit);
 	}
 
 	/* Underruns don't always raise interrupts, so check manually */

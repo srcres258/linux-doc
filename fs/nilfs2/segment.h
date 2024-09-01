@@ -105,7 +105,6 @@ struct nilfs_segsum_pointer {
  * @sc_flush_request: inode bitmap of metadata files to be flushed
  * @sc_wait_request: Client request queue
  * @sc_wait_daemon: Daemon wait queue
- * @sc_wait_task: Start/end wait queue to control segctord task
  * @sc_seq_request: Request counter
  * @sc_seq_accepted: Accepted request count
  * @sc_seq_done: Completion counter
@@ -159,7 +158,6 @@ struct nilfs_sc_info {
 
 	wait_queue_head_t	sc_wait_request;
 	wait_queue_head_t	sc_wait_daemon;
-	wait_queue_head_t	sc_wait_task;
 
 	__u32			sc_seq_request;
 	__u32			sc_seq_accepted;
@@ -172,7 +170,6 @@ struct nilfs_sc_info {
 	unsigned long		sc_watermark;
 
 	struct timer_list	sc_timer;
-	struct task_struct     *sc_timer_task;
 	struct task_struct     *sc_task;
 };
 
@@ -193,7 +190,6 @@ enum {
 };
 
 /* sc_state */
-#define NILFS_SEGCTOR_QUIT	    0x0001  /* segctord is being destroyed */
 #define NILFS_SEGCTOR_COMMIT	    0x0004  /* committed transaction exists */
 
 /*

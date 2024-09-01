@@ -969,7 +969,7 @@ static __always_inline void __folio_set_##fname(struct folio *folio)	\
 {									\
 	VM_BUG_ON_FOLIO(data_race(folio->page.page_type) != UINT_MAX,	\
 			folio);						\
-	folio->page.page_type = PGTY_##lname << 24;			\
+	folio->page.page_type = (unsigned int)PGTY_##lname << 24;	\
 }									\
 static __always_inline void __folio_clear_##fname(struct folio *folio)	\
 {									\
@@ -986,7 +986,7 @@ static __always_inline int Page##uname(const struct page *page)		\
 static __always_inline void __SetPage##uname(struct page *page)		\
 {									\
 	VM_BUG_ON_PAGE(data_race(page->page_type) != UINT_MAX, page);	\
-	page->page_type = PGTY_##lname << 24;				\
+	page->page_type = (unsigned int)PGTY_##lname << 24;		\
 }									\
 static __always_inline void __ClearPage##uname(struct page *page)	\
 {									\

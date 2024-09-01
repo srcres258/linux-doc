@@ -1613,8 +1613,8 @@ struct vm_area_struct *copy_vma(struct vm_area_struct **vmap,
 	vmg.vma = NULL; /* New VMA range. */
 	vmg.pgoff = pgoff;
 	vmg.next = vma_next(&vmi);
-	vma_prev(&vmi);
-	vma_iter_next_range(&vmi);
+	if (vma_prev(&vmi))
+		vma_iter_next_range(&vmi);
 
 	new_vma = vma_merge_new_range(&vmg);
 

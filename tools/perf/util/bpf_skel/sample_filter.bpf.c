@@ -15,13 +15,25 @@ struct filters {
 	__uint(max_entries, 1);
 } filters SEC(".maps");
 
-/* tgid to filter index */
-struct pid_hash {
+/*
+ * An evsel has multiple instances for each CPU or task but we need a single
+ * id to be used as a key for the idx_hash.  This hashmap would translate the
+ * instance's ID to a representative ID.
+ */
+struct event_hash {
 	__uint(type, BPF_MAP_TYPE_HASH);
-	__type(key, int);
+	__type(key, __u64);
+	__type(value, __u64);
+	__uint(max_entries, 1);
+} event_hash SEC(".maps");
+
+/* tgid/evtid to filter index */
+struct idx_hash {
+	__uint(type, BPF_MAP_TYPE_HASH);
+	__type(key, struct idx_hash_key);
 	__type(value, int);
 	__uint(max_entries, 1);
-} pid_hash SEC(".maps");
+} idx_hash SEC(".maps");
 
 /* tgid to filter index */
 struct lost_count {
@@ -31,7 +43,7 @@ struct lost_count {
 	__uint(max_entries, 1);
 } dropped SEC(".maps");
 
-volatile const int use_pid_hash;
+volatile const int use_idx_hash;
 
 void *bpf_cast_to_kern_ctx(void *) __ksym;
 
@@ -81,6 +93,7 @@ static inline __u64 perf_get_sample(struct bpf_perf_event_data_kern *kctx,
 	BUILD_CHECK_SAMPLE(DATA_SRC);
 	BUILD_CHECK_SAMPLE(TRANSACTION);
 	BUILD_CHECK_SAMPLE(PHYS_ADDR);
+	BUILD_CHECK_SAMPLE(CGROUP);
 	BUILD_CHECK_SAMPLE(DATA_PAGE_SIZE);
 	BUILD_CHECK_SAMPLE(CODE_PAGE_SIZE);
 	BUILD_CHECK_SAMPLE(WEIGHT_STRUCT);
@@ -123,6 +136,8 @@ static inline __u64 perf_get_sample(struct bpf_perf_event_data_kern *kctx,
 		return kctx->data->weight.full;
 	case PBF_TERM_PHYS_ADDR:
 		return kctx->data->phys_addr;
+	case PBF_TERM_CGROUP:
+		return kctx->data->cgroup;
 	case PBF_TERM_CODE_PAGE_SIZE:
 		return kctx->data->code_page_size;
 	case PBF_TERM_DATA_PAGE_SIZE:
@@ -171,7 +186,6 @@ static inline __u64 perf_get_sample(struct bpf_perf_event_data_kern *kctx,
 	case __PBF_UNUSED_TERM16:
 	case __PBF_UNUSED_TERM18:
 	case __PBF_UNUSED_TERM20:
-	case __PBF_UNUSED_TERM21:
 	default:
 		break;
 	}
@@ -202,11 +216,25 @@ int perf_sample_filter(void *ctx)
 
 	k = 0;
 
-	if (use_pid_hash) {
-		int tgid = bpf_get_current_pid_tgid() >> 32;
+	if (use_idx_hash) {
+		struct idx_hash_key key = {
+			.tgid = bpf_get_current_pid_tgid() >> 32,
+		};
+		__u64 eid = kctx->event->id;
+		__u64 *key_id;
 		int *idx;
 
-		idx = bpf_map_lookup_elem(&pid_hash, &tgid);
+		/* get primary_event_id */
+		if (kctx->event->parent)
+			eid = kctx->event->parent->id;
+
+		key_id = bpf_map_lookup_elem(&event_hash, &eid);
+		if (key_id == NULL)
+			goto drop;
+
+		key.evt_id = *key_id;
+
+		idx = bpf_map_lookup_elem(&idx_hash, &key);
 		if (idx)
 			k = *idx;
 		else

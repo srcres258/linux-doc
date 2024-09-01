@@ -466,12 +466,6 @@ static struct workqueue_struct *flushwq;
  *******************************************************************/
 
 /*
- * freeptr_t represents a SLUB freelist pointer, which might be encoded
- * and not dereferenceable if CONFIG_SLAB_FREELIST_HARDENED is enabled.
- */
-typedef struct { unsigned long v; } freeptr_t;
-
-/*
  * Returns freelist pointer (ptr). With hardening, this is obfuscated
  * with an XOR of the address where the pointer is held and a per-cache
  * random number.
@@ -756,6 +750,50 @@ static inline bool slab_update_freelist(struct kmem_cache *s, struct slab *slab,
 	return false;
 }
 
+/*
+ * kmalloc caches has fixed sizes (mostly power of 2), and kmalloc() API
+ * family will round up the real request size to these fixed ones, so
+ * there could be an extra area than what is requested. Save the original
+ * request size in the meta data area, for better debug and sanity check.
+ */
+static inline void set_orig_size(struct kmem_cache *s,
+				void *object, unsigned int orig_size)
+{
+	void *p = kasan_reset_tag(object);
+	unsigned int kasan_meta_size;
+
+	if (!slub_debug_orig_size(s))
+		return;
+
+	/*
+	 * KASAN can save its free meta data inside of the object at offset 0.
+	 * If this meta data size is larger than 'orig_size', it will overlap
+	 * the data redzone in [orig_size+1, object_size]. Thus, we adjust
+	 * 'orig_size' to be as at least as big as KASAN's meta data.
+	 */
+	kasan_meta_size = kasan_metadata_size(s, true);
+	if (kasan_meta_size > orig_size)
+		orig_size = kasan_meta_size;
+
+	p += get_info_end(s);
+	p += sizeof(struct track) * 2;
+
+	*(unsigned int *)p = orig_size;
+}
+
+static inline unsigned int get_orig_size(struct kmem_cache *s, void *object)
+{
+	void *p = kasan_reset_tag(object);
+
+	if (!slub_debug_orig_size(s))
+		return s->object_size;
+
+	p += get_info_end(s);
+	p += sizeof(struct track) * 2;
+
+	return *(unsigned int *)p;
+}
+
 #ifdef CONFIG_SLUB_DEBUG
 static unsigned long object_map[BITS_TO_LONGS(MAX_OBJS_PER_PAGE)];
 static DEFINE_SPINLOCK(object_map_lock);
@@ -983,50 +1021,6 @@ static void print_slab_info(const struct slab *slab)
 	pr_err("Slab 0x%p objects=%u used=%u fp=0x%p flags=%pGp\n",
 	       slab, slab->objects, slab->inuse, slab->freelist,
 	       &slab->__page_flags);
-}
-
-/*
- * kmalloc caches has fixed sizes (mostly power of 2), and kmalloc() API
- * family will round up the real request size to these fixed ones, so
- * there could be an extra area than what is requested. Save the original
- * request size in the meta data area, for better debug and sanity check.
- */
-static inline void set_orig_size(struct kmem_cache *s,
-				void *object, unsigned int orig_size)
-{
-	void *p = kasan_reset_tag(object);
-	unsigned int kasan_meta_size;
-
-	if (!slub_debug_orig_size(s))
-		return;
-
-	/*
-	 * KASAN can save its free meta data inside of the object at offset 0.
-	 * If this meta data size is larger than 'orig_size', it will overlap
-	 * the data redzone in [orig_size+1, object_size]. Thus, we adjust
-	 * 'orig_size' to be as at least as big as KASAN's meta data.
-	 */
-	kasan_meta_size = kasan_metadata_size(s, true);
-	if (kasan_meta_size > orig_size)
-		orig_size = kasan_meta_size;
-
-	p += get_info_end(s);
-	p += sizeof(struct track) * 2;
-
-	*(unsigned int *)p = orig_size;
-}
-
-static inline unsigned int get_orig_size(struct kmem_cache *s, void *object)
-{
-	void *p = kasan_reset_tag(object);
-
-	if (!slub_debug_orig_size(s))
-		return s->object_size;
-
-	p += get_info_end(s);
-	p += sizeof(struct track) * 2;
-
-	return *(unsigned int *)p;
 }
 
 void skip_orig_size_check(struct kmem_cache *s, const void *object)
@@ -1896,7 +1890,6 @@ static inline void inc_slabs_node(struct kmem_cache *s, int node,
 							int objects) {}
 static inline void dec_slabs_node(struct kmem_cache *s, int node,
 							int objects) {}
-
 #ifndef CONFIG_SLUB_TINY
 static bool freelist_corrupted(struct kmem_cache *s, struct slab *slab,
 			       void **freelist, void *nextfree)
@@ -2288,14 +2281,21 @@ bool slab_free_hook(struct kmem_cache *s, void *x, bool init,
 	 */
 	if (unlikely(init)) {
 		int rsize;
-		unsigned int inuse;
+		unsigned int inuse, orig_size;
 
 		inuse = get_info_end(s);
+		orig_size = get_orig_size(s, x);
 		if (!kasan_has_integrated_init())
-			memset(kasan_reset_tag(x), 0, s->object_size);
+			memset(kasan_reset_tag(x), 0, orig_size);
 		rsize = (s->flags & SLAB_RED_ZONE) ? s->red_left_pad : 0;
 		memset((char *)kasan_reset_tag(x) + inuse, 0,
 		       s->size - inuse - rsize);
+		/*
+		 * Restore orig_size, otherwize kmalloc redzone overwritten
+		 * would be reported
+		 */
+		set_orig_size(s, x, orig_size);
+
 	}
 	/* KASAN might put x into memory quarantine, delaying its reuse. */
 	return !kasan_slab_free(s, x, init, still_accessible);
@@ -4012,6 +4012,9 @@ static void *__slab_alloc_node(struct kmem_cache *s,
 /*
  * If the object has been wiped upon free, make sure it's fully initialized by
  * zeroing out freelist pointer.
+ *
+ * Note that we also wipe custom freelist pointers specified via
+ * s->rcu_freeptr_offset.
  */
 static __always_inline void maybe_wipe_obj_freeptr(struct kmem_cache *s,
 						   void *obj)
@@ -5262,6 +5265,12 @@ static void set_cpu_partial(struct kmem_cache *s)
 #endif
 }
 
+/* Was a valid freeptr offset requested? */
+static inline bool has_freeptr_offset(const struct kmem_cache *s)
+{
+	return s->rcu_freeptr_offset != UINT_MAX;
+}
+
 /*
  * calculate_sizes() determines the order and the distribution of data within
  * a slab object.
@@ -5307,7 +5316,8 @@ static int calculate_sizes(struct kmem_cache *s)
 	 */
 	s->inuse = size;
 
-	if ((flags & (SLAB_TYPESAFE_BY_RCU | SLAB_POISON)) || s->ctor ||
+	if (((flags & SLAB_TYPESAFE_BY_RCU) && !has_freeptr_offset(s)) ||
+	    (flags & SLAB_POISON) || s->ctor ||
 	    ((flags & SLAB_RED_ZONE) &&
 	     (s->object_size < sizeof(void *) || slub_debug_orig_size(s)))) {
 		/*
@@ -5328,6 +5338,8 @@ static int calculate_sizes(struct kmem_cache *s)
 		 */
 		s->offset = size;
 		size += sizeof(void *);
+	} else if ((flags & SLAB_TYPESAFE_BY_RCU) && has_freeptr_offset(s)) {
+		s->offset = s->rcu_freeptr_offset;
 	} else {
 		/*
 		 * Store freelist pointer near middle of object to keep

@@ -416,9 +416,7 @@ extern unsigned long highest_memmap_pfn;
 /*
  * in mm/vmscan.c:
  */
-bool isolate_lru_page(struct page *page);
 bool folio_isolate_lru(struct folio *folio);
-void putback_lru_page(struct page *page);
 void folio_putback_lru(struct folio *folio);
 extern void reclaim_throttle(pg_data_t *pgdat, enum vmscan_throttle_state reason);
 
@@ -1057,7 +1055,7 @@ static inline int find_next_best_node(int node, nodemask_t *used_node_mask)
  * mm/memory-failure.c
  */
 #ifdef CONFIG_MEMORY_FAILURE
-int unmap_poisoned_folio(struct folio *folio, enum ttu_flags ttu);
+void unmap_poisoned_folio(struct folio *folio, enum ttu_flags ttu);
 void shake_folio(struct folio *folio);
 extern int hwpoison_filter(struct page *p);
 
@@ -1079,9 +1077,8 @@ void add_to_kill_ksm(struct task_struct *tsk, struct page *p,
 unsigned long page_mapped_in_vma(struct page *page, struct vm_area_struct *vma);
 
 #else
-static inline int unmap_poisoned_folio(struct folio *folio, enum ttu_flags ttu)
+static inline void unmap_poisoned_folio(struct folio *folio, enum ttu_flags ttu)
 {
-	return 0;
 }
 #endif
 
@@ -1217,7 +1214,7 @@ int numa_migrate_check(struct folio *folio, struct vm_fault *vmf,
 		      int *last_cpupid);
 
 void free_zone_device_folio(struct folio *folio);
-int migrate_device_coherent_page(struct page *page);
+int migrate_device_coherent_folio(struct folio *folio);
 
 /*
  * mm/gup.c

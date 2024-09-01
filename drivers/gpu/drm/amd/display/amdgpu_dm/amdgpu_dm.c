@@ -1754,6 +1754,30 @@ static struct dml2_soc_bb *dm_dmub_get_vbios_bounding_box(struct amdgpu_device *
 	return bb;
 }
 
+static enum dmub_ips_disable_type dm_get_default_ips_mode(
+	struct amdgpu_device *adev)
+{
+	/*
+	 * On DCN35 systems with Z8 enabled, it's possible for IPS2 + Z8 to
+	 * cause a hard hang. A fix exists for newer PMFW.
+	 *
+	 * As a workaround, for non-fixed PMFW, force IPS1+RCG as the deepest
+	 * IPS state in all cases, except for s0ix and all displays off (DPMS),
+	 * where IPS2 is allowed.
+	 *
+	 * When checking pmfw version, use the major and minor only.
+	 */
+	if (amdgpu_ip_version(adev, DCE_HWIP, 0) == IP_VERSION(3, 5, 0) &&
+	    (adev->pm.fw_version & 0x00FFFF00) < 0x005D6300)
+		return DMUB_IPS_RCG_IN_ACTIVE_IPS2_IN_OFF;
+
+	if (amdgpu_ip_version(adev, DCE_HWIP, 0) >= IP_VERSION(3, 5, 0))
+		return DMUB_IPS_ENABLE;
+
+	/* ASICs older than DCN35 do not have IPSs */
+	return DMUB_IPS_DISABLE_ALL;
+}
+
 static int amdgpu_dm_init(struct amdgpu_device *adev)
 {
 	struct dc_init_data init_data;
@@ -1871,7 +1895,7 @@ static int amdgpu_dm_init(struct amdgpu_device *adev)
 	else if (amdgpu_dc_debug_mask & DC_FORCE_IPS_ENABLE)
 		init_data.flags.disable_ips = DMUB_IPS_ENABLE;
 	else
-		init_data.flags.disable_ips = DMUB_IPS_ENABLE;
+		init_data.flags.disable_ips = dm_get_default_ips_mode(adev);
 
 	init_data.flags.disable_ips_in_vpb = 0;
 
@@ -2585,9 +2609,9 @@ static int dm_late_init(void *handle)
 
 static void resume_mst_branch_status(struct drm_dp_mst_topology_mgr *mgr)
 {
+	u8 buf[UUID_SIZE];
+	guid_t guid;
 	int ret;
-	u8 guid[16];
-	u64 tmp64;
 
 	mutex_lock(&mgr->lock);
 	if (!mgr->mst_primary)
@@ -2608,26 +2632,27 @@ static void resume_mst_branch_status(struct drm_dp_mst_topology_mgr *mgr)
 	}
 
 	/* Some hubs forget their guids after they resume */
-	ret = drm_dp_dpcd_read(mgr->aux, DP_GUID, guid, 16);
-	if (ret != 16) {
+	ret = drm_dp_dpcd_read(mgr->aux, DP_GUID, buf, sizeof(buf));
+	if (ret != sizeof(buf)) {
 		drm_dbg_kms(mgr->dev, "dpcd read failed - undocked during suspend?\n");
 		goto out_fail;
 	}
 
-	if (memchr_inv(guid, 0, 16) == NULL) {
-		tmp64 = get_jiffies_64();
-		memcpy(&guid[0], &tmp64, sizeof(u64));
-		memcpy(&guid[8], &tmp64, sizeof(u64));
+	import_guid(&guid, buf);
 
-		ret = drm_dp_dpcd_write(mgr->aux, DP_GUID, guid, 16);
+	if (guid_is_null(&guid)) {
+		guid_gen(&guid);
+		export_guid(buf, &guid);
 
-		if (ret != 16) {
+		ret = drm_dp_dpcd_write(mgr->aux, DP_GUID, buf, sizeof(buf));
+
+		if (ret != sizeof(buf)) {
 			drm_dbg_kms(mgr->dev, "check mstb guid failed - undocked during suspend?\n");
 			goto out_fail;
 		}
 	}
 
-	memcpy(mgr->mst_primary->guid, guid, 16);
+	guid_copy(&mgr->mst_primary->guid, &guid);
 
 out_fail:
 	mutex_unlock(&mgr->lock);

@@ -42,7 +42,6 @@ struct scmi_msg_resp_base_discover_agent {
 	u8 name[SCMI_SHORT_NAME_MAX_SIZE];
 };
 
-
 struct scmi_msg_base_error_notify {
 	__le32 event_control;
 #define BASE_TP_NOTIFY_ALL	BIT(0)
@@ -104,7 +103,6 @@ scmi_base_vendor_id_get(const struct scmi_protocol_handle *ph, bool sub_vendor)
 	char *vendor_id;
 	struct scmi_xfer *t;
 	struct scmi_revision_info *rev = ph->get_priv(ph);
-
 
 	if (sub_vendor) {
 		cmd = BASE_DISCOVER_SUB_VENDOR;
@@ -386,7 +384,7 @@ static int scmi_base_protocol_init(const struct scmi_protocol_handle *ph)
 	if (ret)
 		return ret;
 
-	rev->major_ver = PROTOCOL_REV_MAJOR(version),
+	rev->major_ver = PROTOCOL_REV_MAJOR(version);
 	rev->minor_ver = PROTOCOL_REV_MINOR(version);
 	ph->set_priv(ph, rev, version);
 

@@ -1772,6 +1772,7 @@ found:
 
 static void do_migrate_range(unsigned long start_pfn, unsigned long end_pfn)
 {
+	struct folio *folio;
 	unsigned long pfn;
 	LIST_HEAD(source);
 	struct folio *folio;
@@ -1780,7 +1781,7 @@ static void do_migrate_range(unsigned long start_pfn, unsigned long end_pfn)
 
 	for (pfn = start_pfn; pfn < end_pfn; pfn++) {
 		struct page *page;
-		bool huge;
+		bool hugetlb;
 
 		if (!pfn_valid(pfn))
 			continue;
@@ -1800,8 +1801,7 @@ static void do_migrate_range(unsigned long start_pfn, unsigned long end_pfn)
 		 * HWPoison pages have elevated reference counts so the migration would
 		 * fail on them. It also doesn't make any sense to migrate them in the
 		 * first place. Still try to unmap such a page in case it is still mapped
-		 * (e.g. current hwpoison implementation doesn't unmap KSM pages but keep
-		 * the unmap as the catch all safety net).
+		 * (keep the unmap as the catch all safety net).
 		 */
 		if (folio_test_hwpoison(folio) ||
 		    (folio_test_large(folio) && folio_test_has_hwpoisoned(folio))) {
@@ -1812,8 +1812,8 @@ static void do_migrate_range(unsigned long start_pfn, unsigned long end_pfn)
 			continue;
 		}
 
-		huge = folio_test_hugetlb(folio);
-		if (!huge) {
+		hugetlb = folio_test_hugetlb(folio);
+		if (!hugetlb) {
 			folio = folio_get_nontail_page(page);
 			if (!folio)
 				continue;
@@ -1826,7 +1826,7 @@ static void do_migrate_range(unsigned long start_pfn, unsigned long end_pfn)
 			}
 		}
 
-		if (!huge)
+		if (!hugetlb)
 			folio_put(folio);
 	}
 	if (!list_empty(&source)) {

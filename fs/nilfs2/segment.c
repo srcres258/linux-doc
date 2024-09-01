@@ -519,7 +519,7 @@ static void nilfs_segctor_end_finfo(struct nilfs_sc_info *sci,
 
 	ii = NILFS_I(inode);
 
-	if (test_bit(NILFS_I_GCINODE, &ii->i_state))
+	if (ii->i_type & NILFS_I_TYPE_GC)
 		cno = ii->i_cno;
 	else if (NILFS_ROOT_METADATA_FILE(inode->i_ino))
 		cno = 0;
@@ -2504,7 +2504,7 @@ static void nilfs_construction_timeout(struct timer_list *t)
 {
 	struct nilfs_sc_info *sci = from_timer(sci, t, sc_timer);
 
-	wake_up_process(sci->sc_timer_task);
+	wake_up_process(sci->sc_task);
 }
 
 static void
@@ -2630,121 +2630,83 @@ static int nilfs_segctor_flush_mode(struct nilfs_sc_info *sci)
 }
 
 /**
- * nilfs_segctor_thread - main loop of the segment constructor thread.
+ * nilfs_log_write_required - determine whether log writing is required
+ * @sci:   nilfs_sc_info struct
+ * @modep: location for storing log writing mode
+ *
+ * Return: true if log writing is required, false otherwise.  If log writing
+ * is required, the mode is stored in the location pointed to by @modep.
+ */
+static bool nilfs_log_write_required(struct nilfs_sc_info *sci, int *modep)
+{
+	bool timedout, ret = true;
+
+	spin_lock(&sci->sc_state_lock);
+	timedout = ((sci->sc_state & NILFS_SEGCTOR_COMMIT) &&
+		   time_after_eq(jiffies, sci->sc_timer.expires));
+	if (timedout || sci->sc_seq_request != sci->sc_seq_done)
+		*modep = SC_LSEG_SR;
+	else if (sci->sc_flush_request)
+		*modep = nilfs_segctor_flush_mode(sci);
+	else
+		ret = false;
+
+	spin_unlock(&sci->sc_state_lock);
+	return ret;
+}
+
+/**
+ * nilfs_segctor_thread - main loop of the log writer thread
  * @arg: pointer to a struct nilfs_sc_info.
  *
- * nilfs_segctor_thread() initializes a timer and serves as a daemon
- * to execute segment constructions.
+ * nilfs_segctor_thread() is the main loop function of the log writer kernel
+ * thread, which determines whether log writing is necessary, and if so,
+ * performs the log write in the background, or waits if not.  It is also
+ * used to decide the background writeback of the superblock.
+ *
+ * Return: Always 0.
  */
 static int nilfs_segctor_thread(void *arg)
 {
 	struct nilfs_sc_info *sci = (struct nilfs_sc_info *)arg;
 	struct the_nilfs *nilfs = sci->sc_super->s_fs_info;
-	int timeout = 0;
 
-	sci->sc_timer_task = current;
-	timer_setup(&sci->sc_timer, nilfs_construction_timeout, 0);
-
-	/* start sync. */
-	sci->sc_task = current;
-	wake_up(&sci->sc_wait_task); /* for nilfs_segctor_start_thread() */
 	nilfs_info(sci->sc_super,
 		   "segctord starting. Construction interval = %lu seconds, CP frequency < %lu seconds",
 		   sci->sc_interval / HZ, sci->sc_mjcp_freq / HZ);
 
 	set_freezable();
-	spin_lock(&sci->sc_state_lock);
- loop:
-	for (;;) {
+
+	while (!kthread_should_stop()) {
+		DEFINE_WAIT(wait);
+		bool should_write;
 		int mode;
 
-		if (sci->sc_state & NILFS_SEGCTOR_QUIT)
-			goto end_thread;
-
-		if (timeout || sci->sc_seq_request != sci->sc_seq_done)
-			mode = SC_LSEG_SR;
-		else if (sci->sc_flush_request)
-			mode = nilfs_segctor_flush_mode(sci);
-		else
-			break;
-
-		spin_unlock(&sci->sc_state_lock);
-		nilfs_segctor_thread_construct(sci, mode);
-		spin_lock(&sci->sc_state_lock);
-		timeout = 0;
-	}
-
-
-	if (freezing(current)) {
-		spin_unlock(&sci->sc_state_lock);
-		try_to_freeze();
-		spin_lock(&sci->sc_state_lock);
-	} else {
-		DEFINE_WAIT(wait);
-		int should_sleep = 1;
+		if (freezing(current)) {
+			try_to_freeze();
+			continue;
+		}
 
 		prepare_to_wait(&sci->sc_wait_daemon, &wait,
 				TASK_INTERRUPTIBLE);
-
-		if (sci->sc_seq_request != sci->sc_seq_done)
-			should_sleep = 0;
-		else if (sci->sc_flush_request)
-			should_sleep = 0;
-		else if (sci->sc_state & NILFS_SEGCTOR_COMMIT)
-			should_sleep = time_before(jiffies,
-					sci->sc_timer.expires);
-
-		if (should_sleep) {
-			spin_unlock(&sci->sc_state_lock);
+		should_write = nilfs_log_write_required(sci, &mode);
+		if (!should_write)
 			schedule();
-			spin_lock(&sci->sc_state_lock);
-		}
 		finish_wait(&sci->sc_wait_daemon, &wait);
-		timeout = ((sci->sc_state & NILFS_SEGCTOR_COMMIT) &&
-			   time_after_eq(jiffies, sci->sc_timer.expires));
 
 		if (nilfs_sb_dirty(nilfs) && nilfs_sb_need_update(nilfs))
 			set_nilfs_discontinued(nilfs);
-	}
-	goto loop;
 
- end_thread:
+		if (should_write)
+			nilfs_segctor_thread_construct(sci, mode);
+	}
+
 	/* end sync. */
+	spin_lock(&sci->sc_state_lock);
 	sci->sc_task = NULL;
 	timer_shutdown_sync(&sci->sc_timer);
-	wake_up(&sci->sc_wait_task); /* for nilfs_segctor_kill_thread() */
 	spin_unlock(&sci->sc_state_lock);
 	return 0;
-}
-
-static int nilfs_segctor_start_thread(struct nilfs_sc_info *sci)
-{
-	struct task_struct *t;
-
-	t = kthread_run(nilfs_segctor_thread, sci, "segctord");
-	if (IS_ERR(t)) {
-		int err = PTR_ERR(t);
-
-		nilfs_err(sci->sc_super, "error %d creating segctord thread",
-			  err);
-		return err;
-	}
-	wait_event(sci->sc_wait_task, sci->sc_task != NULL);
-	return 0;
-}
-
-static void nilfs_segctor_kill_thread(struct nilfs_sc_info *sci)
-	__acquires(&sci->sc_state_lock)
-	__releases(&sci->sc_state_lock)
-{
-	sci->sc_state |= NILFS_SEGCTOR_QUIT;
-
-	while (sci->sc_task) {
-		wake_up(&sci->sc_wait_daemon);
-		spin_unlock(&sci->sc_state_lock);
-		wait_event(sci->sc_wait_task, sci->sc_task == NULL);
-		spin_lock(&sci->sc_state_lock);
-	}
 }
 
 /*
@@ -2767,7 +2729,6 @@ static struct nilfs_sc_info *nilfs_segctor_new(struct super_block *sb,
 
 	init_waitqueue_head(&sci->sc_wait_request);
 	init_waitqueue_head(&sci->sc_wait_daemon);
-	init_waitqueue_head(&sci->sc_wait_task);
 	spin_lock_init(&sci->sc_state_lock);
 	INIT_LIST_HEAD(&sci->sc_dirty_files);
 	INIT_LIST_HEAD(&sci->sc_segbufs);
@@ -2822,8 +2783,12 @@ static void nilfs_segctor_destroy(struct nilfs_sc_info *sci)
 
 	up_write(&nilfs->ns_segctor_sem);
 
+	if (sci->sc_task) {
+		wake_up(&sci->sc_wait_daemon);
+		kthread_stop(sci->sc_task);
+	}
+
 	spin_lock(&sci->sc_state_lock);
-	nilfs_segctor_kill_thread(sci);
 	flag = ((sci->sc_state & NILFS_SEGCTOR_COMMIT) || sci->sc_flush_request
 		|| sci->sc_seq_request != sci->sc_seq_done);
 	spin_unlock(&sci->sc_state_lock);
@@ -2871,14 +2836,15 @@ static void nilfs_segctor_destroy(struct nilfs_sc_info *sci)
  * This allocates a log writer object, initializes it, and starts the
  * log writer.
  *
- * Return Value: On success, 0 is returned. On error, one of the following
- * negative error code is returned.
- *
- * %-ENOMEM - Insufficient memory available.
+ * Return: 0 on success, or the following negative error code on failure.
+ * * %-EINTR	- Log writer thread creation failed due to interruption.
+ * * %-ENOMEM	- Insufficient memory available.
  */
 int nilfs_attach_log_writer(struct super_block *sb, struct nilfs_root *root)
 {
 	struct the_nilfs *nilfs = sb->s_fs_info;
+	struct nilfs_sc_info *sci;
+	struct task_struct *t;
 	int err;
 
 	if (nilfs->ns_writer) {
@@ -2891,15 +2857,23 @@ int nilfs_attach_log_writer(struct super_block *sb, struct nilfs_root *root)
 		return 0;
 	}
 
-	nilfs->ns_writer = nilfs_segctor_new(sb, root);
-	if (!nilfs->ns_writer)
+	sci = nilfs_segctor_new(sb, root);
+	if (unlikely(!sci))
 		return -ENOMEM;
 
-	err = nilfs_segctor_start_thread(nilfs->ns_writer);
-	if (unlikely(err))
+	nilfs->ns_writer = sci;
+	t = kthread_create(nilfs_segctor_thread, sci, "segctord");
+	if (IS_ERR(t)) {
+		err = PTR_ERR(t);
+		nilfs_err(sb, "error %d creating segctord thread", err);
 		nilfs_detach_log_writer(sb);
+		return err;
+	}
+	sci->sc_task = t;
+	timer_setup(&sci->sc_timer, nilfs_construction_timeout, 0);
 
-	return err;
+	wake_up_process(sci->sc_task);
+	return 0;
 }
 
 /**

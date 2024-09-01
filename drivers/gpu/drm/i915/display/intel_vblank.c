@@ -190,7 +190,7 @@ static u32 __intel_get_crtc_scanline_from_timestamp(struct intel_crtc *crtc)
 	return scanline;
 }
 
-static int intel_crtc_scanline_offset(const struct intel_crtc_state *crtc_state)
+int intel_crtc_scanline_offset(const struct intel_crtc_state *crtc_state)
 {
 	struct intel_display *display = to_intel_display(crtc_state);
 	struct drm_i915_private *i915 = to_i915(crtc_state->uapi.crtc->dev);
@@ -282,15 +282,6 @@ static int __intel_get_crtc_scanline(struct intel_crtc *crtc)
 	 * scanline_offset adjustment.
 	 */
 	return (position + vtotal + crtc->scanline_offset) % vtotal;
-}
-
-int intel_crtc_scanline_to_hw(struct intel_crtc *crtc, int scanline)
-{
-	const struct drm_vblank_crtc *vblank = drm_crtc_vblank_crtc(&crtc->base);
-	const struct drm_display_mode *mode = &vblank->hwmode;
-	int vtotal = intel_mode_vtotal(mode);
-
-	return (scanline + vtotal - crtc->scanline_offset) % vtotal;
 }
 
 /*

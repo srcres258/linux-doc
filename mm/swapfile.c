@@ -1529,6 +1529,8 @@ static bool __swap_entries_free(struct swap_info_struct *si,
 	unlock_cluster_or_swap_info(si, ci);
 
 	if (!has_cache) {
+		for (i = 0; i < nr; i++)
+			zswap_invalidate(swp_entry(si->type, offset + i));
 		spin_lock(&si->lock);
 		swap_entry_range_free(si, entry, nr);
 		spin_unlock(&si->lock);
@@ -3362,7 +3364,7 @@ SYSCALL_DEFINE2(swapon, const char __user *, specialfile, int, swap_flags)
 	unsigned char *swap_map = NULL;
 	unsigned long *zeromap = NULL;
 	struct swap_cluster_info *cluster_info = NULL;
-	struct page *page = NULL;
+	struct folio *folio = NULL;
 	struct inode *inode = NULL;
 	bool inced_nr_rotate_swap = false;
 
@@ -3420,12 +3422,12 @@ SYSCALL_DEFINE2(swapon, const char __user *, specialfile, int, swap_flags)
 		error = -EINVAL;
 		goto bad_swap_unlock_inode;
 	}
-	page = read_mapping_page(mapping, 0, swap_file);
-	if (IS_ERR(page)) {
-		error = PTR_ERR(page);
+	folio = read_mapping_folio(mapping, 0, swap_file);
+	if (IS_ERR(folio)) {
+		error = PTR_ERR(folio);
 		goto bad_swap_unlock_inode;
 	}
-	swap_header = kmap(page);
+	swap_header = kmap_local_folio(folio, 0);
 
 	maxpages = read_swap_header(si, swap_header, inode);
 	if (unlikely(!maxpages)) {
@@ -3579,10 +3581,8 @@ bad_swap:
 	if (swap_file)
 		filp_close(swap_file, NULL);
 out:
-	if (page && !IS_ERR(page)) {
-		kunmap(page);
-		put_page(page);
-	}
+	if (!IS_ERR_OR_NULL(folio))
+		folio_release_kmap(folio, swap_header);
 	if (name)
 		putname(name);
 	if (inode)

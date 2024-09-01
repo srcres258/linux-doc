@@ -914,7 +914,6 @@ static int __init memory_tier_init(void)
 	WARN_ON(!node_demotion);
 #endif
 
-	guard(mutex)(&memory_tier_lock);
 	/*
 	 * For now we can have 4 faster memory tiers with smaller adistance
 	 * than default DRAM tier.
@@ -940,8 +939,7 @@ bool numa_demotion_enabled = false;
 static ssize_t demotion_enabled_show(struct kobject *kobj,
 				     struct kobj_attribute *attr, char *buf)
 {
-	return sysfs_emit(buf, "%s\n",
-			  numa_demotion_enabled ? "true" : "false");
+	return sysfs_emit(buf, "%s\n", str_true_false(numa_demotion_enabled));
 }
 
 static ssize_t demotion_enabled_store(struct kobject *kobj,

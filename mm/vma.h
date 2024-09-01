@@ -136,22 +136,7 @@ int vma_expand(struct vma_merge_struct *vmg);
 int vma_shrink(struct vma_iterator *vmi, struct vm_area_struct *vma,
 	       unsigned long start, unsigned long end, pgoff_t pgoff);
 
-static inline int vma_iter_store_gfp(struct vma_iterator *vmi,
-			struct vm_area_struct *vma, gfp_t gfp)
-
-{
-	if (vmi->mas.status != ma_start &&
-	    ((vmi->mas.index > vma->vm_start) || (vmi->mas.last < vma->vm_start)))
-		vma_iter_invalidate(vmi);
-
-	__mas_set_range(&vmi->mas, vma->vm_start, vma->vm_end - 1);
-	mas_store_gfp(&vmi->mas, vma, gfp);
-	if (unlikely(mas_is_err(&vmi->mas)))
-		return -ENOMEM;
-
-	return 0;
-}
-
+#ifdef CONFIG_MMU
 /*
  * init_vma_munmap() - Initializer wrapper for vma_munmap_struct
  * @vms: The vma munmap struct
@@ -185,6 +170,7 @@ static inline void init_vma_munmap(struct vma_munmap_struct *vms,
 	vms->clear_ptes = false;
 	vms->closed_vm_ops = false;
 }
+#endif
 
 int vms_gather_munmap_vmas(struct vma_munmap_struct *vms,
 		struct ma_state *mas_detach);
@@ -226,6 +212,7 @@ static inline void reattach_vmas(struct ma_state *mas_detach)
 static inline void vms_abort_munmap_vmas(struct vma_munmap_struct *vms,
 		struct ma_state *mas_detach)
 {
+	struct ma_state *mas = &vms->vmi->mas;
 	if (!vms->nr_pages)
 		return;
 
@@ -237,13 +224,14 @@ static inline void vms_abort_munmap_vmas(struct vma_munmap_struct *vms,
 	 * not symmetrical and state data has been lost.  Resort to the old
 	 * failure method of leaving a gap where the MAP_FIXED mapping failed.
 	 */
-	if (unlikely(vma_iter_store_gfp(vms->vmi, NULL, GFP_KERNEL))) {
+	mas_set_range(mas, vms->start, vms->end);
+	if (unlikely(mas_store_gfp(mas, NULL, GFP_KERNEL))) {
 		pr_warn_once("%s: (%d) Unable to abort munmap() operation\n",
 			     current->comm, current->pid);
 		/* Leaving vmas detached and in-tree may hamper recovery */
 		reattach_vmas(mas_detach);
 	} else {
-		/* Clean up the insertion of unfortunate the gap */
+		/* Clean up the insertion of the unfortunate gap */
 		vms_complete_munmap_vmas(vms, mas_detach);
 	}
 }
@@ -352,6 +340,22 @@ static inline struct vm_area_struct *vma_prev_limit(struct vma_iterator *vmi,
 {
 	return mas_prev(&vmi->mas, min);
 }
+
+static inline int vma_iter_store_gfp(struct vma_iterator *vmi,
+			struct vm_area_struct *vma, gfp_t gfp)
+{
+	if (vmi->mas.status != ma_start &&
+	    ((vmi->mas.index > vma->vm_start) || (vmi->mas.last < vma->vm_start)))
+		vma_iter_invalidate(vmi);
+
+	__mas_set_range(&vmi->mas, vma->vm_start, vma->vm_end - 1);
+	mas_store_gfp(&vmi->mas, vma, gfp);
+	if (unlikely(mas_is_err(&vmi->mas)))
+		return -ENOMEM;
+
+	return 0;
+}
+
 
 /*
  * These three helpers classifies VMAs for virtual memory accounting.

@@ -109,7 +109,11 @@ struct xfrm_pol_inexact_node {
  * 4. saddr:any list from saddr tree
  *
  * This result set then needs to be searched for the policy with
- * the lowest priority.  If two results have same prio, youngest one wins.
+ * the lowest priority.  If two candidates have the same priority, the
+ * struct xfrm_policy pos member with the lower number is used.
+ *
+ * This replicates previous single-list-search algorithm which would
+ * return first matching policy in the (ordered-by-priority) list.
  */
 
 struct xfrm_pol_inexact_key {
@@ -1276,11 +1280,7 @@ static void xfrm_hash_rebuild(struct work_struct *work)
 		struct xfrm_pol_inexact_bin *bin;
 		u8 dbits, sbits;
 
-		if (policy->walk.dead)
-			continue;
-
-		dir = xfrm_policy_id2dir(policy->index);
-		if (dir >= XFRM_POLICY_MAX)
+		if (xfrm_policy_is_dead_or_sk(policy))
 			continue;
 
 		if ((dir & XFRM_POLICY_MASK) == XFRM_POLICY_OUT) {
@@ -1331,13 +1331,8 @@ static void xfrm_hash_rebuild(struct work_struct *work)
 
 	/* re-insert all policies by order of creation */
 	list_for_each_entry_reverse(policy, &net->xfrm.policy_all, walk.all) {
-		if (policy->walk.dead)
+		if (xfrm_policy_is_dead_or_sk(policy))
 			continue;
-		dir = xfrm_policy_id2dir(policy->index);
-		if (dir >= XFRM_POLICY_MAX) {
-			/* skip socket policies */
-			continue;
-		}
 
 		hlist_del_rcu(&policy->bydst);
 
