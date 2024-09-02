@@ -1617,6 +1617,25 @@ The following nested keys are defined.
 		Usually because failed to allocate some continuous swap space
 		for the huge page.
 
+	  numa_pages_migrated (npn)
+		Number of pages migrated by NUMA balancing.
+
+	  numa_pte_updates (npn)
+		Number of pages whose page table entries are modified by
+		NUMA balancing to produce NUMA hinting faults on access.
+
+	  numa_hint_faults (npn)
+		Number of NUMA hinting faults.
+
+	  pgdemote_kswapd
+		Number of pages demoted by kswapd.
+
+	  pgdemote_direct
+		Number of pages demoted directly.
+
+	  pgdemote_khugepaged
+		Number of pages demoted by khugepaged.
+
   memory.numa_stat
 	A read-only nested-keyed file which exists on non-root cgroups.
 
@@ -1737,6 +1756,8 @@ The following nested keys are defined.
 
 	Note that this is subtly different from setting memory.swap.max to
 	0, as it still allows for pages to be written to the zswap pool.
+	This setting has no effect if zswap is disabled, and swapping
+	is allowed unless memory.swap.max is set to 0.
 
   memory.pressure
 	A read-only nested-keyed file.
@@ -2613,6 +2634,14 @@ HugeTLB Interface Files
 	Similar to memory.numa_stat, it shows the numa information of the
         hugetlb pages of <hugepagesize> in this cgroup.  Only active in
         use hugetlb pages are included.  The per-node values are in bytes.
+
+  hugetlb.<hugepagesize>.peak
+	Show historical maximum usage for "hugepagesize" hugetlb.  It exists
+        for all the cgroup except root.
+
+  hugetlb.<hugepagesize>.rsvd.peak
+	Show historical maximum usage for "hugepagesize" hugetlb reservations.
+        It exists for all the cgroup except root.
 
 Misc
 ----
