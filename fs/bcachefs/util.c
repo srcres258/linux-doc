@@ -204,7 +204,7 @@ STRTO_H(strtoll, long long)
 STRTO_H(strtoull, unsigned long long)
 STRTO_H(strtou64, u64)
 
-u64 bch2_read_flag_list(char *opt, const char * const list[])
+u64 bch2_read_flag_list(const char *opt, const char * const list[])
 {
 	u64 ret = 0;
 	char *p, *s, *d = kstrdup(opt, GFP_KERNEL);
@@ -360,7 +360,7 @@ void bch2_pr_time_units(struct printbuf *out, u64 ns)
 {
 	const struct time_unit *u = bch2_pick_time_units(ns);
 
-	prt_printf(out, "%llu %s", div_u64(ns, u->nsecs), u->name);
+	prt_printf(out, "%llu %s", div64_u64(ns, u->nsecs), u->name);
 }
 
 static void bch2_pr_time_units_aligned(struct printbuf *out, u64 ns)
