@@ -277,8 +277,7 @@ static void __vxlan_fdb_notify(struct vxlan_dev *vxlan, struct vxlan_fdb *fdb,
 	rtnl_notify(skb, net, 0, RTNLGRP_NEIGH, NULL, GFP_ATOMIC);
 	return;
 errout:
-	if (err < 0)
-		rtnl_set_sk_err(net, RTNLGRP_NEIGH, err);
+	rtnl_set_sk_err(net, RTNLGRP_NEIGH, err);
 }
 
 static void vxlan_fdb_switchdev_notifier_info(const struct vxlan_dev *vxlan,
@@ -2690,11 +2689,11 @@ static netdev_tx_t vxlan_xmit(struct sk_buff *skb, struct net_device *dev)
 	struct vxlan_dev *vxlan = netdev_priv(dev);
 	struct vxlan_rdst *rdst, *fdst = NULL;
 	const struct ip_tunnel_info *info;
-	bool did_rsc = false;
 	struct vxlan_fdb *f;
 	struct ethhdr *eth;
 	__be32 vni = 0;
 	u32 nhid = 0;
+	bool did_rsc;
 
 	info = skb_tunnel_info(skb);
 
