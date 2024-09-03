@@ -1906,7 +1906,7 @@ static int fiemap_fill_next_extent_k(struct fiemap_extent_info *fieinfo,
 				     u64 logical, u64 phys, u64 len, u32 flags)
 {
 	struct fiemap_extent extent;
-	struct fiemap_extent __user *dest = fieinfo->fi_extents_start;
+	struct fiemap_extent *dest = fieinfo->fi_extents_start;
 
 	/* only count the extents */
 	if (fieinfo->fi_extents_max == 0) {
@@ -3454,4 +3454,76 @@ out:
 		mark_inode_dirty_sync(inode);
 
 	return 0;
+}
+
+/*
+ * ni_set_compress
+ *
+ * Helper for 'ntfs_fileattr_set'.
+ * Changes compression for empty files and directories only.
+ */
+int ni_set_compress(struct inode *inode, bool compr)
+{
+	int err;
+	struct ntfs_inode *ni = ntfs_i(inode);
+	struct ATTR_STD_INFO *std;
+	const char *bad_inode;
+
+	if (is_compressed(ni) == !!compr)
+		return 0;
+
+	if (is_sparsed(ni)) {
+		/* sparse and compress not compatible. */
+		return -EOPNOTSUPP;
+	}
+
+	if (!S_ISREG(inode->i_mode) && !S_ISDIR(inode->i_mode)) {
+		/*Skip other inodes. (symlink,fifo,...) */
+		return -EOPNOTSUPP;
+	}
+
+	bad_inode = NULL;
+
+	ni_lock(ni);
+
+	std = ni_std(ni);
+	if (!std) {
+		bad_inode = "no std";
+		goto out;
+	}
+
+	if (S_ISREG(inode->i_mode)) {
+		err = attr_set_compress(ni, compr);
+		if (err) {
+			if (err == -ENOENT) {
+				/* Fix on the fly? */
+				/* Each file must contain data attribute. */
+				bad_inode = "no data attribute";
+			}
+			goto out;
+		}
+	}
+
+	ni->std_fa = std->fa;
+	if (compr)
+		std->fa |= FILE_ATTRIBUTE_COMPRESSED;
+	else
+		std->fa &= ~FILE_ATTRIBUTE_COMPRESSED;
+
+	if (ni->std_fa != std->fa) {
+		ni->std_fa = std->fa;
+		ni->mi.dirty = true;
+	}
+	/* update duplicate information and directory entries in ni_write_inode.*/
+	ni->ni_flags |= NI_FLAG_UPDATE_PARENT;
+	err = 0;
+
+out:
+	ni_unlock(ni);
+	if (bad_inode) {
+		ntfs_bad_inode(inode, bad_inode);
+		err = -EINVAL;
+	}
+
+	return err;
 }
