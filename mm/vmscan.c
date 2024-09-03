@@ -863,7 +863,12 @@ static enum folio_references folio_check_references(struct folio *folio,
 	if (vm_flags & VM_LOCKED)
 		return FOLIOREF_ACTIVATE;
 
-	/* rmap lock contention: rotate */
+	/*
+	 * There are two cases to consider.
+	 * 1) Rmap lock contention: rotate.
+	 * 2) Skip the non-shared swapbacked folio mapped solely by
+	 *    the exiting or OOM-reaped process.
+	 */
 	if (referenced_ptes == -1)
 		return FOLIOREF_KEEP;
 
@@ -1222,7 +1227,7 @@ retry:
 					goto keep_locked;
 				if (folio_test_large(folio)) {
 					/* cannot split folio, skip it */
-					if (!can_split_folio(folio, NULL))
+					if (!can_split_folio(folio, 1, NULL))
 						goto activate_locked;
 					/*
 					 * Split partially mapped folios right away.
@@ -2239,10 +2244,11 @@ static void prepare_scan_control(pg_data_t *pgdat, struct scan_control *sc)
 	target_lruvec = mem_cgroup_lruvec(sc->target_mem_cgroup, pgdat);
 
 	/*
-	 * Flush the memory cgroup stats, so that we read accurate per-memcg
-	 * lruvec stats for heuristics.
+	 * Flush the memory cgroup stats in rate-limited way as we don't need
+	 * most accurate stats here. We may switch to regular stats flushing
+	 * in the future once it is cheap enough.
 	 */
-	mem_cgroup_flush_stats(sc->target_mem_cgroup);
+	mem_cgroup_flush_stats_ratelimited(sc->target_mem_cgroup);
 
 	/*
 	 * Determine the scan balance between anon and file LRUs.
@@ -3456,7 +3462,7 @@ static void walk_pmd_range_locked(pud_t *pud, unsigned long addr, struct vm_area
 			goto next;
 
 		if (!pmd_trans_huge(pmd[i])) {
-			if (should_clear_pmd_young())
+			if (!walk->force_scan && should_clear_pmd_young())
 				pmdp_test_and_clear_young(vma, addr, pmd + i);
 			goto next;
 		}
@@ -3543,7 +3549,7 @@ restart:
 
 		walk->mm_stats[MM_NONLEAF_TOTAL]++;
 
-		if (should_clear_pmd_young()) {
+		if (!walk->force_scan && should_clear_pmd_young()) {
 			if (!pmd_young(val))
 				continue;
 
@@ -6644,7 +6650,7 @@ static bool pgdat_balanced(pg_data_t *pgdat, int order, int highest_zoneidx)
 			continue;
 
 		if (sysctl_numa_balancing_mode & NUMA_BALANCING_MEMORY_TIERING)
-			mark = wmark_pages(zone, WMARK_PROMO);
+			mark = promo_wmark_pages(zone);
 		else
 			mark = high_wmark_pages(zone);
 		if (zone_watermark_ok_safe(zone, order, mark, highest_zoneidx))
@@ -7519,7 +7525,9 @@ int node_reclaim(struct pglist_data *pgdat, gfp_t gfp_mask, unsigned int order)
 	ret = __node_reclaim(pgdat, gfp_mask, order);
 	clear_bit(PGDAT_RECLAIM_LOCKED, &pgdat->flags);
 
-	if (!ret)
+	if (ret)
+		count_vm_event(PGSCAN_ZONE_RECLAIM_SUCCESS);
+	else
 		count_vm_event(PGSCAN_ZONE_RECLAIM_FAILED);
 
 	return ret;
