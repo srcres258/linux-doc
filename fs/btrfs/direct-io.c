@@ -42,8 +42,7 @@ static int lock_extent_direct(struct inode *inode, u64 lockstart, u64 lockend,
 
 	/* Direct lock must be taken before the extent lock. */
 	if (nowait) {
-		if (!try_lock_dio_extent(io_tree, lockstart, lockend,
-					 cached_state))
+		if (!try_lock_dio_extent(io_tree, lockstart, lockend, cached_state))
 			return -EAGAIN;
 	} else {
 		lock_dio_extent(io_tree, lockstart, lockend, cached_state);
@@ -746,7 +745,7 @@ static void btrfs_dio_submit_io(const struct iomap_iter *iter, struct bio *bio,
 		}
 	}
 
-	btrfs_submit_bio(bbio, 0);
+	btrfs_submit_bbio(bbio, 0);
 }
 
 static const struct iomap_ops btrfs_dio_iomap_ops = {
@@ -884,13 +883,6 @@ again:
 	if (IS_ERR_OR_NULL(dio)) {
 		ret = PTR_ERR_OR_ZERO(dio);
 	} else {
-		struct btrfs_file_private stack_private = { 0 };
-		struct btrfs_file_private *private;
-		const bool have_private = (file->private_data != NULL);
-
-		if (!have_private)
-			file->private_data = &stack_private;
-
 		/*
 		 * If we have a synchronous write, we must make sure the fsync
 		 * triggered by the iomap_dio_complete() call below doesn't
@@ -899,13 +891,10 @@ again:
 		 * partial writes due to the input buffer (or parts of it) not
 		 * being already faulted in.
 		 */
-		private = file->private_data;
-		private->fsync_skip_inode_lock = true;
+		ASSERT(current->journal_info == NULL);
+		current->journal_info = BTRFS_TRANS_DIO_WRITE_STUB;
 		ret = iomap_dio_complete(dio);
-		private->fsync_skip_inode_lock = false;
-
-		if (!have_private)
-			file->private_data = NULL;
+		current->journal_info = NULL;
 	}
 
 	/* No increment (+=) because iomap returns a cumulative value. */

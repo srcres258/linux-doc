@@ -418,6 +418,8 @@ static const unsigned int memcg_vm_event_stat[] = {
 	PGPGIN,
 	PGPGOUT,
 #endif
+	PSWPIN,
+	PSWPOUT,
 	PGSCAN_KSWAPD,
 	PGSCAN_DIRECT,
 	PGSCAN_KHUGEPAGED,
@@ -1054,6 +1056,7 @@ restart:
 		if (cmpxchg(&iter->position, pos, next) != pos) {
 			if (css && css != &root->css)
 				css_put(css);
+			next = NULL;
 			goto restart;
 		}
 
@@ -1077,22 +1080,6 @@ out_unlock:
 		css_put(&prev->css);
 
 	return next;
-}
-
-/**
- * mem_cgroup_iter - iterate over memory cgroup hierarchy
- * @root: hierarchy root
- * @prev: previously returned memcg, NULL on first invocation
- * @reclaim: cookie for shared reclaim walks, NULL for full walks
- *
- * Perform an iteration on the memory cgroup hierarchy without skipping
- * offline memcgs.
- */
-struct mem_cgroup *mem_cgroup_iter(struct mem_cgroup *root,
-				   struct mem_cgroup *prev,
-				   struct mem_cgroup_reclaim_cookie *reclaim)
-{
-	return mem_cgroup_iter_online(root, prev, reclaim, false);
 }
 
 /**

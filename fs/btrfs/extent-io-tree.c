@@ -644,7 +644,7 @@ int __clear_extent_bit(struct extent_io_tree *tree, u64 start, u64 end,
 	if (bits & EXTENT_DELALLOC)
 		bits |= EXTENT_NORESERVE;
 
-	wake = (bits & EXTENT_LOCK_BITS) ? 1 : 0;
+	wake = ((bits & EXTENT_LOCK_BITS) ? 1 : 0);
 	if (bits & (EXTENT_LOCK_BITS | EXTENT_BOUNDARY))
 		clear = 1;
 again:
@@ -858,8 +858,7 @@ static void cache_state_if_flags(struct extent_state *state,
 static void cache_state(struct extent_state *state,
 			struct extent_state **cached_ptr)
 {
-	return cache_state_if_flags(state, cached_ptr,
-				    EXTENT_LOCK_BITS | EXTENT_BOUNDARY);
+	return cache_state_if_flags(state, cached_ptr, EXTENT_LOCK_BITS | EXTENT_BOUNDARY);
 }
 
 /*
@@ -1830,8 +1829,8 @@ int clear_record_extent_bits(struct extent_io_tree *tree, u64 start, u64 end,
 	return __clear_extent_bit(tree, start, end, bits, NULL, changeset);
 }
 
-bool __try_lock_extent(struct extent_io_tree *tree, u64 start, u64 end,
-		       u32 bits, struct extent_state **cached)
+bool __try_lock_extent(struct extent_io_tree *tree, u64 start, u64 end, u32 bits,
+		       struct extent_state **cached)
 {
 	int err;
 	u64 failed_start;
@@ -1840,8 +1839,7 @@ bool __try_lock_extent(struct extent_io_tree *tree, u64 start, u64 end,
 			       NULL, cached, NULL);
 	if (err == -EEXIST) {
 		if (failed_start > start)
-			clear_extent_bit(tree, start, failed_start - 1,
-					 bits, cached);
+			clear_extent_bit(tree, start, failed_start - 1, bits, cached);
 		return 0;
 	}
 	return 1;
@@ -1865,8 +1863,7 @@ int __lock_extent(struct extent_io_tree *tree, u64 start, u64 end, u32 bits,
 			clear_extent_bit(tree, start, failed_start - 1,
 					 bits, cached_state);
 
-		wait_extent_bit(tree, failed_start, end, bits,
-				&failed_state);
+		wait_extent_bit(tree, failed_start, end, bits, &failed_state);
 		err = __set_extent_bit(tree, start, end, bits,
 				       &failed_start, &failed_state,
 				       cached_state, NULL);

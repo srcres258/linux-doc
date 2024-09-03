@@ -7,8 +7,3 @@ typedef struct {
 	u32 count;
 	{{ ctype }}{{ type }} *element;
 } {{ name }};
-{%- if name in public_apis %}
-
-bool xdrgen_decode_{{ name }}(struct xdr_stream *xdr, {{ ctype }}{{ name }} *ptr);
-bool xdrgen_encode_{{ name }}(struct xdr_stream *xdr, const {{ ctype }}{{ name }} value);
-{%- endif -%}

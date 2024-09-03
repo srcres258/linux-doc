@@ -20,22 +20,21 @@
  * during SPI transfers by setting max_speed_hz via the device tree.
  */
 
-#include <linux/module.h>
-#include <linux/sched.h>
-#include <linux/slab.h>
+#include <linux/delay.h>
 #include <linux/errno.h>
-#include <linux/wait.h>
-#include <linux/platform_device.h>
+#include <linux/interrupt.h>
+#include <linux/io.h>
+#include <linux/module.h>
 #include <linux/of_address.h>
 #include <linux/of_platform.h>
-#include <linux/interrupt.h>
-#include <linux/delay.h>
 #include <linux/platform_device.h>
+#include <linux/sched.h>
+#include <linux/slab.h>
+#include <linux/wait.h>
 
 #include <linux/spi/spi.h>
 #include <linux/spi/spi_bitbang.h>
 
-#include <linux/io.h>
 #include <asm/dcr.h>
 #include <asm/dcr-regs.h>
 
@@ -415,9 +414,6 @@ static int spi_ppc4xx_of_probe(struct platform_device *op)
 	if (ret < 0)
 		goto free_host;
 	hw->irqnum = ret;
-
-	if (hw->irqnum <= 0)
-		goto free_host;
 
 	ret = request_irq(hw->irqnum, spi_ppc4xx_int,
 			  0, "spi_ppc4xx_of", (void *)hw);

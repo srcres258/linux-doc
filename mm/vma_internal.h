@@ -33,7 +33,6 @@
 #include <linux/mutex.h>
 #include <linux/pagemap.h>
 #include <linux/pfn.h>
-#include <linux/pgtable.h>
 #include <linux/rcupdate.h>
 #include <linux/rmap.h>
 #include <linux/rwsem.h>

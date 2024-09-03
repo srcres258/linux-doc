@@ -137,10 +137,10 @@ const struct btrfs_fs_info *extent_io_tree_to_fs_info(const struct extent_io_tre
 void extent_io_tree_init(struct btrfs_fs_info *fs_info,
 			 struct extent_io_tree *tree, unsigned int owner);
 void extent_io_tree_release(struct extent_io_tree *tree);
-int __lock_extent(struct extent_io_tree *tree, u64 start, u64 end,
-		  u32 bits, struct extent_state **cached);
-bool __try_lock_extent(struct extent_io_tree *tree, u64 start, u64 end,
-		       u32 bits, struct extent_state **cached);
+int __lock_extent(struct extent_io_tree *tree, u64 start, u64 end, u32 bits,
+		  struct extent_state **cached);
+bool __try_lock_extent(struct extent_io_tree *tree, u64 start, u64 end, u32 bits,
+		       struct extent_state **cached);
 
 static inline int lock_extent(struct extent_io_tree *tree, u64 start, u64 end,
 			      struct extent_state **cached)

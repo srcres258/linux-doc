@@ -136,6 +136,22 @@ int vma_expand(struct vma_merge_struct *vmg);
 int vma_shrink(struct vma_iterator *vmi, struct vm_area_struct *vma,
 	       unsigned long start, unsigned long end, pgoff_t pgoff);
 
+static inline int vma_iter_store_gfp(struct vma_iterator *vmi,
+			struct vm_area_struct *vma, gfp_t gfp)
+
+{
+	if (vmi->mas.status != ma_start &&
+	    ((vmi->mas.index > vma->vm_start) || (vmi->mas.last < vma->vm_start)))
+		vma_iter_invalidate(vmi);
+
+	__mas_set_range(&vmi->mas, vma->vm_start, vma->vm_end - 1);
+	mas_store_gfp(&vmi->mas, vma, gfp);
+	if (unlikely(mas_is_err(&vmi->mas)))
+		return -ENOMEM;
+
+	return 0;
+}
+
 #ifdef CONFIG_MMU
 /*
  * init_vma_munmap() - Initializer wrapper for vma_munmap_struct
@@ -252,10 +268,9 @@ void unmap_region(struct ma_state *mas, struct vm_area_struct *vma,
 
 /* We are about to modify the VMA's flags. */
 struct vm_area_struct *vma_modify_flags(struct vma_iterator *vmi,
-					struct vm_area_struct *prev,
-					struct vm_area_struct *vma,
-					unsigned long start, unsigned long end,
-					unsigned long new_flags);
+		struct vm_area_struct *prev, struct vm_area_struct *vma,
+		unsigned long start, unsigned long end,
+		unsigned long new_flags);
 
 /* We are about to modify the VMA's flags and/or anon_name. */
 struct vm_area_struct
@@ -340,22 +355,6 @@ static inline struct vm_area_struct *vma_prev_limit(struct vma_iterator *vmi,
 {
 	return mas_prev(&vmi->mas, min);
 }
-
-static inline int vma_iter_store_gfp(struct vma_iterator *vmi,
-			struct vm_area_struct *vma, gfp_t gfp)
-{
-	if (vmi->mas.status != ma_start &&
-	    ((vmi->mas.index > vma->vm_start) || (vmi->mas.last < vma->vm_start)))
-		vma_iter_invalidate(vmi);
-
-	__mas_set_range(&vmi->mas, vma->vm_start, vma->vm_end - 1);
-	mas_store_gfp(&vmi->mas, vma, gfp);
-	if (unlikely(mas_is_err(&vmi->mas)))
-		return -ENOMEM;
-
-	return 0;
-}
-
 
 /*
  * These three helpers classifies VMAs for virtual memory accounting.
@@ -491,6 +490,34 @@ static inline
 struct vm_area_struct *vma_iter_prev_range(struct vma_iterator *vmi)
 {
 	return mas_prev_range(&vmi->mas, 0);
+}
+
+/*
+ * Retrieve the next VMA and rewind the iterator to end of the previous VMA, or
+ * if no previous VMA, to index 0.
+ */
+static inline
+struct vm_area_struct *vma_iter_next_rewind(struct vma_iterator *vmi,
+		struct vm_area_struct **pprev)
+{
+	struct vm_area_struct *next = vma_next(vmi);
+	struct vm_area_struct *prev = vma_prev(vmi);
+
+	/*
+	 * Consider the case where no previous VMA exists. We advance to the
+	 * next VMA, skipping any gap, then rewind to the start of the range.
+	 *
+	 * If we were to unconditionally advance to the next range we'd wind up
+	 * at the next VMA again, so we check to ensure there is a previous VMA
+	 * to skip over.
+	 */
+	if (prev)
+		vma_iter_next_range(vmi);
+
+	if (pprev)
+		*pprev = prev;
+
+	return next;
 }
 
 #ifdef CONFIG_64BIT

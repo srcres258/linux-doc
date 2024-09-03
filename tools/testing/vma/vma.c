@@ -1460,6 +1460,68 @@ static bool test_vmi_prealloc_fail(void)
 	return true;
 }
 
+static bool test_merge_extend(void)
+{
+	unsigned long flags = VM_READ | VM_WRITE | VM_MAYREAD | VM_MAYWRITE;
+	struct mm_struct mm = {};
+	VMA_ITERATOR(vmi, &mm, 0x1000);
+	struct vm_area_struct *vma;
+
+	vma = alloc_and_link_vma(&mm, 0, 0x1000, 0, flags);
+	alloc_and_link_vma(&mm, 0x3000, 0x4000, 3, flags);
+
+	/*
+	 * Extend a VMA into the gap between itself and the following VMA.
+	 * This should result in a merge.
+	 *
+	 * <->
+	 * *  *
+	 *
+	 */
+
+	ASSERT_EQ(vma_merge_extend(&vmi, vma, 0x2000), vma);
+	ASSERT_EQ(vma->vm_start, 0);
+	ASSERT_EQ(vma->vm_end, 0x4000);
+	ASSERT_EQ(vma->vm_pgoff, 0);
+	ASSERT_TRUE(vma_write_started(vma));
+	ASSERT_EQ(mm.map_count, 1);
+
+	cleanup_mm(&mm, &vmi);
+	return true;
+}
+
+static bool test_copy_vma(void)
+{
+	unsigned long flags = VM_READ | VM_WRITE | VM_MAYREAD | VM_MAYWRITE;
+	struct mm_struct mm = {};
+	bool need_locks = false;
+	VMA_ITERATOR(vmi, &mm, 0);
+	struct vm_area_struct *vma, *vma_new, *vma_next;
+
+	/* Move backwards and do not merge. */
+
+	vma = alloc_and_link_vma(&mm, 0x3000, 0x5000, 3, flags);
+	vma_new = copy_vma(&vma, 0, 0x2000, 0, &need_locks);
+
+	ASSERT_NE(vma_new, vma);
+	ASSERT_EQ(vma_new->vm_start, 0);
+	ASSERT_EQ(vma_new->vm_end, 0x2000);
+	ASSERT_EQ(vma_new->vm_pgoff, 0);
+
+	cleanup_mm(&mm, &vmi);
+
+	/* Move a VMA into position next to another and merge the two. */
+
+	vma = alloc_and_link_vma(&mm, 0, 0x2000, 0, flags);
+	vma_next = alloc_and_link_vma(&mm, 0x6000, 0x8000, 6, flags);
+	vma_new = copy_vma(&vma, 0x4000, 0x2000, 4, &need_locks);
+
+	ASSERT_EQ(vma_new, vma_next);
+
+	cleanup_mm(&mm, &vmi);
+	return true;
+}
+
 int main(void)
 {
 	int num_tests = 0, num_fail = 0;
@@ -1489,6 +1551,8 @@ int main(void)
 	TEST(anon_vma_non_mergeable);
 	TEST(dup_anon_vma);
 	TEST(vmi_prealloc_fail);
+	TEST(merge_extend);
+	TEST(copy_vma);
 
 #undef TEST
 

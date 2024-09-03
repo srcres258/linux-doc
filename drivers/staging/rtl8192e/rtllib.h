@@ -93,16 +93,16 @@ static inline void *netdev_priv_rsl(struct net_device *dev)
 #define SUPPORT_CKIP_PK			0x10
 #define	RT_RF_OFF_LEVL_HALT_NIC		BIT(3)
 #define	RT_IN_PS_LEVEL(psc, _PS_FLAG)		\
-	((psc->CurPsLevel & _PS_FLAG) ? true : false)
+	((psc->cur_ps_level & _PS_FLAG) ? true : false)
 #define	RT_CLEAR_PS_LEVEL(psc, _PS_FLAG)	\
-	(psc->CurPsLevel &= (~(_PS_FLAG)))
+	(psc->cur_ps_level &= (~(_PS_FLAG)))
 
 /* defined for skb cb field */
 /* At most 28 byte */
 struct cb_desc {
 	/* Tx Desc Related flags (8-9) */
-	u8 bLastIniPkt:1;
-	u8 bCmdOrInit:1;
+	u8 last_ini_pkt:1;
+	u8 cmd_or_init:1;
 	u8 tx_dis_rate_fallback:1;
 	u8 tx_use_drv_assinged_rate:1;
 	u8 hw_sec:1;
@@ -159,14 +159,14 @@ enum sw_chnl_cmd_id {
 	cmd_id_write_port_ulong,
 	cmd_id_write_port_ushort,
 	cmd_id_write_port_uchar,
-	CmdID_RF_WriteReg,
+	cmd_id_rf_write_reg,
 };
 
 struct sw_chnl_cmd {
-	enum sw_chnl_cmd_id CmdID;
+	enum sw_chnl_cmd_id cmd_id;
 	u32			Para1;
 	u32			Para2;
-	u32			msDelay;
+	u32			ms_delay;
 };
 
 /*--------------------------Define -------------------------------------------*/
@@ -1046,7 +1046,7 @@ struct rt_pwr_save_ctrl {
 	u8				lps_idle_count;
 	u8				lps_awake_intvl;
 
-	u32				CurPsLevel;
+	u32				cur_ps_level;
 };
 
 #define RT_RF_CHANGE_SOURCE u32

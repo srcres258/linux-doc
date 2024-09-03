@@ -79,7 +79,8 @@ Once a .x file is available, use xdrgen to generate source and
 header files containing an implementation of XDR encoding and
 decoding functions for the specified protocol.
 
-   $ ./xdrgen header --definitions --declarations new2.x > new2xdr_gen.h
+   $ ./xdrgen definitions new2.x > include/linux/sunrpc/xdrgen/new2.h
+   $ ./xdrgen declarations new2.x > new2xdr_gen.h
 
 and
 

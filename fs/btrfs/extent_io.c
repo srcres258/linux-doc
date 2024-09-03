@@ -113,11 +113,11 @@ if (!bbio)
 /* Caller should ensure the bio has at least some range added */
 ASSERT(bbio->bio.bi_iter.bi_size);
 
-if (btrfs_op(&bbio->bio) == BTRFS_MAP_READ &&
-    bio_ctrl->compress_type != BTRFS_COMPRESS_NONE)
-	btrfs_submit_compressed_read(bbio);
-else
-	btrfs_submit_bio(bbio, 0);
+	if (btrfs_op(&bbio->bio) == BTRFS_MAP_READ &&
+	    bio_ctrl->compress_type != BTRFS_COMPRESS_NONE)
+		btrfs_submit_compressed_read(bbio);
+	else
+		btrfs_submit_bbio(bbio, 0);
 
 /* The bbio is owned by the end_io handler now */
 bio_ctrl->bbio = NULL;
@@ -539,6 +539,8 @@ bio_for_each_folio_all(fi, bio) {
 	"incomplete page write with offset %zu and length %zu",
 			   fi.offset, fi.length);
 
+		btrfs_finish_ordered_extent(bbio->ordered, folio, start, len,
+					    !error);
 		if (error)
 			mapping_set_error(folio->mapping, error);
 		btrfs_folio_clear_writeback(fs_info, folio, start, len);
@@ -966,6 +968,23 @@ if (!folio_test_private(folio))
 
 	fs_info = folio_to_fs_info(folio);
 	if (btrfs_is_subpage(fs_info, folio->mapping))
+		return btrfs_attach_subpage(fs_info, folio, BTRFS_SUBPAGE_DATA);
+
+	folio_attach_private(folio, (void *)EXTENT_FOLIO_PRIVATE);
+	return 0;
+}
+
+void clear_folio_extent_mapped(struct folio *folio)
+{
+	struct btrfs_fs_info *fs_info;
+
+	ASSERT(folio->mapping);
+
+	if (!folio_test_private(folio))
+		return;
+
+	fs_info = folio_to_fs_info(folio);
+	if (btrfs_is_subpage(fs_info, folio->mapping))
 		return btrfs_detach_subpage(fs_info, folio);
 
 folio_detach_private(folio);
@@ -1211,15 +1230,15 @@ int btrfs_read_folio(struct file *file, struct folio *folio)
 }
 
 /*
-* helper for __extent_writepage, doing all of the delayed allocation setup.
-*
-* This returns 1 if btrfs_run_delalloc_range function did all the work required
-* to write the page (copy into inline extent).  In this case the IO has
-* been started and the page is already unlocked.
-*
-* This returns 0 if all went well (page still locked)
-* This returns < 0 if there were errors (page still locked)
-*/
+ * helper for extent_writepage(), doing all of the delayed allocation setup.
+ *
+ * This returns 1 if btrfs_run_delalloc_range function did all the work required
+ * to write the page (copy into inline extent).  In this case the IO has
+ * been started and the page is already unlocked.
+ *
+ * This returns 0 if all went well (page still locked)
+ * This returns < 0 if there were errors (page still locked)
+ */
 static noinline_for_stack int writepage_delalloc(struct btrfs_inode *inode,
 						 struct folio *folio,
 						 struct writeback_control *wbc)
@@ -1433,18 +1452,18 @@ static int submit_one_sector(struct btrfs_inode *inode,
 }
 
 /*
-* helper for __extent_writepage.  This calls the writepage start hooks,
-* and does the loop to map the page into extents and bios.
-*
-* We return 1 if the IO is started and the page is unlocked,
-* 0 if all went well (page still locked)
-* < 0 if there were errors (page still locked)
-*/
-static noinline_for_stack int __extent_writepage_io(struct btrfs_inode *inode,
-						    struct folio *folio,
-						    u64 start, u32 len,
-						    struct btrfs_bio_ctrl *bio_ctrl,
-						    loff_t i_size)
+ * Helper for extent_writepage().  This calls the writepage start hooks,
+ * and does the loop to map the page into extents and bios.
+ *
+ * We return 1 if the IO is started and the page is unlocked,
+ * 0 if all went well (page still locked)
+ * < 0 if there were errors (page still locked)
+ */
+static noinline_for_stack int extent_writepage_io(struct btrfs_inode *inode,
+						  struct folio *folio,
+						  u64 start, u32 len,
+						  struct btrfs_bio_ctrl *bio_ctrl,
+						  loff_t i_size)
 {
 	struct btrfs_fs_info *fs_info = inode->root->fs_info;
 	unsigned long range_bitmap = 0;
@@ -1535,7 +1554,7 @@ out:
  * Return 0 if everything goes well.
  * Return <0 for error.
  */
-static int __extent_writepage(struct folio *folio, struct btrfs_bio_ctrl *bio_ctrl)
+static int extent_writepage(struct folio *folio, struct btrfs_bio_ctrl *bio_ctrl)
 {
 	struct inode *inode = folio->mapping->host;
 	const u64 page_start = folio_pos(folio);
@@ -1544,7 +1563,7 @@ static int __extent_writepage(struct folio *folio, struct btrfs_bio_ctrl *bio_ct
 	loff_t i_size = i_size_read(inode);
 	unsigned long end_index = i_size >> PAGE_SHIFT;
 
-	trace___extent_writepage(folio, inode, bio_ctrl->wbc);
+	trace_extent_writepage(folio, inode, bio_ctrl->wbc);
 
 	WARN_ON(!folio_test_locked(folio));
 
@@ -1569,8 +1588,8 @@ static int __extent_writepage(struct folio *folio, struct btrfs_bio_ctrl *bio_ct
 	if (ret)
 		goto done;
 
-	ret = __extent_writepage_io(BTRFS_I(inode), folio, folio_pos(folio),
-				    PAGE_SIZE, bio_ctrl, i_size);
+	ret = extent_writepage_io(BTRFS_I(inode), folio, folio_pos(folio),
+				  PAGE_SIZE, bio_ctrl, i_size);
 	if (ret == 1)
 		return 0;
 
@@ -1583,7 +1602,8 @@ done:
 		mapping_set_error(folio->mapping, ret);
 	}
 
-	btrfs_folio_end_all_writers(inode_to_fs_info(inode), folio);
+	btrfs_folio_end_writer_lock(inode_to_fs_info(inode), folio,
+				    page_start, PAGE_SIZE);
 	ASSERT(ret <= 0);
 	return ret;
 }
@@ -1834,8 +1854,7 @@ if (fs_info->nodesize < PAGE_SIZE) {
 		wbc->nr_to_write -= folio_nr_pages(folio);
 		folio_unlock(folio);
 	}
-}
-btrfs_submit_bio(bbio, 0);
+	btrfs_submit_bbio(bbio, 0);
 }
 
 /*
@@ -2302,7 +2321,7 @@ retry:
 				continue;
 			}
 
-			ret = __extent_writepage(folio, bio_ctrl);
+			ret = extent_writepage(folio, bio_ctrl);
 			if (ret < 0) {
 				done = 1;
 				break;
@@ -2429,8 +2448,8 @@ void extent_write_locked_range(struct inode *inode, const struct folio *locked_f
 		if (pages_dirty && folio != locked_folio)
 			ASSERT(folio_test_dirty(folio));
 
-		ret = __extent_writepage_io(BTRFS_I(inode), folio, cur, cur_len,
-					    &bio_ctrl, i_size);
+		ret = extent_writepage_io(BTRFS_I(inode), folio, cur, cur_len,
+					  &bio_ctrl, i_size);
 		if (ret == 1)
 			goto next_page;
 
@@ -4379,7 +4398,7 @@ int read_extent_buffer_pages(struct extent_buffer *eb, int wait, int mirror_num,
 			ASSERT(ret);
 		}
 	}
-	btrfs_submit_bio(bbio, mirror_num);
+	btrfs_submit_bbio(bbio, mirror_num);
 
 done:
 	if (wait == WAIT_COMPLETE) {

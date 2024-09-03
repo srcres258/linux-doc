@@ -1051,10 +1051,10 @@ struct file {
 	struct mutex			f_pos_lock;
 	loff_t				f_pos;
 	u64				f_version;
+	/* --- cacheline 2 boundary (128 bytes) --- */
 #ifdef CONFIG_SECURITY
 	void				*f_security;
 #endif
-	/* --- cacheline 2 boundary (128 bytes) --- */
 	struct fown_struct		*f_owner;
 	errseq_t			f_wb_err;
 	errseq_t			f_sb_err;

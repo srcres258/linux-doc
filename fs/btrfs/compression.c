@@ -395,7 +395,7 @@ void btrfs_submit_compressed_write(struct btrfs_ordered_extent *ordered,
 	cb->bbio.ordered = ordered;
 	btrfs_add_compressed_bio_folios(cb);
 
-	btrfs_submit_bio(&cb->bbio, 0);
+	btrfs_submit_bbio(&cb->bbio, 0);
 }
 
 /*
@@ -497,6 +497,7 @@ static noinline int add_ra_bio_pages(struct inode *inode,
 		}
 
 		page_end = (pg_index << PAGE_SHIFT) + folio_size(folio) - 1;
+		lock_extent(tree, cur, page_end, NULL);
 		read_lock(&em_tree->lock);
 		em = lookup_extent_mapping(em_tree, cur, page_end + 1 - cur);
 		read_unlock(&em_tree->lock);
@@ -511,6 +512,7 @@ static noinline int add_ra_bio_pages(struct inode *inode,
 		    (extent_map_block_start(em) >> SECTOR_SHIFT) !=
 		    orig_bio->bi_iter.bi_sector) {
 			free_extent_map(em);
+			unlock_extent(tree, cur, page_end, NULL);
 			folio_unlock(folio);
 			folio_put(folio);
 			break;
@@ -626,7 +628,7 @@ void btrfs_submit_compressed_read(struct btrfs_bio *bbio)
 	if (memstall)
 		psi_memstall_leave(&pflags);
 
-	btrfs_submit_bio(&cb->bbio, 0);
+	btrfs_submit_bbio(&cb->bbio, 0);
 	return;
 
 out_free_compressed_pages:

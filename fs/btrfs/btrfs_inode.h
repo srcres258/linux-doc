@@ -373,10 +373,12 @@ static inline void btrfs_set_first_dir_index_to_log(struct btrfs_inode *inode,
 	WRITE_ONCE(inode->first_dir_index_to_log, index);
 }
 
-static inline struct btrfs_inode *BTRFS_I(const struct inode *inode)
-{
-	return container_of(inode, struct btrfs_inode, vfs_inode);
-}
+/* Type checked and const-preserving VFS inode -> btrfs inode. */
+#define BTRFS_I(_inode)								\
+	_Generic(_inode,							\
+		 struct inode *: container_of(_inode, struct btrfs_inode, vfs_inode),	\
+		 const struct inode *: (const struct btrfs_inode *)container_of(	\
+					_inode, const struct btrfs_inode, vfs_inode))
 
 static inline unsigned long btrfs_inode_hash(u64 objectid,
 					     const struct btrfs_root *root)
@@ -526,6 +528,14 @@ static inline bool btrfs_inode_can_compress(const struct btrfs_inode *inode)
 	    inode->flags & BTRFS_INODE_NODATASUM)
 		return false;
 	return true;
+}
+
+static inline void btrfs_assert_inode_locked(struct btrfs_inode *inode)
+{
+	/* Immediately trigger a crash if the inode is not locked. */
+	ASSERT(inode_is_locked(&inode->vfs_inode));
+	/* Trigger a splat in dmesg if this task is not holding the lock. */
+	lockdep_assert_held(&inode->vfs_inode.i_rwsem);
 }
 
 /* Array of bytes with variable length, hexadecimal format 0x1234 */

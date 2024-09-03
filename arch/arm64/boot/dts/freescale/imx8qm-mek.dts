@@ -62,12 +62,6 @@
 			no-map;
 		};
 
-		vdevbuffer: memory {
-			compatible = "shared-dma-pool";
-			reg = <0 0x90400000 0 0x100000>;
-			no-map;
-		};
-
 		vdev2vring0: memory@90100000 {
 			reg = <0 0x90100000 0 0x8000>;
 			no-map;
@@ -90,6 +84,12 @@
 
 		rsc_table1: memory@901ff000 {
 			reg = <0 0x901ff000 0 0x1000>;
+			no-map;
+		};
+
+		vdevbuffer: memory@90400000 {
+			compatible = "shared-dma-pool";
+			reg = <0 0x90400000 0 0x100000>;
 			no-map;
 		};
 	};

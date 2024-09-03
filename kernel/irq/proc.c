@@ -52,10 +52,8 @@ static int show_irq_affinity(int type, struct seq_file *m)
 	case AFFINITY:
 	case AFFINITY_LIST:
 		mask = desc->irq_common_data.affinity;
-#ifdef CONFIG_GENERIC_PENDING_IRQ
-		if (irqd_is_setaffinity_pending(&desc->irq_data))
-			mask = desc->pending_mask;
-#endif
+		if (irq_move_pending(&desc->irq_data))
+			mask = irq_desc_get_pending_mask(desc);
 		break;
 	case EFFECTIVE:
 	case EFFECTIVE_LIST:
@@ -142,7 +140,7 @@ static ssize_t write_irq_affinity(int type, struct file *file,
 	int err;
 
 	if (!irq_can_set_affinity_usr(irq) || no_irq_affinity)
-		return -EIO;
+		return -EPERM;
 
 	if (!zalloc_cpumask_var(&new_value, GFP_KERNEL))
 		return -ENOMEM;
@@ -363,6 +361,8 @@ void register_irq_proc(unsigned int irq, struct irq_desc *desc)
 		goto out_unlock;
 
 #ifdef CONFIG_SMP
+	umode_t umode = S_IRUGO;
+
 	if (irq_can_set_affinity_usr(desc->irq_data.irq))
 		umode |= S_IWUSR;
 

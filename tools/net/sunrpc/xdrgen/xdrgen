@@ -12,9 +12,10 @@ __version__ = "0.2"
 import sys
 import argparse
 
-from subcmds import source
-from subcmds import header
+from subcmds import definitions
+from subcmds import declarations
 from subcmds import lint
+from subcmds import source
 
 
 sys.path.insert(1, "@pythondir@")
@@ -41,35 +42,55 @@ There is NO WARRANTY, to the extent permitted by law.""",
 
     subcommands = parser.add_subparsers(title="Subcommands", required=True)
 
-    header_parser = subcommands.add_parser(
-        "header", help="Generate XDR definitions and declarations"
+    definitions_parser = subcommands.add_parser(
+        "definitions", help="Generate XDR definitions"
     )
-    header_parser.add_argument(
+    definitions_parser.add_argument(
         "--annotate",
         action="store_true",
         default=False,
         help="Add annotation comments",
     )
-    header_parser.add_argument(
-        "--declarations",
-        action="store_true",
-        default=False,
-        help="Generate RPC procedure declarations",
-    )
-    header_parser.add_argument(
-        "--definitions",
-        action="store_true",
-        default=False,
-        help="Generate protocol definitions",
-    )
-    header_parser.add_argument(
+    definitions_parser.add_argument(
         "--language",
         action="store_true",
         default="C",
         help="Output language",
     )
-    header_parser.add_argument("filename", help="File containing an XDR specification")
-    header_parser.set_defaults(func=header.subcmd)
+    definitions_parser.add_argument(
+        "--peer",
+        choices=["server", "client",],
+        default="server",
+        help="Generate header code for client or server side",
+        type=str,
+    )
+    definitions_parser.add_argument("filename", help="File containing an XDR specification")
+    definitions_parser.set_defaults(func=definitions.subcmd)
+
+    declarations_parser = subcommands.add_parser(
+        "declarations", help="Generate function declarations"
+    )
+    declarations_parser.add_argument(
+        "--annotate",
+        action="store_true",
+        default=False,
+        help="Add annotation comments",
+    )
+    declarations_parser.add_argument(
+        "--language",
+        action="store_true",
+        default="C",
+        help="Output language",
+    )
+    declarations_parser.add_argument(
+        "--peer",
+        choices=["server", "client",],
+        default="server",
+        help="Generate code for client or server side",
+        type=str,
+    )
+    declarations_parser.add_argument("filename", help="File containing an XDR specification")
+    declarations_parser.set_defaults(func=declarations.subcmd)
 
     linter_parser = subcommands.add_parser("lint", help="Check an XDR specification")
     linter_parser.add_argument("filename", help="File containing an XDR specification")
@@ -107,5 +128,5 @@ There is NO WARRANTY, to the extent permitted by law.""",
 try:
     if __name__ == "__main__":
         sys.exit(main())
-except (SystemExit, KeyboardInterrupt, RuntimeError, BrokenPipeError):
+except (SystemExit, KeyboardInterrupt, BrokenPipeError):
     sys.exit(1)

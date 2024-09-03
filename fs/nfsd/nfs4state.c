@@ -3079,8 +3079,7 @@ nfsd4_cb_getattr_release(struct nfsd4_callback *cb)
 	struct nfs4_delegation *dp =
 			container_of(ncf, struct nfs4_delegation, dl_cb_fattr);
 
-	clear_bit(CB_GETATTR_BUSY, &ncf->ncf_cb_flags);
-	wake_up_bit(&ncf->ncf_cb_flags, CB_GETATTR_BUSY);
+	clear_and_wake_up_bit(CB_GETATTR_BUSY, &ncf->ncf_cb_flags);
 	nfs4_put_stid(&dp->dl_stid);
 }
 
@@ -4707,6 +4706,7 @@ void nfsd4_cstate_clear_replay(struct nfsd4_compound_state *cstate)
 	if (so != NULL) {
 		cstate->replay_owner = NULL;
 		atomic_set(&so->so_replay.rp_locked, RP_UNLOCKED);
+		smp_mb__after_atomic();
 		wake_up_var(&so->so_replay.rp_locked);
 		nfs4_put_stateowner(so);
 	}
@@ -5007,6 +5007,7 @@ move_to_close_lru(struct nfs4_ol_stateid *s, struct net *net)
 	 * so tell them to stop waiting.
 	 */
 	atomic_set(&oo->oo_owner.so_replay.rp_locked, RP_UNHASHED);
+	smp_mb__after_atomic();
 	wake_up_var(&oo->oo_owner.so_replay.rp_locked);
 	wait_event(close_wq, refcount_read(&s->st_stid.sc_count) == 2);
 
@@ -7476,8 +7477,9 @@ nfsd4_delegreturn(struct svc_rqst *rqstp, struct nfsd4_compound_state *cstate,
 		goto put_stateid;
 
 	trace_nfsd_deleg_return(stateid);
-	wake_up_var(d_inode(cstate->current_fh.fh_dentry));
 	destroy_delegation(dp);
+	smp_mb__after_atomic();
+	wake_up_var(d_inode(cstate->current_fh.fh_dentry));
 put_stateid:
 	nfs4_put_stid(&dp->dl_stid);
 out:
@@ -8552,6 +8554,7 @@ static int nfs4_state_create_net(struct net *net)
 	spin_lock_init(&nn->client_lock);
 	spin_lock_init(&nn->s2s_cp_lock);
 	idr_init(&nn->s2s_cp_stateids);
+	atomic_set(&nn->pending_async_copies, 0);
 
 	spin_lock_init(&nn->blocked_locks_lock);
 	INIT_LIST_HEAD(&nn->blocked_locks_lru);

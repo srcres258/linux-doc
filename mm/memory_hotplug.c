@@ -1781,7 +1781,6 @@ static void do_migrate_range(unsigned long start_pfn, unsigned long end_pfn)
 
 	for (pfn = start_pfn; pfn < end_pfn; pfn++) {
 		struct page *page;
-		bool hugetlb;
 
 		if (!pfn_valid(pfn))
 			continue;
@@ -1812,22 +1811,21 @@ static void do_migrate_range(unsigned long start_pfn, unsigned long end_pfn)
 			continue;
 		}
 
-		hugetlb = folio_test_hugetlb(folio);
-		if (!hugetlb) {
-			folio = folio_get_nontail_page(page);
-			if (!folio)
-				continue;
-		}
+		if (!folio_try_get(folio))
+			continue;
+
+		if (unlikely(page_folio(page) != folio))
+			goto put_folio;
 
 		if (!isolate_folio_to_list(folio, &source)) {
 			if (__ratelimit(&migrate_rs)) {
-				pr_warn("failed to isolate pfn %lx\n", pfn);
+				pr_warn("failed to isolate pfn %lx\n",
+					page_to_pfn(page));
 				dump_page(page, "isolation failed");
 			}
 		}
-
-		if (!hugetlb)
-			folio_put(folio);
+put_folio:
+		folio_put(folio);
 	}
 	if (!list_empty(&source)) {
 		nodemask_t nmask = node_states[N_MEMORY];

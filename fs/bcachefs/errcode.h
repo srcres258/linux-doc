@@ -119,8 +119,8 @@
 	x(EEXIST,			EEXIST_str_hash_set)			\
 	x(EEXIST,			EEXIST_discard_in_flight_add)		\
 	x(EEXIST,			EEXIST_subvolume_create)		\
-	x(0,				open_buckets_empty)			\
-	x(0,				freelist_empty)				\
+	x(ENOSPC,			open_buckets_empty)			\
+	x(ENOSPC,			freelist_empty)				\
 	x(BCH_ERR_freelist_empty,	no_buckets_found)			\
 	x(0,				transaction_restart)			\
 	x(BCH_ERR_transaction_restart,	transaction_restart_fault_inject)	\
@@ -258,7 +258,6 @@
 	x(BCH_ERR_nopromote,		nopromote_in_flight)			\
 	x(BCH_ERR_nopromote,		nopromote_no_writes)			\
 	x(BCH_ERR_nopromote,		nopromote_enomem)			\
-	x(0,				need_inode_lock)			\
 	x(0,				invalid_snapshot_node)			\
 	x(0,				option_needs_open_fs)
 

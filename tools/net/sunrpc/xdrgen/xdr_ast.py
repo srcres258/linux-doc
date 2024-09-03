@@ -55,7 +55,6 @@ class _XdrDefinedType(_XdrTypeSpecifier):
 @dataclass
 class _XdrBuiltInType(_XdrTypeSpecifier):
     """Corresponds to a built-in XDR type"""
-    display_name: str
     type_decorator: str = ""
 
 
@@ -283,9 +282,7 @@ class ParseToAst(Transformer):
             return _XdrDefinedType(name, decorator)
 
         token = children[0].data
-        return _XdrBuiltInType(
-            type_name=token.value, display_name=token.value.replace("_", " ")
-        )
+        return _XdrBuiltInType(type_name=token.value)
 
     def constant_def(self, children):
         """Instantiate one _XdrConstant object"""

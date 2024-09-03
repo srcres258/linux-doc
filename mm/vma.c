@@ -45,6 +45,13 @@ static inline bool is_mergeable_anon_vma(struct anon_vma *anon_vma1,
 	return anon_vma1 == anon_vma2;
 }
 
+/* Are the anon_vma's belonging to each VMA compatible with one another? */
+static inline bool are_anon_vmas_compatible(struct vm_area_struct *vma1,
+					    struct vm_area_struct *vma2)
+{
+	return is_mergeable_anon_vma(vma1->anon_vma, vma2->anon_vma, NULL);
+}
+
 /*
  * init_multi_vma_prep() - Initializer for struct vma_prepare
  * @vp: The vma_prepare struct
@@ -91,7 +98,7 @@ static bool can_vma_merge_before(struct vma_merge_struct *vmg)
 {
 	pgoff_t pglen = PHYS_PFN(vmg->end - vmg->start);
 
-	if (is_mergeable_vma(vmg, true) &&
+	if (is_mergeable_vma(vmg, /* merge_next = */ true) &&
 	    is_mergeable_anon_vma(vmg->anon_vma, vmg->next->anon_vma, vmg->next)) {
 		if (vmg->next->vm_pgoff == vmg->pgoff + pglen)
 			return true;
@@ -111,7 +118,7 @@ static bool can_vma_merge_before(struct vma_merge_struct *vmg)
  */
 static bool can_vma_merge_after(struct vma_merge_struct *vmg)
 {
-	if (is_mergeable_vma(vmg, false) &&
+	if (is_mergeable_vma(vmg, /* merge_next = */ false) &&
 	    is_mergeable_anon_vma(vmg->anon_vma, vmg->prev->anon_vma, vmg->prev)) {
 		if (vmg->prev->vm_pgoff + vma_pages(vmg->prev) == vmg->pgoff)
 			return true;
@@ -273,6 +280,44 @@ again:
 static void init_vma_prep(struct vma_prepare *vp, struct vm_area_struct *vma)
 {
 	init_multi_vma_prep(vp, vma, NULL, NULL, NULL);
+}
+
+/*
+ * Can the proposed VMA be merged with the left (previous) VMA taking into
+ * account the start position of the proposed range.
+ */
+static bool can_vma_merge_left(struct vma_merge_struct *vmg)
+
+{
+	return vmg->prev && vmg->prev->vm_end == vmg->start &&
+		can_vma_merge_after(vmg);
+}
+
+/*
+ * Can the proposed VMA be merged with the right (next) VMA taking into
+ * account the end position of the proposed range.
+ *
+ * In addition, if we can merge with the left VMA, ensure that left and right
+ * anon_vma's are also compatible.
+ */
+static bool can_vma_merge_right(struct vma_merge_struct *vmg,
+				bool can_merge_left)
+{
+	if (!vmg->next || vmg->end != vmg->next->vm_start ||
+	    !can_vma_merge_before(vmg))
+		return false;
+
+	if (!can_merge_left)
+		return true;
+
+	/*
+	 * If we can merge with prev (left) and next (right), indicating that
+	 * each VMA's anon_vma is compatible with the proposed anon_vma, this
+	 * does not mean prev and next are compatible with EACH OTHER.
+	 *
+	 * We therefore check this in addition to mergeability to either side.
+	 */
+	return are_anon_vmas_compatible(vmg->prev, vmg->next);
 }
 
 /*
@@ -622,11 +667,10 @@ static struct vm_area_struct *vma_merge_existing_range(struct vma_merge_struct *
 	unsigned long end = vmg->end;
 	bool left_side = vma && start == vma->vm_start;
 	bool right_side = vma && end == vma->vm_end;
-	bool merge_both = false;
 	int err = 0;
 	long adj_start = 0;
 	bool merge_will_delete_vma, merge_will_delete_next;
-	bool merge_left, merge_right;
+	bool merge_left, merge_right, merge_both;
 	bool expanded;
 
 	mmap_assert_write_locked(vmg->mm);
@@ -647,52 +691,34 @@ static struct vm_area_struct *vma_merge_existing_range(struct vma_merge_struct *
 	vmg->state = VMA_MERGE_NOMERGE;
 
 	/*
-	 * If a special mapping or neither at the furthermost left or right side
-	 * of the VMA, then we have no chance of merging and should abort.
-	 *
-	 * We later require that vma->vm_flags == vm_flags, so this tests
-	 * vma->vm_flags & VM_SPECIAL, too.
+	 * If a special mapping or if the range being modified is neither at the
+	 * furthermost left or right side of the VMA, then we have no chance of
+	 * merging and should abort.
 	 */
 	if (vmg->flags & VM_SPECIAL || (!left_side && !right_side))
 		return NULL;
 
-	if (left_side && prev && prev->vm_end == start && can_vma_merge_after(vmg)) {
-		merge_left = true;
-		vma_prev(vmg->vmi);
-	} else {
+	if (left_side)
+		merge_left = can_vma_merge_left(vmg);
+	else
 		merge_left = false;
-	}
 
 	if (right_side) {
-		next = vmg->next = vma_lookup(vma->vm_mm, end);
+		next = vmg->next = vma_iter_next_range(vmg->vmi);
+		vma_iter_prev_range(vmg->vmi);
 
-		/*
-		 * We can merge right if there is a subsequent VMA, if it is
-		 * immediately adjacent, and if it is compatible with vma.
-		 */
-		merge_right = next && end == next->vm_start &&
-			can_vma_merge_before(vmg);
-
-		/*
-		 * We can only merge both if the anonymous VMA of the previous
-		 * VMA is compatible with the anonymous VMA of the subsequent
-		 * VMA.
-		 *
-		 * Otherwise, we default to merging only the left.
-		 */
-		if (merge_left && merge_right)
-			merge_right = merge_both =
-				is_mergeable_anon_vma(prev->anon_vma,
-						      next->anon_vma, NULL);
+		merge_right = can_vma_merge_right(vmg, merge_left);
 	} else {
 		merge_right = false;
 		next = NULL;
 	}
 
-	/* If we have nothing to merge, abort. */
-	if (!merge_left && !merge_right)
+	if (merge_left)		/* If merging prev, position iterator there. */
+		vma_prev(vmg->vmi);
+	else if (!merge_right)	/* If we have nothing to merge, abort. */
 		return NULL;
 
+	merge_both = merge_left && merge_right;
 	/* If we span the entire VMA, a merge implies it will be deleted. */
 	merge_will_delete_vma = left_side && right_side;
 
@@ -890,8 +916,7 @@ struct vm_area_struct *vma_merge_new_range(struct vma_merge_struct *vmg)
 	unsigned long end = vmg->end;
 	pgoff_t pgoff = vmg->pgoff;
 	pgoff_t pglen = PHYS_PFN(end - start);
-	bool merge_next = false;
-	bool can_merge_before, can_merge_after;
+	bool can_merge_left, can_merge_right;
 
 	mmap_assert_write_locked(vmg->mm);
 	VM_WARN_ON(vmg->vma);
@@ -904,24 +929,18 @@ struct vm_area_struct *vma_merge_new_range(struct vma_merge_struct *vmg)
 	if ((vmg->flags & VM_SPECIAL) || (!prev && !next))
 		return NULL;
 
-	can_merge_before = next && next->vm_start == end &&
-		can_vma_merge_before(vmg);
-	can_merge_after = prev && prev->vm_end == start &&
-		can_vma_merge_after(vmg);
+	can_merge_left = can_vma_merge_left(vmg);
+	can_merge_right = can_vma_merge_right(vmg, can_merge_left);
 
 	/* If we can merge with the next VMA, adjust vmg accordingly. */
-	if (can_merge_before &&
-	    (!can_merge_after || is_mergeable_anon_vma(prev->anon_vma,
-						       next->anon_vma, NULL))) {
+	if (can_merge_right) {
 		vmg->end = next->vm_end;
 		vmg->vma = next;
 		vmg->pgoff = next->vm_pgoff - pglen;
-
-		merge_next = true;
 	}
 
 	/* If we can merge with the previous VMA, adjust vmg accordingly. */
-	if (can_merge_after) {
+	if (can_merge_left) {
 		vmg->start = prev->vm_start;
 		vmg->vma = prev;
 		vmg->pgoff = prev->vm_pgoff;
@@ -931,7 +950,7 @@ struct vm_area_struct *vma_merge_new_range(struct vma_merge_struct *vmg)
 		 * are not permitted to do so, reduce the operation to merging
 		 * prev and vma.
 		 */
-		if (merge_next && !can_merge_remove_vma(next))
+		if (can_merge_right && !can_merge_remove_vma(next))
 			vmg->end = end;
 
 		vma_prev(vmg->vmi); /* Equivalent to going to the previous range */
@@ -943,7 +962,6 @@ struct vm_area_struct *vma_merge_new_range(struct vma_merge_struct *vmg)
 	 */
 	if (vmg->vma && !vma_expand(vmg)) {
 		khugepaged_enter_vma(vmg->vma, vmg->flags);
-
 		vmg->state = VMA_MERGE_SUCCESS;
 		return vmg->vma;
 	}
@@ -1153,7 +1171,7 @@ void vms_complete_munmap_vmas(struct vma_munmap_struct *vms,
  * @vms: The vma munmap struct
  * @mas_detach: The maple state tracking the detached tree
  *
- * Return: 0 on success
+ * Return: 0 on success, -EPERM on mseal vmas, -ENOMEM otherwise
  */
 int vms_gather_munmap_vmas(struct vma_munmap_struct *vms,
 		struct ma_state *mas_detach)
@@ -1182,8 +1200,7 @@ int vms_gather_munmap_vmas(struct vma_munmap_struct *vms,
 			goto start_split_failed;
 		}
 
-		error = __split_vma(vms->vmi, vms->vma, vms->start, 1);
-		if (error)
+		if (__split_vma(vms->vmi, vms->vma, vms->start, 1))
 			goto start_split_failed;
 	}
 	vms->prev = vma_prev(vms->vmi);
@@ -1203,14 +1220,12 @@ int vms_gather_munmap_vmas(struct vma_munmap_struct *vms,
 		}
 		/* Does it split the end? */
 		if (next->vm_end > vms->end) {
-			error = __split_vma(vms->vmi, next, vms->end, 0);
-			if (error)
+			if (__split_vma(vms->vmi, next, vms->end, 0))
 				goto end_split_failed;
 		}
 		vma_start_write(next);
 		mas_set(mas_detach, vms->vma_count++);
-		error = mas_store_gfp(mas_detach, next, GFP_KERNEL);
-		if (error)
+		if (mas_store_gfp(mas_detach, next, GFP_KERNEL))
 			goto munmap_gather_failed;
 
 		vma_mark_detached(next, true);
@@ -1240,10 +1255,8 @@ int vms_gather_munmap_vmas(struct vma_munmap_struct *vms,
 			 * split, despite we could. This is unlikely enough
 			 * failure that it's not worth optimizing it for.
 			 */
-			error = userfaultfd_unmap_prep(next, vms->start,
-						       vms->end, vms->uf);
-
-			if (error)
+			if (userfaultfd_unmap_prep(next, vms->start, vms->end,
+						   vms->uf))
 				goto userfaultfd_error;
 		}
 #ifdef CONFIG_DEBUG_VM_MAPLE_TREE
@@ -1489,8 +1502,9 @@ struct vm_area_struct *vma_merge_extend(struct vma_iterator *vmi,
 {
 	VMG_VMA_STATE(vmg, vmi, vma, vma, vma->vm_end, vma->vm_end + delta);
 
-	/* We use the VMA to populate VMG fields only. */
-	vmg.vma = NULL;
+	vmg.next = vma_iter_next_rewind(vmi, NULL);
+	vmg.vma = NULL; /* We use the VMA to populate VMG fields only. */
+
 	return vma_merge_new_range(&vmg);
 }
 
@@ -1612,10 +1626,7 @@ struct vm_area_struct *copy_vma(struct vm_area_struct **vmap,
 
 	vmg.vma = NULL; /* New VMA range. */
 	vmg.pgoff = pgoff;
-	vmg.next = vma_next(&vmi);
-	if (vma_prev(&vmi))
-		vma_iter_next_range(&vmi);
-
+	vmg.next = vma_iter_next_rewind(&vmi, NULL);
 	new_vma = vma_merge_new_range(&vmg);
 
 	if (new_vma) {

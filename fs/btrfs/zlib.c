@@ -175,7 +175,7 @@ int zlib_compress_folios(struct list_head *ws, struct address_space *mapping,
 						  data_in);
 					start += PAGE_SIZE;
 					workspace->strm.avail_in =
-						in_buf_folios << PAGE_SHIFT;
+						(in_buf_folios << PAGE_SHIFT);
 				}
 				workspace->strm.next_in = workspace->buf;
 			} else {

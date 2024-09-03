@@ -1377,7 +1377,6 @@ unsigned long mmap_region(struct file *file, unsigned long addr,
 	VMG_STATE(vmg, mm, &vmi, addr, end, vm_flags, pgoff);
 
 	vmg.file = file;
-
 	/* Find the first overlapping VMA */
 	vma = vma_find(&vmi, end);
 	init_vma_munmap(&vms, &vmi, vma, addr, end, uf, /* unlock = */ false);
@@ -1386,17 +1385,15 @@ unsigned long mmap_region(struct file *file, unsigned long addr,
 		mt_on_stack(mt_detach);
 		mas_init(&mas_detach, &mt_detach, /* addr = */ 0);
 		/* Prepare to unmap any existing mapping in the area */
-		if (vms_gather_munmap_vmas(&vms, &mas_detach))
-			return -ENOMEM;
+		error = vms_gather_munmap_vmas(&vms, &mas_detach);
+		if (error)
+			goto gather_failed;
 
 		vmg.next = vms.next;
 		vmg.prev = vms.prev;
 		vma = NULL;
 	} else {
-		vmg.next = vma_next(&vmi);
-		vmg.prev = vma_prev(&vmi);
-		if (vmg.prev)
-			vma_iter_next_range(&vmi);
+		vmg.next = vma_iter_next_rewind(&vmi, &vmg.prev);
 	}
 
 	/* Check against address space limit. */
@@ -1426,7 +1423,6 @@ unsigned long mmap_region(struct file *file, unsigned long addr,
 	vma = vma_merge_new_range(&vmg);
 	if (vma)
 		goto expanded;
-
 	/*
 	 * Determine the object being mapped and call the appropriate
 	 * specific mapper. the address has already been validated, but
@@ -1495,6 +1491,7 @@ unsigned long mmap_region(struct file *file, unsigned long addr,
 			} else {
 				vma_iter_config(&vmi, addr, end);
 			}
+			vma_iter_config(&vmi, addr, end);
 		}
 
 		vm_flags = vma->vm_flags;
@@ -1596,6 +1593,7 @@ unacct_error:
 
 abort_munmap:
 	vms_abort_munmap_vmas(&vms, &mas_detach);
+gather_failed:
 	validate_mm(mm);
 	return error;
 }
@@ -2341,7 +2339,6 @@ int relocate_vma_down(struct vm_area_struct *vma, unsigned long shift)
 	tlb_finish_mmu(&tlb);
 
 	vma_prev(&vmi);
-
 	/* Shrink the vma to just the new range */
 	return vma_shrink(&vmi, vma, new_start, new_end, vma->vm_pgoff);
 }

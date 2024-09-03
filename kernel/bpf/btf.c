@@ -6272,12 +6272,11 @@ static struct btf *btf_parse_module(const char *module_name, const void *data,
 	btf->kernel_btf = true;
 	snprintf(btf->name, sizeof(btf->name), "%s", module_name);
 
-	btf->data = kvmalloc(data_size, GFP_KERNEL | __GFP_NOWARN);
+	btf->data = kvmemdup(data, data_size, GFP_KERNEL | __GFP_NOWARN);
 	if (!btf->data) {
 		err = -ENOMEM;
 		goto errout;
 	}
-	memcpy(btf->data, data, data_size);
 	btf->data_size = data_size;
 
 	err = btf_parse_hdr(env);
@@ -6312,7 +6311,7 @@ static struct btf *btf_parse_module(const char *module_name, const void *data,
 
 errout:
 	btf_verifier_env_free(env);
-	if (base_btf != vmlinux_btf)
+	if (!IS_ERR(base_btf) && base_btf != vmlinux_btf)
 		btf_free(base_btf);
 	if (btf) {
 		kvfree(btf->data);

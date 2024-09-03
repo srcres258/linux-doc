@@ -840,7 +840,7 @@ void migrate_device_finalize(unsigned long *src_pfns,
 			dst = src;
 		}
 
-		remove_migration_ptes(src, dst, false);
+		remove_migration_ptes(src, dst, 0);
 		folio_unlock(src);
 
 		if (folio_is_zone_device(src))

@@ -45,11 +45,11 @@ static int perf_session__deliver_event(struct perf_session *session,
 				       u64 file_offset,
 				       const char *file_path);
 
-static int perf_session__open(struct perf_session *session, int repipe_fd)
+static int perf_session__open(struct perf_session *session)
 {
 	struct perf_data *data = session->data;
 
-	if (perf_session__read_header(session, repipe_fd) < 0) {
+	if (perf_session__read_header(session) < 0) {
 		pr_err("incompatible file format (rerun with -v to learn more)\n");
 		return -1;
 	}
@@ -135,8 +135,8 @@ static int ordered_events__deliver_event(struct ordered_events *oe,
 }
 
 struct perf_session *__perf_session__new(struct perf_data *data,
-					 bool repipe, int repipe_fd,
-					 struct perf_tool *tool)
+					 struct perf_tool *tool,
+					 bool trace_event_repipe)
 {
 	int ret = -ENOMEM;
 	struct perf_session *session = zalloc(sizeof(*session));
@@ -144,7 +144,7 @@ struct perf_session *__perf_session__new(struct perf_data *data,
 	if (!session)
 		goto out;
 
-	session->repipe = repipe;
+	session->trace_event_repipe = trace_event_repipe;
 	session->tool   = tool;
 	session->decomp_data.zstd_decomp = &session->zstd_data;
 	session->active_decomp = &session->decomp_data;
@@ -162,7 +162,7 @@ struct perf_session *__perf_session__new(struct perf_data *data,
 		session->data = data;
 
 		if (perf_data__is_read(data)) {
-			ret = perf_session__open(session, repipe_fd);
+			ret = perf_session__open(session);
 			if (ret < 0)
 				goto out_delete;
 

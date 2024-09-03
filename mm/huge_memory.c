@@ -74,7 +74,7 @@ static unsigned long deferred_split_count(struct shrinker *shrink,
 					  struct shrink_control *sc);
 static unsigned long deferred_split_scan(struct shrinker *shrink,
 					 struct shrink_control *sc);
-static bool split_underutilized_thp = true;
+static bool split_underused_thp = true;
 
 static atomic_t huge_zero_refcount;
 struct folio *huge_zero_folio __read_mostly;
@@ -444,17 +444,17 @@ static ssize_t hpage_pmd_size_show(struct kobject *kobj,
 static struct kobj_attribute hpage_pmd_size_attr =
 	__ATTR_RO(hpage_pmd_size);
 
-static ssize_t split_underutilized_thp_show(struct kobject *kobj,
+static ssize_t split_underused_thp_show(struct kobject *kobj,
 			    struct kobj_attribute *attr, char *buf)
 {
-	return sysfs_emit(buf, "%d\n", split_underutilized_thp);
+	return sysfs_emit(buf, "%d\n", split_underused_thp);
 }
 
-static ssize_t split_underutilized_thp_store(struct kobject *kobj,
+static ssize_t split_underused_thp_store(struct kobject *kobj,
 			     struct kobj_attribute *attr,
 			     const char *buf, size_t count)
 {
-	int err = kstrtobool(buf, &split_underutilized_thp);
+	int err = kstrtobool(buf, &split_underused_thp);
 
 	if (err < 0)
 		return err;
@@ -462,8 +462,8 @@ static ssize_t split_underutilized_thp_store(struct kobject *kobj,
 	return count;
 }
 
-static struct kobj_attribute split_underutilized_thp_attr = __ATTR(
-	thp_low_util_shrinker, 0644, split_underutilized_thp_show, split_underutilized_thp_store);
+static struct kobj_attribute split_underused_thp_attr = __ATTR(
+	shrink_underused, 0644, split_underused_thp_show, split_underused_thp_store);
 
 static struct attribute *hugepage_attr[] = {
 	&enabled_attr.attr,
@@ -475,7 +475,7 @@ static struct attribute *hugepage_attr[] = {
 #ifdef CONFIG_SHMEM
 	&shmem_enabled_attr.attr,
 #endif
-	&split_underutilized_thp_attr.attr,
+	&split_underused_thp_attr.attr,
 	NULL,
 };
 
@@ -3389,7 +3389,8 @@ static void __split_huge_page(struct page *page, struct list_head *list,
 
 			folio_clear_active(new_folio);
 			folio_clear_unevictable(new_folio);
-			if (!folio_batch_add(&free_folios, folio)) {
+			list_del(&new_folio->lru);
+			if (!folio_batch_add(&free_folios, new_folio)) {
 				mem_cgroup_uncharge_folios(&free_folios);
 				free_unref_folios(&free_folios);
 			}
@@ -3621,7 +3622,11 @@ int split_huge_page_to_list_to_order(struct page *page, struct list_head *list,
 		if (folio_order(folio) > 1 &&
 		    !list_empty(&folio->_deferred_list)) {
 			ds_queue->split_queue_len--;
-			mod_mthp_stat(folio_order(folio), MTHP_STAT_NR_ANON_PARTIALLY_MAPPED, -1);
+			if (folio_test_partially_mapped(folio)) {
+				__folio_clear_partially_mapped(folio);
+				mod_mthp_stat(folio_order(folio),
+					      MTHP_STAT_NR_ANON_PARTIALLY_MAPPED, -1);
+			}
 			/*
 			 * Reinitialize page_deferred_list after removing the
 			 * page from the split_queue, otherwise a subsequent
@@ -3689,7 +3694,11 @@ void __folio_undo_large_rmappable(struct folio *folio)
 	spin_lock_irqsave(&ds_queue->split_queue_lock, flags);
 	if (!list_empty(&folio->_deferred_list)) {
 		ds_queue->split_queue_len--;
-		mod_mthp_stat(folio_order(folio), MTHP_STAT_NR_ANON_PARTIALLY_MAPPED, -1);
+		if (folio_test_partially_mapped(folio)) {
+			__folio_clear_partially_mapped(folio);
+			mod_mthp_stat(folio_order(folio),
+				      MTHP_STAT_NR_ANON_PARTIALLY_MAPPED, -1);
+		}
 		list_del_init(&folio->_deferred_list);
 		folio_clear_partially_mapped(folio);
 	}
@@ -3719,6 +3728,9 @@ void deferred_split_folio(struct folio *folio, bool partially_mapped)
 	if (!partially_mapped && !split_underutilized_thp)
 		return;
 
+	if (!partially_mapped && !split_underused_thp)
+		return;
+
 	/*
 	 * The try_to_unmap() in page reclaim path might reach here too,
 	 * this may cause a race condition to corrupt deferred split queue.
@@ -3734,11 +3746,19 @@ void deferred_split_folio(struct folio *folio, bool partially_mapped)
 
 	spin_lock_irqsave(&ds_queue->split_queue_lock, flags);
 	if (partially_mapped) {
-		folio_set_partially_mapped(folio);
-		if (folio_test_pmd_mappable(folio))
-			count_vm_event(THP_DEFERRED_SPLIT_PAGE);
-		count_mthp_stat(folio_order(folio), MTHP_STAT_SPLIT_DEFERRED);
-		mod_mthp_stat(folio_order(folio), MTHP_STAT_NR_ANON_PARTIALLY_MAPPED, 1);
+		if (!folio_test_partially_mapped(folio)) {
+			__folio_set_partially_mapped(folio);
+			if (folio_test_pmd_mappable(folio))
+				count_vm_event(THP_DEFERRED_SPLIT_PAGE);
+			count_mthp_stat(folio_order(folio), MTHP_STAT_SPLIT_DEFERRED);
+			mod_mthp_stat(folio_order(folio), MTHP_STAT_NR_ANON_PARTIALLY_MAPPED, 1);
+
+		}
+	} else {
+		/* partially mapped folios cannot become non-partially mapped */
+		VM_WARN_ON_FOLIO(folio_test_partially_mapped(folio), folio);
+	}
+	if (list_empty(&folio->_deferred_list)) {
 		list_add_tail(&folio->_deferred_list, &ds_queue->split_queue);
 		ds_queue->split_queue_len++;
 #ifdef CONFIG_MEMCG
@@ -3763,7 +3783,7 @@ static unsigned long deferred_split_count(struct shrinker *shrink,
 	return READ_ONCE(ds_queue->split_queue_len);
 }
 
-static bool thp_underutilized(struct folio *folio)
+static bool thp_underused(struct folio *folio)
 {
 	int num_zero_pages = 0, num_filled_pages = 0;
 	void *kaddr;
@@ -3819,7 +3839,11 @@ static unsigned long deferred_split_scan(struct shrinker *shrink,
 			list_move(&folio->_deferred_list, &list);
 		} else {
 			/* We lost race with folio_put() */
-			mod_mthp_stat(folio_order(folio), MTHP_STAT_NR_ANON_PARTIALLY_MAPPED, -1);
+			if (folio_test_partially_mapped(folio)) {
+				__folio_clear_partially_mapped(folio);
+				mod_mthp_stat(folio_order(folio),
+					      MTHP_STAT_NR_ANON_PARTIALLY_MAPPED, -1);
+			}
 			list_del_init(&folio->_deferred_list);
 			folio_clear_partially_mapped(folio);
 			ds_queue->split_queue_len--;
@@ -3831,26 +3855,35 @@ static unsigned long deferred_split_scan(struct shrinker *shrink,
 
 	list_for_each_entry_safe(folio, next, &list, _deferred_list) {
 		bool did_split = false;
-		bool underutilized = false;
+		bool underused = false;
 
-		if (folio_test_partially_mapped(folio))
-			goto split;
-		underutilized = thp_underutilized(folio);
-		if (underutilized)
-			goto split;
-		continue;
-split:
+		if (!folio_test_partially_mapped(folio)) {
+			underused = thp_underused(folio);
+			if (!underused)
+				goto next;
+		}
 		if (!folio_trylock(folio))
-			continue;
-		did_split = !split_folio(folio);
-		folio_unlock(folio);
-		if (did_split) {
-			/* Splitting removed folio from the list, drop reference here */
-			folio_put(folio);
-			if (underutilized)
-				count_vm_event(THP_UNDERUTILIZED_SPLIT_PAGE);
+			goto next;
+		if (!split_folio(folio)) {
+			did_split = true;
+			if (underused)
+				count_vm_event(THP_UNDERUSED_SPLIT_PAGE);
 			split++;
 		}
+		folio_unlock(folio);
+next:
+		/*
+		 * split_folio() removes folio from list on success.
+		 * Only add back to the queue if folio is partially mapped.
+		 * If thp_underused returns false, or if split_folio fails
+		 * in the case it was underused, then consider it used and
+		 * don't add it back to split_queue.
+		 */
+		if (!did_split && !folio_test_partially_mapped(folio)) {
+			list_del_init(&folio->_deferred_list);
+			ds_queue->split_queue_len--;
+		}
+		folio_put(folio);
 	}
 
 	spin_lock_irqsave(&ds_queue->split_queue_lock, flags);

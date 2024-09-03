@@ -748,7 +748,7 @@ static noinline int cow_file_range_inline(struct btrfs_inode *inode,
 	/*
 	 * In the successful case (ret == 0 here), cow_file_range will return 1.
 	 *
-	 * Quite a bit further up the callstack in __extent_writepage, ret == 1
+	 * Quite a bit further up the callstack in extent_writepage(), ret == 1
 	 * is treated as a short circuited success and does not unlock the folio,
 	 * so we must do it here.
 	 *
@@ -886,7 +886,7 @@ static inline void inode_should_defrag(struct btrfs_inode *inode,
 	/* If this is a small write inside eof, kick off a defrag */
 	if (num_bytes < small_write &&
 	    (start > 0 || end + 1 < inode->disk_i_size))
-		btrfs_add_inode_defrag(NULL, inode, small_write);
+		btrfs_add_inode_defrag(inode, small_write);
 }
 
 static int extent_range_clear_dirty_for_io(struct inode *inode, u64 start, u64 end)
@@ -898,7 +898,7 @@ static int extent_range_clear_dirty_for_io(struct inode *inode, u64 start, u64 e
 	for (unsigned long index = start >> PAGE_SHIFT;
 	     index <= end_index; index++) {
 		folio = __filemap_get_folio(inode->i_mapping, index, 0, 0);
-		if (unlikely(IS_ERR(folio))) {
+		if (IS_ERR(folio)) {
 			if (!ret)
 				ret = PTR_ERR(folio);
 			continue;
@@ -7243,7 +7243,7 @@ static bool __btrfs_release_folio(struct folio *folio, gfp_t gfp_flags)
 {
 	if (try_release_extent_mapping(folio, gfp_flags)) {
 		wait_subpage_spinlock(folio);
-		clear_page_extent_mapped(folio);
+		clear_folio_extent_mapped(folio);
 		return true;
 	}
 	return false;
@@ -7441,7 +7441,7 @@ next:
 	btrfs_folio_clear_checked(fs_info, folio, folio_pos(folio), folio_size(folio));
 	if (!inode_evicting)
 		__btrfs_release_folio(folio, GFP_NOFS);
-	clear_page_extent_mapped(folio);
+	clear_folio_extent_mapped(folio);
 }
 
 static int btrfs_truncate(struct btrfs_inode *inode, bool skip_writeback)
@@ -9190,9 +9190,9 @@ static void _btrfs_encoded_read_regular_fill_pages(struct btrfs_inode *inode,
 	do {
 		size_t bytes = min_t(u64, disk_io_size, PAGE_SIZE);
 
-		if (bio_add_page(&bbio->bio, priv->pages[i], bytes, 0) < bytes) {
-			atomic_inc(&priv->pending);
-			btrfs_submit_bio(bbio, 0);
+		if (bio_add_page(&bbio->bio, pages[i], bytes, 0) < bytes) {
+			atomic_inc(&priv.pending);
+			btrfs_submit_bbio(bbio, 0);
 
 			bbio = btrfs_bio_alloc(BIO_MAX_VECS, REQ_OP_READ, fs_info,
 					       cb, priv);
@@ -9206,21 +9206,8 @@ static void _btrfs_encoded_read_regular_fill_pages(struct btrfs_inode *inode,
 		disk_io_size -= bytes;
 	} while (disk_io_size);
 
-	atomic_inc(&priv->pending);
-	btrfs_submit_bio(bbio, 0);
-}
-
-int btrfs_encoded_read_regular_fill_pages(struct btrfs_inode *inode,
-					  u64 file_offset, u64 disk_bytenr,
-					  u64 disk_io_size, struct page **pages)
-{
-	struct btrfs_encoded_read_private priv = {
-		.pending = ATOMIC_INIT(1),
-		.pages = pages,
-	};
-
-	_btrfs_encoded_read_regular_fill_pages(inode, file_offset, disk_bytenr,
-					       disk_io_size, &priv);
+	atomic_inc(&priv.pending);
+	btrfs_submit_bbio(bbio, 0);
 
 	if (atomic_dec_return(&priv.pending))
 		io_wait_event(priv.wait, !atomic_read(&priv.pending));

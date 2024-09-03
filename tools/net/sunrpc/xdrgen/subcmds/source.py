@@ -10,8 +10,7 @@ from argparse import Namespace
 from lark import logger
 from lark.exceptions import UnexpectedInput
 
-from generators.boilerplate import XdrBoilerplateGenerator
-from generators.constant import XdrConstantGenerator
+from generators.source_top import XdrSourceTopGenerator
 from generators.enum import XdrEnumGenerator
 from generators.pointer import XdrPointerGenerator
 from generators.program import XdrProgramGenerator
@@ -69,8 +68,8 @@ def emit_source_encoder(node: _XdrAst, language: str, peer: str) -> None:
 def generate_server_source(filename: str, root: Specification, language: str) -> None:
     """Generate server-side source code"""
 
-    gen = XdrBoilerplateGenerator(language)
-    gen.emit_source_top(filename, root)
+    gen = XdrSourceTopGenerator(language, "server")
+    gen.emit_source(filename, root)
 
     for definition in root.definitions:
         emit_source_decoder(definition.value, language, "server")
@@ -81,8 +80,8 @@ def generate_server_source(filename: str, root: Specification, language: str) ->
 def generate_client_source(filename: str, root: Specification, language: str) -> None:
     """Generate server-side source code"""
 
-    gen = XdrBoilerplateGenerator(language)
-    gen.emit_source_top(filename, root)
+    gen = XdrSourceTopGenerator(language, "client")
+    gen.emit_source(filename, root)
 
     # cel: todo: client needs XDR size macros
 

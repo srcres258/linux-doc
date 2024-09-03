@@ -543,7 +543,7 @@ static int meminfo_to_nid(struct numa_meminfo *mi, u64 start)
 	return NUMA_NO_NODE;
 }
 
-int phys_to_target_node(phys_addr_t start)
+int phys_to_target_node(u64 start)
 {
 	int nid = meminfo_to_nid(&numa_meminfo, start);
 

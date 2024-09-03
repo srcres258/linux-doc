@@ -103,6 +103,7 @@ ssize_t zcomp_available_show(const char *comp, char *buf)
 		}
 	}
 
+	sz += scnprintf(buf + sz, PAGE_SIZE - sz, "\n");
 	return sz;
 }
 

@@ -564,6 +564,12 @@ static void devm_unregister_framebuffer(void *data)
 int
 devm_register_framebuffer(struct device *dev, struct fb_info *fb_info)
 {
+	int ret;
+
+	ret = register_framebuffer(fb_info);
+	if (ret)
+		return ret;
+
 	return devm_add_action_or_reset(dev, devm_unregister_framebuffer, fb_info);
 }
 EXPORT_SYMBOL(devm_register_framebuffer);

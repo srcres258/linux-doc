@@ -202,6 +202,16 @@ PMD-mappable transparent hugepage::
 
 	cat /sys/kernel/mm/transparent_hugepage/hpage_pmd_size
 
+All THPs at fault and collapse time will be added to _deferred_list,
+and will therefore be split under memory presure if they are considered
+"underused". A THP is underused if the number of zero-filled pages in
+the THP is above max_ptes_none (see below). It is possible to disable
+this behaviour by writing 0 to shrink_underused, and enable it by writing
+1 to it::
+
+	echo 0 > /sys/kernel/mm/transparent_hugepage/shrink_underused
+	echo 1 > /sys/kernel/mm/transparent_hugepage/shrink_underused
+
 khugepaged will be automatically started when PMD-sized THP is enabled
 (either of the per-size anon control or the top-level control are set
 to "always" or "madvise"), and it'll be automatically shutdown when
@@ -476,10 +486,10 @@ thp_deferred_split_page
 	splitting it would free up some memory. Pages on split queue are
 	going to be split under memory pressure.
 
-thp_underutilized_split_page
+thp_underused_split_page
 	is incremented when a huge page on the split queue was split
-	because it was underutilized. A THP is underutilized if the
-	number of zero pages in the THP is above a certain threshold
+	because it was underused. A THP is underused if the number of
+	zero pages in the THP is above a certain threshold
 	(/sys/kernel/mm/transparent_hugepage/khugepaged/max_ptes_none).
 
 thp_split_pmd

@@ -384,8 +384,9 @@ static inline void mapping_set_large_folios(struct address_space *mapping)
 }
 
 /**
- * mapping_clear_large_folios() - Disable large folio support for a mapping
- * @mapping: The mapping.
+ * mapping_align_index() - Align index for this mapping.
+ * @mapping: The address_space.
+ * @index: The page index.
  *
  * This can be called to undo the effect of mapping_set_large_folios().
  *

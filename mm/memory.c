@@ -672,11 +672,10 @@ struct page *vm_normal_page_pmd(struct vm_area_struct *vma, unsigned long addr,
 {
 	unsigned long pfn = pmd_pfn(pmd);
 
-	/*
-	 * There is no pmd_special() but there may be special pmds, e.g.
-	 * in a direct-access (dax) mapping, so let's just replicate the
-	 * !CONFIG_ARCH_HAS_PTE_SPECIAL case from vm_normal_page() here.
-	 */
+	/* Currently it's only used for huge pfnmaps */
+	if (unlikely(pmd_special(pmd)))
+		return NULL;
+
 	if (unlikely(vma->vm_flags & (VM_PFNMAP|VM_MIXEDMAP))) {
 		if (vma->vm_flags & VM_MIXEDMAP) {
 			if (!pfn_valid(pfn))
@@ -4173,153 +4172,6 @@ static struct folio *alloc_swap_folio(struct vm_fault *vmf)
 	return __alloc_swap_folio(vmf);
 }
 #endif /* CONFIG_TRANSPARENT_HUGEPAGE */
-
-/*
- * check a range of PTEs are completely swap entries with
- * contiguous swap offsets and the same SWAP_HAS_CACHE.
- * ptep must be first one in the range
- */
-#ifdef CONFIG_TRANSPARENT_HUGEPAGE
-static bool can_swapin_thp(struct vm_fault *vmf, pte_t *ptep, int nr_pages)
-{
-	struct swap_info_struct *si;
-	unsigned long addr;
-	swp_entry_t entry;
-	pgoff_t offset;
-	char has_cache;
-	int idx, i;
-	pte_t pte;
-
-	addr = ALIGN_DOWN(vmf->address, nr_pages * PAGE_SIZE);
-	idx = (vmf->address - addr) / PAGE_SIZE;
-	pte = ptep_get(ptep);
-
-	if (!pte_same(pte, pte_move_swp_offset(vmf->orig_pte, -idx)))
-		return false;
-	entry = pte_to_swp_entry(pte);
-	offset = swp_offset(entry);
-	if (swap_pte_batch(ptep, nr_pages, pte) != nr_pages)
-		return false;
-
-	si = swp_swap_info(entry);
-	has_cache = si->swap_map[offset] & SWAP_HAS_CACHE;
-	for (i = 1; i < nr_pages; i++) {
-		/*
-		 * while allocating a large folio and doing swap_read_folio for the
-		 * SWP_SYNCHRONOUS_IO path, which is the case the being faulted pte
-		 * doesn't have swapcache. We need to ensure all PTEs have no cache
-		 * as well, otherwise, we might go to swap devices while the content
-		 * is in swapcache
-		 */
-		if ((si->swap_map[offset + i] & SWAP_HAS_CACHE) != has_cache)
-			return false;
-	}
-
-	return true;
-}
-
-static inline unsigned long thp_swap_suitable_orders(pgoff_t swp_offset,
-		unsigned long addr, unsigned long orders)
-{
-	int order, nr;
-
-	order = highest_order(orders);
-
-	/*
-	 * To swap-in a THP with nr pages, we require its first swap_offset
-	 * is aligned with nr. This can filter out most invalid entries.
-	 */
-	while (orders) {
-		nr = 1 << order;
-		if ((addr >> PAGE_SHIFT) % nr == swp_offset % nr)
-			break;
-		order = next_order(&orders, order);
-	}
-
-	return orders;
-}
-#else
-static inline bool can_swapin_thp(struct vm_fault *vmf, pte_t *ptep, int nr_pages)
-{
-	return false;
-}
-#endif
-
-static struct folio *alloc_swap_folio(struct vm_fault *vmf)
-{
-#ifdef CONFIG_TRANSPARENT_HUGEPAGE
-	struct vm_area_struct *vma = vmf->vma;
-	unsigned long orders;
-	struct folio *folio;
-	unsigned long addr;
-	swp_entry_t entry;
-	spinlock_t *ptl;
-	pte_t *pte;
-	gfp_t gfp;
-	int order;
-
-	/*
-	 * If uffd is active for the vma we need per-page fault fidelity to
-	 * maintain the uffd semantics.
-	 */
-	if (unlikely(userfaultfd_armed(vma)))
-		goto fallback;
-
-	/*
-	 * A large swapped out folio could be partially or fully in zswap. We
-	 * lack handling for such cases, so fallback to swapping in order-0
-	 * folio.
-	 */
-	if (!zswap_never_enabled())
-		goto fallback;
-
-	entry = pte_to_swp_entry(vmf->orig_pte);
-	/*
-	 * Get a list of all the (large) orders below PMD_ORDER that are enabled
-	 * and suitable for swapping THP.
-	 */
-	orders = thp_vma_allowable_orders(vma, vma->vm_flags,
-			TVA_IN_PF | TVA_ENFORCE_SYSFS, BIT(PMD_ORDER) - 1);
-	orders = thp_vma_suitable_orders(vma, vmf->address, orders);
-	orders = thp_swap_suitable_orders(swp_offset(entry), vmf->address, orders);
-
-	if (!orders)
-		goto fallback;
-
-	pte = pte_offset_map_lock(vmf->vma->vm_mm, vmf->pmd, vmf->address & PMD_MASK, &ptl);
-	if (unlikely(!pte))
-		goto fallback;
-
-	/*
-	 * For do_swap_page, find the highest order where the aligned range is
-	 * completely swap entries with contiguous swap offsets.
-	 */
-	order = highest_order(orders);
-	while (orders) {
-		addr = ALIGN_DOWN(vmf->address, PAGE_SIZE << order);
-		if (can_swapin_thp(vmf, pte + pte_index(addr), 1 << order))
-			break;
-		order = next_order(&orders, order);
-	}
-
-	pte_unmap_unlock(pte, ptl);
-
-	/* Try allocating the highest of the remaining orders. */
-	gfp = vma_thp_gfp_mask(vma);
-	while (orders) {
-		addr = ALIGN_DOWN(vmf->address, PAGE_SIZE << order);
-		folio = vma_alloc_folio(gfp, order, vma, addr, true);
-		if (folio)
-			return folio;
-		order = next_order(&orders, order);
-	}
-
-fallback:
-#endif
-	return vma_alloc_folio(GFP_HIGHUSER_MOVABLE, 0, vmf->vma,
-			       vmf->address, false);
-}
-
 
 /*
  * We enter with non-exclusive mmap_lock (to exclude vma changes,

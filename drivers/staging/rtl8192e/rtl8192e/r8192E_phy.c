@@ -509,8 +509,8 @@ static void _rtl92e_set_tx_power_level(struct net_device *dev, u8 channel)
 static u8 _rtl92e_phy_set_sw_chnl_cmd_array(struct net_device *dev,
 					    struct sw_chnl_cmd *CmdTable,
 					    u32 CmdTableIdx, u32 CmdTableSz,
-					    enum sw_chnl_cmd_id CmdID,
-					    u32 Para1, u32 Para2, u32 msDelay)
+					    enum sw_chnl_cmd_id cmd_id,
+					    u32 Para1, u32 Para2, u32 ms_delay)
 {
 	struct sw_chnl_cmd *pCmd;
 
@@ -524,10 +524,10 @@ static u8 _rtl92e_phy_set_sw_chnl_cmd_array(struct net_device *dev,
 	}
 
 	pCmd = CmdTable + CmdTableIdx;
-	pCmd->CmdID = CmdID;
+	pCmd->cmd_id = cmd_id;
 	pCmd->Para1 = Para1;
 	pCmd->Para2 = Para2;
-	pCmd->msDelay = msDelay;
+	pCmd->ms_delay = ms_delay;
 
 	return true;
 }
@@ -579,7 +579,7 @@ static u8 _rtl92e_phy_switch_channel_step(struct net_device *dev, u8 channel,
 						  ieee->RfDependCmd,
 						  RfDependCmdCnt++,
 						  MAX_RFDEPENDCMD_CNT,
-						  CmdID_RF_WriteReg,
+						  cmd_id_rf_write_reg,
 						  rZebra1_Channel,
 						  channel, 10);
 		_rtl92e_phy_set_sw_chnl_cmd_array(dev,
@@ -601,7 +601,7 @@ static u8 _rtl92e_phy_switch_channel_step(struct net_device *dev, u8 channel,
 				break;
 			}
 
-			if (CurrentCmd && CurrentCmd->CmdID == cmd_id_end) {
+			if (CurrentCmd && CurrentCmd->cmd_id == cmd_id_end) {
 				if ((*stage) == 2)
 					return true;
 				(*stage)++;
@@ -611,7 +611,7 @@ static u8 _rtl92e_phy_switch_channel_step(struct net_device *dev, u8 channel,
 
 			if (!CurrentCmd)
 				continue;
-			switch (CurrentCmd->CmdID) {
+			switch (CurrentCmd->cmd_id) {
 			case cmd_id_set_tx_power_level:
 				if (priv->ic_cut > VERSION_8190_BD)
 					_rtl92e_set_tx_power_level(dev,
@@ -629,7 +629,7 @@ static u8 _rtl92e_phy_switch_channel_step(struct net_device *dev, u8 channel,
 				rtl92e_writeb(dev, CurrentCmd->Para1,
 					      CurrentCmd->Para2);
 				break;
-			case CmdID_RF_WriteReg:
+			case cmd_id_rf_write_reg:
 				for (eRFPath = 0; eRFPath <
 				     priv->num_total_rf_path; eRFPath++)
 					rtl92e_set_rf_reg(dev,
@@ -645,7 +645,7 @@ static u8 _rtl92e_phy_switch_channel_step(struct net_device *dev, u8 channel,
 		} while (true);
 	} /*for (Number of RF paths)*/
 
-	(*delay) = CurrentCmd->msDelay;
+	(*delay) = CurrentCmd->ms_delay;
 	(*step)++;
 	return false;
 }

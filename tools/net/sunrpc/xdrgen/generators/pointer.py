@@ -3,15 +3,16 @@
 
 """Generate code to handle XDR pointer types"""
 
-from jinja2 import Environment, Template
+from jinja2 import Environment
 
-from generators import SourceGenerator, create_jinja2_environment
+from generators import SourceGenerator
+from generators import create_jinja2_environment, get_jinja2_template
 
 from xdr_ast import _XdrBasic, _XdrVariableLengthString
 from xdr_ast import _XdrFixedLengthOpaque, _XdrVariableLengthOpaque
 from xdr_ast import _XdrFixedLengthArray, _XdrVariableLengthArray
 from xdr_ast import _XdrOptionalData, _XdrBuiltInType, _XdrPointer
-from xdr_ast import _XdrDeclaration
+from xdr_ast import _XdrDeclaration, public_apis
 
 
 def get_kernel_c_type(type_spec: str) -> str:
@@ -30,11 +31,11 @@ def get_kernel_c_type(type_spec: str) -> str:
     return type_spec.type_name
 
 
-def get_jinja_template(
-    environment: Environment, template_type: str, template_name: str
-) -> Template:
-    """Retrieve a Jinja2 template for emitting source code"""
-    return environment.get_template(template_type + "/" + template_name + ".j2")
+def emit_pointer_declaration(environment: Environment, node: _XdrPointer) -> None:
+    """Emit a declaration pair for an XDR pointer type"""
+    if node.name in public_apis:
+        template = get_jinja2_template(environment, "declaration", "close")
+        print(template.render(name=node.name))
 
 
 def emit_pointer_member_definition(
@@ -42,7 +43,7 @@ def emit_pointer_member_definition(
 ) -> None:
     """Emit a definition for one field in an XDR struct"""
     if isinstance(field, _XdrBasic):
-        template = get_jinja_template(environment, "definition", field.template)
+        template = get_jinja2_template(environment, "definition", field.template)
         print(
             template.render(
                 name=field.name,
@@ -51,7 +52,7 @@ def emit_pointer_member_definition(
             )
         )
     elif isinstance(field, _XdrFixedLengthOpaque):
-        template = get_jinja_template(environment, "definition", field.template)
+        template = get_jinja2_template(environment, "definition", field.template)
         print(
             template.render(
                 name=field.name,
@@ -59,13 +60,13 @@ def emit_pointer_member_definition(
             )
         )
     elif isinstance(field, _XdrVariableLengthOpaque):
-        template = get_jinja_template(environment, "definition", field.template)
+        template = get_jinja2_template(environment, "definition", field.template)
         print(template.render(name=field.name))
     elif isinstance(field, _XdrVariableLengthString):
-        template = get_jinja_template(environment, "definition", field.template)
+        template = get_jinja2_template(environment, "definition", field.template)
         print(template.render(name=field.name))
     elif isinstance(field, _XdrFixedLengthArray):
-        template = get_jinja_template(environment, "definition", field.template)
+        template = get_jinja2_template(environment, "definition", field.template)
         print(
             template.render(
                 name=field.name,
@@ -74,7 +75,7 @@ def emit_pointer_member_definition(
             )
         )
     elif isinstance(field, _XdrVariableLengthArray):
-        template = get_jinja_template(environment, "definition", field.template)
+        template = get_jinja2_template(environment, "definition", field.template)
         print(
             template.render(
                 name=field.name,
@@ -83,7 +84,7 @@ def emit_pointer_member_definition(
             )
         )
     elif isinstance(field, _XdrOptionalData):
-        template = get_jinja_template(environment, "definition", field.template)
+        template = get_jinja2_template(environment, "definition", field.template)
         print(
             template.render(
                 name=field.name,
@@ -95,13 +96,13 @@ def emit_pointer_member_definition(
 
 def emit_pointer_definition(environment: Environment, node: _XdrPointer) -> None:
     """Emit a definition for an XDR pointer type"""
-    template = get_jinja_template(environment, "definition", "open")
+    template = get_jinja2_template(environment, "definition", "open")
     print(template.render(name=node.name))
 
     for field in node.fields[0:-1]:
         emit_pointer_member_definition(environment, field)
 
-    template = get_jinja_template(environment, "definition", "close")
+    template = get_jinja2_template(environment, "definition", "close")
     print(template.render(name=node.name))
 
 
@@ -110,7 +111,7 @@ def emit_pointer_member_decoder(
 ) -> None:
     """Emit a decoder for one field in an XDR pointer"""
     if isinstance(field, _XdrBasic):
-        template = get_jinja_template(environment, "decoder", field.template)
+        template = get_jinja2_template(environment, "decoder", field.template)
         print(
             template.render(
                 name=field.name,
@@ -119,7 +120,7 @@ def emit_pointer_member_decoder(
             )
         )
     elif isinstance(field, _XdrFixedLengthOpaque):
-        template = get_jinja_template(environment, "decoder", field.template)
+        template = get_jinja2_template(environment, "decoder", field.template)
         print(
             template.render(
                 name=field.name,
@@ -127,7 +128,7 @@ def emit_pointer_member_decoder(
             )
         )
     elif isinstance(field, _XdrVariableLengthOpaque):
-        template = get_jinja_template(environment, "decoder", field.template)
+        template = get_jinja2_template(environment, "decoder", field.template)
         print(
             template.render(
                 name=field.name,
@@ -135,7 +136,7 @@ def emit_pointer_member_decoder(
             )
         )
     elif isinstance(field, _XdrVariableLengthString):
-        template = get_jinja_template(environment, "decoder", field.template)
+        template = get_jinja2_template(environment, "decoder", field.template)
         print(
             template.render(
                 name=field.name,
@@ -143,7 +144,7 @@ def emit_pointer_member_decoder(
             )
         )
     elif isinstance(field, _XdrFixedLengthArray):
-        template = get_jinja_template(environment, "decoder", field.template)
+        template = get_jinja2_template(environment, "decoder", field.template)
         print(
             template.render(
                 name=field.name,
@@ -153,7 +154,7 @@ def emit_pointer_member_decoder(
             )
         )
     elif isinstance(field, _XdrVariableLengthArray):
-        template = get_jinja_template(environment, "decoder", field.template)
+        template = get_jinja2_template(environment, "decoder", field.template)
         print(
             template.render(
                 name=field.name,
@@ -163,7 +164,7 @@ def emit_pointer_member_decoder(
             )
         )
     elif isinstance(field, _XdrOptionalData):
-        template = get_jinja_template(environment, "decoder", field.template)
+        template = get_jinja2_template(environment, "decoder", field.template)
         print(
             template.render(
                 name=field.name,
@@ -175,13 +176,13 @@ def emit_pointer_member_decoder(
 
 def emit_pointer_decoder(environment: Environment, node: _XdrPointer) -> None:
     """Emit one decoder function for an XDR pointer type"""
-    template = get_jinja_template(environment, "decoder", "open")
+    template = get_jinja2_template(environment, "decoder", "open")
     print(template.render(name=node.name))
 
     for field in node.fields[0:-1]:
         emit_pointer_member_decoder(environment, field)
 
-    template = get_jinja_template(environment, "decoder", "close")
+    template = get_jinja2_template(environment, "decoder", "close")
     print(template.render())
 
 
@@ -190,7 +191,7 @@ def emit_pointer_member_encoder(
 ) -> None:
     """Emit an encoder for one field in a XDR pointer"""
     if isinstance(field, _XdrBasic):
-        template = get_jinja_template(environment, "encoder", field.template)
+        template = get_jinja2_template(environment, "encoder", field.template)
         print(
             template.render(
                 name=field.name,
@@ -198,7 +199,7 @@ def emit_pointer_member_encoder(
             )
         )
     elif isinstance(field, _XdrFixedLengthOpaque):
-        template = get_jinja_template(environment, "encoder", field.template)
+        template = get_jinja2_template(environment, "encoder", field.template)
         print(
             template.render(
                 name=field.name,
@@ -206,7 +207,7 @@ def emit_pointer_member_encoder(
             )
         )
     elif isinstance(field, _XdrVariableLengthOpaque):
-        template = get_jinja_template(environment, "encoder", field.template)
+        template = get_jinja2_template(environment, "encoder", field.template)
         print(
             template.render(
                 name=field.name,
@@ -214,7 +215,7 @@ def emit_pointer_member_encoder(
             )
         )
     elif isinstance(field, _XdrVariableLengthString):
-        template = get_jinja_template(environment, "encoder", field.template)
+        template = get_jinja2_template(environment, "encoder", field.template)
         print(
             template.render(
                 name=field.name,
@@ -222,7 +223,7 @@ def emit_pointer_member_encoder(
             )
         )
     elif isinstance(field, _XdrFixedLengthArray):
-        template = get_jinja_template(environment, "encoder", field.template)
+        template = get_jinja2_template(environment, "encoder", field.template)
         print(
             template.render(
                 name=field.name,
@@ -231,7 +232,7 @@ def emit_pointer_member_encoder(
             )
         )
     elif isinstance(field, _XdrVariableLengthArray):
-        template = get_jinja_template(environment, "encoder", field.template)
+        template = get_jinja2_template(environment, "encoder", field.template)
         print(
             template.render(
                 name=field.name,
@@ -240,7 +241,7 @@ def emit_pointer_member_encoder(
             )
         )
     elif isinstance(field, _XdrOptionalData):
-        template = get_jinja_template(environment, "encoder", field.template)
+        template = get_jinja2_template(environment, "encoder", field.template)
         print(
             template.render(
                 name=field.name,
@@ -252,13 +253,13 @@ def emit_pointer_member_encoder(
 
 def emit_pointer_encoder(environment: Environment, node: _XdrPointer) -> None:
     """Emit one encoder function for a pointer type"""
-    template = get_jinja_template(environment, "encoder", "open")
+    template = get_jinja2_template(environment, "encoder", "open")
     print(template.render(name=node.name))
 
     for field in node.fields[0:-1]:
         emit_pointer_member_encoder(environment, field)
 
-    template = get_jinja_template(environment, "encoder", "close")
+    template = get_jinja2_template(environment, "encoder", "close")
     print(template.render())
 
 
@@ -270,14 +271,18 @@ class XdrPointerGenerator(SourceGenerator):
         self.environment = create_jinja2_environment(language, "pointer")
         self.peer = peer
 
+    def emit_declaration(self, node: _XdrPointer) -> None:
+        """Emit one declaration pair for an XDR pointer type"""
+        emit_pointer_declaration(self.environment, node)
+
     def emit_definition(self, node: _XdrPointer) -> None:
-        """Emit one declaration for a pointer type"""
+        """Emit one declaration for an XDR pointer type"""
         emit_pointer_definition(self.environment, node)
 
     def emit_decoder(self, node: _XdrPointer) -> None:
-        """Emit one decoder function for a pointer type"""
+        """Emit one decoder function for an XDR pointer type"""
         emit_pointer_decoder(self.environment, node)
 
     def emit_encoder(self, node: _XdrPointer) -> None:
-        """Emit one encoder function for a pointer type"""
+        """Emit one encoder function for an XDR pointer type"""
         emit_pointer_encoder(self.environment, node)
