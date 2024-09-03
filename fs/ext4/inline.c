@@ -661,7 +661,7 @@ out_nofolio:
 int ext4_try_to_write_inline_data(struct address_space *mapping,
 				  struct inode *inode,
 				  loff_t pos, unsigned len,
-				  struct page **pagep)
+				  struct folio **foliop)
 {
 	int ret;
 	handle_t *handle;
@@ -709,7 +709,7 @@ int ext4_try_to_write_inline_data(struct address_space *mapping,
 		goto out;
 	}
 
-	*pagep = &folio->page;
+	*foliop = folio;
 	down_read(&EXT4_I(inode)->xattr_sem);
 	if (!ext4_has_inline_data(inode)) {
 		ret = 0;
@@ -892,7 +892,7 @@ out:
 int ext4_da_write_inline_data_begin(struct address_space *mapping,
 				    struct inode *inode,
 				    loff_t pos, unsigned len,
-				    struct page **pagep,
+				    struct folio **foliop,
 				    void **fsdata)
 {
 	int ret;
@@ -955,7 +955,7 @@ retry_journal:
 		goto out_release_page;
 
 	up_read(&EXT4_I(inode)->xattr_sem);
-	*pagep = &folio->page;
+	*foliop = folio;
 	brelse(iloc.bh);
 	return 1;
 out_release_page:
