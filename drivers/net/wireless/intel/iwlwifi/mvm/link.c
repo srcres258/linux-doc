@@ -17,7 +17,8 @@
 	HOW(EXIT_COEX)			\
 	HOW(EXIT_BANDWIDTH)		\
 	HOW(EXIT_CSA)			\
-	HOW(EXIT_LINK_USAGE)
+	HOW(EXIT_LINK_USAGE)		\
+	HOW(EXIT_FAIL_ENTRY)
 
 static const char *const iwl_mvm_esr_states_names[] = {
 #define NAME_ENTRY(x) [ilog2(IWL_MVM_ESR_##x)] = #x,
@@ -291,6 +292,17 @@ int iwl_mvm_link_changed(struct iwl_mvm *mvm, struct ieee80211_vif *vif,
 			link_conf->uora_ocw_range & 0x7;
 		cmd.rand_alloc_ecwmax =
 			(link_conf->uora_ocw_range >> 3) & 0x7;
+	}
+
+	/* ap_sta may be NULL if we're disconnecting */
+	if (changes & LINK_CONTEXT_MODIFY_HE_PARAMS && mvmvif->ap_sta) {
+		struct ieee80211_link_sta *link_sta =
+			link_sta_dereference_check(mvmvif->ap_sta, link_id);
+
+		if (!WARN_ON(!link_sta) && link_sta->he_cap.has_he &&
+		    link_sta->he_cap.he_cap_elem.mac_cap_info[5] &
+		    IEEE80211_HE_MAC_CAP5_OM_CTRL_UL_MU_DATA_DIS_RX)
+			cmd.ul_mu_data_disable = 1;
 	}
 
 	/* TODO  how to set ndp_fdbk_buff_th_exp? */

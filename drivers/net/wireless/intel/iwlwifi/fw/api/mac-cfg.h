@@ -62,6 +62,14 @@ enum iwl_mac_conf_subcmd_ids {
 	 */
 	ROC_CMD = 0xE,
 	/**
+	 * @MISSED_BEACONS_NOTIF: &struct iwl_missed_beacons_notif
+	 */
+	MISSED_BEACONS_NOTIF = 0xF6,
+	/**
+	 * @EMLSR_TRANS_FAIL_NOTIF: &struct iwl_esr_trans_fail_notif
+	 */
+	EMLSR_TRANS_FAIL_NOTIF = 0xF7,
+	/**
 	 * @ROC_NOTIF: &struct iwl_roc_notif
 	 */
 	ROC_NOTIF = 0xF8,
@@ -472,7 +480,9 @@ enum iwl_link_ctx_flags {
  * @bssid_index: index of the associated VAP
  * @bss_color: 11ax AP ID that is used in the HE SIG-A to mark inter BSS frame
  * @spec_link_id: link_id as the AP knows it
- * @reserved2: alignment
+ * @ul_mu_data_disable: OM Control UL MU Data Disable RX Support (bit 44) in
+ *	HE MAC Capabilities information field as defined in figure 9-897 in
+ *	IEEE802.11REVme-D5.0
  * @ibss_bssid_addr: bssid for ibss
  * @reserved_for_ibss_bssid_addr: reserved
  * @reserved3: reserved for future use
@@ -515,17 +525,17 @@ struct iwl_link_config_cmd {
 	u8 bssid_index;
 	u8 bss_color;
 	u8 spec_link_id;
-	u8 reserved2;
+	u8 ul_mu_data_disable;
 	u8 ibss_bssid_addr[6];
 	__le16 reserved_for_ibss_bssid_addr;
 	__le32 reserved3[8];
-} __packed; /* LINK_CONTEXT_CONFIG_CMD_API_S_VER_1, _VER_2, _VER_3 */
+} __packed; /* LINK_CONTEXT_CONFIG_CMD_API_S_VER_1, _VER_2, _VER_3, _VER_4 */
 
 /* Currently FW supports link ids in the range 0-3 and can have
  * at most two active links for each vif.
  */
-#define IWL_MVM_FW_MAX_ACTIVE_LINKS_NUM 2
-#define IWL_MVM_FW_MAX_LINK_ID 3
+#define IWL_FW_MAX_ACTIVE_LINKS_NUM 2
+#define IWL_FW_MAX_LINK_ID 3
 
 /**
  * enum iwl_fw_sta_type - FW station types
@@ -662,5 +672,52 @@ enum iwl_mvm_fw_esr_recommendation {
 struct iwl_mvm_esr_mode_notif {
 	__le32 action;
 } __packed; /* ESR_MODE_RECOMMENDATION_NTFY_API_S_VER_1 */
+
+/**
+ * struct iwl_missed_beacons_notif - sent when by the firmware upon beacon loss
+ *  ( MISSED_BEACONS_NOTIF = 0xF6 )
+ * @link_id: fw link ID
+ * @consec_missed_beacons_since_last_rx: number of consecutive missed
+ *	beacons since last RX.
+ * @consec_missed_beacons: number of consecutive missed beacons
+ * @other_link_id: used in EMLSR only. The fw link ID for
+ *	&consec_missed_beacons_other_link. IWL_MVM_FW_LINK_ID_INVALID (0xff) if
+ *	invalid.
+ * @consec_missed_beacons_other_link: number of consecutive missed beacons on
+ *	&other_link_id.
+ */
+struct iwl_missed_beacons_notif {
+	__le32 link_id;
+	__le32 consec_missed_beacons_since_last_rx;
+	__le32 consec_missed_beacons;
+	__le32 other_link_id;
+	__le32 consec_missed_beacons_other_link;
+} __packed; /* MISSED_BEACON_NTFY_API_S_VER_5 */
+
+/*
+ * enum iwl_esr_trans_fail_code: to be used to parse the notif below
+ *
+ * @ESR_TRANS_FAILED_TX_STATUS_ERROR: failed to TX EML OMN frame
+ * @ESR_TRANSITION_FAILED_TX_TIMEOUT: timeout on the EML OMN frame
+ * @ESR_TRANSITION_FAILED_BEACONS_NOT_HEARD: can't get a beacon on the new link
+ */
+enum iwl_esr_trans_fail_code {
+	ESR_TRANS_FAILED_TX_STATUS_ERROR,
+	ESR_TRANSITION_FAILED_TX_TIMEOUT,
+	ESR_TRANSITION_FAILED_BEACONS_NOT_HEARD,
+};
+
+/**
+ * struct iwl_esr_trans_fail_notif - FW reports a failure in EMLSR transition
+ *
+ * @link_id: the link_id that still works after the failure
+ * @activation: true if the link was activated, false otherwise
+ * @err_code: see &enum iwl_esr_trans_fail_code
+ */
+struct iwl_esr_trans_fail_notif {
+	__le32 link_id;
+	__le32 activation;
+	__le32 err_code;
+} __packed; /* ESR_TRANSITION_FAILED_NTFY_API_S_VER_1 */
 
 #endif /* __iwl_fw_api_mac_cfg_h__ */
