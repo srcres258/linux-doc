@@ -172,7 +172,10 @@ static inline int __task_prio(const struct task_struct *p)
 	if (p->sched_class == &idle_sched_class)
 		return MAX_RT_PRIO + NICE_WIDTH; /* 140 */
 
-	return MAX_RT_PRIO + MAX_NICE; /* 120, squash fair */
+	if (task_on_scx(p))
+		return MAX_RT_PRIO + MAX_NICE + 1; /* 120, squash ext */
+
+	return MAX_RT_PRIO + MAX_NICE; /* 119, squash fair */
 }
 
 /*
@@ -216,6 +219,11 @@ static inline bool prio_less(const struct task_struct *a,
 
 	if (pa == MAX_RT_PRIO + MAX_NICE)	/* fair */
 		return cfs_prio_less(a, b, in_fi);
+
+#ifdef CONFIG_SCHED_CLASS_EXT
+	if (pa == MAX_RT_PRIO + MAX_NICE + 1)	/* ext */
+		return scx_prio_less(a, b, in_fi);
+#endif
 
 	return false;
 }
@@ -1274,11 +1282,14 @@ bool sched_can_stop_tick(struct rq *rq)
 		return true;
 
 	/*
-	 * If there are no DL,RR/FIFO tasks, there must only be CFS tasks left;
-	 * if there's more than one we need the tick for involuntary
-	 * preemption.
+	 * If there are no DL,RR/FIFO tasks, there must only be CFS or SCX tasks
+	 * left. For CFS, if there's more than one we need the tick for
+	 * involuntary preemption. For SCX, ask.
 	 */
-	if (rq->nr_running > 1)
+	if (scx_enabled() && !scx_can_stop_tick(rq))
+		return false;
+
+	if (rq->cfs.nr_running > 1)
 		return false;
 
 	/*
@@ -1360,8 +1371,8 @@ void set_load_weight(struct task_struct *p, bool update_load)
 	 * SCHED_OTHER tasks have to update their load when changing their
 	 * weight
 	 */
-	if (update_load && p->sched_class == &fair_sched_class)
-		reweight_task(p, &lw);
+	if (update_load && p->sched_class->reweight_task)
+		p->sched_class->reweight_task(task_rq(p), p, &lw);
 	else
 		p->se.load = lw;
 }
@@ -2081,6 +2092,17 @@ inline int task_curr(const struct task_struct *p)
 }
 
 /*
+ * ->switching_to() is called with the pi_lock and rq_lock held and must not
+ * mess with locking.
+ */
+void check_class_changing(struct rq *rq, struct task_struct *p,
+			  const struct sched_class *prev_class)
+{
+	if (prev_class != p->sched_class && p->sched_class->switching_to)
+		p->sched_class->switching_to(rq, p);
+}
+
+/*
  * switched_from, switched_to and prio_changed must _NOT_ drop rq->lock,
  * use the balance_callback list if you want balancing.
  *
@@ -2350,7 +2372,7 @@ static inline bool rq_has_pinned_tasks(struct rq *rq)
 static inline bool is_cpu_allowed(struct task_struct *p, int cpu)
 {
 	/* When not in the task's cpumask, no point in looking further. */
-	if (!cpumask_test_cpu(cpu, p->cpus_ptr))
+	if (!task_allowed_on_cpu(p, cpu))
 		return false;
 
 	/* migrate_disabled() must be allowed to finish. */
@@ -2359,7 +2381,7 @@ static inline bool is_cpu_allowed(struct task_struct *p, int cpu)
 
 	/* Non kernel threads are not allowed during either online or offline. */
 	if (!(p->flags & PF_KTHREAD))
-		return cpu_active(cpu) && task_cpu_possible(cpu, p);
+		return cpu_active(cpu);
 
 	/* KTHREAD_IS_PER_CPU is always allowed. */
 	if (kthread_is_per_cpu(p))
@@ -3668,8 +3690,6 @@ ttwu_do_activate(struct rq *rq, struct task_struct *p, int wake_flags,
 		rq->idle_stamp = 0;
 	}
 #endif
-
-	p->dl_server = NULL;
 }
 
 /*
@@ -3838,6 +3858,15 @@ bool cpus_share_resources(int this_cpu, int that_cpu)
 
 static inline bool ttwu_queue_cond(struct task_struct *p, int cpu)
 {
+	/*
+	 * The BPF scheduler may depend on select_task_rq() being invoked during
+	 * wakeups. In addition, @p may end up executing on a different CPU
+	 * regardless of what happens in the wakeup path making the ttwu_queue
+	 * optimization less meaningful. Skip if on SCX.
+	 */
+	if (task_on_scx(p))
+		return false;
+
 	/*
 	 * Do not complicate things with the async wake_list while the CPU is
 	 * in hotplug state.
@@ -4412,6 +4441,10 @@ static void __sched_fork(unsigned long clone_flags, struct task_struct *p)
 	p->rt.on_rq		= 0;
 	p->rt.on_list		= 0;
 
+#ifdef CONFIG_SCHED_CLASS_EXT
+	init_scx_entity(&p->scx);
+#endif
+
 #ifdef CONFIG_PREEMPT_NOTIFIERS
 	INIT_HLIST_HEAD(&p->preempt_notifiers);
 #endif
@@ -4654,10 +4687,18 @@ int sched_fork(unsigned long clone_flags, struct task_struct *p)
 
 	if (dl_prio(p->prio))
 		return -EAGAIN;
-	else if (rt_prio(p->prio))
+
+	scx_pre_fork(p);
+
+	if (rt_prio(p->prio)) {
 		p->sched_class = &rt_sched_class;
-	else
+#ifdef CONFIG_SCHED_CLASS_EXT
+	} else if (task_should_scx(p)) {
+		p->sched_class = &ext_sched_class;
+#endif
+	} else {
 		p->sched_class = &fair_sched_class;
+	}
 
 	init_entity_runnable_average(&p->se);
 
@@ -4677,7 +4718,7 @@ int sched_fork(unsigned long clone_flags, struct task_struct *p)
 	return 0;
 }
 
-void sched_cgroup_fork(struct task_struct *p, struct kernel_clone_args *kargs)
+int sched_cgroup_fork(struct task_struct *p, struct kernel_clone_args *kargs)
 {
 	unsigned long flags;
 
@@ -4704,11 +4745,19 @@ void sched_cgroup_fork(struct task_struct *p, struct kernel_clone_args *kargs)
 	if (p->sched_class->task_fork)
 		p->sched_class->task_fork(p);
 	raw_spin_unlock_irqrestore(&p->pi_lock, flags);
+
+	return scx_fork(p);
+}
+
+void sched_cancel_fork(struct task_struct *p)
+{
+	scx_cancel_fork(p);
 }
 
 void sched_post_fork(struct task_struct *p)
 {
 	uclamp_post_fork(p);
+	scx_post_fork(p);
 }
 
 unsigned long to_ratio(u64 period, u64 runtime)
@@ -5541,6 +5590,7 @@ void sched_tick(void)
 	calc_global_load_tick(rq);
 	sched_core_tick(rq);
 	task_tick_mm_cid(rq, curr);
+	scx_tick(rq);
 
 	rq_unlock(rq, &rf);
 
@@ -5553,8 +5603,10 @@ void sched_tick(void)
 		wq_worker_tick(curr);
 
 #ifdef CONFIG_SMP
-	rq->idle_balance = idle_cpu(cpu);
-	sched_balance_trigger(rq);
+	if (!scx_switched_all()) {
+		rq->idle_balance = idle_cpu(cpu);
+		sched_balance_trigger(rq);
+	}
 #endif
 }
 
@@ -5841,11 +5893,22 @@ static inline void schedule_debug(struct task_struct *prev, bool preempt)
 	schedstat_inc(this_rq()->sched_count);
 }
 
-static void put_prev_task_balance(struct rq *rq, struct task_struct *prev,
-				  struct rq_flags *rf)
+static void prev_balance(struct rq *rq, struct task_struct *prev,
+			 struct rq_flags *rf)
 {
-#ifdef CONFIG_SMP
+	const struct sched_class *start_class = prev->sched_class;
 	const struct sched_class *class;
+
+#ifdef CONFIG_SCHED_CLASS_EXT
+	/*
+	 * SCX requires a balance() call before every pick_next_task() including
+	 * when waking up from SCHED_IDLE. If @start_class is below SCX, start
+	 * from SCX instead.
+	 */
+	if (scx_enabled() && sched_class_above(&ext_sched_class, start_class))
+		start_class = &ext_sched_class;
+#endif
+
 	/*
 	 * We must do the balancing pass before put_prev_task(), such
 	 * that when we release the rq->lock the task is in the same
@@ -5854,21 +5917,10 @@ static void put_prev_task_balance(struct rq *rq, struct task_struct *prev,
 	 * We can terminate the balance pass as soon as we know there is
 	 * a runnable task of @class priority or higher.
 	 */
-	for_class_range(class, prev->sched_class, &idle_sched_class) {
-		if (class->balance(rq, prev, rf))
+	for_active_class_range(class, start_class, &idle_sched_class) {
+		if (class->balance && class->balance(rq, prev, rf))
 			break;
 	}
-#endif
-
-	put_prev_task(rq, prev);
-
-	/*
-	 * We've updated @prev and no longer need the server link, clear it.
-	 * Must be done before ->pick_next_task() because that can (re)set
-	 * ->dl_server.
-	 */
-	if (prev->dl_server)
-		prev->dl_server = NULL;
 }
 
 /*
@@ -5879,6 +5931,11 @@ __pick_next_task(struct rq *rq, struct task_struct *prev, struct rq_flags *rf)
 {
 	const struct sched_class *class;
 	struct task_struct *p;
+
+	rq->dl_server = NULL;
+
+	if (scx_enabled())
+		goto restart;
 
 	/*
 	 * Optimization: we know that if all tasks are in the fair class we can
@@ -5895,34 +5952,38 @@ __pick_next_task(struct rq *rq, struct task_struct *prev, struct rq_flags *rf)
 
 		/* Assume the next prioritized class is idle_sched_class */
 		if (!p) {
-			put_prev_task(rq, prev);
-			p = pick_next_task_idle(rq);
+			p = pick_task_idle(rq);
+			put_prev_set_next_task(rq, prev, p);
 		}
-
-		/*
-		 * This is a normal CFS pick, but the previous could be a DL pick.
-		 * Clear it as previous is no longer picked.
-		 */
-		if (prev->dl_server)
-			prev->dl_server = NULL;
-
-		/*
-		 * This is the fast path; it cannot be a DL server pick;
-		 * therefore even if @p == @prev, ->dl_server must be NULL.
-		 */
-		if (p->dl_server)
-			p->dl_server = NULL;
 
 		return p;
 	}
 
 restart:
-	put_prev_task_balance(rq, prev, rf);
+	prev_balance(rq, prev, rf);
 
-	for_each_class(class) {
-		p = class->pick_next_task(rq);
-		if (p)
-			return p;
+	for_each_active_class(class) {
+		if (class->pick_next_task) {
+			p = class->pick_next_task(rq, prev);
+			if (p) {
+				const struct sched_class *prev_class = prev->sched_class;
+
+				if (class != prev_class && prev_class->switch_class)
+					prev_class->switch_class(rq, p);
+				return p;
+			}
+		} else {
+			p = class->pick_task(rq);
+			if (p) {
+				const struct sched_class *prev_class = prev->sched_class;
+
+				put_prev_set_next_task(rq, prev, p);
+
+				if (class != prev_class && prev_class->switch_class)
+					prev_class->switch_class(rq, p);
+				return p;
+			}
+		}
 	}
 
 	BUG(); /* The idle class should always have a runnable task. */
@@ -5952,7 +6013,9 @@ static inline struct task_struct *pick_task(struct rq *rq)
 	const struct sched_class *class;
 	struct task_struct *p;
 
-	for_each_class(class) {
+	rq->dl_server = NULL;
+
+	for_each_active_class(class) {
 		p = class->pick_task(rq);
 		if (p)
 			return p;
@@ -5990,6 +6053,7 @@ pick_next_task(struct rq *rq, struct task_struct *prev, struct rq_flags *rf)
 		 * another cpu during offline.
 		 */
 		rq->core_pick = NULL;
+		rq->core_dl_server = NULL;
 		return __pick_next_task(rq, prev, rf);
 	}
 
@@ -6008,16 +6072,13 @@ pick_next_task(struct rq *rq, struct task_struct *prev, struct rq_flags *rf)
 		WRITE_ONCE(rq->core_sched_seq, rq->core->core_pick_seq);
 
 		next = rq->core_pick;
-		if (next != prev) {
-			put_prev_task(rq, prev);
-			set_next_task(rq, next);
-		}
-
+		rq->dl_server = rq->core_dl_server;
 		rq->core_pick = NULL;
-		goto out;
+		rq->core_dl_server = NULL;
+		goto out_set_next;
 	}
 
-	put_prev_task_balance(rq, prev, rf);
+	prev_balance(rq, prev, rf);
 
 	smt_mask = cpu_smt_mask(cpu);
 	need_sync = !!rq->core->core_cookie;
@@ -6058,6 +6119,7 @@ pick_next_task(struct rq *rq, struct task_struct *prev, struct rq_flags *rf)
 		next = pick_task(rq);
 		if (!next->core_cookie) {
 			rq->core_pick = NULL;
+			rq->core_dl_server = NULL;
 			/*
 			 * For robustness, update the min_vruntime_fi for
 			 * unconstrained picks as well.
@@ -6085,7 +6147,9 @@ pick_next_task(struct rq *rq, struct task_struct *prev, struct rq_flags *rf)
 		if (i != cpu && (rq_i != rq->core || !core_clock_updated))
 			update_rq_clock(rq_i);
 
-		p = rq_i->core_pick = pick_task(rq_i);
+		rq_i->core_pick = p = pick_task(rq_i);
+		rq_i->core_dl_server = rq_i->dl_server;
+
 		if (!max || prio_less(max, p, fi_before))
 			max = p;
 	}
@@ -6109,6 +6173,7 @@ pick_next_task(struct rq *rq, struct task_struct *prev, struct rq_flags *rf)
 		}
 
 		rq_i->core_pick = p;
+		rq_i->core_dl_server = NULL;
 
 		if (p == rq_i->idle) {
 			if (rq_i->nr_running) {
@@ -6169,6 +6234,7 @@ pick_next_task(struct rq *rq, struct task_struct *prev, struct rq_flags *rf)
 
 		if (i == cpu) {
 			rq_i->core_pick = NULL;
+			rq_i->core_dl_server = NULL;
 			continue;
 		}
 
@@ -6177,6 +6243,7 @@ pick_next_task(struct rq *rq, struct task_struct *prev, struct rq_flags *rf)
 
 		if (rq_i->curr == rq_i->core_pick) {
 			rq_i->core_pick = NULL;
+			rq_i->core_dl_server = NULL;
 			continue;
 		}
 
@@ -6184,8 +6251,7 @@ pick_next_task(struct rq *rq, struct task_struct *prev, struct rq_flags *rf)
 	}
 
 out_set_next:
-	set_next_task(rq, next);
-out:
+	put_prev_set_next_task(rq, prev, next);
 	if (rq->core->core_forceidle_count && next == rq->idle)
 		queue_core_balance(rq);
 
@@ -6946,6 +7012,10 @@ void __setscheduler_prio(struct task_struct *p, int prio)
 		p->sched_class = &dl_sched_class;
 	else if (rt_prio(prio))
 		p->sched_class = &rt_sched_class;
+#ifdef CONFIG_SCHED_CLASS_EXT
+	else if (task_should_scx(p))
+		p->sched_class = &ext_sched_class;
+#endif
 	else
 		p->sched_class = &fair_sched_class;
 
@@ -7091,6 +7161,7 @@ void rt_mutex_setprio(struct task_struct *p, struct task_struct *pi_task)
 	}
 
 	__setscheduler_prio(p, prio);
+	check_class_changing(rq, p, prev_class);
 
 	if (queued)
 		enqueue_task(rq, p, queue_flag);
@@ -7503,6 +7574,7 @@ void sched_show_task(struct task_struct *p)
 
 	print_worker_info(KERN_INFO, p);
 	print_stop_info(KERN_INFO, p);
+	print_scx_info(KERN_INFO, p);
 	show_stack(p, NULL, KERN_INFO);
 	put_task_stack(p);
 }
@@ -8031,6 +8103,8 @@ int sched_cpu_activate(unsigned int cpu)
 		cpuset_cpu_active();
 	}
 
+	scx_rq_activate(rq);
+
 	/*
 	 * Put the rq online, if not already. This happens:
 	 *
@@ -8079,6 +8153,8 @@ int sched_cpu_deactivate(unsigned int cpu)
 	synchronize_rcu();
 
 	sched_set_rq_offline(rq, cpu);
+
+	scx_rq_deactivate(rq);
 
 	/*
 	 * When going down, decrement the number of cores with SMT present.
@@ -8264,11 +8340,15 @@ void __init sched_init(void)
 	int i;
 
 	/* Make sure the linker didn't screw up */
-	BUG_ON(&idle_sched_class != &fair_sched_class + 1 ||
-	       &fair_sched_class != &rt_sched_class + 1 ||
-	       &rt_sched_class   != &dl_sched_class + 1);
 #ifdef CONFIG_SMP
-	BUG_ON(&dl_sched_class != &stop_sched_class + 1);
+	BUG_ON(!sched_class_above(&stop_sched_class, &dl_sched_class));
+#endif
+	BUG_ON(!sched_class_above(&dl_sched_class, &rt_sched_class));
+	BUG_ON(!sched_class_above(&rt_sched_class, &fair_sched_class));
+	BUG_ON(!sched_class_above(&fair_sched_class, &idle_sched_class));
+#ifdef CONFIG_SCHED_CLASS_EXT
+	BUG_ON(!sched_class_above(&fair_sched_class, &ext_sched_class));
+	BUG_ON(!sched_class_above(&ext_sched_class, &idle_sched_class));
 #endif
 
 	wait_bit_init();
@@ -8399,6 +8479,7 @@ void __init sched_init(void)
 #ifdef CONFIG_SCHED_CORE
 		rq->core = rq;
 		rq->core_pick = NULL;
+		rq->core_dl_server = NULL;
 		rq->core_enabled = 0;
 		rq->core_tree = RB_ROOT;
 		rq->core_forceidle_count = 0;
@@ -8442,6 +8523,7 @@ void __init sched_init(void)
 	balance_push_set(smp_processor_id(), false);
 #endif
 	init_sched_fair_class();
+	init_sched_ext_class();
 
 	psi_init();
 
@@ -9639,29 +9721,27 @@ static int cpu_local_stat_show(struct seq_file *sf,
 }
 
 #ifdef CONFIG_FAIR_GROUP_SCHED
+
+static unsigned long tg_weight(struct task_group *tg)
+{
+	return scale_load_down(tg->shares);
+}
+
 static u64 cpu_weight_read_u64(struct cgroup_subsys_state *css,
 			       struct cftype *cft)
 {
-	struct task_group *tg = css_tg(css);
-	u64 weight = scale_load_down(tg->shares);
-
-	return DIV_ROUND_CLOSEST_ULL(weight * CGROUP_WEIGHT_DFL, 1024);
+	return sched_weight_to_cgroup(tg_weight(css_tg(css)));
 }
 
 static int cpu_weight_write_u64(struct cgroup_subsys_state *css,
-				struct cftype *cft, u64 weight)
+				struct cftype *cft, u64 cgrp_weight)
 {
-	/*
-	 * cgroup weight knobs should use the common MIN, DFL and MAX
-	 * values which are 1, 100 and 10000 respectively.  While it loses
-	 * a bit of range on both ends, it maps pretty well onto the shares
-	 * value used by scheduler and the round-trip conversions preserve
-	 * the original value over the entire range.
-	 */
-	if (weight < CGROUP_WEIGHT_MIN || weight > CGROUP_WEIGHT_MAX)
+	unsigned long weight;
+
+	if (cgrp_weight < CGROUP_WEIGHT_MIN || cgrp_weight > CGROUP_WEIGHT_MAX)
 		return -ERANGE;
 
-	weight = DIV_ROUND_CLOSEST_ULL(weight * 1024, CGROUP_WEIGHT_DFL);
+	weight = sched_weight_from_cgroup(cgrp_weight);
 
 	return sched_group_set_shares(css_tg(css), scale_load(weight));
 }
@@ -9669,7 +9749,7 @@ static int cpu_weight_write_u64(struct cgroup_subsys_state *css,
 static s64 cpu_weight_nice_read_s64(struct cgroup_subsys_state *css,
 				    struct cftype *cft)
 {
-	unsigned long weight = scale_load_down(css_tg(css)->shares);
+	unsigned long weight = tg_weight(css_tg(css));
 	int last_delta = INT_MAX;
 	int prio, delta;
 
@@ -10410,3 +10490,38 @@ void sched_mm_cid_fork(struct task_struct *t)
 	t->mm_cid_active = 1;
 }
 #endif
+
+#ifdef CONFIG_SCHED_CLASS_EXT
+void sched_deq_and_put_task(struct task_struct *p, int queue_flags,
+			    struct sched_enq_and_set_ctx *ctx)
+{
+	struct rq *rq = task_rq(p);
+
+	lockdep_assert_rq_held(rq);
+
+	*ctx = (struct sched_enq_and_set_ctx){
+		.p = p,
+		.queue_flags = queue_flags,
+		.queued = task_on_rq_queued(p),
+		.running = task_current(rq, p),
+	};
+
+	update_rq_clock(rq);
+	if (ctx->queued)
+		dequeue_task(rq, p, queue_flags | DEQUEUE_NOCLOCK);
+	if (ctx->running)
+		put_prev_task(rq, p);
+}
+
+void sched_enq_and_set_task(struct sched_enq_and_set_ctx *ctx)
+{
+	struct rq *rq = task_rq(ctx->p);
+
+	lockdep_assert_rq_held(rq);
+
+	if (ctx->queued)
+		enqueue_task(rq, ctx->p, ctx->queue_flags | ENQUEUE_NOCLOCK);
+	if (ctx->running)
+		set_next_task(rq, ctx->p);
+}
+#endif	/* CONFIG_SCHED_CLASS_EXT */
