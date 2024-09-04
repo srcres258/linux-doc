@@ -48,7 +48,7 @@ def emit_struct_member_definition(
             template.render(
                 name=field.name,
                 type=get_kernel_c_type(field.spec),
-                ctype=field.spec.type_decorator,
+                classifier=field.spec.c_classifier,
             )
         )
     elif isinstance(field, _XdrFixedLengthOpaque):
@@ -80,7 +80,7 @@ def emit_struct_member_definition(
             template.render(
                 name=field.name,
                 type=get_kernel_c_type(field.spec),
-                ctype=field.spec.type_decorator,
+                classifier=field.spec.c_classifier,
             )
         )
     elif isinstance(field, _XdrOptionalData):
@@ -89,7 +89,7 @@ def emit_struct_member_definition(
             template.render(
                 name=field.name,
                 type=get_kernel_c_type(field.spec),
-                ctype=field.spec.type_decorator,
+                classifier=field.spec.c_classifier,
             )
         )
 
@@ -116,7 +116,7 @@ def emit_struct_member_decoder(
             template.render(
                 name=field.name,
                 type=field.spec.type_name,
-                ctype=field.spec.type_decorator,
+                classifier=field.spec.c_classifier,
             )
         )
     elif isinstance(field, _XdrFixedLengthOpaque):
@@ -150,7 +150,7 @@ def emit_struct_member_decoder(
                 name=field.name,
                 type=field.spec.type_name,
                 size=field.size,
-                ctype=field.spec.type_decorator,
+                classifier=field.spec.c_classifier,
             )
         )
     elif isinstance(field, _XdrVariableLengthArray):
@@ -160,7 +160,7 @@ def emit_struct_member_decoder(
                 name=field.name,
                 type=field.spec.type_name,
                 maxsize=field.maxsize,
-                ctype=field.spec.type_decorator,
+                classifier=field.spec.c_classifier,
             )
         )
     elif isinstance(field, _XdrOptionalData):
@@ -169,7 +169,7 @@ def emit_struct_member_decoder(
             template.render(
                 name=field.name,
                 type=field.spec.type_name,
-                ctype=field.spec.type_decorator,
+                classifier=field.spec.c_classifier,
             )
         )
 
@@ -246,7 +246,7 @@ def emit_struct_member_encoder(
             template.render(
                 name=field.name,
                 type=field.spec.type_name,
-                ctype=field.spec.type_decorator,
+                classifier=field.spec.c_classifier,
             )
         )
 

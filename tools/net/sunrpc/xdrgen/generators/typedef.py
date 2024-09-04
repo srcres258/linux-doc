@@ -41,7 +41,7 @@ def emit_typedef_declaration(environment: Environment, node: _XdrDeclaration) ->
             template.render(
                 name=node.name,
                 type=get_kernel_c_type(node.spec),
-                ctype=node.spec.type_decorator,
+                classifier=node.spec.c_classifier,
             )
         )
     elif isinstance(node, _XdrVariableLengthString):
@@ -68,7 +68,7 @@ def emit_typedef_declaration(environment: Environment, node: _XdrDeclaration) ->
             template.render(
                 name=node.name,
                 type=node.spec.type_name,
-                ctype=node.spec.type_decorator,
+                classifier=node.spec.c_classifier,
             )
         )
     elif isinstance(node, _XdrOptionalData):
@@ -87,7 +87,7 @@ def emit_type_definition(environment: Environment, node: _XdrDeclaration) -> Non
             template.render(
                 name=node.name,
                 type=get_kernel_c_type(node.spec),
-                ctype=node.spec.type_decorator,
+                classifier=node.spec.c_classifier,
             )
         )
     elif isinstance(node, _XdrVariableLengthString):
@@ -114,7 +114,7 @@ def emit_type_definition(environment: Environment, node: _XdrDeclaration) -> Non
             template.render(
                 name=node.name,
                 type=node.spec.type_name,
-                ctype=node.spec.type_decorator,
+                classifier=node.spec.c_classifier,
             )
         )
     elif isinstance(node, _XdrOptionalData):
@@ -166,7 +166,7 @@ def emit_typedef_decoder(environment: Environment, node: _XdrDeclaration) -> Non
                 name=node.name,
                 type=node.spec.type_name,
                 size=node.size,
-                ctype=node.spec.type_decorator,
+                classifier=node.spec.c_classifier,
             )
         )
     elif isinstance(node, _XdrVariableLengthArray):

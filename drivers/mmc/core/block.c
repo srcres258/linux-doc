@@ -353,10 +353,10 @@ static ssize_t force_ro_store(struct device *dev, struct device_attribute *attr,
 			      const char *buf, size_t count)
 {
 	int ret;
-	char *end;
 	struct mmc_blk_data *md = mmc_blk_get(dev_to_disk(dev));
-	unsigned long set = simple_strtoul(buf, &end, 0);
-	if (end == buf) {
+	unsigned long set;
+
+	if (kstrtoul(buf, 0, &set)) {
 		ret = -EINVAL;
 		goto out;
 	}
@@ -2530,7 +2530,7 @@ static struct mmc_blk_data *mmc_blk_alloc_req(struct mmc_card *card,
 		return ERR_PTR(devidx);
 	}
 
-	md = kzalloc(sizeof(struct mmc_blk_data), GFP_KERNEL);
+	md = kzalloc(sizeof(*md), GFP_KERNEL);
 	if (!md) {
 		ret = -ENOMEM;
 		goto out;

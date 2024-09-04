@@ -42,7 +42,7 @@ enum iwl_mac_conf_subcmd_ids {
 	 */
 	LINK_CONFIG_CMD = 0x9,
 	/**
-	 * @STA_CONFIG_CMD: &struct iwl_mvm_sta_cfg_cmd
+	 * @STA_CONFIG_CMD: &struct iwl_sta_cfg_cmd
 	 */
 	STA_CONFIG_CMD = 0xA,
 	/**
@@ -50,7 +50,7 @@ enum iwl_mac_conf_subcmd_ids {
 	 */
 	AUX_STA_CMD = 0xB,
 	/**
-	 * @STA_REMOVE_CMD: &struct iwl_mvm_remove_sta_cmd
+	 * @STA_REMOVE_CMD: &struct iwl_remove_sta_cmd
 	 */
 	STA_REMOVE_CMD = 0xC,
 	/**
@@ -454,6 +454,9 @@ enum iwl_link_ctx_flags {
  * @listen_lmac: indicates whether the link should be allocated on the Listen
  *	Lmac or on the Main Lmac. Cannot be changed on an active Link.
  *	Relevant only for eSR.
+ * @block_tx: tell the firmware that this link can't Tx. This should be used
+ *	only when a link is de-activated because of CSA with mode = 1.
+ *	Available since version 5.
  * @reserved1: in version 2, listen_lmac became reserved
  * @cck_rates: basic rates available for CCK
  * @ofdm_rates: basic rates available for OFDM
@@ -498,7 +501,10 @@ struct iwl_link_config_cmd {
 	__le32 active;
 	union {
 		__le32 listen_lmac;
-		__le32 reserved1;
+		struct {
+			u8 block_tx;
+			u8 reserved1[3];
+		};
 	};
 	__le32 cck_rates;
 	__le32 ofdm_rates;
@@ -529,7 +535,7 @@ struct iwl_link_config_cmd {
 	u8 ibss_bssid_addr[6];
 	__le16 reserved_for_ibss_bssid_addr;
 	__le32 reserved3[8];
-} __packed; /* LINK_CONTEXT_CONFIG_CMD_API_S_VER_1, _VER_2, _VER_3, _VER_4 */
+} __packed; /* LINK_CONTEXT_CONFIG_CMD_API_S_VER_1, _VER_2, _VER_3, _VER_4, _VER_5 */
 
 /* Currently FW supports link ids in the range 0-3 and can have
  * at most two active links for each vif.
@@ -557,7 +563,7 @@ enum iwl_fw_sta_type {
 }; /* STATION_TYPE_E_VER_1 */
 
 /**
- * struct iwl_mvm_sta_cfg_cmd - cmd structure to add a peer sta to the uCode's
+ * struct iwl_sta_cfg_cmd - cmd structure to add a peer sta to the uCode's
  *	station table
  * ( STA_CONFIG_CMD = 0xA )
  *
@@ -589,7 +595,7 @@ enum iwl_fw_sta_type {
  *	capa
  * @htc_flags: which features are supported in HTC
  */
-struct iwl_mvm_sta_cfg_cmd {
+struct iwl_sta_cfg_cmd {
 	__le32 sta_id;
 	__le32 link_id;
 	u8 peer_mld_address[ETH_ALEN];
@@ -630,13 +636,13 @@ struct iwl_mvm_aux_sta_cmd {
 } __packed; /* AUX_STA_CMD_API_S_VER_1 */
 
 /**
- * struct iwl_mvm_remove_sta_cmd - a cmd structure to remove a sta added by
+ * struct iwl_remove_sta_cmd - a cmd structure to remove a sta added by
  *	STA_CONFIG_CMD or AUX_STA_CONFIG_CMD
  * ( STA_REMOVE_CMD = 0xC )
  *
  * @sta_id: index of station to remove
  */
-struct iwl_mvm_remove_sta_cmd {
+struct iwl_remove_sta_cmd {
 	__le32 sta_id;
 } __packed; /* REMOVE_STA_API_S_VER_1 */
 

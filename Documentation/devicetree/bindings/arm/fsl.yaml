@@ -953,7 +953,6 @@ properties:
               - toradex,verdin-imx8mm     # Verdin iMX8M Mini Modules
               - toradex,verdin-imx8mm-nonwifi  # Verdin iMX8M Mini Modules without Wi-Fi / BT
               - toradex,verdin-imx8mm-wifi  # Verdin iMX8M Mini Wi-Fi / BT Modules
-              - variscite,var-som-mx8mm   # i.MX8MM Variscite VAR-SOM-MX8MM module
               - prt,prt8mm                # i.MX8MM Protonic PRT8MM Board
           - const: fsl,imx8mm
 
@@ -1166,6 +1165,12 @@ properties:
               - tq,imx8mp-tqma8mpql-mba8mpxl      # TQ-Systems GmbH i.MX8MP TQMa8MPQL SOM on MBa8MPxL
               - tq,imx8mp-tqma8mpql-mba8mp-ras314 # TQ-Systems GmbH i.MX8MP TQMa8MPQL SOM on MBa8MP-RAS314
           - const: tq,imx8mp-tqma8mpql            # TQ-Systems GmbH i.MX8MP TQMa8MPQL SOM
+          - const: fsl,imx8mp
+
+      - description: Variscite VAR-SOM-MX8M Plus based boards
+        items:
+          - const: variscite,var-som-mx8mp-symphony
+          - const: variscite,var-som-mx8mp
           - const: fsl,imx8mp
 
       - description: i.MX8MQ based Boards

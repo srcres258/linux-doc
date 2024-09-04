@@ -299,6 +299,7 @@ struct iwl_probe_resp_data {
  * @active: indicates the link is active in FW (for sanity checking)
  * @cab_queue: content-after-beacon (multicast) queue
  * @listen_lmac: indicates this link is allocated to the listen LMAC
+ * @csa_block_tx: we got CSA with mode=1
  * @mcast_sta: multicast station
  * @phy_ctxt: phy context allocated to this link, if any
  * @bf_data: beacon filtering data
@@ -324,6 +325,7 @@ struct iwl_mvm_vif_link_info {
 	bool he_ru_2mhz_block;
 	bool active;
 	bool listen_lmac;
+	bool csa_block_tx;
 
 	u16 cab_queue;
 	/* Assigned while mac80211 has the link in a channel context,
@@ -772,7 +774,6 @@ struct iwl_mvm_tcm {
  * @num_stored: number of mpdus stored in the buffer
  * @queue: queue of this reorder buffer
  * @last_amsdu: track last ASMDU SN for duplication detection
- * @last_sub_index: track ASMDU sub frame index for duplication detection
  * @valid: reordering is valid for this queue
  * @lock: protect reorder buffer internal state
  */
@@ -781,7 +782,6 @@ struct iwl_mvm_reorder_buffer {
 	u16 num_stored;
 	int queue;
 	u16 last_amsdu;
-	u8 last_sub_index;
 	bool valid;
 	spinlock_t lock;
 } ____cacheline_aligned_in_smp;
@@ -1076,8 +1076,8 @@ struct iwl_mvm {
 
 	/* data related to data path */
 	struct iwl_rx_phy_info last_phy_info;
-	struct ieee80211_sta __rcu *fw_id_to_mac_id[IWL_MVM_STATION_COUNT_MAX];
-	struct ieee80211_link_sta __rcu *fw_id_to_link_sta[IWL_MVM_STATION_COUNT_MAX];
+	struct ieee80211_sta __rcu *fw_id_to_mac_id[IWL_STATION_COUNT_MAX];
+	struct ieee80211_link_sta __rcu *fw_id_to_link_sta[IWL_STATION_COUNT_MAX];
 	u8 rx_ba_sessions;
 
 	/* configured by mac80211 */
@@ -1706,9 +1706,9 @@ static inline struct agg_tx_status *
 iwl_mvm_get_agg_status(struct iwl_mvm *mvm, void *tx_resp)
 {
 	if (iwl_mvm_has_new_tx_api(mvm))
-		return &((struct iwl_mvm_tx_resp *)tx_resp)->status;
+		return &((struct iwl_tx_resp *)tx_resp)->status;
 	else
-		return ((struct iwl_mvm_tx_resp_v3 *)tx_resp)->status;
+		return ((struct iwl_tx_resp_v3 *)tx_resp)->status;
 }
 
 static inline bool iwl_mvm_is_tt_in_fw(struct iwl_mvm *mvm)
@@ -2016,7 +2016,7 @@ int iwl_mvm_phy_send_rlc(struct iwl_mvm *mvm, struct iwl_mvm_phy_ctxt *ctxt,
 void iwl_mvm_prepare_mac_removal(struct iwl_mvm *mvm,
 				 struct ieee80211_vif *vif);
 void iwl_mvm_set_fw_basic_rates(struct iwl_mvm *mvm, struct ieee80211_vif *vif,
-				struct ieee80211_bss_conf *link_conf,
+				struct iwl_mvm_vif_link_info *link_info,
 				__le32 *cck_rates, __le32 *ofdm_rates);
 void iwl_mvm_set_fw_protection_flags(struct iwl_mvm *mvm,
 				     struct ieee80211_vif *vif,

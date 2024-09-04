@@ -662,13 +662,13 @@ server_unresponsive(struct TCP_Server_Info *server)
 {
 	/*
 	 * If we're in the process of mounting a share or reconnecting a session
-	 * and the server abruptly shut down (e.g. socket wasn't closed properly),
-	 * wait for at least an echo interval (+7s from rcvtimeo) when attempting
-	 * to negotiate protocol.
+	 * and the server abruptly shut down (e.g. socket wasn't closed, packet
+	 * had been ACK'ed but no SMB response), don't wait longer than 20s to
+	 * negotiate protocol.
 	 */
 	spin_lock(&server->srv_lock);
 	if (server->tcpStatus == CifsInNegotiate &&
-	    time_after(jiffies, server->lstrp + server->echo_interval)) {
+	    time_after(jiffies, server->lstrp + 20 * HZ)) {
 		spin_unlock(&server->srv_lock);
 		cifs_reconnect(server, false);
 		return true;

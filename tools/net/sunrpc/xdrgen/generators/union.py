@@ -29,7 +29,7 @@ def emit_union_switch_spec_definition(
         template.render(
             name=node.name,
             type=node.spec.type_name,
-            ctype=node.spec.type_decorator,
+            classifier=node.spec.c_classifier,
         )
     )
 
@@ -46,7 +46,7 @@ def emit_union_case_spec_definition(
         template.render(
             name=node.arm.name,
             type=node.arm.spec.type_name,
-            ctype=node.arm.spec.type_decorator,
+            classifier=node.arm.spec.c_classifier,
         )
     )
 
@@ -93,7 +93,7 @@ def emit_union_case_spec_decoder(environment: Environment, node: _XdrCaseSpec) -
         template.render(
             name=node.arm.name,
             type=node.arm.spec.type_name,
-            ctype=node.arm.spec.type_decorator,
+            classifier=node.arm.spec.c_classifier,
         )
     )
 
@@ -123,7 +123,7 @@ def emit_union_default_spec_decoder(environment: Environment, node: _XdrUnion) -
         template.render(
             name=default_case.arm.name,
             type=default_case.arm.spec.type_name,
-            ctype=default_case.arm.spec.type_decorator,
+            classifier=default_case.arm.spec.c_classifier,
         )
     )
 

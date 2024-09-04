@@ -9,9 +9,9 @@ bool
 static bool __maybe_unused
 {% endif %}
 {% if name in pass_by_reference %}
-xdrgen_encode_{{ name }}(struct xdr_stream *xdr, const {{ ctype }}{{ name }} *value)
+xdrgen_encode_{{ name }}(struct xdr_stream *xdr, const {{ classifier }}{{ name }} *value)
 {% else %}
-xdrgen_encode_{{ name }}(struct xdr_stream *xdr, const {{ ctype }}{{ name }} value)
+xdrgen_encode_{{ name }}(struct xdr_stream *xdr, const {{ classifier }}{{ name }} value)
 {% endif %}
 {
 {% if annotate %}

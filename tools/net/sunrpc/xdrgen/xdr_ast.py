@@ -40,22 +40,28 @@ class _XdrValue(_XdrAst):
 
 
 @dataclass
+class _XdrConstantValue(_XdrAst):
+    """Corresponds to 'constant' in the XDR language grammar"""
+
+    value: int
+
+
+@dataclass
 class _XdrTypeSpecifier(_XdrAst):
     """Corresponds to 'type_specifier' in the XDR language grammar"""
 
     type_name: str
+    c_classifier: str
 
 
 @dataclass
 class _XdrDefinedType(_XdrTypeSpecifier):
     """Corresponds to a type defined within the input"""
-    type_decorator: str
 
 
 @dataclass
 class _XdrBuiltInType(_XdrTypeSpecifier):
     """Corresponds to a built-in XDR type"""
-    type_decorator: str = ""
 
 
 @dataclass
@@ -131,6 +137,8 @@ class _XdrBasic(_XdrDeclaration):
 @dataclass
 class _XdrVoid(_XdrDeclaration):
     """A void declaration"""
+
+    template: str = "void"
 
 
 @dataclass
@@ -270,19 +278,36 @@ class ParseToAst(Transformer):
             return _XdrValue(children[0].symbol)
         return _XdrValue(children[0].children[0].value)
 
+    def constant(self, children):
+        """Instantiate one _XdrConstantValue object"""
+        match children[0].data:
+            case "decimal_constant":
+                value = int(children[0].children[0].value, base=10)
+            case "hexadecimal_constant":
+                value = int(children[0].children[0].value, base=16)
+            case "octal_constant":
+                value = int(children[0].children[0].value, base=8)
+        return _XdrConstantValue(value)
+
     def type_specifier(self, children):
         """Instantiate one type_specifier object"""
+        c_classifier = ""
         if isinstance(children[0], _XdrIdentifier):
             name = children[0].symbol
-            decorator = ""
             if name in enums:
-                decorator = "enum "
+                c_classifier = "enum "
             if name in structs:
-                decorator = "struct "
-            return _XdrDefinedType(name, decorator)
+                c_classifier = "struct "
+            return _XdrDefinedType(
+                type_name=name,
+                c_classifier=c_classifier,
+            )
 
         token = children[0].data
-        return _XdrBuiltInType(type_name=token.value)
+        return _XdrBuiltInType(
+            type_name=token.value,
+            c_classifier=c_classifier,
+        )
 
     def constant_def(self, children):
         """Instantiate one _XdrConstant object"""
@@ -372,6 +397,7 @@ class ParseToAst(Transformer):
 
     def void(self, children):
         """Instantiate one _XdrVoid declaration object"""
+
         return _XdrVoid()
 
     def struct(self, children):
@@ -387,6 +413,7 @@ class ParseToAst(Transformer):
             and name == last_field.spec.type_name
         ):
             return _XdrPointer(name, fields)
+
         return _XdrStruct(name, fields)
 
     def typedef(self, children):
@@ -420,6 +447,7 @@ class ParseToAst(Transformer):
         name = children[0].symbol
         structs.add(name)
         pass_by_reference.add(name)
+
         body = children[1]
         discriminant = body.children[0].children[0]
         cases = body.children[1:-1]
@@ -429,17 +457,18 @@ class ParseToAst(Transformer):
 
     def procedure_def(self, children):
         """Instantiate one _RpcProcedure object"""
+        #print(children)
         result = children[0]
         name = children[1].symbol
         argument = children[2]
-        number = children[3].children[0].children[0].value
+        number = children[3].value
 
         return _RpcProcedure(name, number, argument, result)
 
     def version_def(self, children):
         """Instantiate one _RpcVersion object"""
         name = children[0].symbol
-        number = children[-1].children[0].children[0].value
+        number = children[-1].value
         procedures = children[1:-1]
 
         return _RpcVersion(name, number, procedures)
@@ -447,7 +476,7 @@ class ParseToAst(Transformer):
     def program_def(self, children):
         """Instantiate one _RpcProgram object"""
         name = children[0].symbol
-        number = children[-1].children[0].children[0].value
+        number = children[-1].value
         versions = children[1:-1]
 
         return _RpcProgram(name, number, versions)

@@ -15,12 +15,13 @@ from generators.enum import XdrEnumGenerator
 from generators.header_bottom import XdrHeaderBottomGenerator
 from generators.header_top import XdrHeaderTopGenerator
 from generators.pointer import XdrPointerGenerator
+from generators.program import XdrProgramGenerator
 from generators.typedef import XdrTypedefGenerator
 from generators.struct import XdrStructGenerator
 from generators.union import XdrUnionGenerator
 
 from xdr_ast import transform_parse_tree, Specification
-from xdr_ast import _XdrConstant, _XdrEnum, _XdrPointer
+from xdr_ast import _RpcProgram, _XdrConstant, _XdrEnum, _XdrPointer
 from xdr_ast import _XdrTypedef, _XdrStruct, _XdrUnion
 from xdr_parse import xdr_parser, set_xdr_annotate
 
@@ -38,6 +39,8 @@ def emit_header_definitions(
             gen = XdrEnumGenerator(language, peer)
         elif isinstance(definition.value, _XdrPointer):
             gen = XdrPointerGenerator(language, peer)
+        elif isinstance(definition.value, _RpcProgram):
+            gen = XdrProgramGenerator(language, peer)
         elif isinstance(definition.value, _XdrTypedef):
             gen = XdrTypedefGenerator(language, peer)
         elif isinstance(definition.value, _XdrStruct):

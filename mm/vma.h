@@ -240,7 +240,7 @@ static inline void vms_abort_munmap_vmas(struct vma_munmap_struct *vms,
 	 * not symmetrical and state data has been lost.  Resort to the old
 	 * failure method of leaving a gap where the MAP_FIXED mapping failed.
 	 */
-	mas_set_range(mas, vms->start, vms->end);
+	mas_set_range(mas, vms->start, vms->end - 1);
 	if (unlikely(mas_store_gfp(mas, NULL, GFP_KERNEL))) {
 		pr_warn_once("%s: (%d) Unable to abort munmap() operation\n",
 			     current->comm, current->pid);

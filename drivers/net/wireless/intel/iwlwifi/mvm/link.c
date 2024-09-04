@@ -234,10 +234,15 @@ int iwl_mvm_link_changed(struct iwl_mvm *mvm, struct ieee80211_vif *vif,
 		WARN_ON_ONCE(active == link_info->active);
 
 		/* When deactivating a link session protection should
-		 * be stopped
+		 * be stopped. Also let the firmware know if we can't Tx.
 		 */
-		if (!active && vif->type == NL80211_IFTYPE_STATION)
+		if (!active && vif->type == NL80211_IFTYPE_STATION) {
 			iwl_mvm_stop_session_protection(mvm, vif);
+			if (link_info->csa_block_tx) {
+				cmd.block_tx = 1;
+				link_info->csa_block_tx = false;
+			}
+		}
 	}
 
 	cmd.link_id = cpu_to_le32(link_info->fw_link_id);
@@ -259,7 +264,7 @@ int iwl_mvm_link_changed(struct iwl_mvm *mvm, struct ieee80211_vif *vif,
 	if (vif->type == NL80211_IFTYPE_ADHOC && link_conf->bssid)
 		memcpy(cmd.ibss_bssid_addr, link_conf->bssid, ETH_ALEN);
 
-	iwl_mvm_set_fw_basic_rates(mvm, vif, link_conf,
+	iwl_mvm_set_fw_basic_rates(mvm, vif, link_info,
 				   &cmd.cck_rates, &cmd.ofdm_rates);
 
 	cmd.cck_short_preamble = cpu_to_le32(link_conf->use_short_preamble);

@@ -309,7 +309,7 @@ a single line of text and contains the following stats separated by whitespace:
  ============== =============================================================
 
 10) Deactivate
-=============
+==============
 
 ::
 

@@ -9,6 +9,27 @@ from generators import SourceGenerator, create_jinja2_environment
 from xdr_ast import _RpcProgram, _RpcVersion, excluded_apis
 
 
+def emit_version_definitions(
+    environment: Environment, program: str, version: _RpcVersion
+) -> None:
+    """Emit procedure numbers for each RPC version's procedures"""
+    template = environment.get_template("definition/open.j2")
+    print(template.render(program=program.upper()))
+
+    template = environment.get_template("definition/procedure.j2")
+    for procedure in version.procedures:
+        if procedure.name not in excluded_apis:
+            print(
+                template.render(
+                    name=procedure.name,
+                    value=procedure.number,
+                )
+            )
+
+    template = environment.get_template("definition/close.j2")
+    print(template.render())
+
+
 def emit_version_declarations(
     environment: Environment, program: str, version: _RpcVersion
 ) -> None:
@@ -99,6 +120,14 @@ class XdrProgramGenerator(SourceGenerator):
         """Initialize an instance of this class"""
         self.environment = create_jinja2_environment(language, "program")
         self.peer = peer
+
+    def emit_definition(self, node: _RpcProgram) -> None:
+        """Emit procedure numbers for each of an RPC programs's procedures"""
+        raw_name = node.name
+        program = raw_name.lower().removesuffix("_program").removesuffix("_prog")
+
+        for version in node.versions:
+            emit_version_definitions(self.environment, program, version)
 
     def emit_declaration(self, node: _RpcProgram) -> None:
         """Emit a declaration pair for each of an RPC programs's procedures"""
