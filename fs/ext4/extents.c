@@ -6132,7 +6132,7 @@ int ext4_ext_clear_bb(struct inode *inode)
 		if (ret < 0)
 			break;
 		if (ret > 0) {
-			path = ext4_find_extent(inode, map.m_lblk, NULL, 0);
+			path = ext4_find_extent(inode, map.m_lblk, path, 0);
 			if (!IS_ERR(path)) {
 				for (j = 0; j < path->p_depth; j++) {
 					ext4_mb_mark_bb(inode->i_sb,
@@ -6140,7 +6140,8 @@ int ext4_ext_clear_bb(struct inode *inode)
 					ext4_fc_record_regions(inode->i_sb, inode->i_ino,
 							0, path[j].p_block, 1, 1);
 				}
-				ext4_free_ext_path(path);
+			} else {
+				path = NULL;
 			}
 			ext4_mb_mark_bb(inode->i_sb, map.m_pblk, map.m_len, false);
 			ext4_fc_record_regions(inode->i_sb, inode->i_ino,

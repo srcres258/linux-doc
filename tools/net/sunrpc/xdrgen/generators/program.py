@@ -34,27 +34,25 @@ def emit_version_declarations(
     environment: Environment, program: str, version: _RpcVersion
 ) -> None:
     """Emit declarations for each RPC version's procedures"""
-    print("")
-    template = environment.get_template("declaration/argument.j2")
+    arguments = set()
     for procedure in version.procedures:
         if procedure.name not in excluded_apis:
-            print(
-                template.render(
-                    program=program,
-                    argument=procedure.argument.type_name,
-                )
-            )
+            arguments.add(procedure.argument.type_name)
+    if len(arguments) > 0:
+        print("")
+        template = environment.get_template("declaration/argument.j2")
+        for argument in arguments:
+            print(template.render(program=program, argument=argument))
 
-    print("")
-    template = environment.get_template("declaration/result.j2")
+    results = set()
     for procedure in version.procedures:
         if procedure.name not in excluded_apis:
-            print(
-                template.render(
-                    program=program,
-                    result=procedure.result.type_name,
-                )
-            )
+            results.add(procedure.result.type_name)
+    if len(results) > 0:
+        print("")
+        template = environment.get_template("declaration/result.j2")
+        for result in results:
+            print(template.render(program=program, result=result))
 
 
 def emit_version_argument_decoders(

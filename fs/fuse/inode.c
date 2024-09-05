@@ -586,7 +586,7 @@ static void fuse_send_destroy(struct fuse_mount *fm)
 		args.opcode = FUSE_DESTROY;
 		args.force = true;
 		args.nocreds = true;
-		fuse_simple_request(fm, &args);
+		fuse_simple_request(NULL, fm, &args);
 	}
 }
 
@@ -624,7 +624,7 @@ static int fuse_statfs(struct dentry *dentry, struct kstatfs *buf)
 	args.out_numargs = 1;
 	args.out_args[0].size = sizeof(outarg);
 	args.out_args[0].value = &outarg;
-	err = fuse_simple_request(fm, &args);
+	err = fuse_simple_request(NULL, fm, &args);
 	if (!err)
 		convert_fuse_statfs(buf, &outarg.st);
 	return err;
@@ -713,7 +713,7 @@ static int fuse_sync_fs(struct super_block *sb, int wait)
 	args.nodeid = get_node_id(sb->s_root->d_inode);
 	args.out_numargs = 0;
 
-	err = fuse_simple_request(fm, &args);
+	err = fuse_simple_request(NULL, fm, &args);
 	if (err == -ENOSYS) {
 		fc->sync_fs = 0;
 		err = 0;
@@ -1350,10 +1350,8 @@ static void process_init_reply(struct fuse_mount *fm, struct fuse_args *args,
 			}
 			if (flags & FUSE_NO_EXPORT_SUPPORT)
 				fm->sb->s_export_op = &fuse_export_fid_operations;
-			if (flags & FUSE_OWNER_UID_GID_EXT)
-				fc->owner_uid_gid_ext = 1;
 			if (flags & FUSE_ALLOW_IDMAP) {
-				if (fc->owner_uid_gid_ext && fc->default_permissions)
+				if (fc->default_permissions)
 					fm->sb->s_iflags &= ~SB_I_NOIDMAP;
 				else
 					ok = false;
@@ -1405,8 +1403,7 @@ void fuse_send_init(struct fuse_mount *fm)
 		FUSE_HANDLE_KILLPRIV_V2 | FUSE_SETXATTR_EXT | FUSE_INIT_EXT |
 		FUSE_SECURITY_CTX | FUSE_CREATE_SUPP_GROUP |
 		FUSE_HAS_EXPIRE_ONLY | FUSE_DIRECT_IO_ALLOW_MMAP |
-		FUSE_NO_EXPORT_SUPPORT | FUSE_HAS_RESEND | FUSE_OWNER_UID_GID_EXT |
-		FUSE_ALLOW_IDMAP;
+		FUSE_NO_EXPORT_SUPPORT | FUSE_HAS_RESEND | FUSE_ALLOW_IDMAP;
 #ifdef CONFIG_FUSE_DAX
 	if (fm->fc->dax)
 		flags |= FUSE_MAP_ALIGNMENT;

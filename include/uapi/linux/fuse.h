@@ -219,8 +219,6 @@
  *  - add FUSE_NOTIFY_RESEND, add FUSE_HAS_RESEND init flag
  *
  *  7.41
- *  - add FUSE_EXT_OWNER_UID_GID
- *  - add FUSE_OWNER_UID_GID_EXT
  *  - add FUSE_ALLOW_IDMAP
  */
 
@@ -426,8 +424,6 @@ struct fuse_file_lock {
  * FUSE_NO_EXPORT_SUPPORT: explicitly disable export support
  * FUSE_HAS_RESEND: kernel supports resending pending requests, and the high bit
  *		    of the request ID indicates resend requests
- * FUSE_OWNER_UID_GID_EXT: add inode owner UID/GID info to create, mkdir,
- *			   symlink and mknod
  * FUSE_ALLOW_IDMAP: allow creation of idmapped mounts
  */
 #define FUSE_ASYNC_READ		(1 << 0)
@@ -474,8 +470,7 @@ struct fuse_file_lock {
 
 /* Obsolete alias for FUSE_DIRECT_IO_ALLOW_MMAP */
 #define FUSE_DIRECT_IO_RELAX	FUSE_DIRECT_IO_ALLOW_MMAP
-#define FUSE_OWNER_UID_GID_EXT	(1ULL << 40)
-#define FUSE_ALLOW_IDMAP	(1ULL << 41)
+#define FUSE_ALLOW_IDMAP	(1ULL << 40)
 
 /**
  * CUSE INIT request/reply flags
@@ -995,6 +990,21 @@ struct fuse_fallocate_in {
  * request accordingly.
  */
 #define FUSE_UNIQUE_RESEND (1ULL << 63)
+
+/**
+ * This value will be set by the kernel to
+ * (struct fuse_in_header).{uid,gid} fields in
+ * case when:
+ * - fuse daemon enabled FUSE_ALLOW_IDMAP
+ * - idmapping information is not available and uid/gid
+ *   can not be mapped in accordance with an idmapping.
+ *
+ * Note: an idmapping information always available
+ * for inode creation operations like:
+ * FUSE_MKNOD, FUSE_SYMLINK, FUSE_MKDIR, FUSE_TMPFILE,
+ * FUSE_CREATE and FUSE_RENAME2 (with RENAME_WHITEOUT).
+ */
+#define FUSE_INVALID_UIDGID ((uint32_t)(-1))
 
 struct fuse_in_header {
 	uint32_t	len;

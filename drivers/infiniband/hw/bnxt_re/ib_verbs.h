@@ -77,6 +77,8 @@ struct bnxt_re_srq {
 	struct bnxt_qplib_srq	qplib_srq;
 	struct ib_umem		*umem;
 	spinlock_t		lock;		/* protect srq */
+	void			*uctx_srq_page;
+	struct hlist_node       hash_entry;
 };
 
 struct bnxt_re_qp {

@@ -11,7 +11,8 @@
 
 void bch2_dev_missing(struct bch_fs *c, unsigned dev)
 {
-	bch2_fs_inconsistent(c, "pointer to nonexistent device %u", dev);
+	if (dev != BCH_SB_MEMBER_INVALID)
+		bch2_fs_inconsistent(c, "pointer to nonexistent device %u", dev);
 }
 
 void bch2_dev_bucket_missing(struct bch_fs *c, struct bpos bucket)
@@ -477,12 +478,20 @@ unsigned bch2_sb_nr_devices(const struct bch_sb *sb)
 int bch2_sb_member_alloc(struct bch_fs *c)
 {
 	unsigned dev_idx = c->sb.nr_devices;
+	struct bch_sb_field_members_v2 *mi;
+	unsigned nr_devices;
+	unsigned u64s;
+	int best = -1;
+	u64 best_last_mount = 0;
+
 	if (dev_idx < BCH_SB_MEMBERS_MAX)
 		goto have_slot;
 
-	int best = -1;
-	u64 best_last_mount = 0;
 	for (dev_idx = 0; dev_idx < BCH_SB_MEMBERS_MAX; dev_idx++) {
+		/* eventually BCH_SB_MEMBERS_MAX will be raised */
+		if (dev_idx == BCH_SB_MEMBER_INVALID)
+			continue;
+
 		struct bch_member m = bch2_sb_member_get(c->disk_sb.sb, dev_idx);
 		if (bch2_member_alive(&m))
 			continue;
@@ -500,11 +509,11 @@ int bch2_sb_member_alloc(struct bch_fs *c)
 
 	return -BCH_ERR_ENOSPC_sb_members;
 have_slot:
-	unsigned nr_devices = max_t(unsigned, dev_idx + 1, c->sb.nr_devices);
+	nr_devices = max_t(unsigned, dev_idx + 1, c->sb.nr_devices);
 
-	struct bch_sb_field_members_v2 *mi = bch2_sb_field_get(c->disk_sb.sb, members_v2);
-	unsigned u64s = DIV_ROUND_UP(sizeof(struct bch_sb_field_members_v2) +
-				     le16_to_cpu(mi->member_bytes) * nr_devices, sizeof(u64));
+	mi = bch2_sb_field_get(c->disk_sb.sb, members_v2);
+	u64s = DIV_ROUND_UP(sizeof(struct bch_sb_field_members_v2) +
+			    le16_to_cpu(mi->member_bytes) * nr_devices, sizeof(u64));
 
 	mi = bch2_sb_field_resize(&c->disk_sb, members_v2, u64s);
 	if (!mi)

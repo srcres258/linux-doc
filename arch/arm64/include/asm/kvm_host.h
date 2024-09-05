@@ -446,6 +446,8 @@ enum vcpu_sysreg {
 	GCR_EL1,	/* Tag Control Register */
 	TFSRE0_EL1,	/* Tag Fault Status Register (EL0) */
 
+	POR_EL0,	/* Permission Overlay Register 0 (EL0) */
+
 	/* FP/SIMD/SVE */
 	SVCR,
 	FPMR,
@@ -520,6 +522,8 @@ enum vcpu_sysreg {
 	/* Permission Indirection Extension registers */
 	VNCR(PIR_EL1),	 /* Permission Indirection Register 1 (EL1) */
 	VNCR(PIRE0_EL1), /*  Permission Indirection Register 0 (EL1) */
+
+	VNCR(POR_EL1),	/* Permission Overlay Register 1 (EL1) */
 
 	VNCR(HFGRTR_EL2),
 	VNCR(HFGWTR_EL2),

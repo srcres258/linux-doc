@@ -74,20 +74,19 @@ enum imx_pcie_variants {
 };
 
 #define IMX_PCIE_FLAG_IMX_PHY			BIT(0)
-#define IMX_PCIE_FLAG_IMX_SPEED_CHANGE	BIT(1)
+#define IMX_PCIE_FLAG_IMX_SPEED_CHANGE		BIT(1)
 #define IMX_PCIE_FLAG_SUPPORTS_SUSPEND		BIT(2)
-#define IMX_PCIE_FLAG_HAS_PHYDRV			BIT(3)
+#define IMX_PCIE_FLAG_HAS_PHYDRV		BIT(3)
 #define IMX_PCIE_FLAG_HAS_APP_RESET		BIT(4)
 #define IMX_PCIE_FLAG_HAS_PHY_RESET		BIT(5)
 #define IMX_PCIE_FLAG_HAS_SERDES		BIT(6)
 #define IMX_PCIE_FLAG_SUPPORT_64BIT		BIT(7)
 #define IMX_PCIE_FLAG_CPU_ADDR_FIXUP		BIT(8)
 
-#define imx_check_flag(pci, val)     (pci->drvdata->flags & val)
+#define imx_check_flag(pci, val)	(pci->drvdata->flags & val)
 
-#define IMX_PCIE_MAX_CLKS       6
-
-#define IMX_PCIE_MAX_INSTANCES			2
+#define IMX_PCIE_MAX_CLKS	6
+#define IMX_PCIE_MAX_INSTANCES	2
 
 struct imx_pcie;
 

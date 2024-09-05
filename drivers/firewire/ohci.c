@@ -396,7 +396,7 @@ MODULE_PARM_DESC(quirks, "Chip quirks (default = 0"
 
 static int param_debug;
 module_param_named(debug, param_debug, int, 0644);
-MODULE_PARM_DESC(debug, "Verbose logging (default = 0"
+MODULE_PARM_DESC(debug, "Verbose logging, deprecated in v6.11 kernel or later. (default = 0"
 	", AT/AR events = "	__stringify(OHCI_PARAM_DEBUG_AT_AR)
 	", self-IDs = "		__stringify(OHCI_PARAM_DEBUG_SELFIDS)
 	", IRQs = "		__stringify(OHCI_PARAM_DEBUG_IRQS)
@@ -2197,6 +2197,11 @@ static irqreturn_t irq_handler(int irq, void *data)
 	if (!event || !~event)
 		return IRQ_NONE;
 
+	if (unlikely(param_debug > 0)) {
+		dev_notice_ratelimited(ohci->card.device,
+				       "The debug parameter is superceded by tracepoints events, and deprecated.");
+	}
+
 	/*
 	 * busReset and postedWriteErr events must not be cleared yet
 	 * (OHCI 1.1 clauses 7.2.3.2 and 13.2.8.1)
@@ -2263,13 +2268,11 @@ static irqreturn_t irq_handler(int irq, void *data)
 		reg_read(ohci, OHCI1394_PostedWriteAddressLo);
 		reg_write(ohci, OHCI1394_IntEventClear,
 			  OHCI1394_postedWriteErr);
-		if (printk_ratelimit())
-			ohci_err(ohci, "PCI posted write error\n");
+		dev_err_ratelimited(ohci->card.device, "PCI posted write error\n");
 	}
 
 	if (unlikely(event & OHCI1394_cycleTooLong)) {
-		if (printk_ratelimit())
-			ohci_notice(ohci, "isochronous cycle too long\n");
+		dev_notice_ratelimited(ohci->card.device, "isochronous cycle too long\n");
 		reg_write(ohci, OHCI1394_LinkControlSet,
 			  OHCI1394_LinkControl_cycleMaster);
 	}
@@ -2281,8 +2284,7 @@ static irqreturn_t irq_handler(int irq, void *data)
 		 * stop active cycleMatch iso contexts now and restart
 		 * them at least two cycles later.  (FIXME?)
 		 */
-		if (printk_ratelimit())
-			ohci_notice(ohci, "isochronous cycle inconsistent\n");
+		dev_notice_ratelimited(ohci->card.device, "isochronous cycle inconsistent\n");
 	}
 
 	if (unlikely(event & OHCI1394_unrecoverableError))

@@ -744,25 +744,26 @@ static void __iomem *brcm7425_pcie_map_bus(struct pci_bus *bus,
 
 static int brcm_pcie_bridge_sw_init_set_generic(struct brcm_pcie *pcie, u32 val)
 {
+	u32 tmp, mask = RGR1_SW_INIT_1_INIT_GENERIC_MASK;
+	u32 shift = RGR1_SW_INIT_1_INIT_GENERIC_SHIFT;
 	int ret = 0;
 
-	if (val)
-		ret = reset_control_assert(pcie->bridge_reset);
-	else
-		ret = reset_control_deassert(pcie->bridge_reset);
+	if (pcie->bridge_reset) {
+		if (val)
+			ret = reset_control_assert(pcie->bridge_reset);
+		else
+			ret = reset_control_deassert(pcie->bridge_reset);
 
-	if (ret)
-		dev_err(pcie->dev, "failed to %s 'bridge' reset, err=%d\n",
-			val ? "assert" : "deassert", ret);
+		if (ret)
+			dev_err(pcie->dev, "failed to %s 'bridge' reset, err=%d\n",
+				val ? "assert" : "deassert", ret);
 
-	if (!pcie->bridge_reset) {
-		u32 tmp, mask =  RGR1_SW_INIT_1_INIT_GENERIC_MASK;
-		u32 shift = RGR1_SW_INIT_1_INIT_GENERIC_SHIFT;
-
-		tmp = readl(pcie->base + PCIE_RGR1_SW_INIT_1(pcie));
-		tmp = (tmp & ~mask) | ((val << shift) & mask);
-		writel(tmp, pcie->base + PCIE_RGR1_SW_INIT_1(pcie));
+		return ret;
 	}
+
+	tmp = readl(pcie->base + PCIE_RGR1_SW_INIT_1(pcie));
+	tmp = (tmp & ~mask) | ((val << shift) & mask);
+	writel(tmp, pcie->base + PCIE_RGR1_SW_INIT_1(pcie));
 
 	return ret;
 }
@@ -841,8 +842,8 @@ static int brcm_pcie_get_inbound_wins(struct brcm_pcie *pcie,
 	u8 n = 0;
 
 	/*
-	 * The HW registers (and PCIe) use order-1 numbering for BARs. As
-	 * such, we have inbound_wins[0] unused and BAR1 starts at inbound_wins[1].
+	 * The HW registers (and PCIe) use order-1 numbering for BARs.  As such,
+	 * we have inbound_wins[0] unused and BAR1 starts at inbound_wins[1].
 	 */
 	struct inbound_win *b_begin = &inbound_wins[1];
 	struct inbound_win *b = b_begin;

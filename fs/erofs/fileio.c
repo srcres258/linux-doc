@@ -127,6 +127,7 @@ static int erofs_fileio_scan_folio(struct erofs_fileio *io, struct folio *folio)
 			erofs_put_metabuf(&buf);
 		} else if (!(map->m_flags & EROFS_MAP_MAPPED)) {
 			folio_zero_segment(folio, cur, cur + len);
+			attached = 0;
 		} else {
 			if (io->rq && (map->m_pa + ofs != io->dev.m_pa ||
 				       map->m_deviceid != io->dev.m_deviceid)) {

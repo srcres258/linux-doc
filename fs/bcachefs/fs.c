@@ -723,7 +723,7 @@ static int bch2_rename2(struct mnt_idmap *idmap,
 	struct bch_inode_info *src_inode = to_bch_ei(src_dentry->d_inode);
 	struct bch_inode_info *dst_inode = to_bch_ei(dst_dentry->d_inode);
 	struct bch_inode_unpacked dst_dir_u, src_dir_u;
-	struct bch_inode_unpacked src_inode_u, dst_inode_u, whiteout_inode_u;
+	struct bch_inode_unpacked src_inode_u, dst_inode_u, *whiteout_inode_u;
 	struct btree_trans *trans;
 	enum bch_rename_mode mode = flags & RENAME_EXCHANGE
 		? BCH_RENAME_EXCHANGE
@@ -749,9 +749,6 @@ static int bch2_rename2(struct mnt_idmap *idmap,
 			 dst_inode);
 
 	trans = bch2_trans_get(c);
-
-	if (whiteout)
-		bch2_inode_init_early(c, &whiteout_inode_u);
 
 	ret   = bch2_subvol_is_ro_trans(trans, src_dir->ei_inum.subvol) ?:
 		bch2_subvol_is_ro_trans(trans, dst_dir->ei_inum.subvol);
@@ -791,15 +788,21 @@ retry:
 		goto err_tx_restart;
 
 	if (whiteout) {
+		whiteout_inode_u = bch2_trans_kmalloc_nomemzero(trans, sizeof(*whiteout_inode_u));
+		ret = PTR_ERR_OR_ZERO(whiteout_inode_u);
+		if (unlikely(ret))
+			goto err_tx_restart;
+		bch2_inode_init_early(c, whiteout_inode_u);
+
 		ret = bch2_create_trans(trans,
 					inode_inum(src_dir), &src_dir_u,
-					&whiteout_inode_u,
+					whiteout_inode_u,
 					&src_dentry->d_name,
 					from_kuid(i_user_ns(&src_dir->v), current_fsuid()),
 					from_kgid(i_user_ns(&src_dir->v), current_fsgid()),
 					S_IFCHR|WHITEOUT_MODE, 0,
 					NULL, NULL, (subvol_inum) { 0 }, 0) ?:
-		      bch2_quota_acct(c, bch_qid(&whiteout_inode_u), Q_INO, 1,
+		      bch2_quota_acct(c, bch_qid(whiteout_inode_u), Q_INO, 1,
 				      KEY_TYPE_QUOTA_PREALLOC);
 		if (unlikely(ret))
 			goto err_tx_restart;

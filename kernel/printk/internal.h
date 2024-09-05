@@ -21,6 +21,19 @@ int devkmsg_sysctl_set_loglvl(const struct ctl_table *table, int write,
 		(con->flags & CON_BOOT) ? "boot" : "",		\
 		con->name, con->index, ##__VA_ARGS__)
 
+/*
+ * Identify if legacy printing is forced in a dedicated kthread. If
+ * true, all printing via console lock occurs within a dedicated
+ * legacy printer thread. The only exception is on panic, after the
+ * nbcon consoles have had their chance to print the panic messages
+ * first.
+ */
+#ifdef CONFIG_PREEMPT_RT
+# define force_legacy_kthread()	(true)
+#else
+# define force_legacy_kthread()	(false)
+#endif
+
 #ifdef CONFIG_PRINTK
 
 #ifdef CONFIG_PRINTK_CALLER
@@ -48,6 +61,7 @@ struct printk_ringbuffer;
 struct dev_printk_info;
 
 extern struct printk_ringbuffer *prb;
+extern bool printk_kthreads_running;
 
 __printf(4, 0)
 int vprintk_store(int facility, int level,
@@ -91,7 +105,10 @@ void nbcon_free(struct console *con);
 enum nbcon_prio nbcon_get_default_prio(void);
 void nbcon_atomic_flush_pending(void);
 bool nbcon_legacy_emit_next_record(struct console *con, bool *handover,
-				   int cookie);
+				   int cookie, bool use_atomic);
+bool nbcon_kthread_create(struct console *con);
+void nbcon_kthread_stop(struct console *con);
+void nbcon_kthreads_wake(void);
 
 /*
  * Check if the given console is currently capable and allowed to print
@@ -99,7 +116,7 @@ bool nbcon_legacy_emit_next_record(struct console *con, bool *handover,
  * which can also play a role in deciding if @con can be used to print
  * records.
  */
-static inline bool console_is_usable(struct console *con, short flags)
+static inline bool console_is_usable(struct console *con, short flags, bool use_atomic)
 {
 	if (!(flags & CON_ENABLED))
 		return false;
@@ -108,8 +125,16 @@ static inline bool console_is_usable(struct console *con, short flags)
 		return false;
 
 	if (flags & CON_NBCON) {
-		if (!con->write_atomic)
+		/* The write_atomic() callback is optional. */
+		if (use_atomic && !con->write_atomic)
 			return false;
+
+		/*
+		 * For the !use_atomic case, @printk_kthreads_running is not
+		 * checked because the write_thread() callback is also used
+		 * via the legacy loop when the printer threads are not
+		 * available.
+		 */
 	} else {
 		if (!con->write)
 			return false;
@@ -126,11 +151,33 @@ static inline bool console_is_usable(struct console *con, short flags)
 	return true;
 }
 
+/**
+ * nbcon_kthread_wake - Wake up a console printing thread
+ * @con:	Console to operate on
+ */
+static inline void nbcon_kthread_wake(struct console *con)
+{
+	/*
+	 * Guarantee any new records can be seen by tasks preparing to wait
+	 * before this context checks if the rcuwait is empty.
+	 *
+	 * The full memory barrier in rcuwait_wake_up() pairs with the full
+	 * memory barrier within set_current_state() of
+	 * ___rcuwait_wait_event(), which is called after prepare_to_rcuwait()
+	 * adds the waiter but before it has checked the wait condition.
+	 *
+	 * This pairs with nbcon_kthread_func:A.
+	 */
+	rcuwait_wake_up(&con->rcuwait); /* LMM(nbcon_kthread_wake:A) */
+}
+
 #else
 
 #define PRINTK_PREFIX_MAX	0
 #define PRINTK_MESSAGE_MAX	0
 #define PRINTKRB_RECORD_MAX	0
+
+#define printk_kthreads_running (false)
 
 /*
  * In !PRINTK builds we still export console_sem
@@ -141,6 +188,7 @@ static inline bool console_is_usable(struct console *con, short flags)
 #define printk_safe_exit_irqrestore(flags) local_irq_restore(flags)
 
 static inline bool printk_percpu_data_ready(void) { return false; }
+static inline void defer_console_output(void) { }
 static inline bool is_printk_legacy_deferred(void) { return false; }
 static inline u64 nbcon_seq_read(struct console *con) { return 0; }
 static inline void nbcon_seq_force(struct console *con, u64 seq) { }
@@ -149,9 +197,12 @@ static inline void nbcon_free(struct console *con) { }
 static inline enum nbcon_prio nbcon_get_default_prio(void) { return NBCON_PRIO_NONE; }
 static inline void nbcon_atomic_flush_pending(void) { }
 static inline bool nbcon_legacy_emit_next_record(struct console *con, bool *handover,
-						 int cookie) { return false; }
+						 int cookie, bool use_atomic) { return false; }
+static inline void nbcon_kthread_wake(struct console *con) { }
+static inline void nbcon_kthreads_wake(void) { }
 
-static inline bool console_is_usable(struct console *con, short flags) { return false; }
+static inline bool console_is_usable(struct console *con, short flags,
+				     bool use_atomic) { return false; }
 
 #endif /* CONFIG_PRINTK */
 
@@ -163,13 +214,15 @@ extern bool legacy_allow_panic_sync;
 /**
  * struct console_flush_type - Define available console flush methods
  * @nbcon_atomic:	Flush directly using nbcon_atomic() callback
+ * @nbcon_offload:	Offload flush to printer thread
  * @legacy_direct:	Call the legacy loop in this context
- * @legacy_offload:	Offload the legacy loop into IRQ
+ * @legacy_offload:	Offload the legacy loop into IRQ or legacy thread
  *
  * Note that the legacy loop also flushes the nbcon consoles.
  */
 struct console_flush_type {
 	bool	nbcon_atomic;
+	bool	nbcon_offload;
 	bool	legacy_direct;
 	bool	legacy_offload;
 };
@@ -184,6 +237,22 @@ static inline void printk_get_console_flush_type(struct console_flush_type *ft)
 
 	switch (nbcon_get_default_prio()) {
 	case NBCON_PRIO_NORMAL:
+		if (have_nbcon_console && !have_boot_console) {
+			if (printk_kthreads_running)
+				ft->nbcon_offload = true;
+			else
+				ft->nbcon_atomic = true;
+		}
+
+		/* Legacy consoles are flushed directly when possible. */
+		if (have_legacy_console || have_boot_console) {
+			if (!is_printk_legacy_deferred())
+				ft->legacy_direct = true;
+			else
+				ft->legacy_offload = true;
+		}
+		break;
+
 	case NBCON_PRIO_EMERGENCY:
 		if (have_nbcon_console && !have_boot_console)
 			ft->nbcon_atomic = true;
@@ -266,4 +335,5 @@ bool printk_get_next_message(struct printk_message *pmsg, u64 seq,
 
 #ifdef CONFIG_PRINTK
 void console_prepend_dropped(struct printk_message *pmsg, unsigned long dropped);
+void console_prepend_replay(struct printk_message *pmsg);
 #endif
