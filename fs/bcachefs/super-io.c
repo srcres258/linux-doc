@@ -524,7 +524,7 @@ static void bch2_sb_update(struct bch_fs *c)
 	c->sb.time_units_per_sec = NSEC_PER_SEC / c->sb.nsec_per_time_unit;
 
 	/* XXX this is wrong, we need a 96 or 128 bit integer type */
-	c->sb.time_base_lo	= div_u64(le64_to_cpu(src->time_base_lo),
+	c->sb.time_base_lo	= div64_u64(le64_to_cpu(src->time_base_lo),
 					  c->sb.nsec_per_time_unit);
 	c->sb.time_base_hi	= le32_to_cpu(src->time_base_hi);
 
