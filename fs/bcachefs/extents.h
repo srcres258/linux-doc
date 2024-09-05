@@ -357,7 +357,7 @@ out:									\
 	__bkey_for_each_ptr_decode(_k, (_p).start, (_p).end,		\
 				   _ptr, _entry)
 
-#define bkey_crc_next(_k, _start, _end, _crc, _iter)			\
+#define bkey_crc_next(_k, _end, _crc, _iter)			\
 ({									\
 	__bkey_extent_entry_for_each_from(_iter, _end, _iter)		\
 		if (extent_entry_is_crc(_iter)) {			\
@@ -372,7 +372,7 @@ out:									\
 #define __bkey_for_each_crc(_k, _start, _end, _crc, _iter)		\
 	for ((_crc) = bch2_extent_crc_unpack(_k, NULL),			\
 	     (_iter) = (_start);					\
-	     bkey_crc_next(_k, _start, _end, _crc, _iter);		\
+	     bkey_crc_next(_k, _end, _crc, _iter);		\
 	     (_iter) = extent_entry_next(_iter))
 
 #define bkey_for_each_crc(_k, _p, _crc, _iter)				\
@@ -649,26 +649,21 @@ static inline void bch2_bkey_append_ptr(struct bkey_i *k, struct bch_extent_ptr 
 
 void bch2_extent_ptr_decoded_append(struct bkey_i *,
 				    struct extent_ptr_decoded *);
-union bch_extent_entry *bch2_bkey_drop_ptr_noerror(struct bkey_s,
-						   struct bch_extent_ptr *);
-union bch_extent_entry *bch2_bkey_drop_ptr(struct bkey_s,
-					   struct bch_extent_ptr *);
+void bch2_bkey_drop_ptr_noerror(struct bkey_s, struct bch_extent_ptr *);
+void bch2_bkey_drop_ptr(struct bkey_s, struct bch_extent_ptr *);
 
 #define bch2_bkey_drop_ptrs(_k, _ptr, _cond)				\
 do {									\
-	struct bkey_ptrs _ptrs = bch2_bkey_ptrs(_k);			\
+	__label__ _again;						\
+	struct bkey_ptrs _ptrs;						\
+_again:									\
+	_ptrs = bch2_bkey_ptrs(_k);					\
 									\
-	struct bch_extent_ptr *_ptr = &_ptrs.start->ptr;		\
-									\
-	while ((_ptr = bkey_ptr_next(_ptrs, _ptr))) {			\
+	bkey_for_each_ptr(_ptrs, _ptr)					\
 		if (_cond) {						\
-			_ptr = (void *) bch2_bkey_drop_ptr(_k, _ptr);	\
-			_ptrs = bch2_bkey_ptrs(_k);			\
-			continue;					\
+			bch2_bkey_drop_ptr(_k, _ptr);			\
+			goto _again;					\
 		}							\
-									\
-		(_ptr)++;						\
-	}								\
 } while (0)
 
 bool bch2_bkey_matches_ptr(struct bch_fs *, struct bkey_s_c,
