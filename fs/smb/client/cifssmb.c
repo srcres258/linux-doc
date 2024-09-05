@@ -1266,9 +1266,8 @@ static void cifs_readv_worker(struct work_struct *work)
 	struct cifs_io_subrequest *rdata =
 		container_of(work, struct cifs_io_subrequest, subreq.work);
 
-	netfs_subreq_terminated(&rdata->subreq,
-				(rdata->result == 0 || rdata->result == -EAGAIN) ?
-				rdata->got_bytes : rdata->result, true);
+	rdata->subreq.transferred += rdata->got_bytes;
+	netfs_read_subreq_terminated(&rdata->subreq, rdata->result, true);
 }
 
 static void
