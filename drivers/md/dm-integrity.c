@@ -2447,7 +2447,7 @@ retry:
 	bio->bi_iter.bi_sector += ic->start + SB_SECTORS;
 
 	bip = bio_integrity_alloc(bio, GFP_NOIO, 1);
-	if (unlikely(IS_ERR(bip))) {
+	if (IS_ERR(bip)) {
 		bio->bi_status = errno_to_blk_status(PTR_ERR(bip));
 		bio_endio(bio);
 		return DM_MAPIO_SUBMITTED;
@@ -2520,7 +2520,7 @@ static void dm_integrity_inline_recheck(struct work_struct *w)
 		}
 
 		bip = bio_integrity_alloc(outgoing_bio, GFP_NOIO, 1);
-		if (unlikely(IS_ERR(bip))) {
+		if (IS_ERR(bip)) {
 			bio_put(outgoing_bio);
 			bio->bi_status = errno_to_blk_status(PTR_ERR(bip));
 			bio_endio(bio);
@@ -4715,13 +4715,18 @@ static int dm_integrity_ctr(struct dm_target *ti, unsigned int argc, char **argv
 		ti->error = "Block size doesn't match the information in superblock";
 		goto bad;
 	}
-	if (!le32_to_cpu(ic->sb->journal_sections) != (ic->mode == 'I')) {
-		r = -EINVAL;
-		if (ic->mode != 'I')
+	if (ic->mode != 'I') {
+		if (!le32_to_cpu(ic->sb->journal_sections)) {
+			r = -EINVAL;
 			ti->error = "Corrupted superblock, journal_sections is 0";
-		else
+			goto bad;
+		}
+	} else {
+		if (le32_to_cpu(ic->sb->journal_sections)) {
+			r = -EINVAL;
 			ti->error = "Corrupted superblock, journal_sections is not 0";
-		goto bad;
+			goto bad;
+		}
 	}
 	/* make sure that ti->max_io_len doesn't overflow */
 	if (!ic->meta_dev) {
