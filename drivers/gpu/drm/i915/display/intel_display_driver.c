@@ -168,10 +168,11 @@ static void intel_mode_config_cleanup(struct drm_i915_private *i915)
 
 static void intel_plane_possible_crtcs_init(struct drm_i915_private *dev_priv)
 {
+	struct intel_display *display = &dev_priv->display;
 	struct intel_plane *plane;
 
 	for_each_intel_plane(&dev_priv->drm, plane) {
-		struct intel_crtc *crtc = intel_crtc_for_pipe(dev_priv,
+		struct intel_crtc *crtc = intel_crtc_for_pipe(display,
 							      plane->pipe);
 
 		plane->base.possible_crtcs = drm_crtc_mask(&crtc->base);
@@ -428,7 +429,7 @@ int intel_display_driver_probe_nogem(struct drm_i915_private *i915)
 
 	intel_panel_sanitize_ssc(i915);
 
-	intel_pps_setup(i915);
+	intel_pps_setup(display);
 
 	intel_gmbus_setup(i915);
 
@@ -459,7 +460,7 @@ int intel_display_driver_probe_nogem(struct drm_i915_private *i915)
 	intel_vga_disable(i915);
 	intel_setup_outputs(i915);
 
-	ret = intel_dp_tunnel_mgr_init(i915);
+	ret = intel_dp_tunnel_mgr_init(display);
 	if (ret)
 		goto err_hdcp;
 
@@ -580,6 +581,8 @@ void intel_display_driver_remove(struct drm_i915_private *i915)
 /* part #2: call after irq uninstall */
 void intel_display_driver_remove_noirq(struct drm_i915_private *i915)
 {
+	struct intel_display *display = &i915->display;
+
 	if (!HAS_DISPLAY(i915))
 		return;
 
@@ -600,7 +603,7 @@ void intel_display_driver_remove_noirq(struct drm_i915_private *i915)
 
 	intel_mode_config_cleanup(i915);
 
-	intel_dp_tunnel_mgr_cleanup(i915);
+	intel_dp_tunnel_mgr_cleanup(display);
 
 	intel_overlay_cleanup(i915);
 
