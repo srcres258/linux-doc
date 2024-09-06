@@ -127,8 +127,8 @@ static int loongson_card_parse_of(struct loongson_card_data *data)
 	codec = of_get_child_by_name(dev->of_node, "codec");
 	if (!codec) {
 		dev_err(dev, "audio-codec property missing or invalid\n");
-		ret = -EINVAL;
-		goto err;
+		of_node_put(cpu);
+		return -EINVAL;
 	}
 
 	for (i = 0; i < card->num_links; i++) {
@@ -192,9 +192,7 @@ static int loongson_asoc_card_probe(struct platform_device *pdev)
 	if (ret < 0)
 		return ret;
 
-	ret = devm_snd_soc_register_card(&pdev->dev, card);
-
-	return ret;
+	return devm_snd_soc_register_card(&pdev->dev, card);
 }
 
 static const struct of_device_id loongson_asoc_dt_ids[] = {
