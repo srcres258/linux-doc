@@ -1555,7 +1555,7 @@ static void amd_pstate_epp_cpu_exit(struct cpufreq_policy *policy)
 	pr_debug("CPU %d exiting\n", policy->cpu);
 }
 
-static void amd_pstate_epp_update_limit(struct cpufreq_policy *policy)
+static int amd_pstate_epp_update_limit(struct cpufreq_policy *policy)
 {
 	struct amd_cpudata *cpudata = policy->driver_data;
 	u32 max_perf, min_perf, min_limit_perf, max_limit_perf;
@@ -1605,7 +1605,7 @@ static void amd_pstate_epp_update_limit(struct cpufreq_policy *policy)
 		 * This return value can only be negative for shared_memory
 		 * systems where EPP register read/write not supported.
 		 */
-		return;
+		return epp;
 	}
 
 	if (cpudata->policy == CPUFREQ_POLICY_PERFORMANCE)
@@ -1618,12 +1618,13 @@ static void amd_pstate_epp_update_limit(struct cpufreq_policy *policy)
 	}
 
 	WRITE_ONCE(cpudata->cppc_req_cached, value);
-	amd_pstate_set_epp(cpudata, epp);
+	return amd_pstate_set_epp(cpudata, epp);
 }
 
 static int amd_pstate_epp_set_policy(struct cpufreq_policy *policy)
 {
 	struct amd_cpudata *cpudata = policy->driver_data;
+	int ret;
 
 	if (!policy->cpuinfo.max_freq)
 		return -ENODEV;
@@ -1633,7 +1634,9 @@ static int amd_pstate_epp_set_policy(struct cpufreq_policy *policy)
 
 	cpudata->policy = policy->policy;
 
-	amd_pstate_epp_update_limit(policy);
+	ret = amd_pstate_epp_update_limit(policy);
+	if (ret)
+		return ret;
 
 	/*
 	 * policy->cur is never updated with the amd_pstate_epp driver, but it
@@ -1834,20 +1837,34 @@ static bool amd_cppc_supported(void)
 	}
 
 	/*
-	 * If the CPPC feature is disabled in the BIOS for processors that support MSR-based CPPC,
-	 * the AMD Pstate driver may not function correctly.
-	 * Check the CPPC flag and display a warning message if the platform supports CPPC.
-	 * Note: below checking code will not abort the driver registeration process because of
-	 * the code is added for debugging purposes.
+	 * If the CPPC feature is disabled in the BIOS for processors
+	 * that support MSR-based CPPC, the AMD Pstate driver may not
+	 * function correctly.
+	 *
+	 * For such processors, check the CPPC flag and display a
+	 * warning message if the platform supports CPPC.
+	 *
+	 * Note: The code check below will not abort the driver
+	 * registration process because of the code is added for
+	 * debugging purposes. Besides, it may still be possible for
+	 * the driver to work using the shared-memory mechanism.
 	 */
 	if (!cpu_feature_enabled(X86_FEATURE_CPPC)) {
-		if (cpu_feature_enabled(X86_FEATURE_ZEN1) || cpu_feature_enabled(X86_FEATURE_ZEN2)) {
-			if (c->x86_model > 0x60 && c->x86_model < 0xaf)
+		if (cpu_feature_enabled(X86_FEATURE_ZEN2)) {
+			switch (c->x86_model) {
+			case 0x60 ... 0x6F:
+			case 0x80 ... 0xAF:
 				warn = true;
-		} else if (cpu_feature_enabled(X86_FEATURE_ZEN3) || cpu_feature_enabled(X86_FEATURE_ZEN4)) {
-			if ((c->x86_model > 0x10 && c->x86_model < 0x1F) ||
-					(c->x86_model > 0x40 && c->x86_model < 0xaf))
+				break;
+			}
+		} else if (cpu_feature_enabled(X86_FEATURE_ZEN3) ||
+			   cpu_feature_enabled(X86_FEATURE_ZEN4)) {
+			switch (c->x86_model) {
+			case 0x10 ... 0x1F:
+			case 0x40 ... 0xAF:
 				warn = true;
+				break;
+			}
 		} else if (cpu_feature_enabled(X86_FEATURE_ZEN5)) {
 			warn = true;
 		}
