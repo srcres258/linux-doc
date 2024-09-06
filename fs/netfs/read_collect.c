@@ -33,9 +33,11 @@ static void netfs_clear_unread(struct netfs_io_subrequest *subreq)
  */
 static void netfs_unlock_read_folio(struct netfs_io_subrequest *subreq,
 				    struct netfs_io_request *rreq,
-				    struct folio *folio)
+				    struct folio_queue *folioq,
+				    int slot)
 {
 	struct netfs_folio *finfo;
+	struct folio *folio = folioq_folio(folioq, slot);
 
 	flush_dcache_folio(folio);
 	folio_mark_uptodate(folio);
@@ -62,18 +64,18 @@ static void netfs_unlock_read_folio(struct netfs_io_subrequest *subreq,
 		}
 	} else {
 		// TODO: Use of PG_private_2 is deprecated.
-		if (test_bit(NETFS_SREQ_COPY_TO_CACHE, &subreq->flags)) {
-			trace_netfs_folio(folio, netfs_folio_trace_copy_to_cache);
-			folio_start_private_2(folio);
-		}
+		if (test_bit(NETFS_SREQ_COPY_TO_CACHE, &subreq->flags))
+			netfs_pgpriv2_mark_copy_to_cache(subreq, rreq, folioq, slot);
 	}
 
 	if (!test_bit(NETFS_RREQ_DONT_UNLOCK_FOLIOS, &rreq->flags)) {
 		if (folio->index == rreq->no_unlock_folio &&
-		    test_bit(NETFS_RREQ_NO_UNLOCK_FOLIO, &rreq->flags))
+		    test_bit(NETFS_RREQ_NO_UNLOCK_FOLIO, &rreq->flags)) {
 			_debug("no unlock");
-		else
+		} else {
+			trace_netfs_folio(folio, netfs_folio_trace_read_unlock);
 			folio_unlock(folio);
+		}
 	}
 }
 
@@ -113,7 +115,7 @@ next_folio:
 		if (folioq) {
 			struct folio *folio = folioq_folio(folioq, slot);
 
-			pr_err("folioq: %02x%02x%02x%02x\n",
+			pr_err("folioq: orders=%02x%02x%02x%02x\n",
 			       folioq->orders[0], folioq->orders[1],
 			       folioq->orders[2], folioq->orders[3]);
 			if (folio)
@@ -170,7 +172,7 @@ donation_changed:
 		if (fpos == start) {
 			/* Flush, unlock and mark for caching any folio we've just read. */
 			subreq->consumed = fend - subreq->start;
-			netfs_unlock_read_folio(subreq, rreq, folioq_folio(folioq, slot));
+			netfs_unlock_read_folio(subreq, rreq, folioq, slot);
 			folioq_mark2(folioq, slot);
 			if (subreq->consumed >= subreq->len)
 				goto remove_subreq;
@@ -354,8 +356,8 @@ static void netfs_rreq_assess_dio(struct netfs_io_request *rreq)
 /*
  * Assess the state of a read request and decide what to do next.
  *
- * Note that we could be in an ordinary kernel thread, on a workqueue or in
- * softirq context at this point.  We inherit a ref from the caller.
+ * Note that we're in normal kernel thread context at this point, possibly
+ * running on a workqueue.
  */
 static void netfs_rreq_assess(struct netfs_io_request *rreq)
 {
@@ -380,6 +382,8 @@ static void netfs_rreq_assess(struct netfs_io_request *rreq)
 	trace_netfs_rreq(rreq, netfs_rreq_trace_done);
 	netfs_clear_subrequests(rreq, false);
 	netfs_unlock_abandoned_read_pages(rreq);
+	if (unlikely(test_bit(NETFS_RREQ_USE_PGPRIV2, &rreq->flags)))
+		netfs_pgpriv2_write_to_the_cache(rreq);
 }
 
 void netfs_read_termination_worker(struct work_struct *work)

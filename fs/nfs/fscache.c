@@ -267,6 +267,7 @@ static int nfs_netfs_init_request(struct netfs_io_request *rreq, struct file *fi
 	rreq->debug_id = atomic_inc_return(&nfs_netfs_debug_id);
 	/* [DEPRECATED] Use PG_private_2 to mark folio being written to the cache. */
 	__set_bit(NETFS_RREQ_USE_PGPRIV2, &rreq->flags);
+	rreq->io_streams[0].sreq_max_len = NFS_SB(rreq->inode->i_sb)->rsize;
 
 	return 0;
 }

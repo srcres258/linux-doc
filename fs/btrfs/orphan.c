@@ -11,7 +11,6 @@ int btrfs_insert_orphan_item(struct btrfs_trans_handle *trans,
 {
 	BTRFS_PATH_AUTO_FREE(path);
 	struct btrfs_key key;
-	int ret = 0;
 
 	key.objectid = BTRFS_ORPHAN_OBJECTID;
 	key.type = BTRFS_ORPHAN_ITEM_KEY;
@@ -21,9 +20,7 @@ int btrfs_insert_orphan_item(struct btrfs_trans_handle *trans,
 	if (!path)
 		return -ENOMEM;
 
-	ret = btrfs_insert_empty_item(trans, root, path, &key, 0);
-
-	return ret;
+	return btrfs_insert_empty_item(trans, root, path, &key, 0);
 }
 
 int btrfs_del_orphan_item(struct btrfs_trans_handle *trans,

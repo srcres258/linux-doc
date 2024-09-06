@@ -38,6 +38,7 @@ static void erofs_fileio_ki_complete(struct kiocb *iocb, long ret)
 			erofs_onlinefolio_end(fi.folio, ret);
 		}
 	}
+	bio_uninit(&rq->bio);
 	kfree(rq);
 }
 
@@ -48,7 +49,7 @@ static void erofs_fileio_rq_submit(struct erofs_fileio_rq *rq)
 
 	if (!rq)
 		return;
-	rq->iocb.ki_pos = rq->bio.bi_iter.bi_sector << 9;
+	rq->iocb.ki_pos = rq->bio.bi_iter.bi_sector << SECTOR_SHIFT;
 	rq->iocb.ki_ioprio = get_current_ioprio();
 	rq->iocb.ki_complete = erofs_fileio_ki_complete;
 	rq->iocb.ki_flags = (rq->iocb.ki_filp->f_mode & FMODE_CAN_ODIRECT) ?
@@ -62,10 +63,9 @@ static void erofs_fileio_rq_submit(struct erofs_fileio_rq *rq)
 
 static struct erofs_fileio_rq *erofs_fileio_rq_alloc(struct erofs_map_dev *mdev)
 {
-	struct erofs_fileio_rq *rq = kzalloc(sizeof(*rq), GFP_KERNEL);
+	struct erofs_fileio_rq *rq = kzalloc(sizeof(*rq),
+					     GFP_KERNEL | __GFP_NOFAIL);
 
-	if (!rq)
-		return NULL;
 	bio_init(&rq->bio, NULL, rq->bvecs, BIO_MAX_VECS, REQ_OP_READ);
 	rq->iocb.ki_filp = mdev->m_fp;
 	return rq;
@@ -73,10 +73,7 @@ static struct erofs_fileio_rq *erofs_fileio_rq_alloc(struct erofs_map_dev *mdev)
 
 struct bio *erofs_fileio_bio_alloc(struct erofs_map_dev *mdev)
 {
-	struct erofs_fileio_rq *rq;
-
-	rq = erofs_fileio_rq_alloc(mdev);
-	return rq ? &rq->bio : NULL;
+	return &erofs_fileio_rq_alloc(mdev)->bio;
 }
 
 void erofs_fileio_submit_bio(struct bio *bio)
@@ -145,10 +142,6 @@ io_retry:
 				if (err)
 					break;
 				io->rq = erofs_fileio_rq_alloc(&io->dev);
-				if (!io->rq) {
-					err = -ENOMEM;
-					break;
-				}
 				io->rq->bio.bi_iter.bi_sector = io->dev.m_pa >> 9;
 				attached = 0;
 			}

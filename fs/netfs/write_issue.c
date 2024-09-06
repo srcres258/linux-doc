@@ -95,7 +95,8 @@ struct netfs_io_request *netfs_create_write_req(struct address_space *mapping,
 	struct netfs_io_request *wreq;
 	struct netfs_inode *ictx;
 	bool is_buffered = (origin == NETFS_WRITEBACK ||
-			    origin == NETFS_WRITETHROUGH);
+			    origin == NETFS_WRITETHROUGH ||
+			    origin == NETFS_PGPRIV2_COPY_TO_CACHE);
 
 	wreq = netfs_alloc_request(mapping, file, start, 0, origin);
 	if (IS_ERR(wreq))
@@ -237,8 +238,8 @@ void netfs_reissue_write(struct netfs_io_stream *stream,
 	netfs_do_issue_write(stream, subreq);
 }
 
-static void netfs_issue_write(struct netfs_io_request *wreq,
-			      struct netfs_io_stream *stream)
+void netfs_issue_write(struct netfs_io_request *wreq,
+		       struct netfs_io_stream *stream)
 {
 	struct netfs_io_subrequest *subreq = stream->construct;
 

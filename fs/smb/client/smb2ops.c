@@ -302,7 +302,8 @@ smb2_adjust_credits(struct TCP_Server_Info *server,
 		    unsigned int /*enum smb3_rw_credits_trace*/ trace)
 {
 	struct cifs_credits *credits = &subreq->credits;
-	int new_val = DIV_ROUND_UP(subreq->actual_len, SMB2_MAX_BUFFER_SIZE);
+	int new_val = DIV_ROUND_UP(subreq->subreq.len - subreq->subreq.transferred,
+				   SMB2_MAX_BUFFER_SIZE);
 	int scredits, in_flight;
 
 	if (!credits->value || credits->value == new_val)
@@ -4520,32 +4521,14 @@ smb3_init_transform_rq(struct TCP_Server_Info *server, int num_rqst,
 			if (!buffer)
 				goto err_free;
 
-			for (j = 0; j < npages; j++) {
-				void *o;
+			new->rq_buffer = buffer;
+			iov_iter_folio_queue(&new->rq_iter, ITER_SOURCE,
+					     buffer, 0, 0, size);
 
-				rc = -ENOMEM;
-				page = alloc_page(GFP_KERNEL|__GFP_HIGHMEM);
-				if (!page)
-					goto err_free;
-				page->index = j;
-				o = xa_store(buffer, j, page, GFP_KERNEL);
-				if (xa_is_err(o)) {
-					rc = xa_err(o);
-					put_page(page);
-					goto err_free;
-				}
-
-				xa_set_mark(buffer, j, XA_MARK_0);
-
-				seg = min_t(size_t, size - copied, PAGE_SIZE);
-				if (copy_page_from_iter(page, 0, seg, &old->rq_iter) != seg) {
-					rc = -EFAULT;
-					goto err_free;
-				}
-				copied += seg;
+			if (!cifs_copy_iter_to_folioq(&old->rq_iter, size, buffer)) {
+				rc = -EIO;
+				goto err_free;
 			}
-			iov_iter_xarray(&new->rq_iter, ITER_SOURCE,
-					buffer, 0, size);
 		}
 	}
 

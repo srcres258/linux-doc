@@ -13,6 +13,7 @@
 #include <linux/iversion.h>
 #include <linux/ktime.h>
 #include <linux/netfs.h>
+#include <trace/events/netfs.h>
 
 #include "super.h"
 #include "mds_client.h"
@@ -253,6 +254,7 @@ static void finish_netfs_read(struct ceph_osd_request *req)
 		subreq->transferred = err;
 		err = 0;
 	}
+	trace_netfs_sreq(subreq, netfs_sreq_trace_io_progress);
 	netfs_read_subreq_terminated(subreq, err, false);
 	iput(req->r_inode);
 	ceph_dec_osd_stopping_blocker(fsc->mdsc);
@@ -289,6 +291,7 @@ static bool ceph_netfs_issue_op_inline(struct netfs_io_subrequest *subreq)
 	req->r_args.getattr.mask = cpu_to_le32(CEPH_STAT_CAP_INLINE_DATA);
 	req->r_num_caps = 2;
 
+	trace_netfs_sreq(subreq, netfs_sreq_trace_submit);
 	err = ceph_mdsc_do_request(mdsc, NULL, req);
 	if (err < 0)
 		goto out;
@@ -420,6 +423,7 @@ static void ceph_netfs_issue_read(struct netfs_io_subrequest *subreq)
 	req->r_inode = inode;
 	ihold(inode);
 
+	trace_netfs_sreq(subreq, netfs_sreq_trace_submit);
 	ceph_osdc_start_request(req->r_osdc, req);
 out:
 	ceph_osdc_put_request(req);

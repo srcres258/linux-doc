@@ -1001,31 +1001,40 @@ static ssize_t iter_folioq_get_pages(struct iov_iter *iter,
 	const struct folio_queue *folioq = iter->folioq;
 	struct page **pages;
 	unsigned int slot = iter->folioq_slot;
-	size_t extracted = 0;
+	size_t extracted = 0, count = iter->count, iov_offset = iter->iov_offset;
 
-	maxpages = want_pages_array(ppages, maxsize, iter->iov_offset & ~PAGE_MASK, maxpages);
+	if (slot >= folioq_nr_slots(folioq)) {
+		folioq = folioq->next;
+		slot = 0;
+		if (WARN_ON(iov_offset != 0))
+			return -EIO;
+	}
+
+	maxpages = want_pages_array(ppages, maxsize, iov_offset & ~PAGE_MASK, maxpages);
 	if (!maxpages)
 		return -ENOMEM;
-	*_start_offset = iter->iov_offset & ~PAGE_MASK;
+	*_start_offset = iov_offset & ~PAGE_MASK;
 	pages = *ppages;
 
 	for (;;) {
 		struct folio *folio = folioq_folio(folioq, slot);
-		size_t offset = iter->iov_offset, fsize = folioq_folio_size(folioq, slot);
+		size_t offset = iov_offset, fsize = folioq_folio_size(folioq, slot);
 		size_t part = PAGE_SIZE - offset % PAGE_SIZE;
 
 		part = umin(part, umin(maxsize - extracted, fsize - offset));
-		iter->count -= part;
-		iter->iov_offset += part;
+		count -= part;
+		iov_offset += part;
 		extracted += part;
 
-		*pages++ = folio_page(folio, offset % PAGE_SIZE);
+		*pages = folio_page(folio, offset % PAGE_SIZE);
+		get_page(*pages);
+		pages++;
 		maxpages--;
 		if (maxpages == 0 || extracted >= maxsize)
 			break;
 
 		if (offset >= fsize) {
-			iter->iov_offset = 0;
+			iov_offset = 0;
 			slot++;
 			if (slot == folioq_nr_slots(folioq) && folioq->next) {
 				folioq = folioq->next;
@@ -1034,6 +1043,8 @@ static ssize_t iter_folioq_get_pages(struct iov_iter *iter,
 		}
 	}
 
+	iter->count = count;
+	iter->iov_offset = iov_offset;
 	iter->folioq = folioq;
 	iter->folioq_slot = slot;
 	return extracted;

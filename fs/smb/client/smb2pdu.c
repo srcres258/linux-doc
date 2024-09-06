@@ -4529,7 +4529,7 @@ smb2_readv_callback(struct mid_q_entry *mid)
 
 	cifs_dbg(FYI, "%s: mid=%llu state=%d result=%d bytes=%zu/%zu\n",
 		 __func__, mid->mid, mid->mid_state, rdata->result,
-		 rdata->actual_len, rdata->subreq.len - rdata->subreq.transferred);
+		 rdata->got_bytes, rdata->subreq.len - rdata->subreq.transferred);
 
 	switch (mid->mid_state) {
 	case MID_RESPONSE_RECEIVED:
@@ -4586,7 +4586,7 @@ smb2_readv_callback(struct mid_q_entry *mid)
 				    rdata->req->cfile->fid.persistent_fid,
 				    tcon->tid, tcon->ses->Suid,
 				    rdata->subreq.start + rdata->subreq.transferred,
-				    rdata->actual_len,
+				    rdata->subreq.len   - rdata->subreq.transferred,
 				    rdata->result);
 	} else
 		trace_smb3_read_done(rdata->rreq->debug_id,
@@ -4601,9 +4601,9 @@ smb2_readv_callback(struct mid_q_entry *mid)
 		__set_bit(NETFS_SREQ_HIT_EOF, &rdata->subreq.flags);
 		rdata->result = 0;
 	} else {
-		if (rdata->got_bytes < rdata->actual_len &&
-		    rdata->subreq.start + rdata->subreq.transferred + rdata->got_bytes ==
-		    ictx->remote_i_size) {
+		size_t trans = rdata->subreq.transferred + rdata->got_bytes;
+		if (trans < rdata->subreq.len &&
+		    rdata->subreq.start + trans == ictx->remote_i_size) {
 			__set_bit(NETFS_SREQ_HIT_EOF, &rdata->subreq.flags);
 			rdata->result = 0;
 		}
@@ -4650,7 +4650,7 @@ smb2_async_readv(struct cifs_io_subrequest *rdata)
 	io_parms.tcon = tlink_tcon(rdata->req->cfile->tlink);
 	io_parms.server = server = rdata->server;
 	io_parms.offset = subreq->start + subreq->transferred;
-	io_parms.length = rdata->actual_len;
+	io_parms.length = subreq->len   - subreq->transferred;
 	io_parms.persistent_fid = rdata->req->cfile->fid.persistent_fid;
 	io_parms.volatile_fid = rdata->req->cfile->fid.volatile_fid;
 	io_parms.pid = rdata->req->pid;
@@ -4671,7 +4671,7 @@ smb2_async_readv(struct cifs_io_subrequest *rdata)
 	shdr = (struct smb2_hdr *)buf;
 
 	if (rdata->credits.value > 0) {
-		shdr->CreditCharge = cpu_to_le16(DIV_ROUND_UP(rdata->actual_len,
+		shdr->CreditCharge = cpu_to_le16(DIV_ROUND_UP(io_parms.length,
 						SMB2_MAX_BUFFER_SIZE));
 		credit_request = le16_to_cpu(shdr->CreditCharge) + 8;
 		if (server->credits >= server->max_credits)
@@ -4699,7 +4699,8 @@ smb2_async_readv(struct cifs_io_subrequest *rdata)
 				    rdata->xid, io_parms.persistent_fid,
 				    io_parms.tcon->tid,
 				    io_parms.tcon->ses->Suid,
-				    io_parms.offset, rdata->actual_len, rc);
+				    io_parms.offset,
+				    subreq->len - subreq->transferred, rc);
 	}
 
 async_readv_out:

@@ -43,6 +43,7 @@ static const char *netfs_origins[nr__netfs_io_origin] = {
 	[NETFS_WRITETHROUGH]		= "WT",
 	[NETFS_UNBUFFERED_WRITE]	= "UW",
 	[NETFS_DIO_WRITE]		= "DW",
+	[NETFS_PGPRIV2_COPY_TO_CACHE]	= "2C",
 };
 
 /*

@@ -115,8 +115,8 @@ struct fw_card_driver {
 
 void fw_card_initialize(struct fw_card *card,
 		const struct fw_card_driver *driver, struct device *device);
-int fw_card_add(struct fw_card *card,
-		u32 max_receive, u32 link_speed, u64 guid);
+int fw_card_add(struct fw_card *card, u32 max_receive, u32 link_speed, u64 guid,
+		unsigned int supported_isoc_contexts);
 void fw_core_remove_card(struct fw_card *card);
 int fw_compute_block_crc(__be32 *block);
 void fw_schedule_bm_work(struct fw_card *card, unsigned long delay);
@@ -158,6 +158,16 @@ void fw_node_event(struct fw_card *card, struct fw_node *node, int event);
 int fw_iso_buffer_alloc(struct fw_iso_buffer *buffer, int page_count);
 int fw_iso_buffer_map_dma(struct fw_iso_buffer *buffer, struct fw_card *card,
 			  enum dma_data_direction direction);
+
+static inline void fw_iso_context_init_work(struct fw_iso_context *ctx, work_func_t func)
+{
+	INIT_WORK(&ctx->work, func);
+}
+
+static inline void fw_iso_context_queue_work(struct fw_iso_context *ctx)
+{
+	queue_work(ctx->card->isoc_wq, &ctx->work);
+}
 
 
 /* -topology */

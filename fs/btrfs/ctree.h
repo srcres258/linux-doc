@@ -85,6 +85,9 @@ struct btrfs_path {
 	unsigned int nowait:1;
 };
 
+#define BTRFS_PATH_AUTO_FREE(path_name)					\
+	struct btrfs_path *path_name __free(btrfs_free_path) = NULL
+
 /*
  * The state of btrfs root
  */
@@ -600,8 +603,6 @@ void btrfs_release_path(struct btrfs_path *p);
 struct btrfs_path *btrfs_alloc_path(void);
 void btrfs_free_path(struct btrfs_path *p);
 DEFINE_FREE(btrfs_free_path, struct btrfs_path *, btrfs_free_path(_T))
-#define BTRFS_PATH_AUTO_FREE(path_name) \
-	struct btrfs_path *path_name __free(btrfs_free_path) = NULL;
 
 int btrfs_del_items(struct btrfs_trans_handle *trans, struct btrfs_root *root,
 		   struct btrfs_path *path, int slot, int nr);

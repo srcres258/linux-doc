@@ -38,7 +38,10 @@
 #include <drm/drm_atomic_helper.h>
 #include <drm/drm_crtc.h>
 #include <drm/drm_edid.h>
+#include <drm/drm_probe_helper.h>
 #include <drm/intel/intel_lpe_audio.h>
+
+#include <media/cec-notifier.h>
 
 #include "g4x_hdmi.h"
 #include "i915_drv.h"
@@ -55,6 +58,7 @@
 #include "intel_gmbus.h"
 #include "intel_hdcp.h"
 #include "intel_hdcp_regs.h"
+#include "intel_hdcp_shim.h"
 #include "intel_hdmi.h"
 #include "intel_lspcon.h"
 #include "intel_panel.h"
