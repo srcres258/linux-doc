@@ -18,6 +18,7 @@
 #include "ec.h"
 #include "error.h"
 #include "io_read.h"
+#include "io_write.h"
 #include "keylist.h"
 #include "recovery.h"
 #include "replicas.h"
@@ -146,12 +147,18 @@ void bch2_stripe_to_text(struct printbuf *out, struct bch_fs *c,
 	bch2_prt_csum_type(out, s.csum_type);
 	prt_printf(out, " gran %u", 1U << s.csum_granularity_bits);
 
+	if (s.disk_label) {
+		prt_str(out, " label");
+		bch2_disk_path_to_text(out, c, s.disk_label - 1);
+	}
+
 	for (unsigned i = 0; i < s.nr_blocks; i++) {
 		const struct bch_extent_ptr *ptr = sp->ptrs + i;
 
 		if ((void *) ptr >= bkey_val_end(k))
 			break;
 
+		prt_char(out, ' ');
 		bch2_extent_ptr_to_text(out, c, ptr);
 
 		if (s.csum_type < BCH_CSUM_NR &&
@@ -192,7 +199,7 @@ static int __mark_stripe_bucket(struct btree_trans *trans,
 				a->dirty_sectors,
 				a->stripe, s.k->p.offset,
 				(bch2_bkey_val_to_text(&buf, c, s.s_c), buf.buf))) {
-			ret = -EIO;
+			ret = -BCH_ERR_mark_stripe;
 			goto err;
 		}
 
@@ -203,7 +210,7 @@ static int __mark_stripe_bucket(struct btree_trans *trans,
 				a->dirty_sectors,
 				a->cached_sectors,
 				(bch2_bkey_val_to_text(&buf, c, s.s_c), buf.buf))) {
-			ret = -EIO;
+			ret = -BCH_ERR_mark_stripe;
 			goto err;
 		}
 	} else {
@@ -213,7 +220,7 @@ static int __mark_stripe_bucket(struct btree_trans *trans,
 				bucket.inode, bucket.offset, a->gen,
 				a->stripe,
 				(bch2_bkey_val_to_text(&buf, c, s.s_c), buf.buf))) {
-			ret = -EIO;
+			ret = -BCH_ERR_mark_stripe;
 			goto err;
 		}
 
@@ -223,7 +230,7 @@ static int __mark_stripe_bucket(struct btree_trans *trans,
 				bch2_data_type_str(a->data_type),
 				bch2_data_type_str(data_type),
 				(bch2_bkey_val_to_text(&buf, c, s.s_c), buf.buf))) {
-			ret = -EIO;
+			ret = -BCH_ERR_mark_stripe;
 			goto err;
 		}
 
@@ -235,7 +242,7 @@ static int __mark_stripe_bucket(struct btree_trans *trans,
 				a->dirty_sectors,
 				a->cached_sectors,
 				(bch2_bkey_val_to_text(&buf, c, s.s_c), buf.buf))) {
-			ret = -EIO;
+			ret = -BCH_ERR_mark_stripe;
 			goto err;
 		}
 	}
@@ -273,8 +280,8 @@ static int mark_stripe_bucket(struct btree_trans *trans,
 
 	struct bch_dev *ca = bch2_dev_tryget(c, ptr->dev);
 	if (unlikely(!ca)) {
-		if (!(flags & BTREE_TRIGGER_overwrite))
-			ret = -EIO;
+		if (ptr->dev != BCH_SB_MEMBER_INVALID && !(flags & BTREE_TRIGGER_overwrite))
+			ret = -BCH_ERR_mark_stripe;
 		goto err;
 	}
 
@@ -293,7 +300,7 @@ static int mark_stripe_bucket(struct btree_trans *trans,
 		if (bch2_fs_inconsistent_on(!g, c, "reference to invalid bucket on device %u\n  %s",
 					    ptr->dev,
 					    (bch2_bkey_val_to_text(&buf, c, s.s_c), buf.buf))) {
-			ret = -EIO;
+			ret = -BCH_ERR_mark_stripe;
 			goto err_unlock;
 		}
 
@@ -349,6 +356,19 @@ static int mark_stripe_buckets(struct btree_trans *trans,
 	}
 
 	return 0;
+}
+
+static inline void stripe_to_mem(struct stripe *m, const struct bch_stripe *s)
+{
+	m->sectors	= le16_to_cpu(s->sectors);
+	m->algorithm	= s->algorithm;
+	m->nr_blocks	= s->nr_blocks;
+	m->nr_redundant	= s->nr_redundant;
+	m->disk_label	= s->disk_label;
+	m->blocks_nonempty = 0;
+
+	for (unsigned i = 0; i < s->nr_blocks; i++)
+		m->blocks_nonempty += !!stripe_blockcount_get(s, i);
 }
 
 int bch2_trigger_stripe(struct btree_trans *trans,
@@ -467,14 +487,7 @@ int bch2_trigger_stripe(struct btree_trans *trans,
 
 			memset(m, 0, sizeof(*m));
 		} else {
-			m->sectors	= le16_to_cpu(new_s->sectors);
-			m->algorithm	= new_s->algorithm;
-			m->nr_blocks	= new_s->nr_blocks;
-			m->nr_redundant	= new_s->nr_redundant;
-			m->blocks_nonempty = 0;
-
-			for (unsigned i = 0; i < new_s->nr_blocks; i++)
-				m->blocks_nonempty += !!stripe_blockcount_get(new_s, i);
+			stripe_to_mem(m, new_s);
 
 			if (!old_s)
 				bch2_stripes_heap_insert(c, m, idx);
@@ -838,7 +851,7 @@ int bch2_ec_read_extent(struct btree_trans *trans, struct bch_read_bio *rbio)
 		bch_err_ratelimited(c,
 			"error doing reconstruct read: error %i looking up stripe", ret);
 		kfree(buf);
-		return -EIO;
+		return -BCH_ERR_stripe_reconstruct;
 	}
 
 	v = &bkey_i_to_stripe(&buf->key)->v;
@@ -846,7 +859,7 @@ int bch2_ec_read_extent(struct btree_trans *trans, struct bch_read_bio *rbio)
 	if (!bch2_ptr_matches_stripe(v, rbio->pick)) {
 		bch_err_ratelimited(c,
 			"error doing reconstruct read: pointer doesn't match stripe");
-		ret = -EIO;
+		ret = -BCH_ERR_stripe_reconstruct;
 		goto err;
 	}
 
@@ -854,7 +867,7 @@ int bch2_ec_read_extent(struct btree_trans *trans, struct bch_read_bio *rbio)
 	if (offset + bio_sectors(&rbio->bio) > le16_to_cpu(v->sectors)) {
 		bch_err_ratelimited(c,
 			"error doing reconstruct read: read is bigger than stripe");
-		ret = -EIO;
+		ret = -BCH_ERR_stripe_reconstruct;
 		goto err;
 	}
 
@@ -870,7 +883,7 @@ int bch2_ec_read_extent(struct btree_trans *trans, struct bch_read_bio *rbio)
 	if (ec_nr_failed(buf) > v->nr_redundant) {
 		bch_err_ratelimited(c,
 			"error doing reconstruct read: unable to read enough blocks");
-		ret = -EIO;
+		ret = -BCH_ERR_stripe_reconstruct;
 		goto err;
 	}
 
@@ -890,12 +903,12 @@ err:
 
 /* stripe bucket accounting: */
 
-static int __ec_stripe_mem_alloc(struct bch_fs *c, size_t idx, gfp_t gfp)
+static int __ec_stripe_mem_alloc(struct bch_fs *c, size_t idx)
 {
 	ec_stripes_heap n, *h = &c->ec_stripes_heap;
 
 	if (idx >= h->size) {
-		if (!init_heap(&n, max(1024UL, roundup_pow_of_two(idx + 1)), gfp))
+		if (!init_heap(&n, max(1024UL, roundup_pow_of_two(idx + 1)), GFP_KERNEL))
 			return -BCH_ERR_ENOMEM_ec_stripe_mem_alloc;
 
 		mutex_lock(&c->ec_stripes_heap_lock);
@@ -909,11 +922,11 @@ static int __ec_stripe_mem_alloc(struct bch_fs *c, size_t idx, gfp_t gfp)
 		free_heap(&n);
 	}
 
-	if (!genradix_ptr_alloc(&c->stripes, idx, gfp))
+	if (!genradix_ptr_alloc(&c->stripes, idx, GFP_KERNEL))
 		return -BCH_ERR_ENOMEM_ec_stripe_mem_alloc;
 
 	if (c->gc_pos.phase != GC_PHASE_not_running &&
-	    !genradix_ptr_alloc(&c->gc_stripes, idx, gfp))
+	    !genradix_ptr_alloc(&c->gc_stripes, idx, GFP_KERNEL))
 		return -BCH_ERR_ENOMEM_ec_stripe_mem_alloc;
 
 	return 0;
@@ -923,7 +936,7 @@ static int ec_stripe_mem_alloc(struct btree_trans *trans,
 			       struct btree_iter *iter)
 {
 	return allocate_dropping_locks_errcode(trans,
-			__ec_stripe_mem_alloc(trans->c, iter->pos.offset, _gfp));
+			__ec_stripe_mem_alloc(trans->c, iter->pos.offset));
 }
 
 /*
@@ -1641,7 +1654,8 @@ static void ec_stripe_key_init(struct bch_fs *c,
 			       struct bkey_i *k,
 			       unsigned nr_data,
 			       unsigned nr_parity,
-			       unsigned stripe_size)
+			       unsigned stripe_size,
+			       unsigned disk_label)
 {
 	struct bkey_i_stripe *s = bkey_stripe_init(k);
 	unsigned u64s;
@@ -1652,7 +1666,7 @@ static void ec_stripe_key_init(struct bch_fs *c,
 	s->v.nr_redundant		= nr_parity;
 	s->v.csum_granularity_bits	= ilog2(c->opts.encoded_extent_max >> 9);
 	s->v.csum_type			= BCH_CSUM_crc32c;
-	s->v.pad			= 0;
+	s->v.disk_label			= disk_label;
 
 	while ((u64s = stripe_val_u64s(&s->v)) > BKEY_VAL_U64s_MAX) {
 		BUG_ON(1 << s->v.csum_granularity_bits >=
@@ -1685,14 +1699,16 @@ static int ec_new_stripe_alloc(struct bch_fs *c, struct ec_stripe_head *h)
 	s->nr_parity	= h->redundancy;
 
 	ec_stripe_key_init(c, &s->new_stripe.key,
-			   s->nr_data, s->nr_parity, h->blocksize);
+			   s->nr_data, s->nr_parity,
+			   h->blocksize, h->disk_label);
 
 	h->s = s;
+	h->nr_created++;
 	return 0;
 }
 
 static struct ec_stripe_head *
-ec_new_stripe_head_alloc(struct bch_fs *c, unsigned target,
+ec_new_stripe_head_alloc(struct bch_fs *c, unsigned disk_label,
 			 unsigned algo, unsigned redundancy,
 			 enum bch_watermark watermark)
 {
@@ -1705,17 +1721,19 @@ ec_new_stripe_head_alloc(struct bch_fs *c, unsigned target,
 	mutex_init(&h->lock);
 	BUG_ON(!mutex_trylock(&h->lock));
 
-	h->target	= target;
+	h->disk_label	= disk_label;
 	h->algo		= algo;
 	h->redundancy	= redundancy;
 	h->watermark	= watermark;
 
 	rcu_read_lock();
-	h->devs = target_rw_devs(c, BCH_DATA_user, target);
+	h->devs = target_rw_devs(c, BCH_DATA_user, disk_label ? group_to_target(disk_label - 1) : 0);
+	unsigned nr_devs = dev_mask_nr(&h->devs);
 
 	for_each_member_device_rcu(c, ca, &h->devs)
 		if (!ca->mi.durability)
 			__clear_bit(ca->dev_idx, h->devs.d);
+	unsigned nr_devs_with_durability = dev_mask_nr(&h->devs);
 
 	h->blocksize = pick_blocksize(c, &h->devs);
 
@@ -1729,9 +1747,20 @@ ec_new_stripe_head_alloc(struct bch_fs *c, unsigned target,
 	 * If we only have redundancy + 1 devices, we're better off with just
 	 * replication:
 	 */
-	if (h->nr_active_devs < h->redundancy + 2)
-		bch_err(c, "insufficient devices available to create stripe (have %u, need %u) - mismatched bucket sizes?",
-			h->nr_active_devs, h->redundancy + 2);
+	if (h->nr_active_devs < h->redundancy + 2) {
+		const char *err;
+
+		if (nr_devs < h->redundancy + 2)
+			err = NULL;
+		else if (nr_devs_with_durability < h->redundancy + 2)
+			err = "cannot use durability=0 devices";
+		else
+			err = "mismatched bucket sizes";
+
+		if (err)
+			bch_err(c, "insufficient devices available to create stripe (have %u, need %u): %s",
+				h->nr_active_devs, h->redundancy + 2, err);
+	}
 
 	list_add(&h->list, &c->ec_stripe_head_list);
 	return h;
@@ -1750,7 +1779,7 @@ void bch2_ec_stripe_head_put(struct bch_fs *c, struct ec_stripe_head *h)
 
 static struct ec_stripe_head *
 __bch2_ec_stripe_head_get(struct btree_trans *trans,
-			  unsigned target,
+			  unsigned disk_label,
 			  unsigned algo,
 			  unsigned redundancy,
 			  enum bch_watermark watermark)
@@ -1772,7 +1801,7 @@ __bch2_ec_stripe_head_get(struct btree_trans *trans,
 	}
 
 	list_for_each_entry(h, &c->ec_stripe_head_list, list)
-		if (h->target		== target &&
+		if (h->disk_label	== disk_label &&
 		    h->algo		== algo &&
 		    h->redundancy	== redundancy &&
 		    h->watermark	== watermark) {
@@ -1782,7 +1811,7 @@ __bch2_ec_stripe_head_get(struct btree_trans *trans,
 			goto found;
 		}
 
-	h = ec_new_stripe_head_alloc(c, target, algo, redundancy, watermark);
+	h = ec_new_stripe_head_alloc(c, disk_label, algo, redundancy, watermark);
 found:
 	if (!IS_ERR_OR_NULL(h) &&
 	    h->nr_active_devs < h->redundancy + 2) {
@@ -1796,38 +1825,39 @@ found:
 static int new_stripe_alloc_buckets(struct btree_trans *trans, struct ec_stripe_head *h,
 				    enum bch_watermark watermark, struct closure *cl)
 {
+	struct ec_stripe_new *s = h->s;
 	struct bch_fs *c = trans->c;
 	struct bch_devs_mask devs = h->devs;
 	struct open_bucket *ob;
 	struct open_buckets buckets;
-	struct bch_stripe *v = &bkey_i_to_stripe(&h->s->new_stripe.key)->v;
+	struct bch_stripe *v = &bkey_i_to_stripe(&s->new_stripe.key)->v;
 	unsigned i, j, nr_have_parity = 0, nr_have_data = 0;
 	bool have_cache = true;
 	int ret = 0;
 
-	BUG_ON(v->nr_blocks	!= h->s->nr_data + h->s->nr_parity);
-	BUG_ON(v->nr_redundant	!= h->s->nr_parity);
+	BUG_ON(v->nr_blocks	!= s->nr_data + s->nr_parity);
+	BUG_ON(v->nr_redundant	!= s->nr_parity);
 
 	/* * We bypass the sector allocator which normally does this: */
 	bitmap_and(devs.d, devs.d, c->rw_devs[BCH_DATA_user].d, BCH_SB_MEMBERS_MAX);
 
-	for_each_set_bit(i, h->s->blocks_gotten, v->nr_blocks) {
+	for_each_set_bit(i, s->blocks_gotten, v->nr_blocks) {
 		__clear_bit(v->ptrs[i].dev, devs.d);
-		if (i < h->s->nr_data)
+		if (i < s->nr_data)
 			nr_have_data++;
 		else
 			nr_have_parity++;
 	}
 
-	BUG_ON(nr_have_data	> h->s->nr_data);
-	BUG_ON(nr_have_parity	> h->s->nr_parity);
+	BUG_ON(nr_have_data	> s->nr_data);
+	BUG_ON(nr_have_parity	> s->nr_parity);
 
 	buckets.nr = 0;
-	if (nr_have_parity < h->s->nr_parity) {
+	if (nr_have_parity < s->nr_parity) {
 		ret = bch2_bucket_alloc_set_trans(trans, &buckets,
 					    &h->parity_stripe,
 					    &devs,
-					    h->s->nr_parity,
+					    s->nr_parity,
 					    &nr_have_parity,
 					    &have_cache, 0,
 					    BCH_DATA_parity,
@@ -1835,14 +1865,14 @@ static int new_stripe_alloc_buckets(struct btree_trans *trans, struct ec_stripe_
 					    cl);
 
 		open_bucket_for_each(c, &buckets, ob, i) {
-			j = find_next_zero_bit(h->s->blocks_gotten,
-					       h->s->nr_data + h->s->nr_parity,
-					       h->s->nr_data);
-			BUG_ON(j >= h->s->nr_data + h->s->nr_parity);
+			j = find_next_zero_bit(s->blocks_gotten,
+					       s->nr_data + s->nr_parity,
+					       s->nr_data);
+			BUG_ON(j >= s->nr_data + s->nr_parity);
 
-			h->s->blocks[j] = buckets.v[i];
+			s->blocks[j] = buckets.v[i];
 			v->ptrs[j] = bch2_ob_ptr(c, ob);
-			__set_bit(j, h->s->blocks_gotten);
+			__set_bit(j, s->blocks_gotten);
 		}
 
 		if (ret)
@@ -1850,11 +1880,11 @@ static int new_stripe_alloc_buckets(struct btree_trans *trans, struct ec_stripe_
 	}
 
 	buckets.nr = 0;
-	if (nr_have_data < h->s->nr_data) {
+	if (nr_have_data < s->nr_data) {
 		ret = bch2_bucket_alloc_set_trans(trans, &buckets,
 					    &h->block_stripe,
 					    &devs,
-					    h->s->nr_data,
+					    s->nr_data,
 					    &nr_have_data,
 					    &have_cache, 0,
 					    BCH_DATA_user,
@@ -1862,13 +1892,13 @@ static int new_stripe_alloc_buckets(struct btree_trans *trans, struct ec_stripe_
 					    cl);
 
 		open_bucket_for_each(c, &buckets, ob, i) {
-			j = find_next_zero_bit(h->s->blocks_gotten,
-					       h->s->nr_data, 0);
-			BUG_ON(j >= h->s->nr_data);
+			j = find_next_zero_bit(s->blocks_gotten,
+					       s->nr_data, 0);
+			BUG_ON(j >= s->nr_data);
 
-			h->s->blocks[j] = buckets.v[i];
+			s->blocks[j] = buckets.v[i];
 			v->ptrs[j] = bch2_ob_ptr(c, ob);
-			__set_bit(j, h->s->blocks_gotten);
+			__set_bit(j, s->blocks_gotten);
 		}
 
 		if (ret)
@@ -1878,7 +1908,6 @@ static int new_stripe_alloc_buckets(struct btree_trans *trans, struct ec_stripe_
 	return 0;
 }
 
-/* XXX: doesn't obey target: */
 static s64 get_existing_stripe(struct bch_fs *c,
 			       struct ec_stripe_head *head)
 {
@@ -1901,7 +1930,8 @@ static s64 get_existing_stripe(struct bch_fs *c,
 
 		m = genradix_ptr(&c->stripes, stripe_idx);
 
-		if (m->algorithm	== head->algo &&
+		if (m->disk_label	== head->disk_label &&
+		    m->algorithm	== head->algo &&
 		    m->nr_redundant	== head->redundancy &&
 		    m->sectors		== head->blocksize &&
 		    m->blocks_nonempty	< m->nr_blocks - m->nr_redundant &&
@@ -1914,12 +1944,53 @@ static s64 get_existing_stripe(struct bch_fs *c,
 	return ret;
 }
 
+static int init_new_stripe_from_existing(struct bch_fs *c, struct ec_stripe_new *s)
+{
+	struct bch_stripe *new_v = &bkey_i_to_stripe(&s->new_stripe.key)->v;
+	struct bch_stripe *existing_v = &bkey_i_to_stripe(&s->existing_stripe.key)->v;
+	unsigned i;
+
+	BUG_ON(existing_v->nr_redundant != s->nr_parity);
+	s->nr_data = existing_v->nr_blocks -
+		existing_v->nr_redundant;
+
+	int ret = ec_stripe_buf_init(&s->existing_stripe, 0, le16_to_cpu(existing_v->sectors));
+	if (ret) {
+		bch2_stripe_close(c, s);
+		return ret;
+	}
+
+	BUG_ON(s->existing_stripe.size != le16_to_cpu(existing_v->sectors));
+
+	/*
+	 * Free buckets we initially allocated - they might conflict with
+	 * blocks from the stripe we're reusing:
+	 */
+	for_each_set_bit(i, s->blocks_gotten, new_v->nr_blocks) {
+		bch2_open_bucket_put(c, c->open_buckets + s->blocks[i]);
+		s->blocks[i] = 0;
+	}
+	memset(s->blocks_gotten, 0, sizeof(s->blocks_gotten));
+	memset(s->blocks_allocated, 0, sizeof(s->blocks_allocated));
+
+	for (i = 0; i < existing_v->nr_blocks; i++) {
+		if (stripe_blockcount_get(existing_v, i)) {
+			__set_bit(i, s->blocks_gotten);
+			__set_bit(i, s->blocks_allocated);
+		}
+
+		ec_block_io(c, &s->existing_stripe, READ, i, &s->iodone);
+	}
+
+	bkey_copy(&s->new_stripe.key, &s->existing_stripe.key);
+	s->have_existing_stripe = true;
+
+	return 0;
+}
+
 static int __bch2_ec_stripe_head_reuse(struct btree_trans *trans, struct ec_stripe_head *h)
 {
 	struct bch_fs *c = trans->c;
-	struct bch_stripe *new_v = &bkey_i_to_stripe(&h->s->new_stripe.key)->v;
-	struct bch_stripe *existing_v;
-	unsigned i;
 	s64 idx;
 	int ret;
 
@@ -1939,45 +2010,7 @@ static int __bch2_ec_stripe_head_reuse(struct btree_trans *trans, struct ec_stri
 		return ret;
 	}
 
-	existing_v = &bkey_i_to_stripe(&h->s->existing_stripe.key)->v;
-
-	BUG_ON(existing_v->nr_redundant != h->s->nr_parity);
-	h->s->nr_data = existing_v->nr_blocks -
-		existing_v->nr_redundant;
-
-	ret = ec_stripe_buf_init(&h->s->existing_stripe, 0, h->blocksize);
-	if (ret) {
-		bch2_stripe_close(c, h->s);
-		return ret;
-	}
-
-	BUG_ON(h->s->existing_stripe.size != h->blocksize);
-	BUG_ON(h->s->existing_stripe.size != le16_to_cpu(existing_v->sectors));
-
-	/*
-	 * Free buckets we initially allocated - they might conflict with
-	 * blocks from the stripe we're reusing:
-	 */
-	for_each_set_bit(i, h->s->blocks_gotten, new_v->nr_blocks) {
-		bch2_open_bucket_put(c, c->open_buckets + h->s->blocks[i]);
-		h->s->blocks[i] = 0;
-	}
-	memset(h->s->blocks_gotten, 0, sizeof(h->s->blocks_gotten));
-	memset(h->s->blocks_allocated, 0, sizeof(h->s->blocks_allocated));
-
-	for (i = 0; i < existing_v->nr_blocks; i++) {
-		if (stripe_blockcount_get(existing_v, i)) {
-			__set_bit(i, h->s->blocks_gotten);
-			__set_bit(i, h->s->blocks_allocated);
-		}
-
-		ec_block_io(c, &h->s->existing_stripe, READ, i, &h->s->iodone);
-	}
-
-	bkey_copy(&h->s->new_stripe.key, &h->s->existing_stripe.key);
-	h->s->have_existing_stripe = true;
-
-	return 0;
+	return init_new_stripe_from_existing(c, h->s);
 }
 
 static int __bch2_ec_stripe_head_reserve(struct btree_trans *trans, struct ec_stripe_head *h)
@@ -2046,9 +2079,19 @@ struct ec_stripe_head *bch2_ec_stripe_head_get(struct btree_trans *trans,
 	struct bch_fs *c = trans->c;
 	struct ec_stripe_head *h;
 	bool waiting = false;
+	unsigned disk_label = 0;
+	struct target t = target_decode(target);
 	int ret;
 
-	h = __bch2_ec_stripe_head_get(trans, target, algo, redundancy, watermark);
+	if (t.type == TARGET_GROUP) {
+		if (t.group > U8_MAX) {
+			bch_err(c, "cannot create a stripe when disk_label > U8_MAX");
+			return NULL;
+		}
+		disk_label = t.group + 1; /* 0 == no label */
+	}
+
+	h = __bch2_ec_stripe_head_get(trans, disk_label, algo, redundancy, watermark);
 	if (IS_ERR_OR_NULL(h))
 		return h;
 
@@ -2193,21 +2236,13 @@ int bch2_stripes_read(struct bch_fs *c)
 			if (k.k->type != KEY_TYPE_stripe)
 				continue;
 
-			ret = __ec_stripe_mem_alloc(c, k.k->p.offset, GFP_KERNEL);
+			ret = __ec_stripe_mem_alloc(c, k.k->p.offset);
 			if (ret)
 				break;
 
-			const struct bch_stripe *s = bkey_s_c_to_stripe(k).v;
-
 			struct stripe *m = genradix_ptr(&c->stripes, k.k->p.offset);
-			m->sectors	= le16_to_cpu(s->sectors);
-			m->algorithm	= s->algorithm;
-			m->nr_blocks	= s->nr_blocks;
-			m->nr_redundant	= s->nr_redundant;
-			m->blocks_nonempty = 0;
 
-			for (unsigned i = 0; i < s->nr_blocks; i++)
-				m->blocks_nonempty += !!stripe_blockcount_get(s, i);
+			stripe_to_mem(m, bkey_s_c_to_stripe(k).v);
 
 			bch2_stripes_heap_insert(c, m, k.k->p.offset);
 			0;
@@ -2252,6 +2287,7 @@ static void bch2_new_stripe_to_text(struct printbuf *out, struct bch_fs *c,
 	for_each_set_bit(i, s->blocks_gotten, v->nr_blocks)
 		prt_printf(out, " %u", s->blocks[i]);
 	prt_newline(out);
+	bch2_bkey_val_to_text(out, c, bkey_i_to_s_c(&s->new_stripe.key));
 }
 
 void bch2_new_stripes_to_text(struct printbuf *out, struct bch_fs *c)
@@ -2261,9 +2297,10 @@ void bch2_new_stripes_to_text(struct printbuf *out, struct bch_fs *c)
 
 	mutex_lock(&c->ec_stripe_head_lock);
 	list_for_each_entry(h, &c->ec_stripe_head_list, list) {
-		prt_printf(out, "target %u algo %u redundancy %u %s:\n",
-		       h->target, h->algo, h->redundancy,
-		       bch2_watermarks[h->watermark]);
+		prt_printf(out, "disk label %u algo %u redundancy %u %s nr created %llu:\n",
+		       h->disk_label, h->algo, h->redundancy,
+		       bch2_watermarks[h->watermark],
+		       h->nr_created);
 
 		if (h->s)
 			bch2_new_stripe_to_text(out, c, h->s);
