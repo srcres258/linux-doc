@@ -71,12 +71,6 @@ static inline const char *str_true_false(bool v)
 }
 #define str_false_true(v)		str_true_false(!(v))
 
-static inline const char *str_true_false(bool v)
-{
-	return v ? "true" : "false";
-}
-#define str_false_true(v)		str_true_false(!(v))
-
 /**
  * str_plural - Return the simple pluralization based on English counts
  * @num: Number used for deciding pluralization
