@@ -79,7 +79,14 @@ static struct lockdep_map xe_pm_runtime_nod3cold_map = {
 };
 #endif
 
-static bool __maybe_unused xe_rpm_reclaim_safe(const struct xe_device *xe)
+/**
+ * xe_rpm_reclaim_safe() - Whether runtime resume can be done from reclaim context
+ * @xe: The xe device.
+ *
+ * Return: true if it is safe to runtime resume from reclaim context.
+ * false otherwise.
+ */
+bool xe_rpm_reclaim_safe(const struct xe_device *xe)
 {
 	return !xe->d3cold.capable && !xe->info.has_sriov;
 }
@@ -588,6 +595,18 @@ bool xe_pm_runtime_get_if_in_use(struct xe_device *xe)
 	return pm_runtime_get_if_in_use(xe->drm.dev) > 0;
 }
 
+/*
+ * Very unreliable! Should only be used to suppress the false positive case
+ * in the missing outer rpm protection warning.
+ */
+static bool xe_pm_suspending_or_resuming(struct xe_device *xe)
+{
+	struct device *dev = xe->drm.dev;
+
+	return dev->power.runtime_status == RPM_SUSPENDING ||
+		dev->power.runtime_status == RPM_RESUMING;
+}
+
 /**
  * xe_pm_runtime_get_noresume - Bump runtime PM usage counter without resuming
  * @xe: xe device instance
@@ -604,8 +623,11 @@ void xe_pm_runtime_get_noresume(struct xe_device *xe)
 
 	ref = xe_pm_runtime_get_if_in_use(xe);
 
-	if (drm_WARN(&xe->drm, !ref, "Missing outer runtime PM protection\n"))
+	if (!ref) {
 		pm_runtime_get_noresume(xe->drm.dev);
+		drm_WARN(&xe->drm, !xe_pm_suspending_or_resuming(xe),
+			 "Missing outer runtime PM protection\n");
+	}
 }
 
 /**
