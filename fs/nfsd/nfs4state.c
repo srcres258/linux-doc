@@ -5927,7 +5927,7 @@ nfs4_delegation_stat(struct nfs4_delegation *dp, struct svc_fh *currentfh,
 	path.dentry = file_dentry(nf->nf_file);
 
 	if (vfs_getattr(&path, stat,
-			(STATX_INO | STATX_SIZE | STATX_CTIME | STATX_CHANGE_COOKIE),
+			(STATX_SIZE | STATX_CTIME | STATX_CHANGE_COOKIE),
 			AT_STATX_SYNC_AS_STAT))
 		return false;
 	return true;

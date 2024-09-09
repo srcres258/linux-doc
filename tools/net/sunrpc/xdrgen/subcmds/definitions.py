@@ -73,6 +73,6 @@ def subcmd(args: Namespace) -> int:
         emit_header_definitions(ast, args.language, args.peer)
 
         gen = XdrHeaderBottomGenerator(args.language, args.peer)
-        gen.emit_definition(ast)
+        gen.emit_definition(args.filename, ast)
 
     return 0

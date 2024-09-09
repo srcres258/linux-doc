@@ -5,7 +5,7 @@
 import sys
 from jinja2 import Environment, FileSystemLoader, Template
 
-from xdr_ast import _XdrAst, Specification, _RpcProgram
+from xdr_ast import _XdrAst, Specification, _RpcProgram, _XdrTypeSpecifier
 from xdr_ast import public_apis, pass_by_reference, get_header_name
 from xdr_parse import get_xdr_annotate
 
@@ -45,6 +45,29 @@ def find_xdr_program_name(root: Specification) -> str:
     return "noprog"
 
 
+def header_guard_infix(filename: str) -> str:
+    """Extract the header guard infix from the specification filename"""
+    basename = filename.split("/")[-1]
+    program = basename.replace(".x", "")
+    return program.upper()
+
+
+def kernel_c_type(spec: _XdrTypeSpecifier) -> str:
+    """Return name of C type"""
+    builtin_native_c_type = {
+        "bool": "bool",
+        "int": "s32",
+        "unsigned_int": "u32",
+        "long": "s32",
+        "unsigned_long": "u32",
+        "hyper": "s64",
+        "unsigned_hyper": "u64",
+    }
+    if spec.type_name in builtin_native_c_type:
+        return builtin_native_c_type[spec.type_name]
+    return spec.type_name
+
+
 class Boilerplate:
     """Base class to generate boilerplate for source files"""
 
@@ -52,15 +75,15 @@ class Boilerplate:
         """Initialize an instance of this class"""
         raise NotImplementedError("No language support defined")
 
-    def emit_declaration(self, filename: str, node: _XdrAst) -> None:
+    def emit_declaration(self, filename: str, root: Specification) -> None:
         """Emit declaration header boilerplate"""
         raise NotImplementedError("Header boilerplate generation not supported")
 
-    def emit_definition(self, filename: str, node: _XdrAst) -> None:
+    def emit_definition(self, filename: str, root: Specification) -> None:
         """Emit definition header boilerplate"""
         raise NotImplementedError("Header boilerplate generation not supported")
 
-    def emit_source(self, filename: str, node: _XdrAst) -> None:
+    def emit_source(self, filename: str, root: Specification) -> None:
         """Emit generic source code for this XDR type"""
         raise NotImplementedError("Source boilerplate generation not supported")
 

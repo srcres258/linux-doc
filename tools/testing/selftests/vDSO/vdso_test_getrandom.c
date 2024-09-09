@@ -278,10 +278,10 @@ static void kselftest(void)
 		assert(WIFSTOPPED(status));
 		if (WSTOPSIG(status) == SIGSTOP)
 			assert(ptrace(PTRACE_SETOPTIONS, child, 0, PTRACE_O_TRACESYSGOOD) == 0);
-		else if (WSTOPSIG(status) == SIGTRAP | 0x80) {
+		else if (WSTOPSIG(status) == (SIGTRAP | 0x80)) {
 			assert(ptrace(PTRACE_GET_SYSCALL_INFO, child, sizeof(info), &info) > 0);
-			if (info.entry.nr == __NR_getrandom &&
-			    (info.entry.args[0] == (uintptr_t)weird_size && info.entry.args[1] == sizeof(weird_size)))
+			if (info.op == PTRACE_SYSCALL_INFO_ENTRY && info.entry.nr == __NR_getrandom &&
+			    info.entry.args[0] == (uintptr_t)weird_size && info.entry.args[1] == sizeof(weird_size))
 				exit(KSFT_FAIL);
 		}
 		assert(ptrace(PTRACE_SYSCALL, child, 0, 0) == 0);

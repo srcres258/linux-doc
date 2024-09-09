@@ -180,17 +180,11 @@ Pragma header
 
   pragma header <string> ;
 
-Provide a name to use for the header file and header guards.
-
-For example:
+Provide a name to use for the header file. For example:
 
   pragma header nlm4;
 
-Adds header guards in the generated header file called
-
-  NLM4_XDR_GEN_H
-
-And adds
+Adds
 
   #include "nlm4xdr_gen.h"
 

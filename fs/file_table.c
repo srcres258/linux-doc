@@ -157,10 +157,16 @@ static int init_file(struct file *f, int flags, const struct cred *cred)
 	}
 
 	spin_lock_init(&f->f_lock);
+	/*
+	 * Note that f_pos_lock is only used for files raising
+	 * FMODE_ATOMIC_POS and directories. Other files such as pipes
+	 * don't need it and since f_pos_lock is in a union may reuse
+	 * the space for other purposes. They are expected to initialize
+	 * the respective member when opening the file.
+	 */
 	mutex_init(&f->f_pos_lock);
 	f->f_flags = flags;
 	f->f_mode = OPEN_FMODE(flags);
-	/* f->f_version: 0 */
 
 	/*
 	 * We're SLAB_TYPESAFE_BY_RCU so initialize f_count last. While

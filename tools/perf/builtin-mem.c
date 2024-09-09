@@ -47,7 +47,7 @@ struct perf_mem {
 static int parse_record_events(const struct option *opt,
 			       const char *str, int unset __maybe_unused)
 {
-	struct perf_mem *mem = *(struct perf_mem **)opt->value;
+	struct perf_mem *mem = (struct perf_mem *)opt->value;
 	struct perf_pmu *pmu;
 
 	pmu = perf_mem_events_find_pmu();
@@ -88,7 +88,7 @@ static int __cmd_record(int argc, const char **argv, struct perf_mem *mem,
 		return -1;
 	}
 
-	if (perf_pmu__mem_events_init(pmu)) {
+	if (perf_pmu__mem_events_init()) {
 		pr_err("failed: memory events not supported\n");
 		return -1;
 	}
@@ -117,22 +117,17 @@ static int __cmd_record(int argc, const char **argv, struct perf_mem *mem,
 	if (e->tag &&
 	    (mem->operation & MEM_OPERATION_LOAD) &&
 	    (mem->operation & MEM_OPERATION_STORE)) {
-		e->record = true;
+		perf_mem_record[PERF_MEM_EVENTS__LOAD_STORE] = true;
 		rec_argv[i++] = "-W";
 	} else {
-		if (mem->operation & MEM_OPERATION_LOAD) {
-			e = perf_pmu__mem_events_ptr(pmu, PERF_MEM_EVENTS__LOAD);
-			e->record = true;
-		}
+		if (mem->operation & MEM_OPERATION_LOAD)
+			perf_mem_record[PERF_MEM_EVENTS__LOAD] = true;
 
-		if (mem->operation & MEM_OPERATION_STORE) {
-			e = perf_pmu__mem_events_ptr(pmu, PERF_MEM_EVENTS__STORE);
-			e->record = true;
-		}
+		if (mem->operation & MEM_OPERATION_STORE)
+			perf_mem_record[PERF_MEM_EVENTS__STORE] = true;
 	}
 
-	e = perf_pmu__mem_events_ptr(pmu, PERF_MEM_EVENTS__LOAD);
-	if (e->record)
+	if (perf_mem_record[PERF_MEM_EVENTS__LOAD])
 		rec_argv[i++] = "-W";
 
 	rec_argv[i++] = "-d";
@@ -545,6 +540,9 @@ int cmd_mem(int argc, const char **argv)
 		return __cmd_report(argc, argv, &mem, report_options);
 	else
 		usage_with_options(mem_usage, mem_options);
+
+	/* free usage string allocated by parse_options_subcommand */
+	free((void *)mem_usage[0]);
 
 	return 0;
 }

@@ -5,30 +5,14 @@
 
 from jinja2 import Environment
 
-from generators import SourceGenerator
+from generators import SourceGenerator, kernel_c_type
 from generators import create_jinja2_environment, get_jinja2_template
 
-from xdr_ast import _XdrBasic, _XdrVariableLengthString
+from xdr_ast import _XdrBasic, _XdrTypedef, _XdrVariableLengthString
 from xdr_ast import _XdrFixedLengthOpaque, _XdrVariableLengthOpaque
 from xdr_ast import _XdrFixedLengthArray, _XdrVariableLengthArray
-from xdr_ast import _XdrOptionalData, _XdrVoid, _XdrBuiltInType
-from xdr_ast import _XdrDeclaration, _XdrTypedef, public_apis
-
-
-def get_kernel_c_type(type_spec: str) -> str:
-    """Return C type to be used for an XDR built-in type"""
-    xdr_type_to_c_type = {
-        "unsigned_hyper": "u64",
-        "hyper": "s64",
-        "unsigned_long": "u32",
-        "long": "s32",
-        "unsigned_int": "u32",
-        "int": "s32",
-        "bool": "bool",
-    }
-    if isinstance(type_spec, _XdrBuiltInType):
-        return xdr_type_to_c_type[type_spec.type_name]
-    return type_spec.type_name
+from xdr_ast import _XdrOptionalData, _XdrVoid, _XdrDeclaration
+from xdr_ast import public_apis
 
 
 def emit_typedef_declaration(environment: Environment, node: _XdrDeclaration) -> None:
@@ -40,7 +24,7 @@ def emit_typedef_declaration(environment: Environment, node: _XdrDeclaration) ->
         print(
             template.render(
                 name=node.name,
-                type=get_kernel_c_type(node.spec),
+                type=kernel_c_type(node.spec),
                 classifier=node.spec.c_classifier,
             )
         )
@@ -86,7 +70,7 @@ def emit_type_definition(environment: Environment, node: _XdrDeclaration) -> Non
         print(
             template.render(
                 name=node.name,
-                type=get_kernel_c_type(node.spec),
+                type=kernel_c_type(node.spec),
                 classifier=node.spec.c_classifier,
             )
         )

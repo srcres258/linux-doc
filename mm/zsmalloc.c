@@ -54,6 +54,7 @@
 #include <linux/vmalloc.h>
 #include <linux/preempt.h>
 #include <linux/spinlock.h>
+#include <linux/sprintf.h>
 #include <linux/shrinker.h>
 #include <linux/types.h>
 #include <linux/debugfs.h>
@@ -291,7 +292,41 @@ static struct kmem_cache *zspage_cache;
 
 static unsigned long cache_alloc_handle(gfp_t gfp)
 {
-	return (unsigned long)kmem_cache_alloc(zs_handle_cache,
+	char *name;
+
+	name = kasprintf(GFP_KERNEL, "zs_handle-%s", pool->name);
+	if (!name)
+		return -ENOMEM;
+	pool->handle_cachep = kmem_cache_create(name, ZS_HANDLE_SIZE,
+						0, 0, NULL);
+	kfree(name);
+	if (!pool->handle_cachep)
+		return -EINVAL;
+
+	name = kasprintf(GFP_KERNEL, "zspage-%s", pool->name);
+	if (!name)
+		return -ENOMEM;
+	pool->zspage_cachep = kmem_cache_create(name, sizeof(struct zspage),
+						0, 0, NULL);
+	kfree(name);
+	if (!pool->zspage_cachep) {
+		kmem_cache_destroy(pool->handle_cachep);
+		pool->handle_cachep = NULL;
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
+static void destroy_cache(struct zs_pool *pool)
+{
+	kmem_cache_destroy(pool->handle_cachep);
+	kmem_cache_destroy(pool->zspage_cachep);
+}
+
+static unsigned long cache_alloc_handle(struct zs_pool *pool, gfp_t gfp)
+{
+	return (unsigned long)kmem_cache_alloc(pool->handle_cachep,
 			gfp & ~(__GFP_HIGHMEM|__GFP_MOVABLE));
 }
 

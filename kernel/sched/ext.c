@@ -865,7 +865,7 @@ static DEFINE_STATIC_KEY_FALSE(scx_ops_enq_exiting);
 static DEFINE_STATIC_KEY_FALSE(scx_ops_cpu_preempt);
 static DEFINE_STATIC_KEY_FALSE(scx_builtin_idle_enabled);
 
-struct static_key_false scx_has_op[SCX_OPI_END] =
+static struct static_key_false scx_has_op[SCX_OPI_END] =
 	{ [0 ... SCX_OPI_END-1] = STATIC_KEY_FALSE_INIT };
 
 static atomic_t scx_exit_kind = ATOMIC_INIT(SCX_EXIT_DONE);
@@ -2909,9 +2909,24 @@ static struct task_struct *pick_task_scx(struct rq *rq)
 	 * If balance_scx() is telling us to keep running @prev, replenish slice
 	 * if necessary and keep running @prev. Otherwise, pop the first one
 	 * from the local DSQ.
+	 *
+	 * WORKAROUND:
+	 *
+	 * %SCX_RQ_BAL_KEEP should be set iff $prev is on SCX as it must just
+	 * have gone through balance_scx(). Unfortunately, there currently is a
+	 * bug where fair could say yes on balance() but no on pick_task(),
+	 * which then ends up calling pick_task_scx() without preceding
+	 * balance_scx().
+	 *
+	 * For now, ignore cases where $prev is not on SCX. This isn't great and
+	 * can theoretically lead to stalls. However, for switch_all cases, this
+	 * happens only while a BPF scheduler is being loaded or unloaded, and,
+	 * for partial cases, fair will likely keep triggering this CPU.
+	 *
+	 * Once fair is fixed, restore WARN_ON_ONCE().
 	 */
 	if ((rq->scx.flags & SCX_RQ_BAL_KEEP) &&
-	    !WARN_ON_ONCE(prev->sched_class != &ext_sched_class)) {
+	    prev->sched_class == &ext_sched_class) {
 		p = prev;
 		if (!p->scx.slice)
 			p->scx.slice = SCX_SLICE_DFL;

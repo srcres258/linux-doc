@@ -1318,7 +1318,7 @@ static int ec_stripe_update_extent(struct btree_trans *trans,
 
 	bkey_reassemble(n, k);
 
-	bch2_bkey_drop_ptrs(bkey_i_to_s(n), ptr, ptr->dev != dev);
+	bch2_bkey_drop_ptrs_noerror(bkey_i_to_s(n), ptr, ptr->dev != dev);
 	ec_ptr = bch2_bkey_has_device(bkey_i_to_s(n), dev);
 	BUG_ON(!ec_ptr);
 
@@ -1568,9 +1568,11 @@ void bch2_ec_do_stripe_creates(struct bch_fs *c)
 		bch2_write_ref_put(c, BCH_WRITE_REF_stripe_create);
 }
 
-static void ec_stripe_set_pending(struct bch_fs *c, struct ec_stripe_head *h)
+static void ec_stripe_new_set_pending(struct bch_fs *c, struct ec_stripe_head *h)
 {
 	struct ec_stripe_new *s = h->s;
+
+	lockdep_assert_held(&h->lock);
 
 	BUG_ON(!s->allocated && !s->err);
 
@@ -1582,6 +1584,12 @@ static void ec_stripe_set_pending(struct bch_fs *c, struct ec_stripe_head *h)
 	mutex_unlock(&c->ec_stripe_new_lock);
 
 	ec_stripe_new_put(c, s, STRIPE_REF_io);
+}
+
+static void ec_stripe_new_cancel(struct bch_fs *c, struct ec_stripe_head *h, int err)
+{
+	h->s->err = err;
+	ec_stripe_new_set_pending(c, h);
 }
 
 void bch2_ec_bucket_cancel(struct bch_fs *c, struct open_bucket *ob)
@@ -1707,6 +1715,55 @@ static int ec_new_stripe_alloc(struct bch_fs *c, struct ec_stripe_head *h)
 	return 0;
 }
 
+static void ec_stripe_head_devs_update(struct bch_fs *c, struct ec_stripe_head *h)
+{
+	rcu_read_lock();
+	h->devs = target_rw_devs(c, BCH_DATA_user, h->disk_label
+				 ? group_to_target(h->disk_label - 1)
+				 : 0);
+	unsigned nr_devs = dev_mask_nr(&h->devs);
+
+	for_each_member_device_rcu(c, ca, &h->devs)
+		if (!ca->mi.durability)
+			__clear_bit(ca->dev_idx, h->devs.d);
+	unsigned nr_devs_with_durability = dev_mask_nr(&h->devs);
+
+	h->blocksize = pick_blocksize(c, &h->devs);
+
+	h->nr_active_devs = 0;
+	for_each_member_device_rcu(c, ca, &h->devs)
+		if (ca->mi.bucket_size == h->blocksize)
+			h->nr_active_devs++;
+
+	rcu_read_unlock();
+
+	/*
+	 * If we only have redundancy + 1 devices, we're better off with just
+	 * replication:
+	 */
+	h->insufficient_devs = h->nr_active_devs < h->redundancy + 2;
+
+	if (h->insufficient_devs) {
+		const char *err;
+
+		if (nr_devs < h->redundancy + 2)
+			err = NULL;
+		else if (nr_devs_with_durability < h->redundancy + 2)
+			err = "cannot use durability=0 devices";
+		else
+			err = "mismatched bucket sizes";
+
+		if (err)
+			bch_err(c, "insufficient devices available to create stripe (have %u, need %u): %s",
+				h->nr_active_devs, h->redundancy + 2, err);
+	}
+
+	if (h->s && !h->s->allocated)
+		ec_stripe_new_cancel(c, h, -EINTR);
+
+	h->rw_devs_change_count = c->rw_devs_change_count;
+}
+
 static struct ec_stripe_head *
 ec_new_stripe_head_alloc(struct bch_fs *c, unsigned disk_label,
 			 unsigned algo, unsigned redundancy,
@@ -1726,42 +1783,6 @@ ec_new_stripe_head_alloc(struct bch_fs *c, unsigned disk_label,
 	h->redundancy	= redundancy;
 	h->watermark	= watermark;
 
-	rcu_read_lock();
-	h->devs = target_rw_devs(c, BCH_DATA_user, disk_label ? group_to_target(disk_label - 1) : 0);
-	unsigned nr_devs = dev_mask_nr(&h->devs);
-
-	for_each_member_device_rcu(c, ca, &h->devs)
-		if (!ca->mi.durability)
-			__clear_bit(ca->dev_idx, h->devs.d);
-	unsigned nr_devs_with_durability = dev_mask_nr(&h->devs);
-
-	h->blocksize = pick_blocksize(c, &h->devs);
-
-	for_each_member_device_rcu(c, ca, &h->devs)
-		if (ca->mi.bucket_size == h->blocksize)
-			h->nr_active_devs++;
-
-	rcu_read_unlock();
-
-	/*
-	 * If we only have redundancy + 1 devices, we're better off with just
-	 * replication:
-	 */
-	if (h->nr_active_devs < h->redundancy + 2) {
-		const char *err;
-
-		if (nr_devs < h->redundancy + 2)
-			err = NULL;
-		else if (nr_devs_with_durability < h->redundancy + 2)
-			err = "cannot use durability=0 devices";
-		else
-			err = "mismatched bucket sizes";
-
-		if (err)
-			bch_err(c, "insufficient devices available to create stripe (have %u, need %u): %s",
-				h->nr_active_devs, h->redundancy + 2, err);
-	}
-
 	list_add(&h->list, &c->ec_stripe_head_list);
 	return h;
 }
@@ -1772,7 +1793,7 @@ void bch2_ec_stripe_head_put(struct bch_fs *c, struct ec_stripe_head *h)
 	    h->s->allocated &&
 	    bitmap_weight(h->s->blocks_allocated,
 			  h->s->nr_data) == h->s->nr_data)
-		ec_stripe_set_pending(c, h);
+		ec_stripe_new_set_pending(c, h);
 
 	mutex_unlock(&h->lock);
 }
@@ -1797,7 +1818,7 @@ __bch2_ec_stripe_head_get(struct btree_trans *trans,
 
 	if (test_bit(BCH_FS_going_ro, &c->flags)) {
 		h = ERR_PTR(-BCH_ERR_erofs_no_writes);
-		goto found;
+		goto err;
 	}
 
 	list_for_each_entry(h, &c->ec_stripe_head_list, list)
@@ -1806,18 +1827,23 @@ __bch2_ec_stripe_head_get(struct btree_trans *trans,
 		    h->redundancy	== redundancy &&
 		    h->watermark	== watermark) {
 			ret = bch2_trans_mutex_lock(trans, &h->lock);
-			if (ret)
+			if (ret) {
 				h = ERR_PTR(ret);
+				goto err;
+			}
 			goto found;
 		}
 
 	h = ec_new_stripe_head_alloc(c, disk_label, algo, redundancy, watermark);
 found:
-	if (!IS_ERR_OR_NULL(h) &&
-	    h->nr_active_devs < h->redundancy + 2) {
+	if (h->rw_devs_change_count != c->rw_devs_change_count)
+		ec_stripe_head_devs_update(c, h);
+
+	if (h->insufficient_devs) {
 		mutex_unlock(&h->lock);
 		h = NULL;
 	}
+err:
 	mutex_unlock(&c->ec_stripe_head_lock);
 	return h;
 }
@@ -2169,6 +2195,79 @@ err:
 	return ERR_PTR(ret);
 }
 
+/* device removal */
+
+static int bch2_invalidate_stripe_to_dev(struct btree_trans *trans, struct bkey_s_c k_a)
+{
+	struct bch_alloc_v4 a_convert;
+	const struct bch_alloc_v4 *a = bch2_alloc_to_v4(k_a, &a_convert);
+
+	if (!a->stripe)
+		return 0;
+
+	if (a->stripe_sectors) {
+		bch_err(trans->c, "trying to invalidate device in stripe when bucket has stripe data");
+		return -BCH_ERR_invalidate_stripe_to_dev;
+	}
+
+	struct btree_iter iter;
+	struct bkey_i_stripe *s =
+		bch2_bkey_get_mut_typed(trans, &iter, BTREE_ID_stripes, POS(0, a->stripe),
+					BTREE_ITER_slots, stripe);
+	int ret = PTR_ERR_OR_ZERO(s);
+	if (ret)
+		return ret;
+
+	struct disk_accounting_pos acc = {
+		.type = BCH_DISK_ACCOUNTING_replicas,
+	};
+
+	s64 sectors = 0;
+	for (unsigned i = 0; i < s->v.nr_blocks; i++)
+		sectors -= stripe_blockcount_get(&s->v, i);
+
+	bch2_bkey_to_replicas(&acc.replicas, bkey_i_to_s_c(&s->k_i));
+	acc.replicas.data_type = BCH_DATA_user;
+	ret = bch2_disk_accounting_mod(trans, &acc, &sectors, 1, false);
+	if (ret)
+		goto err;
+
+	struct bkey_ptrs ptrs = bch2_bkey_ptrs(bkey_i_to_s(&s->k_i));
+	bkey_for_each_ptr(ptrs, ptr)
+		if (ptr->dev == k_a.k->p.inode) {
+			if (stripe_blockcount_get(&s->v, ptr - &ptrs.start->ptr)) {
+				bch_err(trans->c, "trying to invalidate device in stripe when stripe block not empty");
+				ret = -BCH_ERR_invalidate_stripe_to_dev;
+				goto err;
+			}
+			ptr->dev = BCH_SB_MEMBER_INVALID;
+		}
+
+	sectors = -sectors;
+
+	bch2_bkey_to_replicas(&acc.replicas, bkey_i_to_s_c(&s->k_i));
+	acc.replicas.data_type = BCH_DATA_user;
+	ret = bch2_disk_accounting_mod(trans, &acc, &sectors, 1, false);
+	if (ret)
+		goto err;
+err:
+	bch2_trans_iter_exit(trans, &iter);
+	return ret;
+}
+
+int bch2_dev_remove_stripes(struct bch_fs *c, struct bch_dev *ca)
+{
+	return bch2_trans_run(c,
+		for_each_btree_key_upto_commit(trans, iter,
+				  BTREE_ID_alloc, POS(ca->dev_idx, 0), POS(ca->dev_idx, U64_MAX),
+				  BTREE_ITER_intent, k,
+				  NULL, NULL, 0, ({
+			bch2_invalidate_stripe_to_dev(trans, k);
+	})));
+}
+
+/* startup/shutdown */
+
 static void __bch2_ec_stop(struct bch_fs *c, struct bch_dev *ca)
 {
 	struct ec_stripe_head *h;
@@ -2194,8 +2293,7 @@ static void __bch2_ec_stop(struct bch_fs *c, struct bch_dev *ca)
 		}
 		goto unlock;
 found:
-		h->s->err = -BCH_ERR_erofs_no_writes;
-		ec_stripe_set_pending(c, h);
+		ec_stripe_new_cancel(c, h, -BCH_ERR_erofs_no_writes);
 unlock:
 		mutex_unlock(&h->lock);
 	}
@@ -2288,6 +2386,7 @@ static void bch2_new_stripe_to_text(struct printbuf *out, struct bch_fs *c,
 		prt_printf(out, " %u", s->blocks[i]);
 	prt_newline(out);
 	bch2_bkey_val_to_text(out, c, bkey_i_to_s_c(&s->new_stripe.key));
+	prt_newline(out);
 }
 
 void bch2_new_stripes_to_text(struct printbuf *out, struct bch_fs *c)

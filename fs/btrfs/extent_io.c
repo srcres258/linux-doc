@@ -1342,11 +1342,10 @@ static noinline_for_stack int writepage_delalloc(struct btrfs_inode *inode,
 		}
 
 		/*
-		 * We have some ranges that's going to be submitted async
-		 * (compression or inline).
-		 * Those range has their own control on when to unlock the pages.
-		 * We should not touch them anymore, so clear the range from the
-		 * submission bitmap.
+		 * We have some ranges that's going to be submitted asynchronously
+		 * (compression or inline).  These range have their own control
+		 * on when to unlock the pages.  We should not touch them
+		 * anymore, so clear the range from the submission bitmap.
 		 */
 		if (ret > 0) {
 			unsigned int start_bit = (found_start - page_start) >>
@@ -1609,8 +1608,8 @@ done:
 	}
 
 	/*
-	 * Only unlock ranges that is submitted. As there can be some async
-	 * submitted range inside the folio.
+	 * Only unlock ranges that are submitted. As there can be some async
+	 * submitted ranges inside the folio.
 	 */
 	btrfs_folio_end_writer_lock_bitmap(fs_info, folio, bio_ctrl->submit_bitmap);
 	ASSERT(ret <= 0);

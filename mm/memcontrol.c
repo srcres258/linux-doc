@@ -1003,7 +1003,7 @@ struct mem_cgroup *mem_cgroup_iter_online(struct mem_cgroup *root,
 	struct mem_cgroup_reclaim_iter *iter;
 	struct cgroup_subsys_state *css;
 	struct mem_cgroup *pos;
-	struct mem_cgroup *next = NULL;
+	struct mem_cgroup *next;
 
 	if (mem_cgroup_disabled())
 		return NULL;
@@ -1013,6 +1013,8 @@ struct mem_cgroup *mem_cgroup_iter_online(struct mem_cgroup *root,
 
 	rcu_read_lock();
 restart:
+	next = NULL;
+
 	if (reclaim) {
 		int gen;
 		int nid = reclaim->pgdat->node_id;
@@ -1056,7 +1058,6 @@ restart:
 		if (cmpxchg(&iter->position, pos, next) != pos) {
 			if (css && css != &root->css)
 				css_put(css);
-			next = NULL;
 			goto restart;
 		}
 

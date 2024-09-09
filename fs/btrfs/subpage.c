@@ -418,7 +418,7 @@ void btrfs_folio_end_writer_lock(const struct btrfs_fs_info *fs_info,
 	 * and we are safe to do several atomic operations without spinlock.
 	 */
 	if (atomic_read(&subpage->writers) == 0) {
-		/* No writers, locked by plain lock_page() */
+		/* No writers, locked by plain lock_page(). */
 		folio_unlock(folio);
 		return;
 	}
@@ -444,7 +444,7 @@ void btrfs_folio_end_writer_lock_bitmap(const struct btrfs_fs_info *fs_info,
 	}
 
 	if (atomic_read(&subpage->writers) == 0) {
-		/* No writers, locked by plain lock_page() */
+		/* No writers, locked by plain lock_page(). */
 		folio_unlock(folio);
 		return;
 	}
