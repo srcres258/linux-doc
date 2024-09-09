@@ -75,6 +75,15 @@ void bch2_dev_usage_to_text(struct printbuf *out,
 			    struct bch_dev *ca,
 			    struct bch_dev_usage *usage)
 {
+	if (out->nr_tabstops < 5) {
+		printbuf_tabstops_reset(out);
+		printbuf_tabstop_push(out, 12);
+		printbuf_tabstop_push(out, 16);
+		printbuf_tabstop_push(out, 16);
+		printbuf_tabstop_push(out, 16);
+		printbuf_tabstop_push(out, 16);
+	}
+
 	prt_printf(out, "\tbuckets\rsectors\rfragmented\r\n");
 
 	for (unsigned i = 0; i < BCH_DATA_NR; i++) {
@@ -100,12 +109,13 @@ static int bch2_check_fix_ptr(struct btree_trans *trans,
 
 	struct bch_dev *ca = bch2_dev_tryget(c, p.ptr.dev);
 	if (!ca) {
-		if (fsck_err(trans, ptr_to_invalid_device,
-			     "pointer to missing device %u\n"
-			     "while marking %s",
-			     p.ptr.dev,
-			     (printbuf_reset(&buf),
-			      bch2_bkey_val_to_text(&buf, c, k), buf.buf)))
+		if (fsck_err_on(p.ptr.dev != BCH_SB_MEMBER_INVALID,
+				trans, ptr_to_invalid_device,
+				"pointer to missing device %u\n"
+				"while marking %s",
+				p.ptr.dev,
+				(printbuf_reset(&buf),
+				 bch2_bkey_val_to_text(&buf, c, k), buf.buf)))
 			*do_update = true;
 		return 0;
 	}
@@ -476,7 +486,7 @@ out:
 	return ret;
 err:
 	bch2_dump_trans_updates(trans);
-	ret = -EIO;
+	ret = -BCH_ERR_bucket_ref_update;
 	goto out;
 }
 
@@ -562,8 +572,8 @@ static int bch2_trigger_pointer(struct btree_trans *trans,
 	struct bch_fs *c = trans->c;
 	struct bch_dev *ca = bch2_dev_tryget(c, p.ptr.dev);
 	if (unlikely(!ca)) {
-		if (insert)
-			ret = -EIO;
+		if (insert && p.ptr.dev != BCH_SB_MEMBER_INVALID)
+			ret = -BCH_ERR_trigger_pointer;
 		goto err;
 	}
 
@@ -592,7 +602,7 @@ static int bch2_trigger_pointer(struct btree_trans *trans,
 		if (bch2_fs_inconsistent_on(!g, c, "reference to invalid bucket on device %u\n  %s",
 					    p.ptr.dev,
 					    (bch2_bkey_val_to_text(&buf, c, k), buf.buf))) {
-			ret = -EIO;
+			ret = -BCH_ERR_trigger_pointer;
 			goto err_unlock;
 		}
 
@@ -637,7 +647,7 @@ static int bch2_trigger_stripe_ptr(struct btree_trans *trans,
 			bch2_trans_inconsistent(trans,
 				"stripe pointer doesn't match stripe %llu",
 				(u64) p.ec.idx);
-			ret = -EIO;
+			ret = -BCH_ERR_trigger_stripe_pointer;
 			goto err;
 		}
 
@@ -676,7 +686,7 @@ err:
 					    (u64) p.ec.idx, buf.buf);
 			printbuf_exit(&buf);
 			bch2_inconsistent_error(c);
-			return -EIO;
+			return -BCH_ERR_trigger_stripe_pointer;
 		}
 
 		m->block_sectors[p.ec.block] += sectors;
@@ -740,7 +750,7 @@ static int __trigger_extent(struct btree_trans *trans,
 				return ret;
 		} else if (!p.has_ec) {
 			*replicas_sectors       += disk_sectors;
-			acc_replicas_key.replicas.devs[acc_replicas_key.replicas.nr_devs++] = p.ptr.dev;
+			replicas_entry_add_dev(&acc_replicas_key.replicas, p.ptr.dev);
 		} else {
 			ret = bch2_trigger_stripe_ptr(trans, k, p, data_type, disk_sectors, flags);
 			if (ret)
@@ -956,7 +966,7 @@ static int __bch2_trans_mark_metadata_bucket(struct btree_trans *trans,
 			bch2_data_type_str(a->v.data_type),
 			bch2_data_type_str(type),
 			bch2_data_type_str(type));
-		ret = -EIO;
+		ret = -BCH_ERR_metadata_bucket_inconsistency;
 		goto err;
 	}
 
@@ -1012,7 +1022,7 @@ err:
 	bucket_unlock(g);
 err_unlock:
 	percpu_up_read(&c->mark_lock);
-	return -EIO;
+	return -BCH_ERR_metadata_bucket_inconsistency;
 }
 
 int bch2_trans_mark_metadata_bucket(struct btree_trans *trans,
