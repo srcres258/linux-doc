@@ -168,8 +168,8 @@ bool static_key_slow_inc_cpuslocked(struct static_key *key)
 		jump_label_update(key);
 		/*
 		 * Ensure that when static_key_fast_inc_not_disabled() or
-		 * static_key_slow_try_dec() observe the positive value,
-		 * they must also observe all the text changes.
+		 * static_key_dec() observe the positive value, they must also
+		 * observe all the text changes.
 		 */
 		atomic_set_release(&key->enabled, 1);
 	} else {
@@ -250,49 +250,74 @@ void static_key_disable(struct static_key *key)
 }
 EXPORT_SYMBOL_GPL(static_key_disable);
 
-static bool static_key_slow_try_dec(struct static_key *key)
+static bool static_key_dec(struct static_key *key, bool dec_not_one)
 {
-	int v;
+	int v = atomic_read(&key->enabled);
 
-	/*
-	 * Go into the slow path if key::enabled is less than or equal than
-	 * one. One is valid to shut down the key, anything less than one
-	 * is an imbalance, which is handled at the call site.
-	 *
-	 * That includes the special case of '-1' which is set in
-	 * static_key_slow_inc_cpuslocked(), but that's harmless as it is
-	 * fully serialized in the slow path below. By the time this task
-	 * acquires the jump label lock the value is back to one and the
-	 * retry under the lock must succeed.
-	 */
-	v = atomic_read(&key->enabled);
 	do {
 		/*
-		 * Warn about the '-1' case though; since that means a
-		 * decrement is concurrent with a first (0->1) increment. IOW
-		 * people are trying to disable something that wasn't yet fully
-		 * enabled. This suggests an ordering problem on the user side.
+		 * Warn about the '-1' case; since that means a decrement is
+		 * concurrent with a first (0->1) increment. IOW people are
+		 * trying to disable something that wasn't yet fully enabled.
+		 * This suggests an ordering problem on the user side.
+		 *
+		 * Warn about the '0' case; simple underflow.
 		 */
-		WARN_ON_ONCE(v < 0);
-		if (v <= 1)
-			return false;
+		if (WARN_ON_ONCE(v <= 0))
+			return v;
+
+		if (dec_not_one && v == 1)
+			return v;
+
 	} while (!likely(atomic_try_cmpxchg(&key->enabled, &v, v - 1)));
 
-	return true;
+	return v;
+}
+
+/*
+ * Fastpath: Decrement if the reference count is greater than one
+ *
+ * Returns false, if the reference count is 1 or -1 to force the caller
+ * into the slowpath.
+ *
+ * The -1 case is to handle a decrement during a concurrent first enable,
+ * which sets the count to -1 in static_key_slow_inc_cpuslocked(). As the
+ * slow path is serialized the caller will observe 1 once it acquired the
+ * jump_label_mutex, so the slow path can succeed.
+ *
+ * Notably 0 (underflow) returns success such that it bails without doing
+ * anything.
+ */
+static bool static_key_dec_not_one(struct static_key *key)
+{
+	int v = static_key_dec(key, true);
+
+	return v != 1 && v != -1;
+}
+
+/*
+ * Slowpath: Decrement and test whether the refcount hit 0.
+ *
+ * Returns true if the refcount hit zero, i.e. the previous value was one.
+ */
+static bool static_key_dec_and_test(struct static_key *key)
+{
+	int v = static_key_dec(key, false);
+
+	lockdep_assert_held(&jump_label_mutex);
+	return v == 1;
 }
 
 static void __static_key_slow_dec_cpuslocked(struct static_key *key)
 {
 	lockdep_assert_cpus_held();
 
-	if (static_key_slow_try_dec(key))
+	if (static_key_dec_not_one(key))
 		return;
 
 	guard(mutex)(&jump_label_mutex);
-	if (atomic_cmpxchg(&key->enabled, 1, 0) == 1)
+	if (static_key_dec_and_test(key))
 		jump_label_update(key);
-	else
-		WARN_ON_ONCE(!static_key_slow_try_dec(key));
 }
 
 static void __static_key_slow_dec(struct static_key *key)
@@ -329,7 +354,7 @@ void __static_key_slow_dec_deferred(struct static_key *key,
 {
 	STATIC_KEY_CHECK_USE(key);
 
-	if (static_key_slow_try_dec(key))
+	if (static_key_dec_not_one(key))
 		return;
 
 	schedule_delayed_work(work, timeout);
