@@ -147,37 +147,6 @@ void dcn35_init_hw(struct dc *dc)
 		hws->funcs.bios_golden_init(dc);
 	}
 
-	if (!dc->debug.disable_clock_gate) {
-		REG_WRITE(DCCG_GATE_DISABLE_CNTL, 0);
-		REG_WRITE(DCCG_GATE_DISABLE_CNTL2,  0);
-
-		/* Disable gating for PHYASYMCLK. This will be enabled in dccg if needed */
-		REG_UPDATE_5(DCCG_GATE_DISABLE_CNTL2, PHYASYMCLK_ROOT_GATE_DISABLE, 1,
-				PHYBSYMCLK_ROOT_GATE_DISABLE, 1,
-				PHYCSYMCLK_ROOT_GATE_DISABLE, 1,
-				PHYDSYMCLK_ROOT_GATE_DISABLE, 1,
-				PHYESYMCLK_ROOT_GATE_DISABLE, 1);
-
-		REG_UPDATE_4(DCCG_GATE_DISABLE_CNTL4,
-				DPIASYMCLK0_GATE_DISABLE, 0,
-				DPIASYMCLK1_GATE_DISABLE, 0,
-				DPIASYMCLK2_GATE_DISABLE, 0,
-				DPIASYMCLK3_GATE_DISABLE, 0);
-
-		REG_WRITE(DCCG_GATE_DISABLE_CNTL5, 0xFFFFFFFF);
-		REG_UPDATE_4(DCCG_GATE_DISABLE_CNTL5,
-				DTBCLK_P0_GATE_DISABLE, 0,
-				DTBCLK_P1_GATE_DISABLE, 0,
-				DTBCLK_P2_GATE_DISABLE, 0,
-				DTBCLK_P3_GATE_DISABLE, 0);
-		REG_UPDATE_4(DCCG_GATE_DISABLE_CNTL5,
-				DPSTREAMCLK0_GATE_DISABLE, 0,
-				DPSTREAMCLK1_GATE_DISABLE, 0,
-				DPSTREAMCLK2_GATE_DISABLE, 0,
-				DPSTREAMCLK3_GATE_DISABLE, 0);
-
-	}
-
 	// Initialize the dccg
 	if (res_pool->dccg->funcs->dccg_init)
 		res_pool->dccg->funcs->dccg_init(res_pool->dccg);
@@ -271,6 +240,10 @@ void dcn35_init_hw(struct dc *dc)
 			dc->res_pool->hubbub->funcs->allow_self_refresh_control(dc->res_pool->hubbub,
 					!dc->res_pool->hubbub->ctx->dc->debug.disable_stutter);
 	}
+	if (res_pool->dccg->funcs->dccg_root_gate_disable_control) {
+		for (i = 0; i < res_pool->pipe_count; i++)
+			res_pool->dccg->funcs->dccg_root_gate_disable_control(res_pool->dccg, i, 0);
+	}
 
 	for (i = 0; i < res_pool->audio_count; i++) {
 		struct audio *audio = res_pool->audios[i];
@@ -305,20 +278,6 @@ void dcn35_init_hw(struct dc *dc)
 
 	if (!dc->debug.disable_clock_gate) {
 		/* enable all DCN clock gating */
-		REG_WRITE(DCCG_GATE_DISABLE_CNTL, 0);
-
-		REG_UPDATE_5(DCCG_GATE_DISABLE_CNTL2, SYMCLKA_FE_GATE_DISABLE, 0,
-				SYMCLKB_FE_GATE_DISABLE, 0,
-				SYMCLKC_FE_GATE_DISABLE, 0,
-				SYMCLKD_FE_GATE_DISABLE, 0,
-				SYMCLKE_FE_GATE_DISABLE, 0);
-		REG_UPDATE(DCCG_GATE_DISABLE_CNTL2, HDMICHARCLK0_GATE_DISABLE, 0);
-		REG_UPDATE_5(DCCG_GATE_DISABLE_CNTL2, SYMCLKA_GATE_DISABLE, 0,
-				SYMCLKB_GATE_DISABLE, 0,
-				SYMCLKC_GATE_DISABLE, 0,
-				SYMCLKD_GATE_DISABLE, 0,
-				SYMCLKE_GATE_DISABLE, 0);
-
 		REG_UPDATE(DCFCLK_CNTL, DCFCLK_GATE_DIS, 0);
 	}
 
@@ -1459,7 +1418,13 @@ void dcn35_set_drr(struct pipe_ctx **pipe_ctx,
 	params.vertical_total_mid_frame_num = adjust.v_total_mid_frame_num;
 
 	for (i = 0; i < num_pipes; i++) {
-		if ((pipe_ctx[i]->stream_res.tg != NULL) && pipe_ctx[i]->stream_res.tg->funcs) {
+		/* dc_state_destruct() might null the stream resources, so fetch tg
+		 * here first to avoid a race condition. The lifetime of the pointee
+		 * itself (the timing_generator object) is not a problem here.
+		 */
+		struct timing_generator *tg = pipe_ctx[i]->stream_res.tg;
+
+		if ((tg != NULL) && tg->funcs) {
 			if (pipe_ctx[i]->stream && pipe_ctx[i]->stream->ctx->dc->debug.static_screen_wait_frames) {
 				struct dc_crtc_timing *timing = &pipe_ctx[i]->stream->timing;
 				struct dc *dc = pipe_ctx[i]->stream->ctx->dc;
@@ -1471,14 +1436,12 @@ void dcn35_set_drr(struct pipe_ctx **pipe_ctx,
 					num_frames = 2 * (frame_rate % 60);
 				}
 			}
-			if (pipe_ctx[i]->stream_res.tg->funcs->set_drr)
-				pipe_ctx[i]->stream_res.tg->funcs->set_drr(
-					pipe_ctx[i]->stream_res.tg, &params);
+			if (tg->funcs->set_drr)
+				tg->funcs->set_drr(tg, &params);
 			if (adjust.v_total_max != 0 && adjust.v_total_min != 0)
-				if (pipe_ctx[i]->stream_res.tg->funcs->set_static_screen_control)
-					pipe_ctx[i]->stream_res.tg->funcs->set_static_screen_control(
-						pipe_ctx[i]->stream_res.tg,
-						event_triggers, num_frames);
+				if (tg->funcs->set_static_screen_control)
+					tg->funcs->set_static_screen_control(
+						tg, event_triggers, num_frames);
 		}
 	}
 }
