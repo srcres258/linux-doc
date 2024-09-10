@@ -385,7 +385,7 @@ static int mt8365_afe_set_2nd_i2s_asrc(struct mtk_base_afe *afe,
 		/* disable IIR coeff SRAM access */
 		regmap_update_bits(afe->regmap, AFE_ASRC_2CH_CON0,
 				   COEFF_SRAM_CTRL,
-				   (unsigned long)~COEFF_SRAM_CTRL);
+				   ~COEFF_SRAM_CTRL);
 		regmap_update_bits(afe->regmap, AFE_ASRC_2CH_CON2,
 				   CLR_IIR_HISTORY | IIR_EN | IIR_STAGE_MASK,
 				   CLR_IIR_HISTORY | IIR_EN |
@@ -393,7 +393,7 @@ static int mt8365_afe_set_2nd_i2s_asrc(struct mtk_base_afe *afe,
 	} else {
 		/* disable IIR */
 		regmap_update_bits(afe->regmap, AFE_ASRC_2CH_CON2,
-				   IIR_EN, (unsigned long)~IIR_EN);
+				   IIR_EN, ~IIR_EN);
 	}
 
 	/* CON3 setting (RX OFS) */
@@ -456,7 +456,7 @@ static int mt8365_afe_set_2nd_i2s_asrc_enable(struct mtk_base_afe *afe,
 				   ASM_ON, ASM_ON);
 	else
 		regmap_update_bits(afe->regmap, AFE_ASRC_2CH_CON0,
-				   ASM_ON, (unsigned long)~ASM_ON);
+				   ASM_ON, ~ASM_ON);
 	return 0;
 }
 
@@ -776,13 +776,6 @@ static struct snd_soc_dai_driver mtk_dai_i2s_driver[] = {
 		.ops = &mt8365_afe_2nd_i2s_ops,
 	}
 };
-
-/* low jitter control */
-static const char * const mt8365_i2s_hd_str[] = {
-	"Normal", "Low_Jitter"
-};
-
-static SOC_ENUM_SINGLE_EXT_DECL(mt8365_i2s_enum, mt8365_i2s_hd_str);
 
 static const char * const fmi2sin_text[] = {
 	"OPEN", "FM_2ND_I2S_IN"

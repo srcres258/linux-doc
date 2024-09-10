@@ -936,14 +936,14 @@ static const struct snd_soc_dai_ops mchp_i2s_mcc_dai_ops = {
 
 static struct snd_soc_dai_driver mchp_i2s_mcc_dai = {
 	.playback = {
-		.stream_name = "I2SMCC-Playback",
+		.stream_name = "Playback",
 		.channels_min = 1,
 		.channels_max = 8,
 		.rates = MCHP_I2SMCC_RATES,
 		.formats = MCHP_I2SMCC_FORMATS,
 	},
 	.capture = {
-		.stream_name = "I2SMCC-Capture",
+		.stream_name = "Capture",
 		.channels_min = 1,
 		.channels_max = 8,
 		.rates = MCHP_I2SMCC_RATES,
@@ -1129,7 +1129,7 @@ static struct platform_driver mchp_i2s_mcc_driver = {
 		.of_match_table	= mchp_i2s_mcc_dt_ids,
 	},
 	.probe		= mchp_i2s_mcc_probe,
-	.remove_new	= mchp_i2s_mcc_remove,
+	.remove		= mchp_i2s_mcc_remove,
 };
 module_platform_driver(mchp_i2s_mcc_driver);
 

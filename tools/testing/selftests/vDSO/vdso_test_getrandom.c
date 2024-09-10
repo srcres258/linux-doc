@@ -255,7 +255,8 @@ static void kselftest(void)
 
 	ksft_test_result_pass("getrandom: PASS\n");
 
-	assert(unshare(CLONE_NEWUSER | CLONE_NEWTIME) == 0);
+	unshare(CLONE_NEWUSER);
+	assert(unshare(CLONE_NEWTIME) == 0);
 	child = fork();
 	assert(child >= 0);
 	if (!child) {

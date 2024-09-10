@@ -185,12 +185,17 @@ static void __wait_on_freeing_inode(struct inode *inode)
 	finish_wait(wq, &wait.wq_entry);
 }
 
+struct bch_inode_info *__bch2_inode_hash_find(struct bch_fs *c, subvol_inum inum)
+{
+	return rhashtable_lookup_fast(&c->vfs_inodes_table, &inum, bch2_vfs_inodes_params);
+}
+
 static struct bch_inode_info *bch2_inode_hash_find(struct bch_fs *c, struct btree_trans *trans,
 						   subvol_inum inum)
 {
 	struct bch_inode_info *inode;
 repeat:
-	inode = rhashtable_lookup_fast(&c->vfs_inodes_table, &inum, bch2_vfs_inodes_params);
+	inode = __bch2_inode_hash_find(c, inum);
 	if (inode) {
 		spin_lock(&inode->v.i_lock);
 		if (!test_bit(EI_INODE_HASHED, &inode->ei_flags)) {
@@ -1698,6 +1703,17 @@ static void bch2_evict_inode(struct inode *vinode)
 {
 	struct bch_fs *c = vinode->i_sb->s_fs_info;
 	struct bch_inode_info *inode = to_bch_ei(vinode);
+	bool delete = !inode->v.i_nlink && !is_bad_inode(&inode->v);
+
+	/*
+	 * evict() has waited for outstanding writeback, we'll do no more IO
+	 * through this inode: it's safe to remove from VFS inode hashtable here
+	 *
+	 * Do that now so that other threads aren't blocked from pulling it back
+	 * in, there's no reason for them to be:
+	 */
+	if (!delete)
+		bch2_inode_hash_remove(c, inode);
 
 	/*
 	 * evict() has waited for outstanding writeback, we'll do no more IO
@@ -1711,12 +1727,18 @@ static void bch2_evict_inode(struct inode *vinode)
 
 	BUG_ON(!is_bad_inode(&inode->v) && inode->ei_quota_reserved);
 
-	if (!inode->v.i_nlink && !is_bad_inode(&inode->v)) {
+	if (delete) {
 		bch2_quota_acct(c, inode->ei_qid, Q_SPC, -((s64) inode->v.i_blocks),
 				KEY_TYPE_QUOTA_WARN);
 		bch2_quota_acct(c, inode->ei_qid, Q_INO, -1,
 				KEY_TYPE_QUOTA_WARN);
 		bch2_inode_rm(c, inode_inum(inode));
+
+		/*
+		 * If we are deleting, we need it present in the vfs hash table
+		 * so that fsck can check if unlinked inodes are still open:
+		 */
+		bch2_inode_hash_remove(c, inode);
 	}
 
 	mutex_lock(&c->vfs_inodes_lock);
@@ -1908,30 +1930,14 @@ static int bch2_show_devname(struct seq_file *seq, struct dentry *root)
 static int bch2_show_options(struct seq_file *seq, struct dentry *root)
 {
 	struct bch_fs *c = root->d_sb->s_fs_info;
-	enum bch_opt_id i;
 	struct printbuf buf = PRINTBUF;
-	int ret = 0;
 
-	for (i = 0; i < bch2_opts_nr; i++) {
-		const struct bch_option *opt = &bch2_opt_table[i];
-		u64 v = bch2_opt_get_by_id(&c->opts, i);
+	bch2_opts_to_text(&buf, c->opts, c, c->disk_sb.sb,
+			  OPT_MOUNT, OPT_HIDDEN, OPT_SHOW_MOUNT_STYLE);
+	printbuf_nul_terminate(&buf);
+	seq_puts(seq, buf.buf);
 
-		if ((opt->flags & OPT_HIDDEN) ||
-		    !(opt->flags & OPT_MOUNT))
-			continue;
-
-		if (v == bch2_opt_get_by_id(&bch2_opts_default, i))
-			continue;
-
-		printbuf_reset(&buf);
-		bch2_opt_to_text(&buf, c, c->disk_sb.sb, opt, v,
-				 OPT_SHOW_MOUNT_STYLE);
-		seq_putc(seq, ',');
-		seq_puts(seq, buf.buf);
-	}
-
-	if (buf.allocation_failure)
-		ret = -ENOMEM;
+	int ret = buf.allocation_failure ? -ENOMEM : 0;
 	printbuf_exit(&buf);
 	return ret;
 }

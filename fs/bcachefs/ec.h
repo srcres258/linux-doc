@@ -209,7 +209,7 @@ struct ec_stripe_head {
 	struct ec_stripe_new	*s;
 };
 
-int bch2_ec_read_extent(struct btree_trans *, struct bch_read_bio *);
+int bch2_ec_read_extent(struct btree_trans *, struct bch_read_bio *, struct bkey_s_c);
 
 void *bch2_writepoint_ec_buf(struct bch_fs *, struct write_point *);
 
@@ -254,7 +254,7 @@ static inline void ec_stripe_new_put(struct bch_fs *c, struct ec_stripe_new *s,
 		}
 }
 
-int bch2_dev_remove_stripes(struct bch_fs *, struct bch_dev *);
+int bch2_dev_remove_stripes(struct bch_fs *, unsigned);
 
 void bch2_ec_stop_dev(struct bch_fs *, struct bch_dev *);
 void bch2_fs_ec_stop(struct bch_fs *);

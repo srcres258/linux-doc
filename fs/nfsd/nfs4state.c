@@ -1078,7 +1078,8 @@ static void nfs4_free_deleg(struct nfs4_stid *stid)
  * When a delegation is recalled, the filehandle is stored in the "new"
  * filter.
  * Every 30 seconds we swap the filters and clear the "new" one,
- * unless both are empty of course.
+ * unless both are empty of course.  This results in delegations for a
+ * given filehandle being blocked for between 30 and 60 seconds.
  *
  * Each filter is 256 bits.  We hash the filehandle to 32bit and use the
  * low 3 bytes as hash-table indices.
@@ -1107,9 +1108,9 @@ static int delegation_blocked(struct knfsd_fh *fh)
 		if (ktime_get_seconds() - bd->swap_time > 30) {
 			bd->entries -= bd->old_entries;
 			bd->old_entries = bd->entries;
+			bd->new = 1-bd->new;
 			memset(bd->set[bd->new], 0,
 			       sizeof(bd->set[0]));
-			bd->new = 1-bd->new;
 			bd->swap_time = ktime_get_seconds();
 		}
 		spin_unlock(&blocked_delegations_lock);
@@ -5919,6 +5920,7 @@ nfs4_delegation_stat(struct nfs4_delegation *dp, struct svc_fh *currentfh,
 {
 	struct nfsd_file *nf = find_rw_file(dp->dl_stid.sc_file);
 	struct path path;
+	int rc;
 
 	if (!nf)
 		return false;
@@ -5926,11 +5928,12 @@ nfs4_delegation_stat(struct nfs4_delegation *dp, struct svc_fh *currentfh,
 	path.mnt = currentfh->fh_export->ex_path.mnt;
 	path.dentry = file_dentry(nf->nf_file);
 
-	if (vfs_getattr(&path, stat,
-			(STATX_SIZE | STATX_CTIME | STATX_CHANGE_COOKIE),
-			AT_STATX_SYNC_AS_STAT))
-		return false;
-	return true;
+	rc = vfs_getattr(&path, stat,
+			 (STATX_SIZE | STATX_CTIME | STATX_CHANGE_COOKIE),
+			 AT_STATX_SYNC_AS_STAT);
+
+	nfsd_file_put(nf);
+	return rc == 0;
 }
 
 /*

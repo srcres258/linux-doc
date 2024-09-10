@@ -2204,7 +2204,11 @@ bool memcg_slab_post_charge(void *p, gfp_t flags)
 	slab = folio_slab(folio);
 	s = slab->slab_cache;
 
-	/* Ignore KMALLOC_NORMAL cache to avoid circular dependency. */
+	/*
+	 * Ignore KMALLOC_NORMAL cache to avoid possible circular dependency
+	 * of slab_obj_exts being allocated from the same slab and thus the slab
+	 * becoming effectively unfreeable.
+	 */
 	if (is_kmalloc_normal(s))
 		return true;
 

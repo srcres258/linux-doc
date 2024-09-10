@@ -287,10 +287,7 @@ static void SetZsPageMovable(struct zs_pool *pool, struct zspage *zspage);
 static void SetZsPageMovable(struct zs_pool *pool, struct zspage *zspage) {}
 #endif
 
-static struct kmem_cache *zs_handle_cache;
-static struct kmem_cache *zspage_cache;
-
-static unsigned long cache_alloc_handle(gfp_t gfp)
+static int create_cache(struct zs_pool *pool)
 {
 	char *name;
 

@@ -170,7 +170,7 @@ bool mt8365_afe_channel_supported(unsigned int channel, unsigned int id)
 	return false;
 }
 
-bool mt8365_afe_clk_group_44k(int sample_rate)
+static bool mt8365_afe_clk_group_44k(int sample_rate)
 {
 	if (sample_rate == 11025 ||
 	    sample_rate == 22050 ||
@@ -182,7 +182,7 @@ bool mt8365_afe_clk_group_44k(int sample_rate)
 		return false;
 }
 
-bool mt8365_afe_clk_group_48k(int sample_rate)
+static bool mt8365_afe_clk_group_48k(int sample_rate)
 {
 	return (!mt8365_afe_clk_group_44k(sample_rate));
 }
@@ -496,8 +496,8 @@ static int mt8365_afe_configure_cm(struct mtk_base_afe *afe,
 	return 0;
 }
 
-int mt8365_afe_fe_startup(struct snd_pcm_substream *substream,
-			  struct snd_soc_dai *dai)
+static int mt8365_afe_fe_startup(struct snd_pcm_substream *substream,
+				 struct snd_soc_dai *dai)
 {
 	struct snd_soc_pcm_runtime *rtd = snd_soc_substream_to_rtd(substream);
 	struct mtk_base_afe *afe = snd_soc_dai_get_drvdata(dai);
@@ -651,7 +651,6 @@ static int mt8365_afe_fe_hw_free(struct snd_pcm_substream *substream,
 	struct mtk_base_afe *afe = snd_soc_dai_get_drvdata(dai);
 	struct mt8365_afe_private *afe_priv = afe->platform_priv;
 	int dai_id = snd_soc_rtd_to_cpu(rtd, 0)->id;
-	struct mtk_base_afe_memif *memif = &afe->memif[dai_id];
 	struct mt8365_fe_dai_data *fe_data = &afe_priv->fe_data[dai_id];
 	int ret = 0;
 
@@ -714,8 +713,8 @@ static int mt8365_afe_fe_prepare(struct snd_pcm_substream *substream,
 	return 0;
 }
 
-int mt8365_afe_fe_trigger(struct snd_pcm_substream *substream, int cmd,
-			  struct snd_soc_dai *dai)
+static int mt8365_afe_fe_trigger(struct snd_pcm_substream *substream, int cmd,
+				 struct snd_soc_dai *dai)
 {
 	struct snd_soc_pcm_runtime *rtd = snd_soc_substream_to_rtd(substream);
 	struct mtk_base_afe *afe = snd_soc_dai_get_drvdata(dai);
@@ -2155,11 +2154,11 @@ static int mt8365_afe_pcm_dev_probe(struct platform_device *pdev)
 	for (i = 0; i < afe->irqs_size; i++)
 		afe->irqs[i].irq_data = &irq_data[i];
 
-	irq_id = platform_get_irq(pdev, 0);
-	if (!irq_id) {
-		dev_err_probe(afe->dev, irq_id, "np %s no irq\n", afe->dev->of_node->name);
-		return -ENXIO;
-	}
+	ret = platform_get_irq(pdev, 0);
+	if (ret < 0)
+		return ret;
+
+	irq_id = ret;
 	ret = devm_request_irq(afe->dev, irq_id, mt8365_afe_irq_handler,
 			       0, "Afe_ISR_Handle", (void *)afe);
 	if (ret)
@@ -2264,7 +2263,7 @@ static struct platform_driver mt8365_afe_pcm_driver = {
 		   .pm = &mt8365_afe_pm_ops,
 	},
 	.probe = mt8365_afe_pcm_dev_probe,
-	.remove_new = mt8365_afe_pcm_dev_remove,
+	.remove = mt8365_afe_pcm_dev_remove,
 };
 
 module_platform_driver(mt8365_afe_pcm_driver);

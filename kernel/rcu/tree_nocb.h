@@ -1056,6 +1056,13 @@ static int rcu_nocb_rdp_deoffload(struct rcu_data *rdp)
 	/* Flush all callbacks from segcblist and bypass */
 	rcu_barrier();
 
+	/*
+	 * Make sure the rcuoc kthread isn't in the middle of a nocb locked
+	 * sequence while offloading is deactivated, along with nocb locking.
+	 */
+	if (rdp->nocb_cb_kthread)
+		kthread_park(rdp->nocb_cb_kthread);
+
 	rcu_nocb_lock_irqsave(rdp, flags);
 	WARN_ON_ONCE(rcu_cblist_n_cbs(&rdp->nocb_bypass));
 	WARN_ON_ONCE(rcu_segcblist_n_cbs(&rdp->cblist));
@@ -1064,12 +1071,10 @@ static int rcu_nocb_rdp_deoffload(struct rcu_data *rdp)
 	wake_gp = rcu_nocb_queue_toggle_rdp(rdp);
 
 	mutex_lock(&rdp_gp->nocb_gp_kthread_mutex);
+
 	if (rdp_gp->nocb_gp_kthread) {
 		if (wake_gp)
 			wake_up_process(rdp_gp->nocb_gp_kthread);
-
-		if (rdp->nocb_cb_kthread)
-			kthread_park(rdp->nocb_cb_kthread);
 
 		swait_event_exclusive(rdp->nocb_state_wq,
 				      rcu_nocb_rdp_deoffload_wait_cond(rdp));
