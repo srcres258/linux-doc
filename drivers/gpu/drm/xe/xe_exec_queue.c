@@ -9,7 +9,7 @@
 
 #include <drm/drm_device.h>
 #include <drm/drm_file.h>
-#include <drm/xe_drm.h>
+#include <uapi/drm/xe_drm.h>
 
 #include "xe_device.h"
 #include "xe_gt.h"
@@ -223,8 +223,10 @@ struct xe_exec_queue *xe_exec_queue_create_bind(struct xe_device *xe,
 							   gt->usm.reserved_bcs_instance,
 							   false);
 
-		if (!hwe)
+		if (!hwe) {
+			xe_vm_put(migrate_vm);
 			return ERR_PTR(-EINVAL);
+		}
 
 		q = xe_exec_queue_create(xe, migrate_vm,
 					 BIT(hwe->logical_instance), 1, hwe,
