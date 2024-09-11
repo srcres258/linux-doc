@@ -47,6 +47,7 @@ struct io_mapped_ubuf {
 	unsigned int    folio_shift;
 	unsigned long	acct_pages;
 	unsigned long   folio_mask;
+	refcount_t	refs;
 	struct bio_vec	bvec[] __counted_by(nr_bvecs);
 };
 
@@ -67,6 +68,7 @@ int io_import_fixed(int ddir, struct iov_iter *iter,
 			   struct io_mapped_ubuf *imu,
 			   u64 buf_addr, size_t len);
 
+int io_register_copy_buffers(struct io_ring_ctx *ctx, void __user *arg);
 void __io_sqe_buffers_unregister(struct io_ring_ctx *ctx);
 int io_sqe_buffers_unregister(struct io_ring_ctx *ctx);
 int io_sqe_buffers_register(struct io_ring_ctx *ctx, void __user *arg,
