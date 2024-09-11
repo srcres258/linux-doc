@@ -292,15 +292,6 @@ static void output_label(const char *label)
 	printf("%s:\n", label);
 }
 
-/* Provide proper symbols relocatability by their '_text' relativeness. */
-static void output_address(unsigned long long addr)
-{
-	if (_text <= addr)
-		printf("\tPTR\t_text + %#llx\n", addr - _text);
-	else
-		printf("\tPTR\t_text - %#llx\n", _text - addr);
-}
-
 /* uncompress a compressed symbol. When this function is called, the best table
  * might still be compressed itself, so the function needs to be recursive */
 static int expand_symbol(const unsigned char *data, int len, char *result)
@@ -464,17 +455,17 @@ static void write_src(void)
 		 */
 
 		long long offset;
-		int overflow;
+		bool overflow;
 
 		if (!absolute_percpu) {
 			offset = table[i]->addr - relative_base;
-			overflow = (offset < 0 || offset > UINT_MAX);
+			overflow = offset < 0 || offset > UINT_MAX;
 		} else if (symbol_absolute(table[i])) {
 			offset = table[i]->addr;
-			overflow = (offset < 0 || offset > INT_MAX);
+			overflow = offset < 0 || offset > INT_MAX;
 		} else {
 			offset = relative_base - table[i]->addr - 1;
-			overflow = (offset < INT_MIN || offset >= 0);
+			overflow = offset < INT_MIN || offset >= 0;
 		}
 		if (overflow) {
 			fprintf(stderr, "kallsyms failure: "
@@ -488,7 +479,11 @@ static void write_src(void)
 	printf("\n");
 
 	output_label("kallsyms_relative_base");
-	output_address(relative_base);
+	/* Provide proper symbols relocatability by their '_text' relativeness. */
+	if (_text <= relative_base)
+		printf("\tPTR\t_text + %#llx\n", relative_base - _text);
+	else
+		printf("\tPTR\t_text - %#llx\n", _text - relative_base);
 	printf("\n");
 
 	sort_symbols_by_name();

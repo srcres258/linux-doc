@@ -4311,38 +4311,52 @@ static int vmx_check_nested_events(struct kvm_vcpu *vcpu)
 	}
 
 	if (kvm_cpu_has_interrupt(vcpu) && !vmx_interrupt_blocked(vcpu)) {
-		u32 exit_intr_info;
+		int irq;
 
 		if (block_nested_events)
 			return -EBUSY;
 		if (!nested_exit_on_intr(vcpu))
 			goto no_vmexit;
 
-		if (nested_exit_intr_ack_set(vcpu)) {
-			int irq;
+		if (!nested_exit_intr_ack_set(vcpu)) {
+			nested_vmx_vmexit(vcpu, EXIT_REASON_EXTERNAL_INTERRUPT, 0, 0);
+			return 0;
+		}
 
-			irq = kvm_cpu_get_interrupt(vcpu, vmx->nested.posted_intr_nv);
-			if (WARN_ON_ONCE(irq < 0))
-				goto no_vmexit;
+		irq = kvm_cpu_get_extint(vcpu);
+		if (irq != -1) {
+			nested_vmx_vmexit(vcpu, EXIT_REASON_EXTERNAL_INTERRUPT,
+					  INTR_INFO_VALID_MASK | INTR_TYPE_EXT_INTR | irq, 0);
+			return 0;
+		}
 
-			/*
-			 * If the IRQ is L2's PI notification vector, process
-			 * posted interrupts instead of injecting VM-Exit, as
-			 * the detection/morphing architecturally occurs when
-			 * the IRQ is delivered to the CPU.  Note, enabling PI
-			 * requires ACK-on-exit.
-			 */
-			if (irq == vmx->nested.posted_intr_nv) {
-				vmx->nested.pi_pending = true;
-				goto no_vmexit;
-			}
-			exit_intr_info = INTR_INFO_VALID_MASK | INTR_TYPE_EXT_INTR | irq;
-		} else {
-			exit_intr_info = 0;
+		irq = kvm_apic_has_interrupt(vcpu);
+		if (WARN_ON_ONCE(irq < 0))
+			goto no_vmexit;
+
+		/*
+		 * If the IRQ is L2's PI notification vector, process posted
+		 * interrupts for L2 instead of injecting VM-Exit, as the
+		 * detection/morphing architecturally occurs when the IRQ is
+		 * delivered to the CPU.  Note, only interrupts that are routed
+		 * through the local APIC trigger posted interrupt processing,
+		 * and enabling posted interrupts requires ACK-on-exit.
+		 */
+		if (irq == vmx->nested.posted_intr_nv) {
+			vmx->nested.pi_pending = true;
+			kvm_apic_clear_irr(vcpu, irq);
+			goto no_vmexit;
 		}
 
 		nested_vmx_vmexit(vcpu, EXIT_REASON_EXTERNAL_INTERRUPT,
-				  exit_intr_info, 0);
+				  INTR_INFO_VALID_MASK | INTR_TYPE_EXT_INTR | irq, 0);
+
+		/*
+		 * ACK the interrupt _after_ emulating VM-Exit, as the IRQ must
+		 * be marked as in-service in vmcs01.GUEST_INTERRUPT_STATUS.SVI
+		 * if APICv is active.
+		 */
+		kvm_apic_ack_interrupt(vcpu, irq);
 		return 0;
 	}
 

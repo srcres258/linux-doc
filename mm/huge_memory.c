@@ -3779,6 +3779,9 @@ void deferred_split_folio(struct folio *folio, bool partially_mapped)
 	if (!partially_mapped && !split_underused_thp)
 		return;
 
+	if (!partially_mapped && !split_underused_thp)
+		return;
+
 	/*
 	 * The try_to_unmap() in page reclaim path might reach here too,
 	 * this may cause a race condition to corrupt deferred split queue.

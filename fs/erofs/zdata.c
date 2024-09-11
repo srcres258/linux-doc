@@ -196,7 +196,8 @@ static int z_erofs_bvec_enqueue(struct z_erofs_bvec_iter *iter,
 		struct page *nextpage = *candidate_bvpage;
 
 		if (!nextpage) {
-			nextpage = erofs_allocpage(pagepool, GFP_KERNEL);
+			nextpage = __erofs_allocpage(pagepool, GFP_KERNEL,
+					true);
 			if (!nextpage)
 				return -ENOMEM;
 			set_page_private(nextpage, Z_EROFS_SHORTLIVED_PAGE);
@@ -1464,7 +1465,7 @@ repeat:
 	folio_unlock(folio);
 	folio_put(folio);
 out_allocfolio:
-	page = erofs_allocpage(&f->pagepool, gfp);
+	page = __erofs_allocpage(&f->pagepool, gfp, true);
 	spin_lock(&pcl->obj.lockref.lock);
 	if (unlikely(pcl->compressed_bvecs[nr].page != zbv.page)) {
 		if (page)
@@ -1620,9 +1621,10 @@ static void z_erofs_submit_queue(struct z_erofs_decompress_frontend *f,
 		cur = mdev.m_pa;
 		end = cur + pcl->pclustersize;
 		do {
+			bvec.bv_page = NULL;
 			if (bio && (cur != last_pa ||
 				    bio->bi_bdev != mdev.m_bdev)) {
-io_retry:
+drain_io:
 				if (erofs_is_fileio_mode(EROFS_SB(sb)))
 					erofs_fileio_submit_bio(bio);
 				else if (erofs_is_fscache_mode(sb))
@@ -1639,6 +1641,15 @@ io_retry:
 			z_erofs_fill_bio_vec(&bvec, f, pcl, i++, mc);
 			if (!bvec.bv_page)
 				continue;
+
+			if (!bvec.bv_page) {
+				z_erofs_fill_bio_vec(&bvec, f, pcl, i++, mc);
+				if (!bvec.bv_page)
+					continue;
+				if (cur + bvec.bv_len > end)
+					bvec.bv_len = end - cur;
+				DBG_BUGON(bvec.bv_len < sb->s_blocksize);
+			}
 
 			if (unlikely(PageWorkingset(bvec.bv_page)) &&
 			    !memstall) {
@@ -1662,13 +1673,9 @@ io_retry:
 				++nr_bios;
 			}
 
-			if (cur + bvec.bv_len > end)
-				bvec.bv_len = end - cur;
-			DBG_BUGON(bvec.bv_len < sb->s_blocksize);
 			if (!bio_add_page(bio, bvec.bv_page, bvec.bv_len,
 					  bvec.bv_offset))
-				goto io_retry;
-
+				goto drain_io;
 			last_pa = cur + bvec.bv_len;
 			bypass = false;
 		} while ((cur += bvec.bv_len) < end);

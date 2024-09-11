@@ -35,7 +35,7 @@ typedef u32 access_mask_t;
 static_assert(BITS_PER_TYPE(access_mask_t) >= LANDLOCK_NUM_ACCESS_FS);
 /* Makes sure all network access rights can be stored. */
 static_assert(BITS_PER_TYPE(access_mask_t) >= LANDLOCK_NUM_ACCESS_NET);
-/* Makes sure all scoped rights can be stored*/
+/* Makes sure all scoped rights can be stored. */
 static_assert(BITS_PER_TYPE(access_mask_t) >= LANDLOCK_NUM_SCOPE);
 /* Makes sure for_each_set_bit() and for_each_clear_bit() calls are OK. */
 static_assert(sizeof(unsigned long) >= sizeof(access_mask_t));
@@ -338,6 +338,7 @@ landlock_add_scope_mask(struct landlock_ruleset *const ruleset,
 {
 	access_mask_t scoped_mask = scope_mask & LANDLOCK_MASK_SCOPE;
 
+	/* Should already be checked in sys_landlock_create_ruleset(). */
 	WARN_ON_ONCE(scope_mask != scoped_mask);
 	ruleset->access_masks[layer_level].scoped |= scoped_mask;
 }

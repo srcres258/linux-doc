@@ -168,8 +168,8 @@ bool static_key_slow_inc_cpuslocked(struct static_key *key)
 		jump_label_update(key);
 		/*
 		 * Ensure that when static_key_fast_inc_not_disabled() or
-		 * static_key_dec() observe the positive value, they must also
-		 * observe all the text changes.
+		 * static_key_dec_not_one() observe the positive value,
+		 * they must also observe all the text changes.
 		 */
 		atomic_set_release(&key->enabled, 1);
 	} else {
@@ -250,7 +250,7 @@ void static_key_disable(struct static_key *key)
 }
 EXPORT_SYMBOL_GPL(static_key_disable);
 
-static bool static_key_dec(struct static_key *key, bool dec_not_one)
+static bool static_key_dec_not_one(struct static_key *key)
 {
 	int v = atomic_read(&key->enabled);
 
@@ -263,12 +263,17 @@ static bool static_key_dec(struct static_key *key, bool dec_not_one)
 		 *
 		 * Warn about the '0' case; simple underflow.
 		 */
-		if (WARN_ON_ONCE(v <= 0))
-			return v;
+		WARN_ON_ONCE(v < 0);
 
-		if (dec_not_one && v == 1)
-			return v;
+		/*
+		 * Warn about underflow, and lie about success in an attempt to
+		 * not make things worse.
+		 */
+		if (WARN_ON_ONCE(v == 0))
+			return true;
 
+		if (v <= 1)
+			return false;
 	} while (!likely(atomic_try_cmpxchg(&key->enabled, &v, v - 1)));
 
 	return v;
@@ -311,12 +316,26 @@ static bool static_key_dec_and_test(struct static_key *key)
 static void __static_key_slow_dec_cpuslocked(struct static_key *key)
 {
 	lockdep_assert_cpus_held();
+	int val;
 
 	if (static_key_dec_not_one(key))
 		return;
 
 	guard(mutex)(&jump_label_mutex);
-	if (static_key_dec_and_test(key))
+	val = atomic_read(&key->enabled);
+	/*
+	 * It should be impossible to observe -1 with jump_label_mutex held,
+	 * see static_key_slow_inc_cpuslocked().
+	 */
+	if (WARN_ON_ONCE(val == -1))
+		return;
+	/*
+	 * Cannot already be 0, something went sideways.
+	 */
+	if (WARN_ON_ONCE(val == 0))
+		return;
+
+	if (atomic_dec_and_test(&key->enabled))
 		jump_label_update(key);
 }
 

@@ -191,14 +191,21 @@ static bool check_ruleset_scope(const char *const env_var,
 				struct landlock_ruleset_attr *ruleset_attr)
 {
 	bool abstract_scoping = false;
+	bool signal_scoping = false;
 	bool ret = true;
 	char *env_type_scope, *env_type_scope_next, *ipc_scoping_name;
 
-	ruleset_attr->scoped &= ~LANDLOCK_SCOPED_ABSTRACT_UNIX_SOCKET;
+	/* scoping is not supported by Landlock ABI */
+	if (!(ruleset_attr->scoped &
+	      (LANDLOCK_SCOPED_ABSTRACT_UNIX_SOCKET | LANDLOCK_SCOPED_SIGNAL)))
+		return ret;
+
 	env_type_scope = getenv(env_var);
 	/* scoping is not supported by the user */
-	if (!env_type_scope)
-		return true;
+	if (!env_type_scope || strcmp("", env_type_scope) == 0) {
+		ruleset_attr->scoped &= ~LANDLOCK_SCOPED_ABSTRACT_UNIX_SOCKET;
+		return ret;
+	}
 
 	env_type_scope = strdup(env_type_scope);
 	unsetenv(env_var);
@@ -207,8 +214,9 @@ static bool check_ruleset_scope(const char *const env_var,
 			strsep(&env_type_scope_next, ENV_DELIMITER))) {
 		if (strcmp("a", ipc_scoping_name) == 0 && !abstract_scoping) {
 			abstract_scoping = true;
-			ruleset_attr->scoped |=
-				LANDLOCK_SCOPED_ABSTRACT_UNIX_SOCKET;
+		} else if (strcmp("s", ipc_scoping_name) == 0 &&
+			   !signal_scoping) {
+			signal_scoping = true;
 		} else {
 			fprintf(stderr, "Unsupported scoping \"%s\"\n",
 				ipc_scoping_name);
@@ -216,6 +224,10 @@ static bool check_ruleset_scope(const char *const env_var,
 			goto out_free_name;
 		}
 	}
+	if (!abstract_scoping)
+		ruleset_attr->scoped &= ~LANDLOCK_SCOPED_ABSTRACT_UNIX_SOCKET;
+	if (!signal_scoping)
+		ruleset_attr->scoped &= ~LANDLOCK_SCOPED_SIGNAL;
 out_free_name:
 	free(env_type_scope);
 	return ret;
@@ -260,7 +272,8 @@ int main(const int argc, char *const argv[], char *const *const envp)
 		.handled_access_fs = access_fs_rw,
 		.handled_access_net = LANDLOCK_ACCESS_NET_BIND_TCP |
 				      LANDLOCK_ACCESS_NET_CONNECT_TCP,
-		.scoped = LANDLOCK_SCOPED_ABSTRACT_UNIX_SOCKET,
+		.scoped = LANDLOCK_SCOPED_ABSTRACT_UNIX_SOCKET |
+			  LANDLOCK_SCOPED_SIGNAL,
 	};
 
 	if (argc < 2) {
@@ -297,7 +310,7 @@ int main(const int argc, char *const argv[], char *const *const envp)
 			"%s=\"/dev/null:/dev/full:/dev/zero:/dev/pts:/tmp\" "
 			"%s=\"9418\" "
 			"%s=\"80:443\" "
-			"%s=\"a\" "
+			"%s=\"a:s\" "
 			"%s bash -i\n\n",
 			ENV_FS_RO_NAME, ENV_FS_RW_NAME, ENV_TCP_BIND_NAME,
 			ENV_TCP_CONNECT_NAME, ENV_SCOPED_NAME, argv[0]);
@@ -371,7 +384,8 @@ int main(const int argc, char *const argv[], char *const *const envp)
 		__attribute__((fallthrough));
 	case 5:
 		/* Removes LANDLOCK_SCOPED_ABSTRACT_UNIX_SOCKET for ABI < 6 */
-		ruleset_attr.scoped &= ~LANDLOCK_SCOPED_ABSTRACT_UNIX_SOCKET;
+		ruleset_attr.scoped &= ~(LANDLOCK_SCOPED_ABSTRACT_UNIX_SOCKET |
+					 LANDLOCK_SCOPED_SIGNAL);
 		fprintf(stderr,
 			"Hint: You should update the running kernel "
 			"to leverage Landlock features "
@@ -403,10 +417,8 @@ int main(const int argc, char *const argv[], char *const *const envp)
 			~LANDLOCK_ACCESS_NET_CONNECT_TCP;
 	}
 
-	if (abi >= 6 && !check_ruleset_scope(ENV_SCOPED_NAME, &ruleset_attr)) {
-		perror("Unsupported IPC scoping requested");
+	if (!check_ruleset_scope(ENV_SCOPED_NAME, &ruleset_attr))
 		return 1;
-	}
 
 	ruleset_fd =
 		landlock_create_ruleset(&ruleset_attr, sizeof(ruleset_attr), 0);

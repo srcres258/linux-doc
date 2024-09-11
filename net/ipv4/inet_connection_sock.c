@@ -714,6 +714,7 @@ struct sock *inet_csk_accept(struct sock *sk, struct proto_accept_arg *arg)
 out:
 	release_sock(sk);
 	if (newsk && mem_cgroup_sockets_enabled) {
+		gfp_t gfp = GFP_KERNEL | __GFP_NOFAIL;
 		int amt = 0;
 		gfp_t gfp = GFP_KERNEL | __GFP_NOFAIL;
 

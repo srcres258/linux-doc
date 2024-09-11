@@ -4022,18 +4022,35 @@ static struct folio *__alloc_swap_folio(struct vm_fault *vmf)
 }
 
 #ifdef CONFIG_TRANSPARENT_HUGEPAGE
+static inline int non_swapcache_batch(swp_entry_t entry, int max_nr)
+{
+	struct swap_info_struct *si = swp_swap_info(entry);
+	pgoff_t offset = swp_offset(entry);
+	int i;
+
+	/*
+	 * While allocating a large folio and doing swap_read_folio, which is
+	 * the case the being faulted pte doesn't have swapcache. We need to
+	 * ensure all PTEs have no cache as well, otherwise, we might go to
+	 * swap devices while the content is in swapcache.
+	 */
+	for (i = 0; i < max_nr; i++) {
+		if ((si->swap_map[offset + i] & SWAP_HAS_CACHE))
+			return i;
+	}
+
+	return i;
+}
+
 /*
  * Check if the PTEs within a range are contiguous swap entries
- * and have no cache when check_no_cache is true.
+ * and have consistent swapcache, zeromap.
  */
-static bool can_swapin_thp(struct vm_fault *vmf, pte_t *ptep,
-			   int nr_pages, bool check_no_cache)
+static bool can_swapin_thp(struct vm_fault *vmf, pte_t *ptep, int nr_pages)
 {
-	struct swap_info_struct *si;
 	unsigned long addr;
 	swp_entry_t entry;
-	pgoff_t offset;
-	int idx, i;
+	int idx;
 	pte_t pte;
 
 	addr = ALIGN_DOWN(vmf->address, nr_pages * PAGE_SIZE);
@@ -4043,24 +4060,18 @@ static bool can_swapin_thp(struct vm_fault *vmf, pte_t *ptep,
 	if (!pte_same(pte, pte_move_swp_offset(vmf->orig_pte, -idx)))
 		return false;
 	entry = pte_to_swp_entry(pte);
-	offset = swp_offset(entry);
 	if (swap_pte_batch(ptep, nr_pages, pte) != nr_pages)
 		return false;
 
-	if (!check_no_cache)
-		return true;
-
-	si = swp_swap_info(entry);
 	/*
-	 * While allocating a large folio and doing swap_read_folio, which is
-	 * the case the being faulted pte doesn't have swapcache. We need to
-	 * ensure all PTEs have no cache as well, otherwise, we might go to
-	 * swap devices while the content is in swapcache.
+	 * swap_read_folio() can't handle the case a large folio is hybridly
+	 * from different backends. And they are likely corner cases. Similar
+	 * things might be added once zswap support large folios.
 	 */
-	for (i = 0; i < nr_pages; i++) {
-		if ((si->swap_map[offset + i] & SWAP_HAS_CACHE))
-			return false;
-	}
+	if (unlikely(swap_zeromap_batch(entry, nr_pages, NULL) != nr_pages))
+		return false;
+	if (unlikely(non_swapcache_batch(entry, nr_pages) != nr_pages))
+		return false;
 
 	return true;
 }
@@ -4141,7 +4152,7 @@ static struct folio *alloc_swap_folio(struct vm_fault *vmf)
 	order = highest_order(orders);
 	while (orders) {
 		addr = ALIGN_DOWN(vmf->address, PAGE_SIZE << order);
-		if (can_swapin_thp(vmf, pte + pte_index(addr), 1 << order, true))
+		if (can_swapin_thp(vmf, pte + pte_index(addr), 1 << order))
 			break;
 		order = next_order(&orders, order);
 	}
@@ -4166,8 +4177,7 @@ fallback:
 	return __alloc_swap_folio(vmf);
 }
 #else /* !CONFIG_TRANSPARENT_HUGEPAGE */
-static inline bool can_swapin_thp(struct vm_fault *vmf, pte_t *ptep,
-				  int nr_pages, bool check_no_cache)
+static inline bool can_swapin_thp(struct vm_fault *vmf, pte_t *ptep, int nr_pages)
 {
 	return false;
 }
@@ -4434,12 +4444,13 @@ check_pte:
 	/* allocated large folios for SWP_SYNCHRONOUS_IO */
 	if (folio_test_large(folio) && !folio_test_swapcache(folio)) {
 		unsigned long nr = folio_nr_pages(folio);
-		unsigned long folio_start = ALIGN_DOWN(vmf->address,
-						       nr * PAGE_SIZE);
+		unsigned long folio_start = ALIGN_DOWN(vmf->address, nr * PAGE_SIZE);
 		unsigned long idx = (vmf->address - folio_start) / PAGE_SIZE;
 		pte_t *folio_ptep = vmf->pte - idx;
+		pte_t folio_pte = ptep_get(folio_ptep);
 
-		if (!can_swapin_thp(vmf, folio_ptep, nr, false))
+		if (!pte_same(folio_pte, pte_move_swp_offset(vmf->orig_pte, -idx)) ||
+		    swap_pte_batch(folio_ptep, nr, folio_pte) != nr)
 			goto out_nomap;
 
 		page_idx = idx;
@@ -5344,11 +5355,12 @@ static vm_fault_t do_cow_fault(struct vm_fault *vmf)
 
 	if (copy_mc_user_highpage(vmf->cow_page, vmf->page, vmf->address, vma)) {
 		ret = VM_FAULT_HWPOISON;
-		goto uncharge_out;
+		goto unlock;
 	}
 	__folio_mark_uptodate(folio);
 
 	ret |= finish_fault(vmf);
+unlock:
 	unlock_page(vmf->page);
 	put_page(vmf->page);
 	if (unlikely(ret & (VM_FAULT_ERROR | VM_FAULT_NOPAGE | VM_FAULT_RETRY)))
