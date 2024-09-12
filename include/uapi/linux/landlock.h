@@ -47,7 +47,7 @@ struct landlock_ruleset_attr {
 	/**
 	 * @scoped: Bitmask of scopes (cf. `Scope flags`_)
 	 * restricting a Landlock domain from accessing outside
-	 * resources(e.g. IPCs).
+	 * resources (e.g. IPCs).
 	 */
 	__u64 scoped;
 };
@@ -294,7 +294,7 @@ struct landlock_net_port_attr {
  * IPCs with scoped actions:
  *
  * - %LANDLOCK_SCOPED_ABSTRACT_UNIX_SOCKET: Restrict a sandboxed process
- *   from connecting to an abstract unix socket created by a process
+ *   from connecting to an abstract UNIX socket created by a process
  *   outside the related Landlock domain (e.g. a parent domain or a
  *   non-sandboxed process).
  * - %LANDLOCK_SCOPED_SIGNAL: Restrict a sandboxed process from sending

@@ -13,6 +13,7 @@
 #include <linux/uaccess.h>
 #include <linux/pagemap.h>
 #include <linux/io_uring/cmd.h>
+#include <uapi/linux/blkdev.h>
 #include "blk.h"
 
 static int blkpg_do_ioctl(struct block_device *bdev,
@@ -94,6 +95,11 @@ static int compat_blkpg_ioctl(struct block_device *bdev,
 }
 #endif
 
+/*
+ * Check that [start, start + len) is a valid range from the block device's
+ * perspective, including verifying that it can be correctly translated into
+ * logical block addresses.
+ */
 static int blk_validate_byte_range(struct block_device *bdev,
 				   uint64_t start, uint64_t len)
 {
@@ -778,7 +784,7 @@ static int blkdev_cmd_write_zeroes(struct io_uring_cmd *cmd,
 				   uint64_t start, uint64_t len,
 				   bool nowait, bool zero_pages)
 {
-
+	struct blk_iou_cmd *bic = io_uring_cmd_to_pdu(cmd, struct blk_iou_cmd);
 	sector_t bs_mask = (bdev_logical_block_size(bdev) >> SECTOR_SHIFT) - 1;
 	sector_t limit = bdev_write_zeroes_sectors(bdev);
 	sector_t sector = start >> SECTOR_SHIFT;
@@ -796,9 +802,6 @@ static int blkdev_cmd_write_zeroes(struct io_uring_cmd *cmd,
 		return err;
 
 	if (zero_pages) {
-		struct blk_iou_cmd *bic = io_uring_cmd_to_pdu(cmd,
-						struct blk_iou_cmd);
-
 		err = blkdev_issue_zero_pages_bio(bdev, sector, nr_sects,
 						  gfp, &prev,
 						  BLKDEV_ZERO_PAGES_NOWAIT);
@@ -840,8 +843,10 @@ static int blkdev_cmd_write_zeroes(struct io_uring_cmd *cmd,
 
 		prev = bio_chain_and_submit(prev, bio);
 	}
-	if (!prev)
+	if (unlikely(!prev))
 		return -EAGAIN;
+	if (unlikely(nr_sects))
+		bic->res = -EAGAIN;
 out_submit:
 	prev->bi_private = cmd;
 	prev->bi_end_io = bio_cmd_bio_end_io;
@@ -853,6 +858,7 @@ static int blkdev_cmd_discard(struct io_uring_cmd *cmd,
 			      struct block_device *bdev,
 			      uint64_t start, uint64_t len, bool nowait)
 {
+	struct blk_iou_cmd *bic = io_uring_cmd_to_pdu(cmd, struct blk_iou_cmd);
 	gfp_t gfp = nowait ? GFP_NOWAIT : GFP_KERNEL;
 	sector_t sector = start >> SECTOR_SHIFT;
 	sector_t nr_sects = len >> SECTOR_SHIFT;
@@ -861,7 +867,6 @@ static int blkdev_cmd_discard(struct io_uring_cmd *cmd,
 
 	if (!bdev_max_discard_sectors(bdev))
 		return -EOPNOTSUPP;
-
 	if (!(file_to_blk_mode(cmd->file) & BLK_OPEN_WRITE))
 		return -EBADF;
 	if (bdev_read_only(bdev))
@@ -870,26 +875,35 @@ static int blkdev_cmd_discard(struct io_uring_cmd *cmd,
 	if (err)
 		return err;
 
-	/*
-	 * Don't allow multi-bio non-blocking submissions as subsequent bios
-	 * may fail but we won't get a direct indication of that. Normally,
-	 * the caller should retry from a blocking context.
-	 */
-	if (nowait && nr_sects > bio_discard_limit(bdev, sector))
-		return -EAGAIN;
-
 	err = filemap_invalidate_pages(bdev->bd_mapping, start,
 					start + len - 1, nowait);
 	if (err)
 		return err;
 
-	while ((bio = blk_alloc_discard_bio(bdev, &sector, &nr_sects, gfp))) {
-		if (nowait)
+	while (true) {
+		bio = blk_alloc_discard_bio(bdev, &sector, &nr_sects, gfp);
+		if (!bio)
+			break;
+		if (nowait) {
+			/*
+			 * Don't allow multi-bio non-blocking submissions as
+			 * subsequent bios may fail but we won't get a direct
+			 * indication of that. Normally, the caller should
+			 * retry from a blocking context.
+			 */
+			if (unlikely(nr_sects)) {
+				bio_put(bio);
+				return -EAGAIN;
+			}
 			bio->bi_opf |= REQ_NOWAIT;
+		}
+
 		prev = bio_chain_and_submit(prev, bio);
 	}
-	if (!prev)
+	if (unlikely(!prev))
 		return -EAGAIN;
+	if (unlikely(nr_sects))
+		bic->res = -EAGAIN;
 
 	prev->bi_private = cmd;
 	prev->bi_end_io = bio_cmd_bio_end_io;

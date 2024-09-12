@@ -5,8 +5,6 @@
  * Copyright © 2024 Tahera Fahimi <fahimitahera@gmail.com>
  */
 
-#define _GNU_SOURCE
-
 enum sandbox_type {
 	NO_SANDBOX,
 	SCOPE_SANDBOX,
@@ -15,7 +13,7 @@ enum sandbox_type {
 };
 
 /* clang-format on */
-FIXTURE_VARIANT(scoped_vs_unscoped_sockets)
+FIXTURE_VARIANT(scoped_vs_unscoped)
 {
 	const int domain_all;
 	const int domain_parent;
@@ -34,7 +32,7 @@ FIXTURE_VARIANT(scoped_vs_unscoped_sockets)
  * '-----------------'
  */
 /* clang-format off */
-FIXTURE_VARIANT_ADD(scoped_vs_unscoped_sockets, deny_scoped) {
+FIXTURE_VARIANT_ADD(scoped_vs_unscoped, deny_scoped) {
 	.domain_all = OTHER_SANDBOX,
 	.domain_parent = NO_SANDBOX,
 	.domain_children = SCOPE_SANDBOX,
@@ -53,7 +51,7 @@ FIXTURE_VARIANT_ADD(scoped_vs_unscoped_sockets, deny_scoped) {
  * ###################
  */
 /* clang-format off */
-FIXTURE_VARIANT_ADD(scoped_vs_unscoped_sockets, all_scoped) {
+FIXTURE_VARIANT_ADD(scoped_vs_unscoped, all_scoped) {
 	.domain_all = SCOPE_SANDBOX,
 	.domain_parent = NO_SANDBOX,
 	.domain_children = SCOPE_SANDBOX,
@@ -72,7 +70,7 @@ FIXTURE_VARIANT_ADD(scoped_vs_unscoped_sockets, all_scoped) {
  * '-----------------'
  */
 /* clang-format off */
-FIXTURE_VARIANT_ADD(scoped_vs_unscoped_sockets, allow_with_other_domain) {
+FIXTURE_VARIANT_ADD(scoped_vs_unscoped, allow_with_other_domain) {
 	.domain_all = OTHER_SANDBOX,
 	.domain_parent = NO_SANDBOX,
 	.domain_children = OTHER_SANDBOX,
@@ -89,7 +87,7 @@ FIXTURE_VARIANT_ADD(scoped_vs_unscoped_sockets, allow_with_other_domain) {
  *              P3
  */
 /* clang-format off */
-FIXTURE_VARIANT_ADD(scoped_vs_unscoped_sockets, allow_with_one_domain) {
+FIXTURE_VARIANT_ADD(scoped_vs_unscoped, allow_with_one_domain) {
 	.domain_all = NO_SANDBOX,
 	.domain_parent = OTHER_SANDBOX,
 	.domain_children = NO_SANDBOX,
@@ -106,7 +104,7 @@ FIXTURE_VARIANT_ADD(scoped_vs_unscoped_sockets, allow_with_one_domain) {
  *              P3
  */
 /* clang-format off */
-FIXTURE_VARIANT_ADD(scoped_vs_unscoped_sockets, allow_with_grand_parent_scoped) {
+FIXTURE_VARIANT_ADD(scoped_vs_unscoped, allow_with_grand_parent_scoped) {
 	.domain_all = NO_SANDBOX,
 	.domain_parent = SCOPE_SANDBOX,
 	.domain_children = NO_SANDBOX,
@@ -125,7 +123,7 @@ FIXTURE_VARIANT_ADD(scoped_vs_unscoped_sockets, allow_with_grand_parent_scoped) 
  *             '----'
  */
 /* clang-format off */
-FIXTURE_VARIANT_ADD(scoped_vs_unscoped_sockets, allow_with_parents_domain) {
+FIXTURE_VARIANT_ADD(scoped_vs_unscoped, allow_with_parents_domain) {
 	.domain_all = NO_SANDBOX,
 	.domain_parent = SCOPE_SANDBOX,
 	.domain_children = NO_SANDBOX,
@@ -144,7 +142,7 @@ FIXTURE_VARIANT_ADD(scoped_vs_unscoped_sockets, allow_with_parents_domain) {
  *           ######
  */
 /* clang-format off */
-FIXTURE_VARIANT_ADD(scoped_vs_unscoped_sockets, deny_with_self_and_grandparent_domain) {
+FIXTURE_VARIANT_ADD(scoped_vs_unscoped, deny_with_self_and_grandparent_domain) {
 	.domain_all = NO_SANDBOX,
 	.domain_parent = SCOPE_SANDBOX,
 	.domain_children = NO_SANDBOX,

@@ -211,7 +211,7 @@ int blkdev_issue_zero_pages_bio(struct block_device *bdev,
 		unsigned int nr_vecs = __blkdev_sectors_to_bio_pages(nr_sects);
 		struct bio *bio;
 
-		bio = bio_alloc(bdev, nr_vecs, opf, gfp_mask);
+		bio = bio_alloc(bdev, nr_vecs, REQ_OP_WRITE, gfp_mask);
 		if (!bio)
 			return -ENOMEM;
 		bio->bi_iter.bi_sector = sector;

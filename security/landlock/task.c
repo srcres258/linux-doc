@@ -130,7 +130,7 @@ static bool domain_is_scoped(const struct landlock_ruleset *const client,
 	struct landlock_hierarchy *client_walker, *server_walker;
 
 	/* Quick return if client has no domain */
-	if (!client)
+	if (WARN_ON_ONCE(!client))
 		return false;
 
 	client_layer = client->num_layers - 1;
@@ -152,6 +152,7 @@ static bool domain_is_scoped(const struct landlock_ruleset *const client,
 	for (; client_layer > server_layer; client_layer--) {
 		if (landlock_get_scope_mask(client, client_layer) & scope)
 			return true;
+
 		client_walker = client_walker->parent;
 	}
 	/*
@@ -248,7 +249,7 @@ static int hook_task_kill(struct task_struct *const p,
 			  const struct cred *const cred)
 {
 	bool is_scoped;
-	const struct landlock_ruleset *target_dom, *dom;
+	const struct landlock_ruleset *dom;
 
 	if (cred) {
 		/* Dealing with USB IO. */
@@ -262,8 +263,8 @@ static int hook_task_kill(struct task_struct *const p,
 		return 0;
 
 	rcu_read_lock();
-	target_dom = landlock_get_task_domain(p);
-	is_scoped = domain_is_scoped(dom, target_dom, LANDLOCK_SCOPED_SIGNAL);
+	is_scoped = domain_is_scoped(dom, landlock_get_task_domain(p),
+				     LANDLOCK_SCOPED_SIGNAL);
 	rcu_read_unlock();
 	if (is_scoped)
 		return -EPERM;
@@ -274,27 +275,21 @@ static int hook_task_kill(struct task_struct *const p,
 static int hook_file_send_sigiotask(struct task_struct *tsk,
 				    struct fown_struct *fown, int signum)
 {
-	struct landlock_ruleset *dom;
+	const struct landlock_ruleset *dom;
 	bool is_scoped = false;
 
 	/* Lock already held by send_sigio() and send_sigurg(). */
 	lockdep_assert_held(&fown->lock);
-
 	dom = landlock_file(fown->file)->fown_domain;
-	landlock_get_ruleset(dom);
 
-	/* Quick return for non-landlocked tasks. */
+	/* Quick return for unowned socket. */
 	if (!dom)
-		goto out_unlock;
+		return 0;
 
 	rcu_read_lock();
 	is_scoped = domain_is_scoped(dom, landlock_get_task_domain(tsk),
 				     LANDLOCK_SCOPED_SIGNAL);
 	rcu_read_unlock();
-
-out_unlock:
-	/* Called in an RCU read-side critical section. */
-	landlock_put_ruleset_deferred(dom);
 	if (is_scoped)
 		return -EPERM;
 
@@ -304,8 +299,10 @@ out_unlock:
 static struct security_hook_list landlock_hooks[] __ro_after_init = {
 	LSM_HOOK_INIT(ptrace_access_check, hook_ptrace_access_check),
 	LSM_HOOK_INIT(ptrace_traceme, hook_ptrace_traceme),
+
 	LSM_HOOK_INIT(unix_stream_connect, hook_unix_stream_connect),
 	LSM_HOOK_INIT(unix_may_send, hook_unix_may_send),
+
 	LSM_HOOK_INIT(task_kill, hook_task_kill),
 	LSM_HOOK_INIT(file_send_sigiotask, hook_file_send_sigiotask),
 };

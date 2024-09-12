@@ -2,10 +2,12 @@
 /*
  * Landlock scoped_domains variants
  *
+ * See the hierarchy variants from ptrace_test.c
+ *
+ * Copyright © 2017-2020 Mickaël Salaün <mic@digikod.net>
+ * Copyright © 2019-2020 ANSSI
  * Copyright © 2024 Tahera Fahimi <fahimitahera@gmail.com>
  */
-
-#define _GNU_SOURCE
 
 /* clang-format on */
 FIXTURE_VARIANT(scoped_domains)
@@ -40,7 +42,7 @@ FIXTURE_VARIANT_ADD(scoped_domains, without_domain) {
  *        '------'
  */
 /* clang-format off */
-FIXTURE_VARIANT_ADD(scoped_domains, with_child_domain) {
+FIXTURE_VARIANT_ADD(scoped_domains, child_domain) {
 	/* clang-format on */
 	.domain_both = false,
 	.domain_parent = false,
@@ -56,7 +58,7 @@ FIXTURE_VARIANT_ADD(scoped_domains, with_child_domain) {
  *            P2
  */
 /* clang-format off */
-FIXTURE_VARIANT_ADD(scoped_domains, with_parent_domain) {
+FIXTURE_VARIANT_ADD(scoped_domains, parent_domain) {
 	/* clang-format on */
 	.domain_both = false,
 	.domain_parent = true,
@@ -73,7 +75,7 @@ FIXTURE_VARIANT_ADD(scoped_domains, with_parent_domain) {
  *         '------'
  */
 /* clang-format off */
-FIXTURE_VARIANT_ADD(scoped_domains, with_sibling_domain) {
+FIXTURE_VARIANT_ADD(scoped_domains, sibling_domain) {
 	/* clang-format on */
 	.domain_both = false,
 	.domain_parent = true,
@@ -126,7 +128,7 @@ FIXTURE_VARIANT_ADD(scoped_domains, nested_domain) {
  * '-----------------'
  */
 /* clang-format off */
-FIXTURE_VARIANT_ADD(scoped_domains, with_nested_and_parent_domain) {
+FIXTURE_VARIANT_ADD(scoped_domains, nested_and_parent_domain) {
 	/* clang-format on */
 	.domain_both = true,
 	.domain_parent = true,
@@ -146,7 +148,7 @@ FIXTURE_VARIANT_ADD(scoped_domains, with_nested_and_parent_domain) {
  * '-----------------'
  */
 /* clang-format off */
-FIXTURE_VARIANT_ADD(scoped_domains, with_forked_domains) {
+FIXTURE_VARIANT_ADD(scoped_domains, forked_domains) {
 	/* clang-format on */
 	.domain_both = true,
 	.domain_parent = true,

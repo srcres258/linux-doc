@@ -53,9 +53,10 @@ struct landlock_file_security {
 	 */
 	access_mask_t allowed_access;
 	/**
-	 * @fown_domain: A pointer to a &landlock_ruleset of the process owns
-	 * the file. This ruleset is protected by fowner_struct.lock same as
-	 * pid, uid, euid fields in fown_struct.
+	 * @fown_domain: Pointer to the &landlock_ruleset of the process
+	 * receiving SIGIO for this socket.  This pointer is protected by the
+	 * related file->f_owner->lock, as for fown_struct's members: pid, uid,
+	 * and euid.
 	 */
 	struct landlock_ruleset *fown_domain;
 };

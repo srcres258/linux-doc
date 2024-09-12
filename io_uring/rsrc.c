@@ -114,14 +114,16 @@ static void io_buffer_unmap(struct io_ring_ctx *ctx, struct io_mapped_ubuf **slo
 	struct io_mapped_ubuf *imu = *slot;
 	unsigned int i;
 
+	*slot = NULL;
 	if (imu != &dummy_ubuf) {
+		if (!refcount_dec_and_test(&imu->refs))
+			return;
 		for (i = 0; i < imu->nr_bvecs; i++)
 			unpin_user_page(imu->bvec[i].bv_page);
 		if (imu->acct_pages)
 			io_unaccount_mem(ctx, imu->acct_pages);
 		kvfree(imu);
 	}
-	*slot = NULL;
 }
 
 static void io_rsrc_put_work(struct io_rsrc_node *node)
@@ -996,6 +998,7 @@ static int io_sqe_buffer_register(struct io_ring_ctx *ctx, struct iovec *iov,
 		imu->folio_shift = data.folio_shift;
 		imu->folio_mask = ~((1UL << data.folio_shift) - 1);
 	}
+	refcount_set(&imu->refs, 1);
 	off = (unsigned long) iov->iov_base & ~imu->folio_mask;
 	*pimu = imu;
 	ret = 0;
@@ -1144,4 +1147,91 @@ int io_import_fixed(int ddir, struct iov_iter *iter,
 	}
 
 	return 0;
+}
+
+static int io_copy_buffers(struct io_ring_ctx *ctx, struct io_ring_ctx *src_ctx)
+{
+	struct io_mapped_ubuf **user_bufs;
+	struct io_rsrc_data *data;
+	int i, ret, nbufs;
+
+	/*
+	 * Drop our own lock here. We'll setup the data we need and reference
+	 * the source buffers, then re-grab, check, and assign at the end.
+	 */
+	mutex_unlock(&ctx->uring_lock);
+
+	mutex_lock(&src_ctx->uring_lock);
+	ret = -ENXIO;
+	nbufs = src_ctx->nr_user_bufs;
+	if (!nbufs)
+		goto out_unlock;
+	ret = io_rsrc_data_alloc(ctx, IORING_RSRC_BUFFER, NULL, nbufs, &data);
+	if (ret)
+		goto out_unlock;
+
+	ret = -ENOMEM;
+	user_bufs = kcalloc(nbufs, sizeof(*ctx->user_bufs), GFP_KERNEL);
+	if (!user_bufs)
+		goto out_free_data;
+
+	for (i = 0; i < nbufs; i++) {
+		struct io_mapped_ubuf *src = src_ctx->user_bufs[i];
+
+		refcount_inc(&src->refs);
+		user_bufs[i] = src;
+	}
+
+	/* Have a ref on the bufs now, drop src lock and re-grab our own lock */
+	mutex_unlock(&src_ctx->uring_lock);
+	mutex_lock(&ctx->uring_lock);
+	if (!ctx->user_bufs) {
+		ctx->user_bufs = user_bufs;
+		ctx->buf_data = data;
+		ctx->nr_user_bufs = nbufs;
+		return 0;
+	}
+
+	/* someone raced setting up buffers, dump ours */
+	for (i = 0; i < nbufs; i++)
+		io_buffer_unmap(ctx, &user_bufs[i]);
+	io_rsrc_data_free(data);
+	kfree(user_bufs);
+	return -EBUSY;
+out_free_data:
+	io_rsrc_data_free(data);
+out_unlock:
+	mutex_unlock(&src_ctx->uring_lock);
+	mutex_lock(&ctx->uring_lock);
+	return ret;
+}
+
+/*
+ * Copy the registered buffers from the source ring whose file descriptor
+ * is given in the src_fd to the current ring. This is identical to registering
+ * the buffers with ctx, except faster as mappings already exist.
+ *
+ * Since the memory is already accounted once, don't account it again.
+ */
+int io_register_copy_buffers(struct io_ring_ctx *ctx, void __user *arg)
+{
+	struct io_uring_copy_buffers buf;
+	struct fd f;
+	int ret;
+
+	if (ctx->user_bufs || ctx->nr_user_bufs)
+		return -EBUSY;
+	if (copy_from_user(&buf, arg, sizeof(buf)))
+		return -EFAULT;
+	if (memchr_inv(buf.pad, 0, sizeof(buf.pad)))
+		return -EINVAL;
+
+	ret = -EBADF;
+	f = fdget(buf.src_fd);
+	if (f.file) {
+		if (io_is_uring_fops(f.file))
+			ret = io_copy_buffers(ctx, f.file->private_data);
+		fdput(f);
+	}
+	return ret;
 }
