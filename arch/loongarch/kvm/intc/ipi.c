@@ -7,25 +7,311 @@
 #include <asm/kvm_ipi.h>
 #include <asm/kvm_vcpu.h>
 
+static void ipi_send(struct kvm *kvm, uint64_t data)
+{
+	struct kvm_vcpu *vcpu;
+	struct kvm_interrupt irq;
+	int cpu, action, status;
+
+	cpu = ((data & 0xffffffff) >> 16) & 0x3ff;
+	vcpu = kvm_get_vcpu_by_cpuid(kvm, cpu);
+	if (unlikely(vcpu == NULL)) {
+		kvm_err("%s: invalid target cpu: %d\n", __func__, cpu);
+		return;
+	}
+
+	action = BIT(data & 0x1f);
+	spin_lock(&vcpu->arch.ipi_state.lock);
+	status = vcpu->arch.ipi_state.status;
+	vcpu->arch.ipi_state.status |= action;
+	spin_unlock(&vcpu->arch.ipi_state.lock);
+	if (status == 0) {
+		irq.irq = LARCH_INT_IPI;
+		kvm_vcpu_ioctl_interrupt(vcpu, &irq);
+	}
+}
+
+static void ipi_clear(struct kvm_vcpu *vcpu, uint64_t data)
+{
+	struct kvm_interrupt irq;
+	uint32_t status;
+
+	spin_lock(&vcpu->arch.ipi_state.lock);
+	vcpu->arch.ipi_state.status &= ~data;
+	status = vcpu->arch.ipi_state.status;
+	spin_unlock(&vcpu->arch.ipi_state.lock);
+	if (!status) {
+		irq.irq = -LARCH_INT_IPI;
+		kvm_vcpu_ioctl_interrupt(vcpu, &irq);
+	}
+}
+
+static uint64_t read_mailbox(struct kvm_vcpu *vcpu, int offset, int len)
+{
+	uint64_t ret = 0;
+	uint64_t data = 0;
+
+	spin_lock(&vcpu->arch.ipi_state.lock);
+	data = *(ulong *)((void *)vcpu->arch.ipi_state.buf + (offset - 0x20));
+	spin_unlock(&vcpu->arch.ipi_state.lock);
+
+	if (len == 1)
+		ret = data & 0xff;
+	else if (len == 2)
+		ret = data & 0xffff;
+	else if (len == 4)
+		ret = data & 0xffffffff;
+	else if (len == 8)
+		ret = data;
+	else
+		kvm_err("%s: unknown data len: %d\n", __func__, len);
+	return ret;
+}
+
+static void write_mailbox(struct kvm_vcpu *vcpu, int offset,
+			uint64_t data, int len)
+{
+	void *pbuf;
+	bool bad_width = false;
+
+	spin_lock(&vcpu->arch.ipi_state.lock);
+	pbuf = (void *)vcpu->arch.ipi_state.buf + (offset - 0x20);
+	if (len == 1)
+		*(unsigned char *)pbuf = (unsigned char)data;
+	else if (len == 2)
+		*(unsigned short *)pbuf = (unsigned short)data;
+	else if (len == 4)
+		*(unsigned int *)pbuf = (unsigned int)data;
+	else if (len == 8)
+		*(unsigned long *)pbuf = (unsigned long)data;
+	else
+		bad_width = true;
+	spin_unlock(&vcpu->arch.ipi_state.lock);
+	if (bad_width)
+		kvm_err("%s: unknown data len: %d\n", __func__, len);
+}
+
+static int loongarch_ipi_writel(struct kvm_vcpu *vcpu, gpa_t addr,
+				int len, const void *val)
+{
+	uint64_t data;
+	uint32_t offset;
+	int ret = 0;
+
+	data = *(uint64_t *)val;
+
+	offset = (uint32_t)(addr & 0xff);
+	WARN_ON_ONCE(offset & (len - 1));
+
+	switch (offset) {
+	case CORE_STATUS:
+		kvm_err("CORE_STATUS Can't be write\n");
+		ret = -EINVAL;
+		break;
+	case CORE_EN:
+		spin_lock(&vcpu->arch.ipi_state.lock);
+		vcpu->arch.ipi_state.en = data;
+		spin_unlock(&vcpu->arch.ipi_state.lock);
+		break;
+	case IOCSR_IPI_SEND:
+		ipi_send(vcpu->kvm, data);
+		break;
+	case CORE_SET:
+		ret = -EINVAL;
+		break;
+	case CORE_CLEAR:
+		/* Just clear the status of the current vcpu */
+		ipi_clear(vcpu, data);
+		break;
+	case CORE_BUF_20 ... CORE_BUF_38 + 7:
+		if (offset + len > CORE_BUF_38 + 8) {
+			kvm_err("%s: invalid offset or len: offset = %d, len = %d\n",
+				__func__, offset, len);
+			ret = -EINVAL;
+			break;
+		}
+		write_mailbox(vcpu, offset, data, len);
+		break;
+	default:
+		kvm_err("%s: unknown addr: %llx\n", __func__, addr);
+		ret = -EINVAL;
+		break;
+	}
+	return ret;
+}
+
+static int loongarch_ipi_readl(struct kvm_vcpu *vcpu, gpa_t addr,
+				int len, void *val)
+{
+	uint32_t offset;
+	uint64_t res = 0;
+	int ret = 0;
+
+	offset = (uint32_t)(addr & 0xff);
+	WARN_ON_ONCE(offset & (len - 1));
+
+	switch (offset) {
+	case CORE_STATUS:
+		spin_lock(&vcpu->arch.ipi_state.lock);
+		res = vcpu->arch.ipi_state.status;
+		spin_unlock(&vcpu->arch.ipi_state.lock);
+		break;
+	case CORE_EN:
+		spin_lock(&vcpu->arch.ipi_state.lock);
+		res = vcpu->arch.ipi_state.en;
+		spin_unlock(&vcpu->arch.ipi_state.lock);
+		break;
+	case CORE_SET:
+		res = 0;
+		break;
+	case CORE_CLEAR:
+		res = 0;
+		break;
+	case CORE_BUF_20 ... CORE_BUF_38 + 7:
+		if (offset + len > CORE_BUF_38 + 8) {
+			kvm_err("%s: invalid offset or len: offset = %d, len = %d\n",
+				__func__, offset, len);
+			ret = -EINVAL;
+			break;
+		}
+		res = read_mailbox(vcpu, offset, len);
+		break;
+	default:
+		kvm_err("%s: unknown addr: %llx\n", __func__, addr);
+		ret = -EINVAL;
+		break;
+	}
+	*(uint64_t *)val = res;
+	return ret;
+}
+
 static int kvm_ipi_write(struct kvm_vcpu *vcpu,
 			struct kvm_io_device *dev,
 			gpa_t addr, int len, const void *val)
 {
-	return 0;
+	struct loongarch_ipi *ipi;
+	int ret;
+
+	ipi = vcpu->kvm->arch.ipi;
+	if (!ipi) {
+		kvm_err("%s: ipi irqchip not valid!\n", __func__);
+		return -EINVAL;
+	}
+	ipi->kvm->stat.ipi_write_exits++;
+	ret = loongarch_ipi_writel(vcpu, addr, len, val);
+	return ret;
 }
 
 static int kvm_ipi_read(struct kvm_vcpu *vcpu,
 			struct kvm_io_device *dev,
 			gpa_t addr, int len, void *val)
 {
-	return 0;
+	struct loongarch_ipi *ipi;
+	int ret;
+
+	ipi = vcpu->kvm->arch.ipi;
+	if (!ipi) {
+		kvm_err("%s: ipi irqchip not valid!\n", __func__);
+		return -EINVAL;
+	}
+	ipi->kvm->stat.ipi_read_exits++;
+	ret = loongarch_ipi_readl(vcpu, addr, len, val);
+	return ret;
+}
+
+static int send_ipi_data(struct kvm_vcpu *vcpu, gpa_t addr, uint64_t data)
+{
+	int i, ret;
+	uint32_t val = 0, mask = 0;
+	/*
+	 * Bit 27-30 is mask for byte writing.
+	 * If the mask is 0, we need not to do anything.
+	 */
+	if ((data >> 27) & 0xf) {
+		/* Read the old val */
+		ret = kvm_io_bus_read(vcpu, KVM_IOCSR_BUS, addr, sizeof(val), &val);
+		if (unlikely(ret)) {
+			kvm_err("%s: : read date from addr %llx failed\n", __func__, addr);
+			return ret;
+		}
+		/* Construct the mask by scanning the bit 27-30 */
+		for (i = 0; i < 4; i++) {
+			if (data & (BIT(27 + i)))
+				mask |= (0xff << (i * 8));
+		}
+	/* Save the old part of val */
+		val &= mask;
+	}
+	val |= ((uint32_t)(data >> 32) & ~mask);
+	ret = kvm_io_bus_write(vcpu, KVM_IOCSR_BUS, addr, sizeof(val), &val);
+	if (unlikely(ret))
+		kvm_err("%s: : write date to addr %llx failed\n", __func__, addr);
+	return ret;
+}
+
+static int mail_send(struct kvm *kvm, uint64_t data)
+{
+	struct kvm_vcpu *vcpu;
+	int cpu, mailbox;
+	int offset, ret;
+
+	cpu = ((data & 0xffffffff) >> 16) & 0x3ff;
+	vcpu = kvm_get_vcpu_by_cpuid(kvm, cpu);
+	if (unlikely(vcpu == NULL)) {
+		kvm_err("%s: invalid target cpu: %d\n", __func__, cpu);
+		return -EINVAL;
+	}
+	mailbox = ((data & 0xffffffff) >> 2) & 0x7;
+	offset = SMP_MAILBOX + CORE_BUF_20 + mailbox * 4;
+	ret = send_ipi_data(vcpu, offset, data);
+	return ret;
+}
+
+static int any_send(struct kvm *kvm, uint64_t data)
+{
+	struct kvm_vcpu *vcpu;
+	int cpu, offset, ret;
+
+	cpu = ((data & 0xffffffff) >> 16) & 0x3ff;
+	vcpu = kvm_get_vcpu_by_cpuid(kvm, cpu);
+	if (unlikely(vcpu == NULL)) {
+		kvm_err("%s: invalid target cpu: %d\n", __func__, cpu);
+		return -EINVAL;
+	}
+	offset = data & 0xffff;
+	ret = send_ipi_data(vcpu, offset, data);
+	return ret;
 }
 
 static int kvm_loongarch_mail_write(struct kvm_vcpu *vcpu,
 			struct kvm_io_device *dev,
 			gpa_t addr, int len, const void *val)
 {
-	return 0;
+	struct loongarch_ipi *ipi;
+	int ret;
+
+	ipi = vcpu->kvm->arch.ipi;
+	if (!ipi) {
+		kvm_err("%s: ipi irqchip not valid!\n", __func__);
+		return -EINVAL;
+	}
+
+	addr &= 0xfff;
+	addr -= IOCSR_MAIL_SEND;
+
+	switch (addr) {
+	case MAIL_SEND_OFFSET:
+		ret = mail_send(vcpu->kvm, *(uint64_t *)val);
+		break;
+	case ANY_SEND_OFFSET:
+		ret = any_send(vcpu->kvm, *(uint64_t *)val);
+		break;
+	default:
+		kvm_err("%s: invalid addr %llx!\n", __func__, addr);
+		ret = -EINVAL;
+		break;
+	}
+	return ret;
 }
 
 static const struct kvm_io_device_ops kvm_ipi_ops = {
