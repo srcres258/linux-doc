@@ -52,6 +52,13 @@ struct landlock_file_security {
 	 * needed to authorize later operations on the open file.
 	 */
 	access_mask_t allowed_access;
+	/**
+	 * @fown_domain: Pointer to the &landlock_ruleset of the process
+	 * receiving SIGIO for this socket.  This pointer is protected by the
+	 * related file->f_owner->lock, as for fown_struct's members: pid, uid,
+	 * and euid.
+	 */
+	struct landlock_ruleset *fown_domain;
 };
 
 /**
