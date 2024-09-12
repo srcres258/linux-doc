@@ -797,16 +797,190 @@ static const struct kvm_io_device_ops kvm_eiointc_virt_ops = {
 	.write	= kvm_eiointc_virt_write,
 };
 
+static int kvm_eiointc_ctrl_access(struct kvm_device *dev,
+					struct kvm_device_attr *attr)
+{
+	unsigned long  type = (unsigned long)attr->attr;
+	unsigned long flags;
+	struct loongarch_eiointc *s = dev->kvm->arch.eiointc;
+	void __user *data;
+	u32 i, start_irq;
+	int len, ret = 0;
+
+	data = (void __user *)attr->addr;
+	loongarch_ext_irq_lock(s, flags);
+	switch (type) {
+	case KVM_DEV_LOONGARCH_EXTIOI_CTRL_INIT_NUM_CPU:
+		len = 4;
+		if (copy_from_user(&s->num_cpu, data, len))
+			ret = -EFAULT;
+		break;
+	case KVM_DEV_LOONGARCH_EXTIOI_CTRL_INIT_FEATURE:
+		len = 4;
+		if (copy_from_user(&s->features, data, len))
+			ret = -EFAULT;
+		if (!(s->features & BIT(EIOINTC_HAS_VIRT_EXTENSION)))
+			s->status |= BIT(EIOINTC_ENABLE);
+		break;
+	case KVM_DEV_LOONGARCH_EXTIOI_CTRL_LOAD_FINISHED:
+		eiointc_set_sw_coreisr(s);
+		for (i = 0; i < (EIOINTC_IRQS / 4); i++) {
+			start_irq = i * 4;
+			eiointc_update_sw_coremap(s, start_irq,
+					(void *)&s->coremap.reg_u32[i],
+					sizeof(u32), false);
+		}
+		break;
+	default:
+		break;
+	}
+	loongarch_ext_irq_unlock(s, flags);
+	return ret;
+}
+
+static int kvm_eiointc_regs_access(struct kvm_device *dev,
+					struct kvm_device_attr *attr,
+					bool is_write)
+{
+	int len, addr, cpuid, offset, ret = 0;
+	void __user *data;
+	void *p = NULL;
+	struct loongarch_eiointc *s;
+	unsigned long flags;
+
+	len = 4;
+	s = dev->kvm->arch.eiointc;
+	addr = attr->attr;
+	cpuid = addr >> 16;
+	addr &= 0xffff;
+	data = (void __user *)attr->addr;
+	switch (addr) {
+	case EIOINTC_NODETYPE_START ... EIOINTC_NODETYPE_END:
+		offset = (addr - EIOINTC_NODETYPE_START) / 4;
+		p = &s->nodetype.reg_u32[offset];
+		break;
+	case EIOINTC_IPMAP_START ... EIOINTC_IPMAP_END:
+		offset = (addr - EIOINTC_IPMAP_START) / 4;
+		p = &s->ipmap.reg_u32[offset];
+		break;
+	case EIOINTC_ENABLE_START ... EIOINTC_ENABLE_END:
+		offset = (addr - EIOINTC_ENABLE_START) / 4;
+		p = &s->enable.reg_u32[offset];
+		break;
+	case EIOINTC_BOUNCE_START ... EIOINTC_BOUNCE_END:
+		offset = (addr - EIOINTC_BOUNCE_START) / 4;
+		p = &s->bounce.reg_u32[offset];
+		break;
+	case EIOINTC_ISR_START ... EIOINTC_ISR_END:
+		offset = (addr - EIOINTC_ISR_START) / 4;
+		p = &s->isr.reg_u32[offset];
+		break;
+	case EIOINTC_COREISR_START ... EIOINTC_COREISR_END:
+		offset = (addr - EIOINTC_COREISR_START) / 4;
+		p = &s->coreisr.reg_u32[cpuid][offset];
+		break;
+	case EIOINTC_COREMAP_START ... EIOINTC_COREMAP_END:
+		offset = (addr - EIOINTC_COREMAP_START) / 4;
+		p = &s->coremap.reg_u32[offset];
+		break;
+	default:
+		kvm_err("%s: unknown eiointc register, addr = %d\n", __func__, addr);
+		return -EINVAL;
+	}
+
+	loongarch_ext_irq_lock(s, flags);
+	if (is_write) {
+		if (copy_from_user(p, data, len))
+			ret = -EFAULT;
+	} else {
+		if (copy_to_user(data, p, len))
+			ret = -EFAULT;
+	}
+	loongarch_ext_irq_unlock(s, flags);
+	return ret;
+}
+
+static int kvm_eiointc_sw_status_access(struct kvm_device *dev,
+					struct kvm_device_attr *attr,
+					bool is_write)
+{
+	int len, addr, ret = 0;
+	void __user *data;
+	void *p = NULL;
+	struct loongarch_eiointc *s;
+	unsigned long flags;
+
+	len = 4;
+	s = dev->kvm->arch.eiointc;
+	addr = attr->attr;
+	addr &= 0xffff;
+
+	data = (void __user *)attr->addr;
+	switch (addr) {
+	case KVM_DEV_LOONGARCH_EXTIOI_SW_STATUS_NUM_CPU:
+		p = &s->num_cpu;
+		break;
+	case KVM_DEV_LOONGARCH_EXTIOI_SW_STATUS_FEATURE:
+		p = &s->features;
+		break;
+	case KVM_DEV_LOONGARCH_EXTIOI_SW_STATUS_STATE:
+		p = &s->status;
+		break;
+	default:
+		kvm_err("%s: unknown eiointc register, addr = %d\n", __func__, addr);
+		return -EINVAL;
+	}
+	loongarch_ext_irq_lock(s, flags);
+	if (is_write) {
+		if (copy_from_user(p, data, len))
+			ret = -EFAULT;
+	} else {
+		if (copy_to_user(data, p, len))
+			ret = -EFAULT;
+	}
+	loongarch_ext_irq_unlock(s, flags);
+	return ret;
+}
+
 static int kvm_eiointc_get_attr(struct kvm_device *dev,
 				struct kvm_device_attr *attr)
 {
-	return 0;
+	__u32	group = attr->group;
+	int ret = -EINVAL;
+
+	switch (group) {
+	case KVM_DEV_LOONGARCH_EXTIOI_GRP_REGS:
+		ret = kvm_eiointc_regs_access(dev, attr, false);
+		break;
+	case KVM_DEV_LOONGARCH_EXTIOI_GRP_SW_STATUS:
+		ret = kvm_eiointc_sw_status_access(dev, attr, false);
+		break;
+	default:
+		break;
+	}
+	return ret;
 }
 
 static int kvm_eiointc_set_attr(struct kvm_device *dev,
 				struct kvm_device_attr *attr)
 {
-	return 0;
+	__u32	group = attr->group;
+	int ret = -EINVAL;
+
+	switch (group) {
+	case KVM_DEV_LOONGARCH_EXTIOI_GRP_REGS:
+		ret = kvm_eiointc_regs_access(dev, attr, true);
+		break;
+	case KVM_DEV_LOONGARCH_EXTIOI_GRP_SW_STATUS:
+		ret = kvm_eiointc_sw_status_access(dev, attr, true);
+		break;
+	case KVM_DEV_LOONGARCH_EXTIOI_GRP_CTRL:
+		ret = kvm_eiointc_ctrl_access(dev, attr);
+		break;
+	default:
+		break;
+	}
+	return ret;
 }
 
 static void kvm_eiointc_destroy(struct kvm_device *dev)
