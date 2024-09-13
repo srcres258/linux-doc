@@ -659,7 +659,7 @@ static int do_fsetxattr(int fd, const char __user *name,
 	int error;
 
 	CLASS(fd, f)(fd);
-	if (!fd_file(f))
+	if (fd_empty(f))
 		return -EBADF;
 
 	audit_file(fd_file(f));
@@ -907,7 +907,7 @@ SYSCALL_DEFINE4(fgetxattr, int, fd, const char __user *, name,
 	struct fd f = fdget(fd);
 	ssize_t error = -EBADF;
 
-	if (!fd_file(f))
+	if (fd_empty(f))
 		return error;
 	audit_file(fd_file(f));
 	error = getxattr(file_mnt_idmap(fd_file(f)), fd_file(f)->f_path.dentry,
@@ -1005,7 +1005,7 @@ SYSCALL_DEFINE3(flistxattr, int, fd, char __user *, list, size_t, size)
 	struct fd f = fdget(fd);
 	ssize_t error = -EBADF;
 
-	if (!fd_file(f))
+	if (fd_empty(f))
 		return error;
 	audit_file(fd_file(f));
 	error = listxattr(fd_file(f)->f_path.dentry, list, size);
@@ -1109,7 +1109,7 @@ SYSCALL_DEFINE2(fremovexattr, int, fd, const char __user *, name)
 	char kname[XATTR_NAME_MAX + 1];
 	int error = -EBADF;
 
-	if (!fd_file(f))
+	if (fd_empty(f))
 		return error;
 	audit_file(fd_file(f));
 

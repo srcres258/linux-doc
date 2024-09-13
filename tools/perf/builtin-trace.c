@@ -65,6 +65,7 @@
 #include "syscalltbl.h"
 #include "rb_resort.h"
 #include "../perf.h"
+#include "trace_augment.h"
 
 #include <errno.h>
 #include <inttypes.h>
@@ -102,6 +103,12 @@
 
 /*
  * strtoul: Go from a string to a value, i.e. for msr: MSR_FS_BASE to 0xc0000100
+ *
+ * We have to explicitely mark the direction of the flow of data, if from the
+ * kernel to user space or the other way around, since the BPF collector we
+ * have so far copies only from user to kernel space, mark the arguments that
+ * go that direction, so that we don´t end up collecting the previous contents
+ * for syscall args that goes from kernel to user space.
  */
 struct syscall_arg_fmt {
 	size_t	   (*scnprintf)(char *bf, size_t size, struct syscall_arg *arg);
@@ -110,9 +117,11 @@ struct syscall_arg_fmt {
 	void	   *parm;
 	const char *name;
 	u16	   nr_entries; // for arrays
+	bool	   from_user;
 	bool	   show_zero;
 #ifdef HAVE_LIBBPF_SUPPORT
 	const struct btf_type *type;
+	int	   type_id; /* used in btf_dump */
 #endif
 };
 
@@ -203,6 +212,7 @@ struct trace {
 	bool			show_string_prefix;
 	bool			force;
 	bool			vfs_getname;
+	bool			force_btf;
 	int			trace_pgfaults;
 	char			*perfconfig_events;
 	struct {
@@ -851,6 +861,15 @@ static size_t syscall_arg__scnprintf_filename(char *bf, size_t size,
 
 #define SCA_FILENAME syscall_arg__scnprintf_filename
 
+// 'argname' is just documentational at this point, to remove the previous comment with that info
+#define SCA_FILENAME_FROM_USER(argname) \
+	  { .scnprintf	= SCA_FILENAME, \
+	    .from_user	= true, }
+
+static size_t syscall_arg__scnprintf_buf(char *bf, size_t size, struct syscall_arg *arg);
+
+#define SCA_BUF syscall_arg__scnprintf_buf
+
 static size_t syscall_arg__scnprintf_pipe_flags(char *bf, size_t size,
 						struct syscall_arg *arg)
 {
@@ -989,6 +1008,54 @@ static size_t btf_enum_scnprintf(const struct btf_type *type, struct btf *btf, c
 	return 0;
 }
 
+struct trace_btf_dump_snprintf_ctx {
+	char   *bf;
+	size_t printed, size;
+};
+
+static void trace__btf_dump_snprintf(void *vctx, const char *fmt, va_list args)
+{
+	struct trace_btf_dump_snprintf_ctx *ctx = vctx;
+
+	ctx->printed += vscnprintf(ctx->bf + ctx->printed, ctx->size - ctx->printed, fmt, args);
+}
+
+static size_t btf_struct_scnprintf(const struct btf_type *type, struct btf *btf, char *bf, size_t size, struct syscall_arg *arg)
+{
+	struct trace_btf_dump_snprintf_ctx ctx = {
+		.bf   = bf,
+		.size = size,
+	};
+	struct augmented_arg *augmented_arg = arg->augmented.args;
+	int type_id = arg->fmt->type_id, consumed;
+	struct btf_dump *btf_dump;
+
+	LIBBPF_OPTS(btf_dump_opts, dump_opts);
+	LIBBPF_OPTS(btf_dump_type_data_opts, dump_data_opts);
+
+	if (arg == NULL || arg->augmented.args == NULL)
+		return 0;
+
+	dump_data_opts.compact	  = true;
+	dump_data_opts.skip_names = !arg->trace->show_arg_names;
+
+	btf_dump = btf_dump__new(btf, trace__btf_dump_snprintf, &ctx, &dump_opts);
+	if (btf_dump == NULL)
+		return 0;
+
+	/* pretty print the struct data here */
+	if (btf_dump__dump_type_data(btf_dump, type_id, arg->augmented.args->value, type->size, &dump_data_opts) == 0)
+		return 0;
+
+	consumed = sizeof(*augmented_arg) + augmented_arg->size;
+	arg->augmented.args = ((void *)arg->augmented.args) + consumed;
+	arg->augmented.size -= consumed;
+
+	btf_dump__free(btf_dump);
+
+	return ctx.printed;
+}
+
 static size_t trace__btf_scnprintf(struct trace *trace, struct syscall_arg *arg, char *bf,
 				   size_t size, int val, char *type)
 {
@@ -1008,6 +1075,8 @@ static size_t trace__btf_scnprintf(struct trace *trace, struct syscall_arg *arg,
 
 	if (btf_is_enum(arg_fmt->type))
 		return btf_enum_scnprintf(arg_fmt->type, trace->btf, bf, size, val);
+	else if (btf_is_struct(arg_fmt->type) || btf_is_union(arg_fmt->type))
+		return btf_struct_scnprintf(arg_fmt->type, trace->btf, bf, size, arg);
 
 	return 0;
 }
@@ -1063,16 +1132,17 @@ static const struct syscall_fmt syscall_fmts[] = {
 		   [1] = { .scnprintf = SCA_PTR, /* arg2 */ }, }, },
 	{ .name	    = "bind",
 	  .arg = { [0] = { .scnprintf = SCA_INT, /* fd */ },
-		   [1] = { .scnprintf = SCA_SOCKADDR, /* umyaddr */ },
+		   [1] = SCA_SOCKADDR_FROM_USER(umyaddr),
 		   [2] = { .scnprintf = SCA_INT, /* addrlen */ }, }, },
 	{ .name	    = "bpf",
-	  .arg = { [0] = STRARRAY(cmd, bpf_cmd), }, },
+	  .arg = { [0] = STRARRAY(cmd, bpf_cmd),
+		   [1] = { .from_user = true /* attr */, }, } },
 	{ .name	    = "brk",	    .hexret = true,
 	  .arg = { [0] = { .scnprintf = SCA_PTR, /* brk */ }, }, },
 	{ .name     = "clock_gettime",
 	  .arg = { [0] = STRARRAY(clk_id, clockid), }, },
 	{ .name	    = "clock_nanosleep",
-	  .arg = { [2] = { .scnprintf = SCA_TIMESPEC,  /* rqtp */ }, }, },
+	  .arg = { [2] = SCA_TIMESPEC_FROM_USER(req), }, },
 	{ .name	    = "clone",	    .errpid = true, .nr_args = 5,
 	  .arg = { [0] = { .name = "flags",	    .scnprintf = SCA_CLONE_FLAGS, },
 		   [1] = { .name = "child_stack",   .scnprintf = SCA_HEX, },
@@ -1083,7 +1153,7 @@ static const struct syscall_fmt syscall_fmts[] = {
 	  .arg = { [0] = { .scnprintf = SCA_CLOSE_FD, /* fd */ }, }, },
 	{ .name	    = "connect",
 	  .arg = { [0] = { .scnprintf = SCA_INT, /* fd */ },
-		   [1] = { .scnprintf = SCA_SOCKADDR, /* servaddr */ },
+		   [1] = SCA_SOCKADDR_FROM_USER(servaddr),
 		   [2] = { .scnprintf = SCA_INT, /* addrlen */ }, }, },
 	{ .name	    = "epoll_ctl",
 	  .arg = { [1] = STRARRAY(op, epoll_ctl_ops), }, },
@@ -1091,11 +1161,11 @@ static const struct syscall_fmt syscall_fmts[] = {
 	  .arg = { [1] = { .scnprintf = SCA_EFD_FLAGS, /* flags */ }, }, },
 	{ .name     = "faccessat",
 	  .arg = { [0] = { .scnprintf = SCA_FDAT,	  /* dirfd */ },
-		   [1] = { .scnprintf = SCA_FILENAME,	  /* pathname */ },
+		   [1] = SCA_FILENAME_FROM_USER(pathname),
 		   [2] = { .scnprintf = SCA_ACCMODE,	  /* mode */ }, }, },
 	{ .name     = "faccessat2",
 	  .arg = { [0] = { .scnprintf = SCA_FDAT,	  /* dirfd */ },
-		   [1] = { .scnprintf = SCA_FILENAME,	  /* pathname */ },
+		   [1] = SCA_FILENAME_FROM_USER(pathname),
 		   [2] = { .scnprintf = SCA_ACCMODE,	  /* mode */ },
 		   [3] = { .scnprintf = SCA_FACCESSAT2_FLAGS, /* flags */ }, }, },
 	{ .name	    = "fchmodat",
@@ -1117,7 +1187,7 @@ static const struct syscall_fmt syscall_fmts[] = {
 		   [2] = { .scnprintf = SCA_FSMOUNT_ATTR_FLAGS, /* attr_flags */ }, }, },
 	{ .name     = "fspick",
 	  .arg = { [0] = { .scnprintf = SCA_FDAT,	  /* dfd */ },
-		   [1] = { .scnprintf = SCA_FILENAME,	  /* path */ },
+		   [1] = SCA_FILENAME_FROM_USER(path),
 		   [2] = { .scnprintf = SCA_FSPICK_FLAGS, /* flags */ }, }, },
 	{ .name	    = "fstat", .alias = "newfstat", },
 	{ .name	    = "futex",
@@ -1181,29 +1251,29 @@ static const struct syscall_fmt syscall_fmts[] = {
 			   .parm      = &strarray__mmap_flags, },
 		   [5] = { .scnprintf = SCA_HEX,	/* offset */ }, }, },
 	{ .name	    = "mount",
-	  .arg = { [0] = { .scnprintf = SCA_FILENAME, /* dev_name */ },
+	  .arg = { [0] = SCA_FILENAME_FROM_USER(devname),
 		   [3] = { .scnprintf = SCA_MOUNT_FLAGS, /* flags */
 			   .mask_val  = SCAMV_MOUNT_FLAGS, /* flags */ }, }, },
 	{ .name	    = "move_mount",
 	  .arg = { [0] = { .scnprintf = SCA_FDAT,	/* from_dfd */ },
-		   [1] = { .scnprintf = SCA_FILENAME, /* from_pathname */ },
+		   [1] = SCA_FILENAME_FROM_USER(pathname),
 		   [2] = { .scnprintf = SCA_FDAT,	/* to_dfd */ },
-		   [3] = { .scnprintf = SCA_FILENAME, /* to_pathname */ },
+		   [3] = SCA_FILENAME_FROM_USER(pathname),
 		   [4] = { .scnprintf = SCA_MOVE_MOUNT_FLAGS, /* flags */ }, }, },
 	{ .name	    = "mprotect",
 	  .arg = { [0] = { .scnprintf = SCA_HEX,	/* start */ },
 		   [2] = { .scnprintf = SCA_MMAP_PROT, .show_zero = true, /* prot */ }, }, },
 	{ .name	    = "mq_unlink",
-	  .arg = { [0] = { .scnprintf = SCA_FILENAME, /* u_name */ }, }, },
+	  .arg = { [0] = SCA_FILENAME_FROM_USER(u_name), }, },
 	{ .name	    = "mremap",	    .hexret = true,
 	  .arg = { [3] = { .scnprintf = SCA_MREMAP_FLAGS, /* flags */ }, }, },
 	{ .name	    = "name_to_handle_at",
 	  .arg = { [0] = { .scnprintf = SCA_FDAT, /* dfd */ }, }, },
 	{ .name	    = "nanosleep",
-	  .arg = { [0] = { .scnprintf = SCA_TIMESPEC,  /* req */ }, }, },
+	  .arg = { [0] = SCA_TIMESPEC_FROM_USER(req), }, },
 	{ .name	    = "newfstatat", .alias = "fstatat",
 	  .arg = { [0] = { .scnprintf = SCA_FDAT,	  /* dirfd */ },
-		   [1] = { .scnprintf = SCA_FILENAME,	  /* pathname */ },
+		   [1] = SCA_FILENAME_FROM_USER(pathname),
 		   [3] = { .scnprintf = SCA_FS_AT_FLAGS, /* flags */ }, }, },
 	{ .name	    = "open",
 	  .arg = { [1] = { .scnprintf = SCA_OPEN_FLAGS, /* flags */ }, }, },
@@ -1214,7 +1284,7 @@ static const struct syscall_fmt syscall_fmts[] = {
 	  .arg = { [0] = { .scnprintf = SCA_FDAT,	/* dfd */ },
 		   [2] = { .scnprintf = SCA_OPEN_FLAGS, /* flags */ }, }, },
 	{ .name	    = "perf_event_open",
-	  .arg = { [0] = { .scnprintf = SCA_PERF_ATTR,  /* attr */ },
+	  .arg = { [0] = SCA_PERF_ATTR_FROM_USER(attr),
 		   [2] = { .scnprintf = SCA_INT,	/* cpu */ },
 		   [3] = { .scnprintf = SCA_FD,		/* group_fd */ },
 		   [4] = { .scnprintf = SCA_PERF_FLAGS, /* flags */ }, }, },
@@ -1239,7 +1309,8 @@ static const struct syscall_fmt syscall_fmts[] = {
 	{ .name	    = "pread", .alias = "pread64", },
 	{ .name	    = "preadv", .alias = "pread", },
 	{ .name	    = "prlimit64",
-	  .arg = { [1] = STRARRAY(resource, rlimit_resources), }, },
+	  .arg = { [1] = STRARRAY(resource, rlimit_resources),
+		   [2] = { .from_user = true /* new_rlim */, }, }, },
 	{ .name	    = "pwrite", .alias = "pwrite64", },
 	{ .name	    = "readlinkat",
 	  .arg = { [0] = { .scnprintf = SCA_FDAT, /* dfd */ }, }, },
@@ -1256,6 +1327,8 @@ static const struct syscall_fmt syscall_fmts[] = {
 	  .arg = { [0] = { .scnprintf = SCA_FDAT, /* olddirfd */ },
 		   [2] = { .scnprintf = SCA_FDAT, /* newdirfd */ },
 		   [4] = { .scnprintf = SCA_RENAMEAT2_FLAGS, /* flags */ }, }, },
+	{ .name	    = "rseq",	    .errpid = true,
+	  .arg = { [0] = { .from_user = true /* rseq */, }, }, },
 	{ .name	    = "rt_sigaction",
 	  .arg = { [0] = { .scnprintf = SCA_SIGNUM, /* sig */ }, }, },
 	{ .name	    = "rt_sigprocmask",
@@ -1277,12 +1350,15 @@ static const struct syscall_fmt syscall_fmts[] = {
 	  .arg = { [2] = { .scnprintf = SCA_MSG_FLAGS, /* flags */ }, }, },
 	{ .name	    = "sendto",
 	  .arg = { [3] = { .scnprintf = SCA_MSG_FLAGS, /* flags */ },
-		   [4] = { .scnprintf = SCA_SOCKADDR, /* addr */ }, }, },
+		   [4] = SCA_SOCKADDR_FROM_USER(addr), }, },
+	{ .name	    = "set_robust_list",	    .errpid = true,
+	  .arg = { [0] = { .from_user = true /* head */, }, }, },
 	{ .name	    = "set_tid_address", .errpid = true, },
 	{ .name	    = "setitimer",
 	  .arg = { [0] = STRARRAY(which, itimers), }, },
 	{ .name	    = "setrlimit",
-	  .arg = { [0] = STRARRAY(resource, rlimit_resources), }, },
+	  .arg = { [0] = STRARRAY(resource, rlimit_resources),
+		   [1] = { .from_user = true /* rlim */, }, }, },
 	{ .name	    = "setsockopt",
 	  .arg = { [1] = STRARRAY(level, socket_level), }, },
 	{ .name	    = "socket",
@@ -1299,9 +1375,9 @@ static const struct syscall_fmt syscall_fmts[] = {
 		   [2] = { .scnprintf = SCA_FS_AT_FLAGS, /* flags */ } ,
 		   [3] = { .scnprintf = SCA_STATX_MASK,	 /* mask */ }, }, },
 	{ .name	    = "swapoff",
-	  .arg = { [0] = { .scnprintf = SCA_FILENAME, /* specialfile */ }, }, },
+	  .arg = { [0] = SCA_FILENAME_FROM_USER(specialfile), }, },
 	{ .name	    = "swapon",
-	  .arg = { [0] = { .scnprintf = SCA_FILENAME, /* specialfile */ }, }, },
+	  .arg = { [0] = SCA_FILENAME_FROM_USER(specialfile), }, },
 	{ .name	    = "symlinkat",
 	  .arg = { [0] = { .scnprintf = SCA_FDAT, /* dfd */ }, }, },
 	{ .name	    = "sync_file_range",
@@ -1311,11 +1387,11 @@ static const struct syscall_fmt syscall_fmts[] = {
 	{ .name	    = "tkill",
 	  .arg = { [1] = { .scnprintf = SCA_SIGNUM, /* sig */ }, }, },
 	{ .name     = "umount2", .alias = "umount",
-	  .arg = { [0] = { .scnprintf = SCA_FILENAME, /* name */ }, }, },
+	  .arg = { [0] = SCA_FILENAME_FROM_USER(name), }, },
 	{ .name	    = "uname", .alias = "newuname", },
 	{ .name	    = "unlinkat",
 	  .arg = { [0] = { .scnprintf = SCA_FDAT,	  /* dfd */ },
-		   [1] = { .scnprintf = SCA_FILENAME,	  /* pathname */ },
+		   [1] = SCA_FILENAME_FROM_USER(pathname),
 		   [2] = { .scnprintf = SCA_FS_AT_FLAGS,  /* flags */ }, }, },
 	{ .name	    = "utimensat",
 	  .arg = { [0] = { .scnprintf = SCA_FDAT, /* dirfd */ }, }, },
@@ -1323,6 +1399,8 @@ static const struct syscall_fmt syscall_fmts[] = {
 	  .arg = { [2] = { .scnprintf = SCA_WAITID_OPTIONS, /* options */ }, }, },
 	{ .name	    = "waitid",	    .errpid = true,
 	  .arg = { [3] = { .scnprintf = SCA_WAITID_OPTIONS, /* options */ }, }, },
+	{ .name	    = "write",	    .errpid = true,
+	  .arg = { [1] = { .scnprintf = SCA_BUF /* buf */, .from_user = true, }, }, },
 };
 
 static int syscall_fmt__cmp(const void *name, const void *fmtp)
@@ -1694,6 +1772,32 @@ static size_t syscall_arg__scnprintf_filename(char *bf, size_t size,
 	return 0;
 }
 
+#define MAX_CONTROL_CHAR 31
+#define MAX_ASCII 127
+
+static size_t syscall_arg__scnprintf_buf(char *bf, size_t size, struct syscall_arg *arg)
+{
+	struct augmented_arg *augmented_arg = arg->augmented.args;
+	unsigned char *orig = (unsigned char *)augmented_arg->value;
+	size_t printed = 0;
+	int consumed;
+
+	if (augmented_arg == NULL)
+		return 0;
+
+	for (int j = 0; j < augmented_arg->size; ++j) {
+		bool control_char = orig[j] <= MAX_CONTROL_CHAR || orig[j] >= MAX_ASCII;
+		/* print control characters (0~31 and 127), and non-ascii characters in \(digits) */
+		printed += scnprintf(bf + printed, size - printed, control_char ? "\\%d" : "%c", (int)orig[j]);
+	}
+
+	consumed = sizeof(*augmented_arg) + augmented_arg->size;
+	arg->augmented.args = ((void *)arg->augmented.args) + consumed;
+	arg->augmented.size -= consumed;
+
+	return printed;
+}
+
 static bool trace__filter_duration(struct trace *trace, double t)
 {
 	return t < (trace->duration_filter * NSEC_PER_MSEC);
@@ -1901,11 +2005,15 @@ syscall_arg_fmt__init_array(struct syscall_arg_fmt *arg, struct tep_format_field
 
 		len = strlen(field->name);
 
+		// As far as heuristics (or intention) goes this seems to hold true, and makes sense!
+		if ((field->flags & TEP_FIELD_IS_POINTER) && strstarts(field->type, "const "))
+			arg->from_user = true;
+
 		if (strcmp(field->type, "const char *") == 0 &&
 		    ((len >= 4 && strcmp(field->name + len - 4, "name") == 0) ||
-		     strstr(field->name, "path") != NULL))
+		     strstr(field->name, "path") != NULL)) {
 			arg->scnprintf = SCA_FILENAME;
-		else if ((field->flags & TEP_FIELD_IS_POINTER) || strstr(field->name, "addr"))
+		} else if ((field->flags & TEP_FIELD_IS_POINTER) || strstr(field->name, "addr"))
 			arg->scnprintf = SCA_PTR;
 		else if (strcmp(field->type, "pid_t") == 0)
 			arg->scnprintf = SCA_PID;
@@ -2221,6 +2329,7 @@ static size_t syscall__scnprintf_args(struct syscall *sc, char *bf, size_t size,
 		.show_string_prefix = trace->show_string_prefix,
 	};
 	struct thread_trace *ttrace = thread__priv(thread);
+	void *default_scnprintf;
 
 	/*
 	 * Things like fcntl will set this in its 'cmd' formatter to pick the
@@ -2262,11 +2371,15 @@ static size_t syscall__scnprintf_args(struct syscall *sc, char *bf, size_t size,
 			if (trace->show_arg_names)
 				printed += scnprintf(bf + printed, size - printed, "%s: ", field->name);
 
-			btf_printed = trace__btf_scnprintf(trace, &arg, bf + printed,
-							   size - printed, val, field->type);
-			if (btf_printed) {
-				printed += btf_printed;
-				continue;
+			default_scnprintf = sc->arg_fmt[arg.idx].scnprintf;
+
+			if (trace->force_btf || default_scnprintf == NULL || default_scnprintf == SCA_PTR) {
+				btf_printed = trace__btf_scnprintf(trace, &arg, bf + printed,
+								   size - printed, val, field->type);
+				if (btf_printed) {
+					printed += btf_printed;
+					continue;
+				}
 			}
 
 			printed += syscall_arg_fmt__scnprintf_val(&sc->arg_fmt[arg.idx],
@@ -3448,6 +3561,23 @@ out_enomem:
 }
 
 #ifdef HAVE_BPF_SKEL
+static int syscall_arg_fmt__cache_btf_struct(struct syscall_arg_fmt *arg_fmt, struct btf *btf, char *type)
+{
+       int id;
+
+	if (arg_fmt->type != NULL)
+		return -1;
+
+       id = btf__find_by_name(btf, type);
+       if (id < 0)
+		return -1;
+
+       arg_fmt->type    = btf__type_by_id(btf, id);
+       arg_fmt->type_id = id;
+
+       return 0;
+}
+
 static struct bpf_program *trace__find_bpf_program_by_title(struct trace *trace, const char *name)
 {
 	struct bpf_program *pos, *prog = NULL;
@@ -3521,6 +3651,91 @@ static int trace__bpf_prog_sys_exit_fd(struct trace *trace, int id)
 {
 	struct syscall *sc = trace__syscall_info(trace, NULL, id);
 	return sc ? bpf_program__fd(sc->bpf_prog.sys_exit) : bpf_program__fd(trace->skel->progs.syscall_unaugmented);
+}
+
+static int trace__bpf_sys_enter_beauty_map(struct trace *trace, int key, unsigned int *beauty_array)
+{
+	struct tep_format_field *field;
+	struct syscall *sc = trace__syscall_info(trace, NULL, key);
+	const struct btf_type *bt;
+	char *struct_offset, *tmp, name[32];
+	bool can_augment = false;
+	int i, cnt;
+
+	if (sc == NULL)
+		return -1;
+
+	trace__load_vmlinux_btf(trace);
+	if (trace->btf == NULL)
+		return -1;
+
+	for (i = 0, field = sc->args; field; ++i, field = field->next) {
+		// XXX We're only collecting pointer payloads _from_ user space
+		if (!sc->arg_fmt[i].from_user)
+			continue;
+
+		struct_offset = strstr(field->type, "struct ");
+		if (struct_offset == NULL)
+			struct_offset = strstr(field->type, "union ");
+		else
+			struct_offset++; // "union" is shorter
+
+		if (field->flags & TEP_FIELD_IS_POINTER && struct_offset) { /* struct or union (think BPF's attr arg) */
+			struct_offset += 6;
+
+			/* for 'struct foo *', we only want 'foo' */
+			for (tmp = struct_offset, cnt = 0; *tmp != ' ' && *tmp != '\0'; ++tmp, ++cnt) {
+			}
+
+			strncpy(name, struct_offset, cnt);
+			name[cnt] = '\0';
+
+			/* cache struct's btf_type and type_id */
+			if (syscall_arg_fmt__cache_btf_struct(&sc->arg_fmt[i], trace->btf, name))
+				continue;
+
+			bt = sc->arg_fmt[i].type;
+			beauty_array[i] = bt->size;
+			can_augment = true;
+		} else if (field->flags & TEP_FIELD_IS_POINTER && /* string */
+			   strcmp(field->type, "const char *") == 0 &&
+			   (strstr(field->name, "name") ||
+			    strstr(field->name, "path") ||
+			    strstr(field->name, "file") ||
+			    strstr(field->name, "root") ||
+			    strstr(field->name, "key") ||
+			    strstr(field->name, "special") ||
+			    strstr(field->name, "type") ||
+			    strstr(field->name, "description"))) {
+			beauty_array[i] = 1;
+			can_augment = true;
+		} else if (field->flags & TEP_FIELD_IS_POINTER && /* buffer */
+			   strstr(field->type, "char *") &&
+			   (strstr(field->name, "buf") ||
+			    strstr(field->name, "val") ||
+			    strstr(field->name, "msg"))) {
+			int j;
+			struct tep_format_field *field_tmp;
+
+			/* find the size of the buffer that appears in pairs with buf */
+			for (j = 0, field_tmp = sc->args; field_tmp; ++j, field_tmp = field_tmp->next) {
+				if (!(field_tmp->flags & TEP_FIELD_IS_POINTER) && /* only integers */
+				    (strstr(field_tmp->name, "count") ||
+				     strstr(field_tmp->name, "siz") ||  /* size, bufsiz */
+				     (strstr(field_tmp->name, "len") && strcmp(field_tmp->name, "filename")))) {
+					 /* filename's got 'len' in it, we don't want that */
+					beauty_array[i] = -(j + 1);
+					can_augment = true;
+					break;
+				}
+			}
+		}
+	}
+
+	if (can_augment)
+		return 0;
+
+	return -1;
 }
 
 static struct bpf_program *trace__find_usable_bpf_prog_entry(struct trace *trace, struct syscall *sc)
@@ -3627,7 +3842,9 @@ static int trace__init_syscalls_bpf_prog_array_maps(struct trace *trace)
 {
 	int map_enter_fd = bpf_map__fd(trace->skel->maps.syscalls_sys_enter);
 	int map_exit_fd  = bpf_map__fd(trace->skel->maps.syscalls_sys_exit);
+	int beauty_map_fd = bpf_map__fd(trace->skel->maps.beauty_map_enter);
 	int err = 0;
+	unsigned int beauty_array[6];
 
 	for (int i = 0; i < trace->sctbl->syscalls.nr_entries; ++i) {
 		int prog_fd, key = syscalltbl__id_at_idx(trace->sctbl, i);
@@ -3644,6 +3861,15 @@ static int trace__init_syscalls_bpf_prog_array_maps(struct trace *trace)
 			break;
 		prog_fd = trace__bpf_prog_sys_exit_fd(trace, key);
 		err = bpf_map_update_elem(map_exit_fd, &key, &prog_fd, BPF_ANY);
+		if (err)
+			break;
+
+		/* use beauty_map to tell BPF how many bytes to collect, set beauty_map's value here */
+		memset(beauty_array, 0, sizeof(beauty_array));
+		err = trace__bpf_sys_enter_beauty_map(trace, key, (unsigned int *)beauty_array);
+		if (err)
+			continue;
+		err = bpf_map_update_elem(beauty_map_fd, &key, beauty_array, BPF_ANY);
 		if (err)
 			break;
 	}
@@ -4959,6 +5185,8 @@ int cmd_trace(int argc, const char **argv)
 	OPT_INTEGER('D', "delay", &trace.opts.target.initial_delay,
 		     "ms to wait before starting measurement after program "
 		     "start"),
+	OPT_BOOLEAN(0, "force-btf", &trace.force_btf, "Prefer btf_dump general pretty printer"
+		       "to customized ones"),
 	OPTS_EVSWITCH(&trace.evswitch),
 	OPT_END()
 	};

@@ -510,7 +510,7 @@ static u8 _rtl92e_phy_set_sw_chnl_cmd_array(struct net_device *dev,
 					    struct sw_chnl_cmd *CmdTable,
 					    u32 CmdTableIdx, u32 CmdTableSz,
 					    enum sw_chnl_cmd_id cmd_id,
-					    u32 Para1, u32 Para2, u32 ms_delay)
+					    u32 para1, u32 para2, u32 ms_delay)
 {
 	struct sw_chnl_cmd *pCmd;
 
@@ -525,8 +525,8 @@ static u8 _rtl92e_phy_set_sw_chnl_cmd_array(struct net_device *dev,
 
 	pCmd = CmdTable + CmdTableIdx;
 	pCmd->cmd_id = cmd_id;
-	pCmd->Para1 = Para1;
-	pCmd->Para2 = Para2;
+	pCmd->para1 = para1;
+	pCmd->para2 = para2;
 	pCmd->ms_delay = ms_delay;
 
 	return true;
@@ -618,24 +618,24 @@ static u8 _rtl92e_phy_switch_channel_step(struct net_device *dev, u8 channel,
 								   channel);
 				break;
 			case cmd_id_write_port_ulong:
-				rtl92e_writel(dev, CurrentCmd->Para1,
-					      CurrentCmd->Para2);
+				rtl92e_writel(dev, CurrentCmd->para1,
+					      CurrentCmd->para2);
 				break;
 			case cmd_id_write_port_ushort:
-				rtl92e_writew(dev, CurrentCmd->Para1,
-					      CurrentCmd->Para2);
+				rtl92e_writew(dev, CurrentCmd->para1,
+					      CurrentCmd->para2);
 				break;
 			case cmd_id_write_port_uchar:
-				rtl92e_writeb(dev, CurrentCmd->Para1,
-					      CurrentCmd->Para2);
+				rtl92e_writeb(dev, CurrentCmd->para1,
+					      CurrentCmd->para2);
 				break;
 			case cmd_id_rf_write_reg:
 				for (eRFPath = 0; eRFPath <
 				     priv->num_total_rf_path; eRFPath++)
 					rtl92e_set_rf_reg(dev,
 						 (enum rf90_radio_path)eRFPath,
-						 CurrentCmd->Para1, bMask12Bits,
-						 CurrentCmd->Para2 << 7);
+						 CurrentCmd->para1, bMask12Bits,
+						 CurrentCmd->para2 << 7);
 				break;
 			default:
 				break;

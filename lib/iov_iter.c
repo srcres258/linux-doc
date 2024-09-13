@@ -1026,7 +1026,7 @@ static ssize_t iter_folioq_get_pages(struct iov_iter *iter,
 		iov_offset += part;
 		extracted += part;
 
-		*pages = folio_page(folio, offset % PAGE_SIZE);
+		*pages = folio_page(folio, offset / PAGE_SIZE);
 		get_page(*pages);
 		pages++;
 		maxpages--;

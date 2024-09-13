@@ -107,7 +107,7 @@ struct cb_desc {
 	u8 tx_use_drv_assinged_rate:1;
 	u8 hw_sec:1;
 
-	u8 nStuckCount;
+	u8 stuck_count;
 
 	/* Tx Firmware Related flags (10-11)*/
 	u8 cts_enable:1;
@@ -164,8 +164,8 @@ enum sw_chnl_cmd_id {
 
 struct sw_chnl_cmd {
 	enum sw_chnl_cmd_id cmd_id;
-	u32			Para1;
-	u32			Para2;
+	u32			para1;
+	u32			para2;
 	u32			ms_delay;
 };
 
@@ -464,9 +464,9 @@ struct rtllib_rx_stats {
 	u8  mask;
 	u16 len;
 	u16 Length;
-	u8  SignalQuality;
+	u8  signal_quality;
 	s32 RecvSignalPower;
-	u8  SignalStrength;
+	u8  signal_strength;
 	u16 hw_error:1;
 	u16 bCRC:1;
 	u16 bICV:1;
@@ -474,8 +474,8 @@ struct rtllib_rx_stats {
 	u32 time_stamp_low;
 	u32 time_stamp_high;
 
-	u8    RxDrvInfoSize;
-	u8    RxBufShift;
+	u8    rx_drv_info_size;
+	u8    rx_buf_shift;
 	bool  bIsAMPDU;
 	bool  bFirstMPDU;
 	bool  contain_htc;
@@ -484,7 +484,7 @@ struct rtllib_rx_stats {
 	s8    RxMIMOSignalQuality[2];
 	bool  bPacketMatchBSSID;
 	bool  bIsCCK;
-	bool  bPacketToSelf;
+	bool  packet_to_self;
 	bool   bPacketBeacon;
 	bool   bToSelfBA;
 };
@@ -951,7 +951,7 @@ struct rtllib_network {
 	bool unknown_cap_exist;
 	bool	berp_info_valid;
 	bool buseprotection;
-	u8 SignalStrength;
+	u8 signal_strength;
 	u8 RSSI;
 	struct list_head list;
 };
@@ -1015,7 +1015,7 @@ struct bandwidth_autoswitch {
 #define REORDER_ENTRY_NUM	128
 struct rx_reorder_entry {
 	struct list_head	list;
-	u16			SeqNum;
+	u16			seq_num;
 	struct rtllib_rxb *prxb;
 };
 
@@ -1460,9 +1460,9 @@ struct rtllib_device {
 	void (*set_wireless_mode)(struct net_device *dev, u8 wireless_mode);
 	bool (*get_half_nmode_support_by_aps_handler)(struct net_device *dev);
 	u8   (*rtllib_ap_sec_type)(struct rtllib_device *ieee);
-	void (*init_gain_handler)(struct net_device *dev, u8 Operation);
-	void (*ScanOperationBackupHandler)(struct net_device *dev,
-					   u8 Operation);
+	void (*init_gain_handler)(struct net_device *dev, u8 operation);
+	void (*scan_operation_backup_handler)(struct net_device *dev,
+					   u8 operation);
 	void (*set_hw_reg_handler)(struct net_device *dev, u8 variable, u8 *val);
 
 	void (*allow_all_dest_addr_handler)(struct net_device *dev,
@@ -1726,7 +1726,7 @@ void ht_set_connect_bw_mode(struct rtllib_device *ieee,
 void ht_update_default_setting(struct rtllib_device *ieee);
 void ht_construct_capability_element(struct rtllib_device *ieee,
 				  u8 *pos_ht_cap, u8 *len,
-				  u8 isEncrypt, bool bAssoc);
+				  u8 is_encrypt, bool assoc);
 void ht_construct_rt2rt_agg_element(struct rtllib_device *ieee,
 				u8 *posRT2RTAgg, u8 *len);
 void ht_on_assoc_rsp(struct rtllib_device *ieee);
@@ -1740,7 +1740,7 @@ u8 ht_get_highest_mcs_rate(struct rtllib_device *ieee, u8 *pMCSRateSet,
 		       u8 *pMCSFilter);
 extern u8 MCS_FILTER_ALL[];
 extern u16 MCS_DATA_RATE[2][2][77];
-u8 ht_c_check(struct rtllib_device *ieee, u8 *pFrame);
+u8 ht_c_check(struct rtllib_device *ieee, u8 *frame);
 void ht_reset_iot_setting(struct rt_hi_throughput *ht_info);
 bool is_ht_half_nmode_aps(struct rtllib_device *ieee);
 u16  tx_count_to_data_rate(struct rtllib_device *ieee, u8 nDataRate);
@@ -1757,7 +1757,7 @@ void rtllib_tx_ba_inact_timeout(struct timer_list *t);
 void rtllib_rx_ba_inact_timeout(struct timer_list *t);
 void rtllib_reset_ba_entry(struct ba_record *ba);
 bool rtllib_get_ts(struct rtllib_device *ieee, struct ts_common_info **ppTS, u8 *addr,
-	   u8 TID, enum tr_select tx_rx_select, bool bAddNewTs);
+	   u8 TID, enum tr_select tx_rx_select, bool add_new_ts);
 void rtllib_ts_init(struct rtllib_device *ieee);
 void rtllib_ts_start_add_ba_process(struct rtllib_device *ieee,
 			 struct tx_ts_record *pTxTS);

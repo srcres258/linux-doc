@@ -198,7 +198,7 @@ static bool is_abstract_socket(struct sock *const sock)
 		return false;
 
 	if (addr->len >= offsetof(struct sockaddr_un, sun_path) + 1 &&
-	    addr->name[0].sun_path[0] == '\0')
+	    addr->name->sun_path[0] == '\0')
 		return true;
 
 	return false;
@@ -230,17 +230,16 @@ static int hook_unix_may_send(struct socket *const sock,
 	if (!dom)
 		return 0;
 
-	if (is_abstract_socket(other->sk)) {
-		/*
-		 * Checks if this datagram socket was already allowed to
-		 * be connected to other.
-		 */
-		if (unix_peer(sock->sk) == other->sk)
-			return 0;
+	/*
+	 * Checks if this datagram socket was already allowed to be connected
+	 * to other.
+	 */
+	if (unix_peer(sock->sk) == other->sk)
+		return 0;
 
-		if (sock_is_scoped(other->sk, dom))
-			return -EPERM;
-	}
+	if (is_abstract_socket(other->sk) && sock_is_scoped(other->sk, dom))
+		return -EPERM;
+
 	return 0;
 }
 

@@ -17,6 +17,7 @@
 #include "openclose.h"
 #include "rsrc.h"
 #include "memmap.h"
+#include "register.h"
 
 struct io_rsrc_update {
 	struct file			*file;
@@ -1216,22 +1217,25 @@ out_unlock:
 int io_register_copy_buffers(struct io_ring_ctx *ctx, void __user *arg)
 {
 	struct io_uring_copy_buffers buf;
-	struct fd f;
+	bool registered_src;
+	struct file *file;
 	int ret;
 
 	if (ctx->user_bufs || ctx->nr_user_bufs)
 		return -EBUSY;
 	if (copy_from_user(&buf, arg, sizeof(buf)))
 		return -EFAULT;
+	if (buf.flags & ~IORING_REGISTER_SRC_REGISTERED)
+		return -EINVAL;
 	if (memchr_inv(buf.pad, 0, sizeof(buf.pad)))
 		return -EINVAL;
 
-	ret = -EBADF;
-	f = fdget(buf.src_fd);
-	if (f.file) {
-		if (io_is_uring_fops(f.file))
-			ret = io_copy_buffers(ctx, f.file->private_data);
-		fdput(f);
-	}
+	registered_src = (buf.flags & IORING_REGISTER_SRC_REGISTERED) != 0;
+	file = io_uring_register_get_file(buf.src_fd, registered_src);
+	if (IS_ERR(file))
+		return PTR_ERR(file);
+	ret = io_copy_buffers(ctx, file->private_data);
+	if (!registered_src)
+		fput(file);
 	return ret;
 }

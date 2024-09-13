@@ -191,8 +191,9 @@ arm/fixes
 ep93xx/dt-conversion
 	patch
 		ep93xx: clock: Fix off by one in ep93xx_div_recalc_rate()
-		clk: fixed-rate: add devm_clk_hw_register_fixed_rate_parent_data()
-		ASoC: dt-bindings: cirrus,cs4271: Convert to dtschema
+	<no branch> (706ae6446494b4523d33b0d96ea1fd9d50ca9be6)
+		Merge commit '706ae6446494b4523d33b0d96ea1fd9d50ca9be6' into ep93xx/dt-conversion
+	patch
 		gpio: ep93xx: split device in multiple
 		ARM: ep93xx: add regmap aux_dev
 		clk: ep93xx: add DT support for Cirrus EP93xx
@@ -202,8 +203,6 @@ ep93xx/dt-conversion
 		soc: Add SoC driver for Cirrus ep93xx
 		dt-bindings: dma: Add Cirrus EP93xx
 		dmaengine: cirrus: Convert to DT for Cirrus EP93xx
-		dt-bindings: watchdog: Add Cirrus EP93x
-		watchdog: ep93xx: add DT support for Cirrus EP93xx
 		dt-bindings: pwm: Add Cirrus EP93xx
 		pwm: ep93xx: add DT support for Cirrus EP93xx
 		dt-bindings: spi: Add Cirrus EP93xx
@@ -233,4 +232,5 @@ ep93xx/dt-conversion
 		dmaengine: cirrus: remove platform code
 		clk: ep93xx: add module license
 		clk: ep93xx: Fix off by one in ep93xx_div_recalc_rate()
+		spi: ep93xx: update kerneldoc comments for ep93xx_spi
 

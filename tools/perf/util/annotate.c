@@ -333,14 +333,15 @@ static int symbol__account_br_cntr(struct annotated_branch *branch,
 {
 	unsigned int br_cntr_nr = evsel__leader(evsel)->br_cntr_nr;
 	unsigned int base = evsel__leader(evsel)->br_cntr_idx;
-	unsigned int width = evsel__env(evsel)->br_cntr_width;
 	unsigned int off = offset * evsel->evlist->nr_br_cntr;
-	unsigned int i, mask = (1L << width) - 1;
 	u64 *branch_br_cntr = branch->br_cntr;
+	unsigned int i, mask, width;
 
 	if (!br_cntr || !branch_br_cntr)
 		return 0;
 
+	perf_env__find_br_cntr_info(evsel__env(evsel), NULL, &width);
+	mask = (1L << width) - 1;
 	for (i = 0; i < br_cntr_nr; i++) {
 		u64 cntr = (br_cntr >> i * width) & mask;
 
@@ -2474,6 +2475,7 @@ static bool is_stack_operation(struct arch *arch, struct disasm_line *dl)
 	if (arch__is(arch, "x86")) {
 		if (!strncmp(dl->ins.name, "push", 4) ||
 		    !strncmp(dl->ins.name, "pop", 3) ||
+		    !strncmp(dl->ins.name, "call", 4) ||
 		    !strncmp(dl->ins.name, "ret", 3))
 			return true;
 	}

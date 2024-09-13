@@ -175,7 +175,7 @@ static void cxl_mbox_sanitize_work(struct work_struct *work)
 
 /**
  * __cxl_pci_mbox_send_cmd() - Execute a mailbox command
- * @mds: The memory device driver data
+ * @cxl_mbox: CXL mailbox context
  * @mbox_cmd: Command to send to the memory device.
  *
  * Context: Any context. Expects mbox_mutex to be held.

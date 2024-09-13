@@ -665,7 +665,7 @@ static void _rtl92e_init_priv_handler(struct net_device *dev)
 	priv->rtllib->init_gain_handler = rtl92e_init_gain;
 	priv->rtllib->rtllib_ips_leave_wq = rtl92e_rtllib_ips_leave_wq;
 	priv->rtllib->rtllib_ips_leave = rtl92e_rtllib_ips_leave;
-	priv->rtllib->ScanOperationBackupHandler = rtl92e_scan_op_backup;
+	priv->rtllib->scan_operation_backup_handler = rtl92e_scan_op_backup;
 }
 
 static void _rtl92e_init_priv_variable(struct net_device *dev)
@@ -860,13 +860,13 @@ static enum reset_type _rtl92e_tx_check_stuck(struct net_device *dev)
 			skb = __skb_peek(&ring->queue);
 			tcb_desc = (struct cb_desc *)(skb->cb +
 				    MAX_DEV_ADDR_SIZE);
-			tcb_desc->nStuckCount++;
+			tcb_desc->stuck_count++;
 			bCheckFwTxCnt = true;
-			if (tcb_desc->nStuckCount > 1)
+			if (tcb_desc->stuck_count > 1)
 				netdev_info(dev,
-					    "%s: QueueID=%d tcb_desc->nStuckCount=%d\n",
+					    "%s: QueueID=%d tcb_desc->stuck_count=%d\n",
 					    __func__, QueueID,
-					    tcb_desc->nStuckCount);
+					    tcb_desc->stuck_count);
 		}
 	}
 	spin_unlock_irqrestore(&priv->irq_th_lock, flags);
@@ -1522,8 +1522,8 @@ static void _rtl92e_rx_normal(struct net_device *dev)
 				 priv->rxbuffersize, DMA_FROM_DEVICE);
 
 		skb_put(skb, pdesc->Length);
-		skb_reserve(skb, stats.RxDrvInfoSize +
-			stats.RxBufShift);
+		skb_reserve(skb, stats.rx_drv_info_size +
+			stats.rx_buf_shift);
 		skb_trim(skb, skb->len - S_CRC_LEN);
 		rtllib_hdr = (struct ieee80211_hdr *)skb->data;
 		if (!is_multicast_ether_addr(rtllib_hdr->addr1)) {
