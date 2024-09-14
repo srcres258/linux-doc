@@ -2616,7 +2616,7 @@ cifs_get_tcon(struct cifs_ses *ses, struct smb3_fs_context *ctx)
 	if (ctx->linux_ext) {
 		if (ses->server->posix_ext_supported) {
 			tcon->posix_extensions = true;
-			pr_warn_once("SMB3.11 POSIX Extensions are experimental\n");
+			cifs_dbg(FYI, "SMB3.11 POSIX Extensions requested\n");
 		} else if ((ses->server->vals->protocol_id == SMB311_PROT_ID) ||
 		    (strcmp(ses->server->vals->version_string,
 		     SMB3ANY_VERSION_STRING) == 0) ||
