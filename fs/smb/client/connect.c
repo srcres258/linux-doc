@@ -1009,11 +1009,10 @@ clean_demultiplex_info(struct TCP_Server_Info *server)
 	}
 
 	if (!list_empty(&server->pending_mid_q)) {
-		struct list_head dispose_list;
 		struct mid_q_entry *mid_entry;
 		struct list_head *tmp, *tmp2;
+		LIST_HEAD(dispose_list);
 
-		INIT_LIST_HEAD(&dispose_list);
 		spin_lock(&server->mid_lock);
 		list_for_each_safe(tmp, tmp2, &server->pending_mid_q) {
 			mid_entry = list_entry(tmp, struct mid_q_entry, qhead);
@@ -2617,7 +2616,7 @@ cifs_get_tcon(struct cifs_ses *ses, struct smb3_fs_context *ctx)
 	if (ctx->linux_ext) {
 		if (ses->server->posix_ext_supported) {
 			tcon->posix_extensions = true;
-			pr_warn_once("SMB3.11 POSIX Extensions are experimental\n");
+			cifs_dbg(FYI, "SMB3.11 POSIX Extensions requested\n");
 		} else if ((ses->server->vals->protocol_id == SMB311_PROT_ID) ||
 		    (strcmp(ses->server->vals->version_string,
 		     SMB3ANY_VERSION_STRING) == 0) ||
@@ -4081,7 +4080,7 @@ __cifs_construct_tcon(struct cifs_sb_info *cifs_sb, kuid_t fsuid)
 
 	ses = cifs_get_smb_ses(master_tcon->ses->server, ctx);
 	if (IS_ERR(ses)) {
-		tcon = (struct cifs_tcon *)ses;
+		tcon = ERR_CAST(ses);
 		cifs_put_tcp_session(master_tcon->ses->server, 0);
 		goto out;
 	}
