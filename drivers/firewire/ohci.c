@@ -1140,9 +1140,8 @@ static struct descriptor *find_branch_descriptor(struct descriptor *d, int z)
 		return d + z - 1;
 }
 
-static void context_tasklet(unsigned long data)
+static void context_retire_descriptors(struct context *ctx)
 {
-	struct context *ctx = (struct context *) data;
 	struct descriptor *d, *last;
 	u32 address;
 	int z;
@@ -1179,6 +1178,21 @@ static void context_tasklet(unsigned long data)
 		}
 		ctx->last = last;
 	}
+}
+
+static void context_tasklet(unsigned long data)
+{
+	struct context *ctx = (struct context *) data;
+
+	context_retire_descriptors(ctx);
+}
+
+static void ohci_isoc_context_work(struct work_struct *work)
+{
+	struct fw_iso_context *base = container_of(work, struct fw_iso_context, work);
+	struct iso_context *isoc_ctx = container_of(base, struct iso_context, base);
+
+	context_retire_descriptors(&isoc_ctx->context);
 }
 
 /*
@@ -2912,7 +2926,7 @@ static int handle_ir_packet_per_buffer(struct context *context,
 	copy_iso_headers(ctx, (u32 *) (last + 1));
 
 	if (last->control & cpu_to_le16(DESCRIPTOR_IRQ_ALWAYS))
-		flush_iso_completions(ctx, FW_ISO_CONTEXT_COMPLETIONS_CAUSE_IRQ);
+		flush_iso_completions(ctx, FW_ISO_CONTEXT_COMPLETIONS_CAUSE_INTERRUPT);
 
 	return 1;
 }
@@ -2948,7 +2962,7 @@ static int handle_ir_buffer_fill(struct context *context,
 
 	if (last->control & cpu_to_le16(DESCRIPTOR_IRQ_ALWAYS)) {
 		trace_isoc_inbound_multiple_completions(&ctx->base, completed,
-							FW_ISO_CONTEXT_COMPLETIONS_CAUSE_IRQ);
+							FW_ISO_CONTEXT_COMPLETIONS_CAUSE_INTERRUPT);
 
 		ctx->base.callback.mc(&ctx->base,
 				      buffer_dma + completed,
@@ -3044,7 +3058,7 @@ static int handle_it_packet(struct context *context,
 	ctx->header_length += 4;
 
 	if (last->control & cpu_to_le16(DESCRIPTOR_IRQ_ALWAYS))
-		flush_iso_completions(ctx, FW_ISO_CONTEXT_COMPLETIONS_CAUSE_IRQ);
+		flush_iso_completions(ctx, FW_ISO_CONTEXT_COMPLETIONS_CAUSE_INTERRUPT);
 
 	return 1;
 }
@@ -3127,6 +3141,7 @@ static struct fw_iso_context *ohci_allocate_iso_context(struct fw_card *card,
 	ret = context_init(&ctx->context, ohci, regs, callback);
 	if (ret < 0)
 		goto out_with_header;
+	fw_iso_context_init_work(&ctx->base, ohci_isoc_context_work);
 
 	if (type == FW_ISO_CONTEXT_RECEIVE_MULTICHANNEL) {
 		set_multichannel_mask(ohci, 0);
@@ -3579,22 +3594,28 @@ static int ohci_flush_iso_completions(struct fw_iso_context *base)
 {
 	struct iso_context *ctx = container_of(base, struct iso_context, base);
 
-	// Note that tasklet softIRQ is not used to process isochronous context anymore.
-	context_tasklet((unsigned long)&ctx->context);
+	if (!test_and_set_bit_lock(0, &ctx->flushing_completions)) {
+		ohci_isoc_context_work(&base->work);
 
-	switch (base->type) {
-	case FW_ISO_CONTEXT_TRANSMIT:
-	case FW_ISO_CONTEXT_RECEIVE:
-		if (ctx->header_length != 0)
-			flush_iso_completions(ctx, FW_ISO_CONTEXT_COMPLETIONS_CAUSE_FLUSH);
-		return 0;
-	case FW_ISO_CONTEXT_RECEIVE_MULTICHANNEL:
-		if (ctx->mc_completed != 0)
-			flush_ir_buffer_fill(ctx);
-		return 0;
-	default:
-		return -ENOSYS;
+		switch (base->type) {
+		case FW_ISO_CONTEXT_TRANSMIT:
+		case FW_ISO_CONTEXT_RECEIVE:
+			if (ctx->header_length != 0)
+				flush_iso_completions(ctx, FW_ISO_CONTEXT_COMPLETIONS_CAUSE_FLUSH);
+			break;
+		case FW_ISO_CONTEXT_RECEIVE_MULTICHANNEL:
+			if (ctx->mc_completed != 0)
+				flush_ir_buffer_fill(ctx);
+			break;
+		default:
+			ret = -ENOSYS;
+		}
+
+		clear_bit_unlock(0, &ctx->flushing_completions);
+		smp_mb__after_atomic();
 	}
+
+	return ret;
 }
 
 static const struct fw_card_driver ohci_driver = {

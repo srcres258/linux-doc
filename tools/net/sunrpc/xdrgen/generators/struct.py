@@ -159,7 +159,7 @@ def emit_struct_member_decoder(
 
 
 def emit_struct_decoder(environment: Environment, node: _XdrStruct) -> None:
-    """Emit one decoder function for a struct type"""
+    """Emit one decoder function for an XDR struct type"""
     template = get_jinja2_template(environment, "decoder", "open")
     print(template.render(name=node.name))
 
@@ -236,7 +236,7 @@ def emit_struct_member_encoder(
 
 
 def emit_struct_encoder(environment: Environment, node: _XdrStruct) -> None:
-    """Emit one encoder function for a struct type"""
+    """Emit one encoder function for an XDR struct type"""
     template = get_jinja2_template(environment, "encoder", "open")
     print(template.render(name=node.name))
 

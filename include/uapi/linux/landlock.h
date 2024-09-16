@@ -287,22 +287,21 @@ struct landlock_net_port_attr {
  * Scope flags
  * ~~~~~~~~~~~
  *
- * These flags enable to restrict a sandboxed process from a set of IPC
- * actions. Setting a flag for a ruleset will isolate the Landlock domain
- * to forbid connections to resources outside the domain.
+ * These flags enable to isolate a sandboxed process from a set of IPC actions.
+ * Setting a flag for a ruleset will isolate the Landlock domain to forbid
+ * connections to resources outside the domain.
  *
- * IPCs with scoped actions:
+ * Scopes:
  *
- * - %LANDLOCK_SCOPED_ABSTRACT_UNIX_SOCKET: Restrict a sandboxed process
- *   from connecting to an abstract UNIX socket created by a process
- *   outside the related Landlock domain (e.g. a parent domain or a
- *   non-sandboxed process).
- * - %LANDLOCK_SCOPED_SIGNAL: Restrict a sandboxed process from sending
- *   a signal to another process outside sandbox domain.
+ * - %LANDLOCK_SCOPE_ABSTRACT_UNIX_SOCKET: Restrict a sandboxed process from
+ *   connecting to an abstract UNIX socket created by a process outside the
+ *   related Landlock domain (e.g. a parent domain or a non-sandboxed process).
+ * - %LANDLOCK_SCOPE_SIGNAL: Restrict a sandboxed process from sending a signal
+ *   to another process outside the domain.
  */
 /* clang-format off */
-#define LANDLOCK_SCOPED_ABSTRACT_UNIX_SOCKET		(1ULL << 0)
-#define LANDLOCK_SCOPED_SIGNAL		                (1ULL << 1)
+#define LANDLOCK_SCOPE_ABSTRACT_UNIX_SOCKET		(1ULL << 0)
+#define LANDLOCK_SCOPE_SIGNAL		                (1ULL << 1)
 /* clang-format on*/
 
 #endif /* _UAPI_LINUX_LANDLOCK_H */

@@ -860,12 +860,12 @@ static int imx_pcie_start_link(struct dw_pcie *pci)
 	if (ret)
 		goto err_reset_phy;
 
-	if (pci->link_gen > 1) {
+	if (pci->max_link_speed > 1) {
 		/* Allow faster modes after the link is up */
 		dw_pcie_dbi_ro_wr_en(pci);
 		tmp = dw_pcie_readl_dbi(pci, offset + PCI_EXP_LNKCAP);
 		tmp &= ~PCI_EXP_LNKCAP_SLS;
-		tmp |= pci->link_gen;
+		tmp |= pci->max_link_speed;
 		dw_pcie_writel_dbi(pci, offset + PCI_EXP_LNKCAP, tmp);
 
 		/*
@@ -1017,15 +1017,15 @@ static u64 imx_pcie_cpu_addr_fixup(struct dw_pcie *pcie, u64 cpu_addr)
 	struct imx_pcie *imx_pcie = to_imx_pcie(pcie);
 	struct dw_pcie_rp *pp = &pcie->pp;
 	struct resource_entry *entry;
-	unsigned int offset;
 
 	if (!(imx_pcie->drvdata->flags & IMX_PCIE_FLAG_CPU_ADDR_FIXUP))
 		return cpu_addr;
 
 	entry = resource_list_first_type(&pp->bridge->windows, IORESOURCE_MEM);
-	offset = entry->offset;
+	if (!entry)
+		return cpu_addr;
 
-	return (cpu_addr - offset);
+	return cpu_addr - entry->offset;
 }
 
 static const struct dw_pcie_host_ops imx_pcie_host_ops = {
@@ -1423,8 +1423,8 @@ static int imx_pcie_probe(struct platform_device *pdev)
 		imx_pcie->tx_swing_low = 127;
 
 	/* Limit link speed */
-	pci->link_gen = 1;
-	of_property_read_u32(node, "fsl,max-link-speed", &pci->link_gen);
+	pci->max_link_speed = 1;
+	of_property_read_u32(node, "fsl,max-link-speed", &pci->max_link_speed);
 
 	imx_pcie->vpcie = devm_regulator_get_optional(&pdev->dev, "vpcie");
 	if (IS_ERR(imx_pcie->vpcie)) {

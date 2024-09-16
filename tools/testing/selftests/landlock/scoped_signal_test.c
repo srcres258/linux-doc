@@ -19,7 +19,7 @@
 #include "common.h"
 #include "scoped_common.h"
 
-/* This variable is used for handeling several signals. */
+/* This variable is used for handling several signals. */
 static volatile sig_atomic_t is_signaled;
 
 /* clang-format off */
@@ -57,6 +57,8 @@ FIXTURE_VARIANT_ADD(scoping_signals, sigtstp) {
 
 FIXTURE_SETUP(scoping_signals)
 {
+	drop_caps(_metadata);
+
 	is_signaled = 0;
 }
 
@@ -76,15 +78,17 @@ static void scope_signal_handler(int sig, siginfo_t *info, void *ucontext)
  */
 TEST_F(scoping_signals, send_sig_to_parent)
 {
+	int pipe_parent[2];
+	int status;
 	pid_t child;
 	pid_t parent = getpid();
-	int status;
 	struct sigaction action = {
 		.sa_sigaction = scope_signal_handler,
 		.sa_flags = SA_SIGINFO,
 
 	};
 
+	ASSERT_EQ(0, pipe2(pipe_parent, O_CLOEXEC));
 	ASSERT_LE(0, sigaction(variant->sig, &action, NULL));
 
 	/* The process should not have already been signaled. */
@@ -93,7 +97,10 @@ TEST_F(scoping_signals, send_sig_to_parent)
 	child = fork();
 	ASSERT_LE(0, child);
 	if (child == 0) {
+		char buf_child;
 		int err;
+
+		EXPECT_EQ(0, close(pipe_parent[1]));
 
 		/*
 		 * The child process can send signal to parent when
@@ -101,8 +108,10 @@ TEST_F(scoping_signals, send_sig_to_parent)
 		 */
 		err = kill(parent, variant->sig);
 		ASSERT_EQ(0, err);
+		ASSERT_EQ(1, read(pipe_parent[0], &buf_child, 1));
+		EXPECT_EQ(0, close(pipe_parent[0]));
 
-		create_scoped_domain(_metadata, LANDLOCK_SCOPED_SIGNAL);
+		create_scoped_domain(_metadata, LANDLOCK_SCOPE_SIGNAL);
 
 		/*
 		 * The child process cannot send signal to the parent
@@ -123,16 +132,22 @@ TEST_F(scoping_signals, send_sig_to_parent)
 		_exit(_metadata->exit_code);
 		return;
 	}
+	EXPECT_EQ(0, close(pipe_parent[0]));
 
+	/* Waits for a first signal to be received, without race condition. */
 	while (!is_signaled && !usleep(1))
 		;
 	ASSERT_EQ(1, is_signaled);
+	ASSERT_EQ(1, write(pipe_parent[1], ".", 1));
+	EXPECT_EQ(0, close(pipe_parent[1]));
+	is_signaled = 0;
 
 	ASSERT_EQ(child, waitpid(child, &status, 0));
-
 	if (WIFSIGNALED(status) || !WIFEXITED(status) ||
 	    WEXITSTATUS(status) != EXIT_SUCCESS)
 		_metadata->exit_code = KSFT_FAIL;
+
+	EXPECT_EQ(0, is_signaled);
 }
 
 /* clang-format off */
@@ -143,6 +158,7 @@ FIXTURE(scoped_domains) {};
 
 FIXTURE_SETUP(scoped_domains)
 {
+	drop_caps(_metadata);
 }
 
 FIXTURE_TEARDOWN(scoped_domains)
@@ -160,30 +176,35 @@ TEST_F(scoped_domains, check_access_signal)
 	int status;
 	bool can_signal_child, can_signal_parent;
 	int pipe_parent[2], pipe_child[2];
+	char buf_parent;
 	int err;
-	char buf;
 
 	can_signal_parent = !variant->domain_child;
 	can_signal_child = !variant->domain_parent;
 
 	if (variant->domain_both)
-		create_scoped_domain(_metadata, LANDLOCK_SCOPED_SIGNAL);
+		create_scoped_domain(_metadata, LANDLOCK_SCOPE_SIGNAL);
+
 	ASSERT_EQ(0, pipe2(pipe_parent, O_CLOEXEC));
 	ASSERT_EQ(0, pipe2(pipe_child, O_CLOEXEC));
 
 	child = fork();
 	ASSERT_LE(0, child);
 	if (child == 0) {
-		ASSERT_EQ(0, close(pipe_child[0]));
-		ASSERT_EQ(0, close(pipe_parent[1]));
+		char buf_child;
+
+		EXPECT_EQ(0, close(pipe_child[0]));
+		EXPECT_EQ(0, close(pipe_parent[1]));
 
 		if (variant->domain_child)
-			create_scoped_domain(_metadata, LANDLOCK_SCOPED_SIGNAL);
+			create_scoped_domain(_metadata, LANDLOCK_SCOPE_SIGNAL);
 
 		ASSERT_EQ(1, write(pipe_child[1], ".", 1));
+		EXPECT_EQ(0, close(pipe_child[1]));
 
 		/* Waits for the parent to send signals. */
-		ASSERT_EQ(1, read(pipe_parent[0], &buf, 1));
+		ASSERT_EQ(1, read(pipe_parent[0], &buf_child, 1));
+		EXPECT_EQ(0, close(pipe_parent[0]));
 
 		err = kill(parent, 0);
 		if (can_signal_parent) {
@@ -201,11 +222,14 @@ TEST_F(scoped_domains, check_access_signal)
 		_exit(_metadata->exit_code);
 		return;
 	}
-	ASSERT_EQ(0, close(pipe_parent[0]));
-	if (variant->domain_parent)
-		create_scoped_domain(_metadata, LANDLOCK_SCOPED_SIGNAL);
+	EXPECT_EQ(0, close(pipe_parent[0]));
+	EXPECT_EQ(0, close(pipe_child[1]));
 
-	ASSERT_EQ(1, read(pipe_child[0], &buf, 1));
+	if (variant->domain_parent)
+		create_scoped_domain(_metadata, LANDLOCK_SCOPE_SIGNAL);
+
+	ASSERT_EQ(1, read(pipe_child[0], &buf_parent, 1));
+	EXPECT_EQ(0, close(pipe_child[0]));
 
 	err = kill(child, 0);
 	if (can_signal_child) {
@@ -217,7 +241,9 @@ TEST_F(scoped_domains, check_access_signal)
 	ASSERT_EQ(0, raise(0));
 
 	ASSERT_EQ(1, write(pipe_parent[1], ".", 1));
+	EXPECT_EQ(0, close(pipe_parent[1]));
 	ASSERT_EQ(child, waitpid(child, &status, 0));
+
 	if (WIFSIGNALED(status) || !WIFEXITED(status) ||
 	    WEXITSTATUS(status) != EXIT_SUCCESS)
 		_metadata->exit_code = KSFT_FAIL;
@@ -246,12 +272,14 @@ TEST(signal_scoping_threads)
 	pthread_t no_sandbox_thread, scoped_thread;
 	enum thread_return ret = THREAD_INVALID;
 
+	drop_caps(_metadata);
 	ASSERT_EQ(0, pipe2(thread_pipe, O_CLOEXEC));
 
 	ASSERT_EQ(0,
 		  pthread_create(&no_sandbox_thread, NULL, thread_func, NULL));
-	/* Restrict the domain after creating the first thread. */
-	create_scoped_domain(_metadata, LANDLOCK_SCOPED_SIGNAL);
+
+	/* Restricts the domain after creating the first thread. */
+	create_scoped_domain(_metadata, LANDLOCK_SCOPE_SIGNAL);
 
 	ASSERT_EQ(EPERM, pthread_kill(no_sandbox_thread, 0));
 	ASSERT_EQ(1, write(thread_pipe[1], ".", 1));
@@ -336,6 +364,7 @@ FIXTURE_VARIANT_ADD(fown, sandbox_after_setown) {
 
 FIXTURE_SETUP(fown)
 {
+	drop_caps(_metadata);
 }
 
 FIXTURE_TEARDOWN(fown)
@@ -362,7 +391,7 @@ TEST_F(fown, sigurg_socket)
 	ASSERT_EQ(0, pipe2(pipe_child, O_CLOEXEC));
 
 	if (variant->sandbox_setown == SANDBOX_BEFORE_FORK)
-		create_scoped_domain(_metadata, LANDLOCK_SCOPED_SIGNAL);
+		create_scoped_domain(_metadata, LANDLOCK_SCOPE_SIGNAL);
 
 	child = fork();
 	ASSERT_LE(0, child);
@@ -373,9 +402,9 @@ TEST_F(fown, sigurg_socket)
 		EXPECT_EQ(0, close(pipe_parent[1]));
 		EXPECT_EQ(0, close(pipe_child[0]));
 
-		ASSERT_NE(-1, setup_signal_handler(SIGURG));
+		ASSERT_EQ(0, setup_signal_handler(SIGURG));
 		client_socket = socket(AF_UNIX, SOCK_STREAM, 0);
-		ASSERT_NE(-1, client_socket);
+		ASSERT_LE(0, client_socket);
 
 		/* Waits for the parent to listen. */
 		ASSERT_EQ(1, read(pipe_parent[0], &buffer_child, 1));
@@ -388,11 +417,14 @@ TEST_F(fown, sigurg_socket)
 		 */
 		ASSERT_EQ(1, read(pipe_parent[0], &buffer_child, 1));
 		/* May signal itself. */
-		ASSERT_NE(-1, send(client_socket, ".", 1, MSG_OOB));
+		ASSERT_EQ(1, send(client_socket, ".", 1, MSG_OOB));
+		EXPECT_EQ(0, close(client_socket));
 		ASSERT_EQ(1, write(pipe_child[1], ".", 1));
+		EXPECT_EQ(0, close(pipe_child[1]));
 
 		/* Waits for the message to be received. */
 		ASSERT_EQ(1, read(pipe_parent[0], &buffer_child, 1));
+		EXPECT_EQ(0, close(pipe_parent[0]));
 
 		if (variant->sandbox_setown == SANDBOX_BEFORE_SETOWN) {
 			ASSERT_EQ(0, signal_received);
@@ -404,10 +436,6 @@ TEST_F(fown, sigurg_socket)
 			 */
 			ASSERT_EQ(1, signal_received);
 		}
-
-		EXPECT_EQ(0, close(pipe_parent[0]));
-		EXPECT_EQ(0, close(pipe_child[1]));
-		EXPECT_EQ(0, close(client_socket));
 		_exit(_metadata->exit_code);
 		return;
 	}
@@ -415,43 +443,42 @@ TEST_F(fown, sigurg_socket)
 	EXPECT_EQ(0, close(pipe_child[1]));
 
 	server_socket = socket(AF_UNIX, SOCK_STREAM, 0);
-	ASSERT_NE(-1, server_socket);
+	ASSERT_LE(0, server_socket);
 	ASSERT_EQ(0, bind(server_socket, &server_address.unix_addr,
 			  server_address.unix_addr_len));
 	ASSERT_EQ(0, listen(server_socket, backlog));
 	ASSERT_EQ(1, write(pipe_parent[1], ".", 1));
 
 	recv_socket = accept(server_socket, NULL, NULL);
-	ASSERT_NE(-1, recv_socket);
+	ASSERT_LE(0, recv_socket);
 
 	if (variant->sandbox_setown == SANDBOX_BEFORE_SETOWN)
-		create_scoped_domain(_metadata, LANDLOCK_SCOPED_SIGNAL);
+		create_scoped_domain(_metadata, LANDLOCK_SCOPE_SIGNAL);
 
 	/*
 	 * Sets the child to receive SIGURG for MSG_OOB.  This uncommon use is
 	 * a valid attack scenario which also simplifies this test.
 	 */
-	ASSERT_NE(-1, fcntl(recv_socket, F_SETOWN, child));
+	ASSERT_EQ(0, fcntl(recv_socket, F_SETOWN, child));
 
 	if (variant->sandbox_setown == SANDBOX_AFTER_SETOWN)
-		create_scoped_domain(_metadata, LANDLOCK_SCOPED_SIGNAL);
+		create_scoped_domain(_metadata, LANDLOCK_SCOPE_SIGNAL);
 
 	ASSERT_EQ(1, write(pipe_parent[1], ".", 1));
 
 	/* Waits for the child to send MSG_OOB. */
 	ASSERT_EQ(1, read(pipe_child[0], &buffer_parent, 1));
+	EXPECT_EQ(0, close(pipe_child[0]));
 	ASSERT_EQ(1, recv(recv_socket, &buffer_parent, 1, MSG_OOB));
+	EXPECT_EQ(0, close(recv_socket));
+	EXPECT_EQ(0, close(server_socket));
 	ASSERT_EQ(1, write(pipe_parent[1], ".", 1));
+	EXPECT_EQ(0, close(pipe_parent[1]));
 
 	ASSERT_EQ(child, waitpid(child, &status, 0));
 	if (WIFSIGNALED(status) || !WIFEXITED(status) ||
 	    WEXITSTATUS(status) != EXIT_SUCCESS)
 		_metadata->exit_code = KSFT_FAIL;
-
-	EXPECT_EQ(0, close(pipe_parent[1]));
-	EXPECT_EQ(0, close(pipe_child[0]));
-	EXPECT_EQ(0, close(server_socket));
-	EXPECT_EQ(0, close(recv_socket));
 }
 
 TEST_HARNESS_MAIN

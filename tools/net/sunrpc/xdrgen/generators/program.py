@@ -34,20 +34,20 @@ def emit_version_declarations(
     environment: Environment, program: str, version: _RpcVersion
 ) -> None:
     """Emit declarations for each RPC version's procedures"""
-    arguments = set()
+    arguments = dict.fromkeys([])
     for procedure in version.procedures:
         if procedure.name not in excluded_apis:
-            arguments.add(procedure.argument.type_name)
+            arguments[procedure.argument.type_name] = None
     if len(arguments) > 0:
         print("")
         template = environment.get_template("declaration/argument.j2")
         for argument in arguments:
             print(template.render(program=program, argument=argument))
 
-    results = set()
+    results = dict.fromkeys([])
     for procedure in version.procedures:
         if procedure.name not in excluded_apis:
-            results.add(procedure.result.type_name)
+            results[procedure.result.type_name] = None
     if len(results) > 0:
         print("")
         template = environment.get_template("declaration/result.j2")

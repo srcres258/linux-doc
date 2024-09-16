@@ -414,12 +414,6 @@ static long f_created_query(const struct file *filp)
 	return !!(filp->f_mode & FMODE_CREATED);
 }
 
-/* Let the caller figure out whether a given file was just created. */
-static long f_created_query(const struct file *filp)
-{
-	return !!(filp->f_mode & FMODE_CREATED);
-}
-
 static int f_owner_sig(struct file *filp, int signum, bool setsig)
 {
 	int ret = 0;

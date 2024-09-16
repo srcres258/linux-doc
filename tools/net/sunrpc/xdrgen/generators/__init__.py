@@ -9,6 +9,7 @@ from xdr_ast import _XdrAst, Specification, _RpcProgram, _XdrTypeSpecifier
 from xdr_ast import public_apis, pass_by_reference, get_header_name
 from xdr_parse import get_xdr_annotate
 
+
 def create_jinja2_environment(language: str, xdr_type: str) -> Environment:
     """Open a set of templates based on output language"""
     match language:

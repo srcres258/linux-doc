@@ -13,7 +13,7 @@ xdrgen_encode_{{ name }}(struct xdr_stream *xdr, const {{ classifier }}{{ name }
 {% if annotate %}
 	/* (variable-length array) */
 {% endif %}
-{% if maxsize != 0 %}
+{% if maxsize != "0" %}
 	if (unlikely(value.count > {{ maxsize }}))
 		return false;
 {% endif %}

@@ -90,8 +90,6 @@ def generate_client_source(filename: str, root: Specification, language: str) ->
     for definition in root.definitions:
         emit_source_decoder(definition.value, language, "client")
 
-    # cel: todo: client needs different arg/res functions
-
     # cel: todo: client needs PROC macros
 
 

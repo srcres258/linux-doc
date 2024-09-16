@@ -225,23 +225,36 @@ EXPORT_SYMBOL(fw_iso_context_queue_flush);
  * @ctx: the isochronous context
  *
  * Process the isochronous context in the current process context. The registered callback function
- * is called if some packets have been already transferred since the last time. If it is required
- * to process the context asynchronously, fw_iso_context_schedule_flush_completions() is available
- * instead.
+ * is called when a queued packet buffer with the interrupt flag is completed, either after
+ * transmission in the IT context or after being filled in the IR context. Additionally, the
+ * callback function is also called for the packet buffer completed at last. Furthermore, the
+ * callback function is called as well when the header buffer in the context becomes full. If it is
+ * required to process the context asynchronously, fw_iso_context_schedule_flush_completions() is
+ * available instead.
  *
- * Context: Process context due to mutex_trylock().
+ * Context: Process context. May sleep due to disable_work_sync().
  */
 int fw_iso_context_flush_completions(struct fw_iso_context *ctx)
 {
+	int err;
+
 	trace_isoc_outbound_flush_completions(ctx);
 	trace_isoc_inbound_single_flush_completions(ctx);
 	trace_isoc_inbound_multiple_flush_completions(ctx);
 
-	scoped_cond_guard(mutex_try, /* nothing to do */, &ctx->flushing_completions_mutex) {
-		return ctx->card->driver->flush_iso_completions(ctx);
-	}
+	might_sleep();
 
-	return 0;
+	// Avoid dead lock due to programming mistake.
+	if (WARN_ON_ONCE(current_work() == &ctx->work))
+		return 0;
+
+	disable_work_sync(&ctx->work);
+
+	err = ctx->card->driver->flush_iso_completions(ctx);
+
+	enable_work(&ctx->work);
+
+	return err;
 }
 EXPORT_SYMBOL(fw_iso_context_flush_completions);
 

@@ -110,7 +110,7 @@ def emit_type_definition(environment: Environment, node: _XdrDeclaration) -> Non
 
 
 def emit_typedef_decoder(environment: Environment, node: _XdrDeclaration) -> None:
-    """Emit a decoder function for one typedef"""
+    """Emit a decoder function for one XDR typedef"""
     if isinstance(node, _XdrBasic):
         template = get_jinja2_template(environment, "decoder", node.template)
         print(
@@ -171,7 +171,7 @@ def emit_typedef_decoder(environment: Environment, node: _XdrDeclaration) -> Non
 
 
 def emit_typedef_encoder(environment: Environment, node: _XdrDeclaration) -> None:
-    """Emit one encoder function for one typedef"""
+    """Emit an encoder function for one XDR typedef"""
     if isinstance(node, _XdrBasic):
         template = get_jinja2_template(environment, "encoder", node.template)
         print(

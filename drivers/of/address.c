@@ -204,9 +204,7 @@ static int __of_address_resource_bounds(struct resource *r, u64 start, u64 size)
 
 	if (overflows_type(start, r->start))
 		return -EOVERFLOW;
-	if (size == 0)
-		return -EOVERFLOW;
-	if (check_add_overflow(end, size - 1, &end))
+	if (size && check_add_overflow(end, size - 1, &end))
 		return -EOVERFLOW;
 	if (overflows_type(end, r->end))
 		return -EOVERFLOW;

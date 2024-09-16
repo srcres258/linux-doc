@@ -87,7 +87,7 @@ TEST_F(scoped_domains, connect_to_parent)
 	ASSERT_EQ(0, pipe2(pipe_parent, O_CLOEXEC));
 	if (variant->domain_both) {
 		create_scoped_domain(_metadata,
-				     LANDLOCK_SCOPED_ABSTRACT_UNIX_SOCKET);
+				     LANDLOCK_SCOPE_ABSTRACT_UNIX_SOCKET);
 		if (!__test_passed(_metadata))
 			return;
 	}
@@ -95,15 +95,14 @@ TEST_F(scoped_domains, connect_to_parent)
 	child = fork();
 	ASSERT_LE(0, child);
 	if (child == 0) {
-		int err_stream, err_dgram, errno_stream, errno_dgram;
+		int err;
 		int stream_client, dgram_client;
 		char buf_child;
 
 		EXPECT_EQ(0, close(pipe_parent[1]));
 		if (variant->domain_child)
 			create_scoped_domain(
-				_metadata,
-				LANDLOCK_SCOPED_ABSTRACT_UNIX_SOCKET);
+				_metadata, LANDLOCK_SCOPE_ABSTRACT_UNIX_SOCKET);
 
 		stream_client = socket(AF_UNIX, SOCK_STREAM, 0);
 		ASSERT_LE(0, stream_client);
@@ -113,24 +112,24 @@ TEST_F(scoped_domains, connect_to_parent)
 		/* Waits for the server. */
 		ASSERT_EQ(1, read(pipe_parent[0], &buf_child, 1));
 
-		err_stream = connect(stream_client,
-				     &self->stream_address.unix_addr,
-				     self->stream_address.unix_addr_len);
-		errno_stream = errno;
-		err_dgram = connect(dgram_client,
-				    &self->dgram_address.unix_addr,
-				    self->dgram_address.unix_addr_len);
-		errno_dgram = errno;
+		err = connect(stream_client, &self->stream_address.unix_addr,
+			      self->stream_address.unix_addr_len);
 		if (can_connect_to_parent) {
-			EXPECT_EQ(0, err_stream);
-			EXPECT_EQ(0, err_dgram);
+			EXPECT_EQ(0, err);
 		} else {
-			EXPECT_EQ(-1, err_stream);
-			EXPECT_EQ(-1, err_dgram);
-			EXPECT_EQ(EPERM, errno_stream);
-			EXPECT_EQ(EPERM, errno_dgram);
+			EXPECT_EQ(-1, err);
+			EXPECT_EQ(EPERM, errno);
 		}
 		EXPECT_EQ(0, close(stream_client));
+
+		err = connect(dgram_client, &self->dgram_address.unix_addr,
+			      self->dgram_address.unix_addr_len);
+		if (can_connect_to_parent) {
+			EXPECT_EQ(0, err);
+		} else {
+			EXPECT_EQ(-1, err);
+			EXPECT_EQ(EPERM, errno);
+		}
 		EXPECT_EQ(0, close(dgram_client));
 		_exit(_metadata->exit_code);
 		return;
@@ -138,7 +137,7 @@ TEST_F(scoped_domains, connect_to_parent)
 	EXPECT_EQ(0, close(pipe_parent[0]));
 	if (variant->domain_parent)
 		create_scoped_domain(_metadata,
-				     LANDLOCK_SCOPED_ABSTRACT_UNIX_SOCKET);
+				     LANDLOCK_SCOPE_ABSTRACT_UNIX_SOCKET);
 
 	stream_server = socket(AF_UNIX, SOCK_STREAM, 0);
 	ASSERT_LE(0, stream_server);
@@ -186,7 +185,7 @@ TEST_F(scoped_domains, connect_to_child)
 	ASSERT_EQ(0, pipe2(pipe_parent, O_CLOEXEC));
 	if (variant->domain_both) {
 		create_scoped_domain(_metadata,
-				     LANDLOCK_SCOPED_ABSTRACT_UNIX_SOCKET);
+				     LANDLOCK_SCOPE_ABSTRACT_UNIX_SOCKET);
 		if (!__test_passed(_metadata))
 			return;
 	}
@@ -200,8 +199,7 @@ TEST_F(scoped_domains, connect_to_child)
 		EXPECT_EQ(0, close(pipe_child[0]));
 		if (variant->domain_child)
 			create_scoped_domain(
-				_metadata,
-				LANDLOCK_SCOPED_ABSTRACT_UNIX_SOCKET);
+				_metadata, LANDLOCK_SCOPE_ABSTRACT_UNIX_SOCKET);
 
 		/* Waits for the parent to be in a domain, if any. */
 		ASSERT_EQ(1, read(pipe_parent[0], &buf, 1));
@@ -232,7 +230,7 @@ TEST_F(scoped_domains, connect_to_child)
 
 	if (variant->domain_parent)
 		create_scoped_domain(_metadata,
-				     LANDLOCK_SCOPED_ABSTRACT_UNIX_SOCKET);
+				     LANDLOCK_SCOPE_ABSTRACT_UNIX_SOCKET);
 
 	/* Signals that the parent is in a domain, if any. */
 	ASSERT_EQ(1, write(pipe_parent[1], ".", 1));
@@ -321,7 +319,7 @@ TEST_F(scoped_vs_unscoped, unix_scoping)
 		create_fs_domain(_metadata);
 	else if (variant->domain_all == SCOPE_SANDBOX)
 		create_scoped_domain(_metadata,
-				     LANDLOCK_SCOPED_ABSTRACT_UNIX_SOCKET);
+				     LANDLOCK_SCOPE_ABSTRACT_UNIX_SOCKET);
 
 	child = fork();
 	ASSERT_LE(0, child);
@@ -336,8 +334,7 @@ TEST_F(scoped_vs_unscoped, unix_scoping)
 			create_fs_domain(_metadata);
 		else if (variant->domain_children == SCOPE_SANDBOX)
 			create_scoped_domain(
-				_metadata,
-				LANDLOCK_SCOPED_ABSTRACT_UNIX_SOCKET);
+				_metadata, LANDLOCK_SCOPE_ABSTRACT_UNIX_SOCKET);
 
 		grand_child = fork();
 		ASSERT_LE(0, grand_child);
@@ -354,7 +351,7 @@ TEST_F(scoped_vs_unscoped, unix_scoping)
 			else if (variant->domain_grand_child == SCOPE_SANDBOX)
 				create_scoped_domain(
 					_metadata,
-					LANDLOCK_SCOPED_ABSTRACT_UNIX_SOCKET);
+					LANDLOCK_SCOPE_ABSTRACT_UNIX_SOCKET);
 
 			stream_client = socket(AF_UNIX, SOCK_STREAM, 0);
 			ASSERT_LE(0, stream_client);
@@ -418,8 +415,7 @@ TEST_F(scoped_vs_unscoped, unix_scoping)
 			create_fs_domain(_metadata);
 		else if (variant->domain_child == SCOPE_SANDBOX)
 			create_scoped_domain(
-				_metadata,
-				LANDLOCK_SCOPED_ABSTRACT_UNIX_SOCKET);
+				_metadata, LANDLOCK_SCOPE_ABSTRACT_UNIX_SOCKET);
 
 		stream_server_child = socket(AF_UNIX, SOCK_STREAM, 0);
 		ASSERT_LE(0, stream_server_child);
@@ -446,7 +442,7 @@ TEST_F(scoped_vs_unscoped, unix_scoping)
 		create_fs_domain(_metadata);
 	else if (variant->domain_parent == SCOPE_SANDBOX)
 		create_scoped_domain(_metadata,
-				     LANDLOCK_SCOPED_ABSTRACT_UNIX_SOCKET);
+				     LANDLOCK_SCOPE_ABSTRACT_UNIX_SOCKET);
 
 	stream_server_parent = socket(AF_UNIX, SOCK_STREAM, 0);
 	ASSERT_LE(0, stream_server_parent);
@@ -550,7 +546,7 @@ TEST_F(outside_socket, socket_with_different_domain)
 
 		/* Client always has a domain. */
 		create_scoped_domain(_metadata,
-				     LANDLOCK_SCOPED_ABSTRACT_UNIX_SOCKET);
+				     LANDLOCK_SCOPE_ABSTRACT_UNIX_SOCKET);
 
 		if (variant->child_socket) {
 			int data_socket, passed_socket, stream_server;
@@ -607,7 +603,7 @@ TEST_F(outside_socket, socket_with_different_domain)
 	ASSERT_LE(0, server_socket);
 
 	/* Server always has a domain. */
-	create_scoped_domain(_metadata, LANDLOCK_SCOPED_ABSTRACT_UNIX_SOCKET);
+	create_scoped_domain(_metadata, LANDLOCK_SCOPE_ABSTRACT_UNIX_SOCKET);
 
 	ASSERT_EQ(0, bind(server_socket, &self->address.unix_addr,
 			  self->address.unix_addr_len));
@@ -714,19 +710,18 @@ TEST_F(various_address_sockets, scoped_pathname_sockets)
 	if (child == 0) {
 		int err;
 
-		ASSERT_EQ(0, close(pipe_parent[1]));
+		EXPECT_EQ(0, close(pipe_parent[1]));
+		EXPECT_EQ(0, close(unnamed_sockets[1]));
 
 		if (variant->domain == SCOPE_SANDBOX)
 			create_scoped_domain(
-				_metadata,
-				LANDLOCK_SCOPED_ABSTRACT_UNIX_SOCKET);
+				_metadata, LANDLOCK_SCOPE_ABSTRACT_UNIX_SOCKET);
 		else if (variant->domain == OTHER_SANDBOX)
 			create_fs_domain(_metadata);
 
-		ASSERT_EQ(0, close(unnamed_sockets[1]));
-
 		/* Waits for parent to listen. */
 		ASSERT_EQ(1, read(pipe_parent[0], &buf_child, 1));
+		EXPECT_EQ(0, close(pipe_parent[0]));
 
 		/* Checks that we can send data through a datagram socket. */
 		ASSERT_EQ(1, write(unnamed_sockets[0], "a", 1));
@@ -740,16 +735,22 @@ TEST_F(various_address_sockets, scoped_pathname_sockets)
 		ASSERT_EQ(1, write(stream_pathname_socket, "b", 1));
 		EXPECT_EQ(0, close(stream_pathname_socket));
 
+		/* Sends without connection. */
 		dgram_pathname_socket = socket(AF_UNIX, SOCK_DGRAM, 0);
 		ASSERT_LE(0, dgram_pathname_socket);
+		err = sendto(dgram_pathname_socket, "c", 1, 0,
+			     &dgram_pathname_addr, size_dgram);
+		EXPECT_EQ(1, err);
+
+		/* Sends with connection. */
 		ASSERT_EQ(0, connect(dgram_pathname_socket,
 				     &dgram_pathname_addr, size_dgram));
-		ASSERT_EQ(1, write(dgram_pathname_socket, "c", 1));
+		ASSERT_EQ(1, write(dgram_pathname_socket, "d", 1));
 		EXPECT_EQ(0, close(dgram_pathname_socket));
 
 		/* Connects with abstract sockets. */
 		stream_abstract_socket = socket(AF_UNIX, SOCK_STREAM, 0);
-		ASSERT_NE(-1, stream_abstract_socket);
+		ASSERT_LE(0, stream_abstract_socket);
 		err = connect(stream_abstract_socket,
 			      &stream_abstract_addr.unix_addr,
 			      stream_abstract_addr.unix_addr_len);
@@ -758,12 +759,24 @@ TEST_F(various_address_sockets, scoped_pathname_sockets)
 			EXPECT_EQ(EPERM, errno);
 		} else {
 			EXPECT_EQ(0, err);
-			ASSERT_EQ(1, write(stream_abstract_socket, "d", 1));
+			ASSERT_EQ(1, write(stream_abstract_socket, "e", 1));
 		}
 		EXPECT_EQ(0, close(stream_abstract_socket));
 
+		/* Sends without connection. */
 		dgram_abstract_socket = socket(AF_UNIX, SOCK_DGRAM, 0);
-		ASSERT_NE(-1, dgram_abstract_socket);
+		ASSERT_LE(0, dgram_abstract_socket);
+		err = sendto(dgram_abstract_socket, "f", 1, 0,
+			     &dgram_abstract_addr.unix_addr,
+			     dgram_abstract_addr.unix_addr_len);
+		if (variant->domain == SCOPE_SANDBOX) {
+			EXPECT_EQ(-1, err);
+			EXPECT_EQ(EPERM, errno);
+		} else {
+			EXPECT_EQ(1, err);
+		}
+
+		/* Sends with connection. */
 		err = connect(dgram_abstract_socket,
 			      &dgram_abstract_addr.unix_addr,
 			      dgram_abstract_addr.unix_addr_len);
@@ -772,14 +785,14 @@ TEST_F(various_address_sockets, scoped_pathname_sockets)
 			EXPECT_EQ(EPERM, errno);
 		} else {
 			EXPECT_EQ(0, err);
-			ASSERT_EQ(1, write(dgram_abstract_socket, "e", 1));
+			ASSERT_EQ(1, write(dgram_abstract_socket, "g", 1));
 		}
 		EXPECT_EQ(0, close(dgram_abstract_socket));
+
 		_exit(_metadata->exit_code);
 		return;
 	}
 	EXPECT_EQ(0, close(pipe_parent[0]));
-
 	EXPECT_EQ(0, close(unnamed_sockets[0]));
 
 	/* Sets up pathname servers. */
@@ -796,70 +809,76 @@ TEST_F(various_address_sockets, scoped_pathname_sockets)
 
 	/* Sets up abstract servers. */
 	stream_abstract_socket = socket(AF_UNIX, SOCK_STREAM, 0);
-	ASSERT_NE(-1, stream_abstract_socket);
+	ASSERT_LE(0, stream_abstract_socket);
 	ASSERT_EQ(0,
 		  bind(stream_abstract_socket, &stream_abstract_addr.unix_addr,
 		       stream_abstract_addr.unix_addr_len));
 
 	dgram_abstract_socket = socket(AF_UNIX, SOCK_DGRAM, 0);
-	ASSERT_NE(-1, dgram_abstract_socket);
+	ASSERT_LE(0, dgram_abstract_socket);
 	ASSERT_EQ(0, bind(dgram_abstract_socket, &dgram_abstract_addr.unix_addr,
 			  dgram_abstract_addr.unix_addr_len));
 	ASSERT_EQ(0, listen(stream_abstract_socket, backlog));
 
 	ASSERT_EQ(1, write(pipe_parent[1], ".", 1));
+	EXPECT_EQ(0, close(pipe_parent[1]));
 
-	/* Reads from unnamed connection. */
+	/* Reads from unnamed socket. */
 	ASSERT_EQ(1, read(unnamed_sockets[1], &buf_parent, sizeof(buf_parent)));
 	ASSERT_EQ('a', buf_parent);
 	EXPECT_LE(0, close(unnamed_sockets[1]));
 
-	/* Reads from pathname connection. */
+	/* Reads from pathname sockets. */
 	data_socket = accept(stream_pathname_socket, NULL, NULL);
 	ASSERT_LE(0, data_socket);
 	ASSERT_EQ(1, read(data_socket, &buf_parent, sizeof(buf_parent)));
 	ASSERT_EQ('b', buf_parent);
 	EXPECT_EQ(0, close(data_socket));
+	EXPECT_EQ(0, close(stream_pathname_socket));
+
 	ASSERT_EQ(1,
 		  read(dgram_pathname_socket, &buf_parent, sizeof(buf_parent)));
 	ASSERT_EQ('c', buf_parent);
+	ASSERT_EQ(1,
+		  read(dgram_pathname_socket, &buf_parent, sizeof(buf_parent)));
+	ASSERT_EQ('d', buf_parent);
+	EXPECT_EQ(0, close(dgram_pathname_socket));
 
 	if (variant->domain != SCOPE_SANDBOX) {
-		/* Reads from abstract connections if there is one. */
+		/* Reads from abstract sockets if allowed to send. */
 		data_socket = accept(stream_abstract_socket, NULL, NULL);
 		ASSERT_LE(0, data_socket);
 		ASSERT_EQ(1,
 			  read(data_socket, &buf_parent, sizeof(buf_parent)));
-		ASSERT_EQ('d', buf_parent);
+		ASSERT_EQ('e', buf_parent);
 		EXPECT_EQ(0, close(data_socket));
 
 		ASSERT_EQ(1, read(dgram_abstract_socket, &buf_parent,
 				  sizeof(buf_parent)));
-		ASSERT_EQ('e', buf_parent);
+		ASSERT_EQ('f', buf_parent);
+		ASSERT_EQ(1, read(dgram_abstract_socket, &buf_parent,
+				  sizeof(buf_parent)));
+		ASSERT_EQ('g', buf_parent);
 	}
 
+	/* Waits for all abstract socket tests. */
 	ASSERT_EQ(child, waitpid(child, &status, 0));
+	EXPECT_EQ(0, close(stream_abstract_socket));
+	EXPECT_EQ(0, close(dgram_abstract_socket));
 
 	if (WIFSIGNALED(status) || !WIFEXITED(status) ||
 	    WEXITSTATUS(status) != EXIT_SUCCESS)
 		_metadata->exit_code = KSFT_FAIL;
-
-	EXPECT_EQ(0, close(stream_abstract_socket));
-	EXPECT_EQ(0, close(dgram_abstract_socket));
-	EXPECT_EQ(0, close(stream_pathname_socket));
-	EXPECT_EQ(0, close(dgram_pathname_socket));
 }
 
 TEST(datagram_sockets)
 {
 	struct service_fixture connected_addr, non_connected_addr;
-	int conn_sock, non_conn_sock;
+	int server_conn_socket, server_unconn_socket;
 	int pipe_parent[2], pipe_child[2];
 	int status;
 	char buf;
 	pid_t child;
-	int num_bytes;
-	char data[64];
 
 	drop_caps(_metadata);
 	memset(&connected_addr, 0, sizeof(connected_addr));
@@ -873,83 +892,83 @@ TEST(datagram_sockets)
 	child = fork();
 	ASSERT_LE(0, child);
 	if (child == 0) {
-		char buf_data[64];
+		int client_conn_socket, client_unconn_socket;
 
-		ASSERT_EQ(0, close(pipe_parent[1]));
-		ASSERT_EQ(0, close(pipe_child[0]));
+		EXPECT_EQ(0, close(pipe_parent[1]));
+		EXPECT_EQ(0, close(pipe_child[0]));
 
-		conn_sock = socket(AF_UNIX, SOCK_DGRAM, 0);
-		non_conn_sock = socket(AF_UNIX, SOCK_DGRAM, 0);
-		ASSERT_NE(-1, conn_sock);
-		ASSERT_NE(-1, non_conn_sock);
+		client_conn_socket = socket(AF_UNIX, SOCK_DGRAM, 0);
+		client_unconn_socket = socket(AF_UNIX, SOCK_DGRAM, 0);
+		ASSERT_LE(0, client_conn_socket);
+		ASSERT_LE(0, client_unconn_socket);
 
+		/* Waits for parent to listen. */
 		ASSERT_EQ(1, read(pipe_parent[0], &buf, 1));
+		ASSERT_EQ(0,
+			  connect(client_conn_socket, &connected_addr.unix_addr,
+				  connected_addr.unix_addr_len));
 
-		ASSERT_EQ(0, connect(conn_sock, &connected_addr.unix_addr,
-				     connected_addr.unix_addr_len));
-
-		/* Both connected and non-connected sockets can send
-		 * data when the domain is not scoped.
+		/*
+		 * Both connected and non-connected sockets can send data when
+		 * the domain is not scoped.
 		 */
-		memset(buf_data, 'x', sizeof(buf_data));
-		ASSERT_NE(-1, send(conn_sock, buf_data, sizeof(buf_data), 0));
-		ASSERT_NE(-1, sendto(non_conn_sock, buf_data, sizeof(buf_data),
-				     0, &non_connected_addr.unix_addr,
-				     non_connected_addr.unix_addr_len));
+		ASSERT_EQ(1, send(client_conn_socket, ".", 1, 0));
+		ASSERT_EQ(1, sendto(client_unconn_socket, ".", 1, 0,
+				    &non_connected_addr.unix_addr,
+				    non_connected_addr.unix_addr_len));
 		ASSERT_EQ(1, write(pipe_child[1], ".", 1));
 
 		/* Scopes the domain. */
 		create_scoped_domain(_metadata,
-				     LANDLOCK_SCOPED_ABSTRACT_UNIX_SOCKET);
+				     LANDLOCK_SCOPE_ABSTRACT_UNIX_SOCKET);
 
 		/*
 		 * Connected socket sends data to the receiver, but the
 		 * non-connected socket must fail to send data.
 		 */
-		ASSERT_NE(-1, send(conn_sock, buf_data, sizeof(buf_data), 0));
-		ASSERT_EQ(-1, sendto(non_conn_sock, buf_data, sizeof(buf_data),
-				     0, &non_connected_addr.unix_addr,
+		ASSERT_EQ(1, send(client_conn_socket, ".", 1, 0));
+		ASSERT_EQ(-1, sendto(client_unconn_socket, ".", 1, 0,
+				     &non_connected_addr.unix_addr,
 				     non_connected_addr.unix_addr_len));
 		ASSERT_EQ(EPERM, errno);
 		ASSERT_EQ(1, write(pipe_child[1], ".", 1));
 
-		EXPECT_EQ(0, close(conn_sock));
-		EXPECT_EQ(0, close(non_conn_sock));
+		EXPECT_EQ(0, close(client_conn_socket));
+		EXPECT_EQ(0, close(client_unconn_socket));
 		_exit(_metadata->exit_code);
 		return;
 	}
-	ASSERT_EQ(0, close(pipe_parent[0]));
-	ASSERT_EQ(0, close(pipe_child[1]));
+	EXPECT_EQ(0, close(pipe_parent[0]));
+	EXPECT_EQ(0, close(pipe_child[1]));
 
-	conn_sock = socket(AF_UNIX, SOCK_DGRAM, 0);
-	non_conn_sock = socket(AF_UNIX, SOCK_DGRAM, 0);
-	ASSERT_NE(-1, conn_sock);
-	ASSERT_NE(-1, non_conn_sock);
+	server_conn_socket = socket(AF_UNIX, SOCK_DGRAM, 0);
+	server_unconn_socket = socket(AF_UNIX, SOCK_DGRAM, 0);
+	ASSERT_LE(0, server_conn_socket);
+	ASSERT_LE(0, server_unconn_socket);
 
-	ASSERT_EQ(0, bind(conn_sock, &connected_addr.unix_addr,
+	ASSERT_EQ(0, bind(server_conn_socket, &connected_addr.unix_addr,
 			  connected_addr.unix_addr_len));
-	ASSERT_EQ(0, bind(non_conn_sock, &non_connected_addr.unix_addr,
+	ASSERT_EQ(0, bind(server_unconn_socket, &non_connected_addr.unix_addr,
 			  non_connected_addr.unix_addr_len));
-
 	ASSERT_EQ(1, write(pipe_parent[1], ".", 1));
 
+	/* Waits for child to test. */
 	ASSERT_EQ(1, read(pipe_child[0], &buf, 1));
-	num_bytes = recv(conn_sock, data, sizeof(data) - 1, 0);
-	ASSERT_NE(-1, num_bytes);
-	num_bytes = recv(non_conn_sock, data, sizeof(data) - 1, 0);
-	ASSERT_NE(-1, num_bytes);
+	ASSERT_EQ(1, recv(server_conn_socket, &buf, 1, 0));
+	ASSERT_EQ(1, recv(server_unconn_socket, &buf, 1, 0));
 
 	/*
 	 * Connected datagram socket will receive data, but
 	 * non-connected datagram socket does not receive data.
 	 */
 	ASSERT_EQ(1, read(pipe_child[0], &buf, 1));
-	num_bytes = recv(conn_sock, data, sizeof(data) - 1, 0);
-	ASSERT_NE(-1, num_bytes);
+	ASSERT_EQ(1, recv(server_conn_socket, &buf, 1, 0));
 
-	EXPECT_EQ(0, close(conn_sock));
-	EXPECT_EQ(0, close(non_conn_sock));
+	/* Waits for all tests to finish. */
 	ASSERT_EQ(child, waitpid(child, &status, 0));
+	EXPECT_EQ(0, close(server_conn_socket));
+	EXPECT_EQ(0, close(server_unconn_socket));
+
 	if (WIFSIGNALED(status) || !WIFEXITED(status) ||
 	    WEXITSTATUS(status) != EXIT_SUCCESS)
 		_metadata->exit_code = KSFT_FAIL;
@@ -969,8 +988,8 @@ TEST(self_connect)
 
 	connected_socket = socket(AF_UNIX, SOCK_DGRAM, 0);
 	non_connected_socket = socket(AF_UNIX, SOCK_DGRAM, 0);
-	ASSERT_NE(-1, connected_socket);
-	ASSERT_NE(-1, non_connected_socket);
+	ASSERT_LE(0, connected_socket);
+	ASSERT_LE(0, non_connected_socket);
 
 	ASSERT_EQ(0, bind(connected_socket, &connected_addr.unix_addr,
 			  connected_addr.unix_addr_len));
@@ -980,30 +999,25 @@ TEST(self_connect)
 	child = fork();
 	ASSERT_LE(0, child);
 	if (child == 0) {
-		char buf_data[64];
-
-		memset(buf_data, 'x', sizeof(buf_data));
 		/* Child's domain is scoped. */
 		create_scoped_domain(_metadata,
-				     LANDLOCK_SCOPED_ABSTRACT_UNIX_SOCKET);
+				     LANDLOCK_SCOPE_ABSTRACT_UNIX_SOCKET);
 
 		/*
 		 * The child inherits the sockets, and cannot connect or
 		 * send data to them.
 		 */
-		ASSERT_NE(0,
+		ASSERT_EQ(-1,
 			  connect(connected_socket, &connected_addr.unix_addr,
 				  connected_addr.unix_addr_len));
 		ASSERT_EQ(EPERM, errno);
 
-		ASSERT_EQ(-1,
-			  sendto(connected_socket, buf_data, sizeof(buf_data),
-				 0, &connected_addr.unix_addr,
-				 connected_addr.unix_addr_len));
+		ASSERT_EQ(-1, sendto(connected_socket, ".", 1, 0,
+				     &connected_addr.unix_addr,
+				     connected_addr.unix_addr_len));
 		ASSERT_EQ(EPERM, errno);
 
-		ASSERT_EQ(-1, sendto(non_connected_socket, buf_data,
-				     sizeof(buf_data), 0,
+		ASSERT_EQ(-1, sendto(non_connected_socket, ".", 1, 0,
 				     &non_connected_addr.unix_addr,
 				     non_connected_addr.unix_addr_len));
 		ASSERT_EQ(EPERM, errno);
@@ -1013,9 +1027,12 @@ TEST(self_connect)
 		_exit(_metadata->exit_code);
 		return;
 	}
+
+	/* Waits for all tests to finish. */
+	ASSERT_EQ(child, waitpid(child, &status, 0));
 	EXPECT_EQ(0, close(connected_socket));
 	EXPECT_EQ(0, close(non_connected_socket));
-	ASSERT_EQ(child, waitpid(child, &status, 0));
+
 	if (WIFSIGNALED(status) || !WIFEXITED(status) ||
 	    WEXITSTATUS(status) != EXIT_SUCCESS)
 		_metadata->exit_code = KSFT_FAIL;

@@ -236,7 +236,7 @@ def emit_pointer_member_encoder(
 
 
 def emit_pointer_encoder(environment: Environment, node: _XdrPointer) -> None:
-    """Emit one encoder function for a pointer type"""
+    """Emit one encoder function for an XDR pointer type"""
     template = get_jinja2_template(environment, "encoder", "open")
     print(template.render(name=node.name))
 

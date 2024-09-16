@@ -20,6 +20,7 @@
 #include <sys/wait.h>
 #include <sys/types.h>
 #include <linux/random.h>
+#include <linux/compiler.h>
 #include <linux/ptrace.h>
 
 #include "../kselftest.h"

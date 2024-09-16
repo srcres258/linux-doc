@@ -53,7 +53,7 @@ examples:
   - |
     #include <dt-bindings/interrupt-controller/arm-gic.h>
     #include <dt-bindings/interrupt-controller/irq.h>
-    msi0: msi@ff200000 {
+    msi@ff200000 {
         compatible = "altr,msi-1.0";
         reg = <0xff200000 0x00000010>,
               <0xff200010 0x00000080>;

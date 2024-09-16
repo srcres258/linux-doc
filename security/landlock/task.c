@@ -187,7 +187,7 @@ static bool sock_is_scoped(struct sock *const other,
 	lockdep_assert_held(&unix_sk(other)->lock);
 	dom_other = landlock_cred(other->sk_socket->file->f_cred)->domain;
 	return domain_is_scoped(domain, dom_other,
-				LANDLOCK_SCOPED_ABSTRACT_UNIX_SOCKET);
+				LANDLOCK_SCOPE_ABSTRACT_UNIX_SOCKET);
 }
 
 static bool is_abstract_socket(struct sock *const sock)
@@ -263,7 +263,7 @@ static int hook_task_kill(struct task_struct *const p,
 
 	rcu_read_lock();
 	is_scoped = domain_is_scoped(dom, landlock_get_task_domain(p),
-				     LANDLOCK_SCOPED_SIGNAL);
+				     LANDLOCK_SCOPE_SIGNAL);
 	rcu_read_unlock();
 	if (is_scoped)
 		return -EPERM;
@@ -287,7 +287,7 @@ static int hook_file_send_sigiotask(struct task_struct *tsk,
 
 	rcu_read_lock();
 	is_scoped = domain_is_scoped(dom, landlock_get_task_domain(tsk),
-				     LANDLOCK_SCOPED_SIGNAL);
+				     LANDLOCK_SCOPE_SIGNAL);
 	rcu_read_unlock();
 	if (is_scoped)
 		return -EPERM;

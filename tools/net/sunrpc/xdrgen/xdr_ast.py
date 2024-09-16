@@ -56,7 +56,7 @@ class _XdrTypeSpecifier(_XdrAst):
 
 @dataclass
 class _XdrDefinedType(_XdrTypeSpecifier):
-    """Corresponds to a type defined within the input"""
+    """Corresponds to a type defined by the input specification"""
 
 
 @dataclass
@@ -89,7 +89,7 @@ class _XdrVariableLengthOpaque(_XdrDeclaration):
 
 @dataclass
 class _XdrVariableLengthString(_XdrDeclaration):
-    """A variable-length string declaration"""
+    """A (NUL-terminated) variable-length string declaration"""
 
     name: str
     maxsize: str
@@ -346,7 +346,7 @@ class ParseToAst(Transformer):
         if children[1] is not None:
             maxsize = children[1].value
         else:
-            maxsize = 0
+            maxsize = "0"
 
         return _XdrVariableLengthOpaque(name, maxsize)
 
@@ -356,7 +356,7 @@ class ParseToAst(Transformer):
         if children[1] is not None:
             maxsize = children[1].value
         else:
-            maxsize = 0
+            maxsize = "0"
 
         return _XdrVariableLengthString(name, maxsize)
 
@@ -375,7 +375,7 @@ class ParseToAst(Transformer):
         if children[2] is not None:
             maxsize = children[2].value
         else:
-            maxsize = 0
+            maxsize = "0"
 
         return _XdrVariableLengthArray(name, spec, maxsize)
 
@@ -457,7 +457,6 @@ class ParseToAst(Transformer):
 
     def procedure_def(self, children):
         """Instantiate one _RpcProcedure object"""
-        #print(children)
         result = children[0]
         name = children[1].symbol
         argument = children[2]

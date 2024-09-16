@@ -12,7 +12,7 @@
 
 #include "common.h"
 
-#define ACCESS_LAST LANDLOCK_SCOPED_SIGNAL
+#define ACCESS_LAST LANDLOCK_SCOPE_SIGNAL
 
 TEST(ruleset_with_unknown_scope)
 {
