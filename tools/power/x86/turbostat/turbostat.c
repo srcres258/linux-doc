@@ -8229,7 +8229,7 @@ void topology_probe(bool startup)
 	set_max_cpu_num();
 	topo.num_cpus = 0;
 	for_all_proc_cpus(count_cpus);
-	if (!summary_only && topo.num_cpus > 1)
+	if (!summary_only)
 		BIC_PRESENT(BIC_CPU);
 
 	if (debug > 1)
