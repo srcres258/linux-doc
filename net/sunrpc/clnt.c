@@ -48,12 +48,7 @@
 # define RPCDBG_FACILITY	RPCDBG_CALL
 #endif
 
-/*
- * All RPC clients are linked into this list
- */
-
 static DECLARE_WAIT_QUEUE_HEAD(destroy_wait);
-
 
 static void	call_start(struct rpc_task *task);
 static void	call_reserve(struct rpc_task *task);
@@ -546,7 +541,7 @@ struct rpc_clnt *rpc_create(struct rpc_create_args *args)
 		.connect_timeout = args->connect_timeout,
 		.reconnect_timeout = args->reconnect_timeout,
 	};
-	char servername[48];
+	char servername[RPC_MAXNETNAMELEN];
 	struct rpc_clnt *clnt;
 	int i;
 
