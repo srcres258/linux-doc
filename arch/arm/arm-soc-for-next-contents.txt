@@ -86,6 +86,8 @@ soc/dt
 		https://git.kernel.org/pub/scm/linux/kernel/git/mediatek/linux tags/v6.11-next-dts64
 	broadcom/dt64
 		https://github.com/Broadcom/stblinux tags/arm-soc/for-6.12/devicetree-arm64
+	<no branch> (605f56405a6719dfdc9f91464c082856cd929d6c)
+		https://git.kernel.org/pub/scm/linux/kernel/git/sunxi/linux tags/sunxi-dt-for-6.12-2
 
 soc/drivers
 	patch
@@ -191,8 +193,8 @@ arm/fixes
 ep93xx/dt-conversion
 	patch
 		ep93xx: clock: Fix off by one in ep93xx_div_recalc_rate()
-	<no branch> (706ae6446494b4523d33b0d96ea1fd9d50ca9be6)
-		Merge commit '706ae6446494b4523d33b0d96ea1fd9d50ca9be6' into ep93xx/dt-conversion
+	ep93xx/clk-dependency
+		Merge branch 'ep93xx/clk-dependency' into ep93xx/dt-conversion
 	patch
 		gpio: ep93xx: split device in multiple
 		ARM: ep93xx: add regmap aux_dev
@@ -233,4 +235,7 @@ ep93xx/dt-conversion
 		clk: ep93xx: add module license
 		clk: ep93xx: Fix off by one in ep93xx_div_recalc_rate()
 		spi: ep93xx: update kerneldoc comments for ep93xx_spi
+		pinctrl: ep93xx: Fix raster pins typo
+		dmaengine: ep93xx: Fix a NULL vs IS_ERR() check in probe()
+		dmaengine: cirrus: use snprintf() to calm down gcc 13.3.0
 

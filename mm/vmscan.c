@@ -4413,6 +4413,7 @@ static bool sort_folio(struct lruvec *lruvec, struct folio *folio, struct scan_c
 		       int tier_idx, int bulk_gen, struct gen_update_batch *batch)
 {
 	bool success;
+	bool dirty, writeback;
 	int gen = folio_lru_gen(folio);
 	int type = folio_is_file_lru(folio);
 	int zone = folio_zonenum(folio);
@@ -4461,7 +4462,10 @@ static bool sort_folio(struct lruvec *lruvec, struct folio *folio, struct scan_c
 	/* waiting for writeback */
 	if (folio_test_locked(folio) || folio_test_writeback(folio) ||
 	    (type == LRU_GEN_FILE && folio_test_dirty(folio))) {
-		gen = folio_inc_gen(lruvec, folio, true, batch);
+		folio_check_dirty_writeback(folio, &dirty, &writeback);
+		if (dirty && !writeback)
+			sc->nr.unqueued_dirty += delta;
+		gen = folio_inc_gen(lruvec, folio, true);
 		list_move(&folio->lru, &lrugen->folios[gen][type][zone]);
 		return true;
 	}
@@ -5070,7 +5074,7 @@ static void lru_gen_shrink_lruvec(struct lruvec *lruvec, struct scan_control *sc
 	 * memory pressure have pushed dirty pages to oldest gen,
 	 * wake up flusher.
 	 */
-	if (sc->nr.unqueued_dirty >= sc->nr.taken)
+	if (sc->nr.unqueued_dirty > sc->nr.taken)
 		wakeup_flusher_threads(WB_REASON_VMSCAN);
 
 	clear_mm_walk();

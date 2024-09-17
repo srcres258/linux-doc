@@ -223,7 +223,6 @@ TEST(uc_cap_hpage)
 }
 
 /* verify SIEIC exit
- * * reset stop requests
  * * fail on codes not expected in the test cases
  */
 static bool uc_handle_sieic(FIXTURE_DATA(uc_kvm) * self)
