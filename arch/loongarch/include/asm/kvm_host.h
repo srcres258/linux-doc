@@ -18,6 +18,9 @@
 
 #include <asm/inst.h>
 #include <asm/kvm_mmu.h>
+#include <asm/kvm_ipi.h>
+#include <asm/kvm_eiointc.h>
+#include <asm/kvm_pch_pic.h>
 #include <asm/loongarch.h>
 
 /* Loongarch KVM register ids */
@@ -32,6 +35,20 @@
 #define KVM_REQ_STEAL_UPDATE		KVM_ARCH_REQ(1)
 #define KVM_REQ_PMU			KVM_ARCH_REQ(2)
 
+/* KVM_IRQ_LINE irq field index values */
+#define KVM_LOONGARCH_IRQ_TYPE_SHIFT	24
+#define KVM_LOONGARCH_IRQ_TYPE_MASK	0xff
+#define KVM_LOONGARCH_IRQ_VCPU_SHIFT	16
+#define KVM_LOONGARCH_IRQ_VCPU_MASK	0xff
+#define KVM_LOONGARCH_IRQ_NUM_SHIFT	0
+#define KVM_LOONGARCH_IRQ_NUM_MASK	0xffff
+
+/* irq_type field */
+#define KVM_LOONGARCH_IRQ_TYPE_CPU_IP	0
+#define KVM_LOONGARCH_IRQ_TYPE_CPU_IO	1
+#define KVM_LOONGARCH_IRQ_TYPE_PCHPIC	2
+#define KVM_LOONGARCH_IRQ_TYPE_PCHMSI	3
+
 #define KVM_GUESTDBG_SW_BP_MASK		\
 	(KVM_GUESTDBG_ENABLE | KVM_GUESTDBG_USE_SW_BP)
 #define KVM_GUESTDBG_VALID_MASK		\
@@ -44,6 +61,12 @@ struct kvm_vm_stat {
 	struct kvm_vm_stat_generic generic;
 	u64 pages;
 	u64 hugepages;
+	u64 ipi_read_exits;
+	u64 ipi_write_exits;
+	u64 eiointc_read_exits;
+	u64 eiointc_write_exits;
+	u64 pch_pic_read_exits;
+	u64 pch_pic_write_exits;
 };
 
 struct kvm_vcpu_stat {
@@ -84,7 +107,7 @@ struct kvm_world_switch {
  *
  *  For LOONGARCH_CSR_CPUID register, max CPUID size if 512
  *  For IPI hardware, max destination CPUID size 1024
- *  For extioi interrupt controller, max destination CPUID size is 256
+ *  For eiointc interrupt controller, max destination CPUID size is 256
  *  For msgint interrupt controller, max supported CPUID size is 65536
  *
  * Currently max CPUID is defined as 256 for KVM hypervisor, in future
@@ -117,6 +140,9 @@ struct kvm_arch {
 
 	s64 time_offset;
 	struct kvm_context __percpu *vmcs;
+	struct loongarch_ipi *ipi;
+	struct loongarch_eiointc *eiointc;
+	struct loongarch_pch_pic *pch_pic;
 };
 
 #define CSR_MAX_NUMS		0x800
@@ -221,6 +247,8 @@ struct kvm_vcpu_arch {
 	int last_sched_cpu;
 	/* mp state */
 	struct kvm_mp_state mp_state;
+	/* ipi state */
+	struct ipi_state ipi_state;
 	/* cpucfg */
 	u32 cpucfg[KVM_MAX_CPUCFG_REGS];
 
