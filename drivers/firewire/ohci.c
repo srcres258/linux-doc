@@ -3593,6 +3593,7 @@ static void ohci_flush_queue_iso(struct fw_iso_context *base)
 static int ohci_flush_iso_completions(struct fw_iso_context *base)
 {
 	struct iso_context *ctx = container_of(base, struct iso_context, base);
+	int ret = 0;
 
 	if (!test_and_set_bit_lock(0, &ctx->flushing_completions)) {
 		ohci_isoc_context_work(&base->work);

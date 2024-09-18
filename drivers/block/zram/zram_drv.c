@@ -2170,8 +2170,6 @@ static void zram_destroy_comps(struct zram *zram)
 	}
 
 	for (prio = ZRAM_SECONDARY_COMP; prio < ZRAM_MAX_COMPS; prio++) {
-		if (!zram->comp_algs[prio])
-			continue;
 		kfree(zram->comp_algs[prio]);
 		zram->comp_algs[prio] = NULL;
 	}

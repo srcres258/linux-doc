@@ -8,6 +8,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include <hash.h>
 #include <hashtable.h>
 #include <xalloc.h>
 #include "lkc.h"
@@ -20,16 +21,6 @@ struct file {
 	struct hlist_node node;
 	char name[];
 };
-
-unsigned int strhash(const char *s)
-{
-	/* fnv32 hash */
-	unsigned int hash = 2166136261U;
-
-	for (; *s; s++)
-		hash = (hash ^ *s) * 0x01000193;
-	return hash;
-}
 
 /* hash table of all parsed Kconfig files */
 static HASHTABLE_DEFINE(file_hashtable, 1U << 11);
@@ -44,7 +35,7 @@ const char *file_lookup(const char *name)
 {
 	struct file *file;
 	size_t len;
-	int hash = strhash(name);
+	int hash = hash_str(name);
 
 	hash_for_each_possible(file_hashtable, file, node, hash)
 		if (!strcmp(name, file->name))

@@ -37,6 +37,8 @@
 
 #include "../kernel/head.h"
 
+u64 new_vmalloc[NR_CPUS / sizeof(u64) + 1];
+
 struct kernel_mapping kernel_map __ro_after_init;
 EXPORT_SYMBOL(kernel_map);
 #ifdef CONFIG_XIP_KERNEL
@@ -1132,13 +1134,7 @@ asmlinkage void __init setup_vm(uintptr_t dtb_pa)
 	kernel_map.va_pa_offset = IS_ENABLED(CONFIG_64BIT) ?
 				0UL : PAGE_OFFSET - kernel_map.phys_addr;
 
-	/*
-	 * The default maximal physical memory size is KERN_VIRT_SIZE for 32-bit
-	 * kernel, whereas for 64-bit kernel, the end of the virtual address
-	 * space is occupied by the modules/BPF/kernel mappings which reduces
-	 * the available size of the linear mapping.
-	 */
-	memory_limit = KERN_VIRT_SIZE - (IS_ENABLED(CONFIG_64BIT) ? SZ_4G : 0);
+	memory_limit = KERN_VIRT_SIZE;
 
 	/* Sanity check alignment and size */
 	BUG_ON((PAGE_OFFSET % PGDIR_SIZE) != 0);
