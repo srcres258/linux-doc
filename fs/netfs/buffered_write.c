@@ -54,7 +54,7 @@ static enum netfs_how_to_modify netfs_how_to_modify(struct netfs_inode *ctx,
 {
 	struct netfs_folio *finfo = netfs_folio_info(folio);
 	struct netfs_group *group = netfs_folio_group(folio);
-	loff_t pos = folio_file_pos(folio);
+	loff_t pos = folio_pos(folio);
 
 	_enter("");
 
@@ -184,7 +184,7 @@ ssize_t netfs_perform_write(struct kiocb *iocb, struct iov_iter *iter,
 	unsigned int bdp_flags = (iocb->ki_flags & IOCB_NOWAIT) ? BDP_ASYNC : 0;
 	ssize_t written = 0, ret, ret2;
 	loff_t i_size, pos = iocb->ki_pos, from, to;
-	size_t max_chunk = PAGE_SIZE << MAX_PAGECACHE_ORDER;
+	size_t max_chunk = mapping_max_folio_size(mapping);
 	bool maybe_trouble = false;
 
 	if (unlikely(test_bit(NETFS_ICTX_WRITETHROUGH, &ctx->flags) ||
