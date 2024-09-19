@@ -446,7 +446,7 @@ struct nfs42_clone_res {
 
 struct stateowner_id {
 	__u64	create_time;
-	__u32	uniquifier;
+	__u64	uniquifier;
 };
 
 struct nfs4_open_delegation {
@@ -1314,11 +1314,6 @@ struct nfs4_fsid_present_res {
 };
 
 #endif /* CONFIG_NFS_V4 */
-
-struct nfstime4 {
-	u64	seconds;
-	u32	nseconds;
-};
 
 #ifdef CONFIG_NFS_V4_1
 
