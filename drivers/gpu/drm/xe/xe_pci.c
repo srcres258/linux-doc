@@ -716,11 +716,6 @@ static int xe_info_init(struct xe_device *xe,
 		gt->info.type = XE_GT_TYPE_MAIN;
 		gt->info.has_indirect_ring_state = graphics_desc->has_indirect_ring_state;
 		gt->info.engine_mask = graphics_desc->hw_engine_mask;
-		gt->mmio.regs = tile->mmio.regs;
-		gt->mmio.regs_size = tile->mmio.regs_size;
-		gt->mmio.tile = tile;
-		if (IS_SRIOV_VF(xe))
-			gt->mmio.sriov_vf_gt = gt;
 
 		if (MEDIA_VER(xe) < 13 && media_desc)
 			gt->info.engine_mask |= media_desc->hw_engine_mask;
@@ -740,13 +735,6 @@ static int xe_info_init(struct xe_device *xe,
 		gt->info.type = XE_GT_TYPE_MEDIA;
 		gt->info.has_indirect_ring_state = media_desc->has_indirect_ring_state;
 		gt->info.engine_mask = media_desc->hw_engine_mask;
-		gt->mmio.regs = tile->mmio.regs;
-		gt->mmio.regs_size = tile->mmio.regs_size;
-		gt->mmio.adj_offset = MEDIA_GT_GSI_OFFSET;
-		gt->mmio.adj_limit = MEDIA_GT_GSI_LENGTH;
-		gt->mmio.tile = tile;
-		if (IS_SRIOV_VF(xe))
-			gt->mmio.sriov_vf_gt = gt;
 
 		/*
 		 * FIXME: At the moment multi-tile and standalone media are
@@ -943,6 +931,8 @@ static int xe_pci_resume(struct device *dev)
 	err = pci_set_power_state(pdev, PCI_D0);
 	if (err)
 		return err;
+
+	pci_restore_state(pdev);
 
 	err = pci_enable_device(pdev);
 	if (err)

@@ -532,31 +532,34 @@ int exfat_file_fsync(struct file *filp, loff_t start, loff_t end, int datasync)
 	return blkdev_issue_flush(inode->i_sb->s_bdev);
 }
 
-static int exfat_extend_valid_size(struct file *file, loff_t start, loff_t end)
+static int exfat_extend_valid_size(struct file *file, loff_t new_valid_size)
 {
 	int err;
+	loff_t pos;
 	struct inode *inode = file_inode(file);
+	struct exfat_inode_info *ei = EXFAT_I(inode);
 	struct address_space *mapping = inode->i_mapping;
 	const struct address_space_operations *ops = mapping->a_ops;
 
-	while (start < end) {
-		u32 zerofrom, len;
+	pos = ei->valid_size;
+	while (pos < new_valid_size) {
+		u32 len;
 		struct folio *folio;
 
-		len = PAGE_SIZE - (start & (PAGE_SIZE - 1));
-		if (start + len > end)
-			len = end - start;
+		len = PAGE_SIZE - (pos & (PAGE_SIZE - 1));
+		if (pos + len > new_valid_size)
+			len = new_valid_size - pos;
 
-		err = ops->write_begin(file, mapping, start, len, &folio, NULL);
+		err = ops->write_begin(file, mapping, pos, len, &folio, NULL);
 		if (err)
 			goto out;
 
-		folio_zero_range(folio, offset_in_folio(folio, start), len);
+		folio_zero_range(folio, offset_in_folio(folio, pos), len);
 
-		err = ops->write_end(file, mapping, start, len, len, folio, NULL);
+		err = ops->write_end(file, mapping, pos, len, len, folio, NULL);
 		if (err < 0)
 			goto out;
-		start += len;
+		pos += len;
 
 		balance_dirty_pages_ratelimited(mapping);
 		cond_resched();
@@ -584,7 +587,7 @@ static ssize_t exfat_file_write_iter(struct kiocb *iocb, struct iov_iter *iter)
 		goto unlock;
 
 	if (pos > valid_size) {
-		ret = exfat_extend_valid_size(file, valid_size, pos);
+		ret = exfat_extend_valid_size(file, pos);
 		if (ret < 0 && ret != -ENOSPC) {
 			exfat_err(inode->i_sb,
 				"write: fail to zero from %llu to %llu(%zd)",
@@ -625,66 +628,26 @@ static vm_fault_t exfat_page_mkwrite(struct vm_fault *vmf)
 	struct file *file = vma->vm_file;
 	struct inode *inode = file_inode(file);
 	struct exfat_inode_info *ei = EXFAT_I(inode);
-	struct folio *folio = page_folio(vmf->page);
-	vm_fault_t ret = VM_FAULT_LOCKED;
+	loff_t start, end;
 
-	sb_start_pagefault(inode->i_sb);
-	file_update_time(file);
-	folio_lock(folio);
-	if (folio->mapping != file->f_mapping) {
-		folio_unlock(folio);
-		ret = VM_FAULT_NOPAGE;
-		goto out;
-	}
+	if (!inode_trylock(inode))
+		return VM_FAULT_RETRY;
 
-	if (ei->valid_size < folio_pos(folio)) {
-		inode_lock(inode);
-		err = exfat_extend_valid_size(file, ei->valid_size, folio_pos(folio));
-		inode_unlock(inode);
+	start = ((loff_t)vma->vm_pgoff << PAGE_SHIFT);
+	end = min_t(loff_t, i_size_read(inode),
+			start + vma->vm_end - vma->vm_start);
+
+	if (ei->valid_size < end) {
+		err = exfat_extend_valid_size(file, end);
 		if (err < 0) {
-			ret = vmf_fs_error(err);
-			goto out;
+			inode_unlock(inode);
+			return vmf_fs_error(err);
 		}
 	}
 
-	/*
-	 * check if the folio is mapped already (Whether ei->valid_size
-	 * has been extended to folio_pos(folio)+folio_len(folio))
-	 */
-	if (!folio_test_mappedtodisk(folio)) {
-		struct buffer_head *head = folio_buffers(folio);
+	inode_unlock(inode);
 
-		if (head) {
-			int fully_mapped = 1;
-			struct buffer_head *bh = head;
-
-			do {
-				if (!buffer_mapped(bh)) {
-					fully_mapped = 0;
-					break;
-				}
-			} while (bh = bh->b_this_page, bh != head);
-
-			if (fully_mapped)
-				folio_set_mappedtodisk(folio);
-		}
-	}
-
-	if (folio_test_mappedtodisk(folio)) {
-		folio_mark_dirty(folio);
-		folio_wait_stable(folio);
-		goto out;
-	}
-
-	folio_unlock(folio);
-
-	err = exfat_block_page_mkwrite(vma, vmf);
-	if (err)
-		ret = vmf_fs_error(err);
-
-out:
-	sb_end_pagefault(inode->i_sb);
-	return ret;
+	return filemap_page_mkwrite(vmf);
 }
 
 static const struct vm_operations_struct exfat_file_vm_ops = {
