@@ -760,7 +760,7 @@ write_retry:
 
 	trace_xfs_file_buffered_write(iocb, from);
 	ret = iomap_file_buffered_write(iocb, from,
-			&xfs_buffered_write_iomap_ops);
+			&xfs_buffered_write_iomap_ops, NULL);
 
 	/*
 	 * If we hit a space limit, try to free up some lingering preallocated
@@ -1411,6 +1411,10 @@ xfs_write_fault(
 	struct xfs_inode	*ip = XFS_I(inode);
 	unsigned int		lock_mode = XFS_MMAPLOCK_SHARED;
 	vm_fault_t		ret;
+
+	ret = filemap_fsnotify_fault(vmf);
+	if (unlikely(ret))
+		return ret;
 
 	sb_start_pagefault(inode->i_sb);
 	file_update_time(vmf->vma->vm_file);
