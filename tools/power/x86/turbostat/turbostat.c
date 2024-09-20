@@ -8367,7 +8367,7 @@ void topology_probe(bool startup)
 	topo.cores_per_node = max_core_id + 1;
 	if (debug > 1)
 		fprintf(outf, "max_core_id %d, sizing for %d cores per package\n", max_core_id, topo.cores_per_node);
-	if (!summary_only && topo.cores_per_node > 1)
+	if (!summary_only)
 		BIC_PRESENT(BIC_Core);
 
 	topo.num_die = topo.max_die_id + 1;
