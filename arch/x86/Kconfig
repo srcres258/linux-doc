@@ -125,6 +125,7 @@ config X86
 	select ARCH_USES_CFI_TRAPS		if X86_64 && CFI_CLANG
 	select ARCH_SUPPORTS_LTO_CLANG
 	select ARCH_SUPPORTS_LTO_CLANG_THIN
+	select ARCH_SUPPORTS_RT
 	select ARCH_USE_BUILTIN_BSWAP
 	select ARCH_USE_CMPXCHG_LOCKREF		if X86_CMPXCHG64
 	select ARCH_USE_MEMTEST
@@ -2421,6 +2422,14 @@ config CFI_AUTO_DEFAULT
 	  this is the same as booting with "cfi=kcfi".
 
 source "kernel/livepatch/Kconfig"
+
+config X86_BUS_LOCK_DETECT
+	bool "Split Lock Detect and Bus Lock Detect support"
+	depends on CPU_SUP_INTEL || CPU_SUP_AMD
+	default y
+	help
+	  Enable Split Lock Detect and Bus Lock Detect functionalities.
+	  See <file:Documentation/arch/x86/buslock.rst> for more information.
 
 endmenu
 
