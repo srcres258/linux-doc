@@ -128,6 +128,7 @@
 #include <linux/blk-cgroup.h>
 #include <linux/fadvise.h>
 #include <linux/sched/mm.h>
+#include <linux/fsnotify.h>
 
 #include "internal.h"
 
@@ -545,6 +546,14 @@ void page_cache_sync_ra(struct readahead_control *ractl,
 	pgoff_t prev_index, miss;
 
 	/*
+	 * If we have pre-content watches we need to disable readahead to make
+	 * sure that we don't find 0 filled pages in cache that we never emitted
+	 * events for.
+	 */
+	if (ractl->file && fsnotify_file_has_pre_content_watches(ractl->file))
+		return;
+
+	/*
 	 * Even if readahead is disabled, issue this request as readahead
 	 * as we'll need it to satisfy the requested range. The forced
 	 * readahead will do the right thing and limit the read to just the
@@ -622,6 +631,10 @@ void page_cache_async_ra(struct readahead_control *ractl,
 	if (!ra->ra_pages)
 		return;
 
+	/* See the comment in page_cache_sync_ra. */
+	if (ractl->file && fsnotify_file_has_pre_content_watches(ractl->file))
+		return;
+
 	/*
 	 * Same bit is used for PG_readahead and PG_reclaim.
 	 */
@@ -678,7 +691,7 @@ ssize_t ksys_readahead(int fd, loff_t offset, size_t count)
 
 	ret = -EBADF;
 	f = fdget(fd);
-	if (!f.file || !(f.file->f_mode & FMODE_READ))
+	if (!fd_file(f) || !(fd_file(f)->f_mode & FMODE_READ))
 		goto out;
 
 	/*
@@ -687,12 +700,12 @@ ssize_t ksys_readahead(int fd, loff_t offset, size_t count)
 	 * on this file, then we must return -EINVAL.
 	 */
 	ret = -EINVAL;
-	if (!f.file->f_mapping || !f.file->f_mapping->a_ops ||
-	    (!S_ISREG(file_inode(f.file)->i_mode) &&
-	    !S_ISBLK(file_inode(f.file)->i_mode)))
+	if (!fd_file(f)->f_mapping || !fd_file(f)->f_mapping->a_ops ||
+	    (!S_ISREG(file_inode(fd_file(f))->i_mode) &&
+	    !S_ISBLK(file_inode(fd_file(f))->i_mode)))
 		goto out;
 
-	ret = vfs_fadvise(f.file, offset, count, POSIX_FADV_WILLNEED);
+	ret = vfs_fadvise(fd_file(f), offset, count, POSIX_FADV_WILLNEED);
 out:
 	fdput(f);
 	return ret;
