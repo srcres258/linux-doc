@@ -22,14 +22,6 @@ struct file {
 	char name[];
 };
 
-/* hash table of all parsed Kconfig files */
-static HASHTABLE_DEFINE(file_hashtable, 1U << 11);
-
-struct file {
-	struct hlist_node node;
-	char name[];
-};
-
 /* file already present in list? If not add it */
 const char *file_lookup(const char *name)
 {

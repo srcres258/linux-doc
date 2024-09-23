@@ -123,7 +123,7 @@ static struct bkey_cached *__bkey_cached_alloc(unsigned key_u64s)
 	struct bkey_cached *ck = kmem_cache_zalloc(bch2_key_cache, gfp);
 	if (unlikely(!ck))
 		return NULL;
-	ck->k = kmalloc(key_u64s * sizeof(u64), gfp);
+	ck->k = kmalloc(key_u64s * sizeof(u64), GFP_KERNEL);
 	if (unlikely(!ck->k)) {
 		kmem_cache_free(bch2_key_cache, ck);
 		return NULL;

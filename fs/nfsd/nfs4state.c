@@ -8953,7 +8953,7 @@ nfsd4_deleg_getattr_conflict(struct svc_rqst *rqstp, struct dentry *dentry,
 
 	ctx = locks_inode_context(inode);
 	if (!ctx)
-		return nfs_ok;
+		return 0;
 
 #define NON_NFSD_LEASE ((void *)1)
 
@@ -9009,16 +9009,20 @@ nfsd4_deleg_getattr_conflict(struct svc_rqst *rqstp, struct dentry *dentry,
 		 * not update the file's metadata with the client's
 		 * modified size
 		 */
-		err = cb_getattr_update_times(dentry, dp);
+		attrs.ia_mtime = attrs.ia_ctime = current_time(inode);
+		attrs.ia_valid = ATTR_MTIME | ATTR_CTIME | ATTR_DELEG;
+		inode_lock(inode);
+		err = notify_change(&nop_mnt_idmap, dentry, &attrs, NULL);
+		inode_unlock(inode);
 		if (err) {
 			status = nfserrno(err);
 			goto out_status;
 		}
 		ncf->ncf_cur_fsize = ncf->ncf_cb_fsize;
-		*pdp = dp;
-		return nfs_ok;
+		*size = ncf->ncf_cur_fsize;
+		*modified = true;
 	}
-	status = nfs_ok;
+	status = 0;
 out_status:
 	nfs4_put_stid(&dp->dl_stid);
 	return status;

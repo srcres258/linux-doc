@@ -99,9 +99,9 @@ extern int mmap_rnd_compat_bits __read_mostly;
 
 #ifndef PHYSMEM_END
 # ifdef MAX_PHYSMEM_BITS
-#  define PHYSMEM_END		((1ULL << MAX_PHYSMEM_BITS) - 1)
+# define PHYSMEM_END	((1ULL << MAX_PHYSMEM_BITS) - 1)
 # else
-#  define PHYSMEM_END		(-1ULL)
+# define PHYSMEM_END	(-1ULL)
 # endif
 #endif
 
@@ -4226,6 +4226,16 @@ void vma_pgtable_walk_end(struct vm_area_struct *vma);
 
 int reserve_mem_find_by_name(const char *name, phys_addr_t *start, phys_addr_t *size);
 
+#ifdef CONFIG_64BIT
+int do_mseal(unsigned long start, size_t len_in, unsigned long flags);
+#else
+static inline int do_mseal(unsigned long start, size_t len_in, unsigned long flags)
+{
+	/* noop on 32 bit */
+	return 0;
+}
+#endif
+
 #ifdef CONFIG_MEM_ALLOC_PROFILING
 static inline void pgalloc_tag_split(struct folio *folio, int old_order, int new_order)
 {
@@ -4282,15 +4292,5 @@ static inline void pgalloc_tag_copy(struct folio *new, struct folio *old)
 {
 }
 #endif /* CONFIG_MEM_ALLOC_PROFILING */
-
-#ifdef CONFIG_64BIT
-int do_mseal(unsigned long start, size_t len_in, unsigned long flags);
-#else
-static inline int do_mseal(unsigned long start, size_t len_in, unsigned long flags)
-{
-	/* noop on 32 bit */
-	return 0;
-}
-#endif
 
 #endif /* _LINUX_MM_H */

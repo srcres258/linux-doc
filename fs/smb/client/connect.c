@@ -4284,6 +4284,8 @@ wait_for_construction:
 
 	if (IS_ERR(tlink->tl_tcon)) {
 		err = PTR_ERR(tlink->tl_tcon);
+		if (err == -ENOKEY)
+			err = -EACCES;
 		cifs_put_tlink(tlink);
 		return ERR_PTR(err);
 	}
