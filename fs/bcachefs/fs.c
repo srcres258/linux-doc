@@ -278,14 +278,6 @@ retry:
 	}
 }
 
-#define memalloc_flags_do(_flags, _do)						\
-({										\
-	unsigned _saved_flags = memalloc_flags_save(_flags);			\
-	typeof(_do) _ret = _do;							\
-	memalloc_noreclaim_restore(_saved_flags);				\
-	_ret;									\
-})
-
 static struct inode *bch2_alloc_inode(struct super_block *sb)
 {
 	BUG();
@@ -2260,7 +2252,7 @@ static struct file_system_type bcache_fs_type = {
 	.name			= "bcachefs",
 	.init_fs_context	= bch2_init_fs_context,
 	.kill_sb		= bch2_kill_sb,
-	.fs_flags		= FS_REQUIRES_DEV | FS_ALLOW_IDMAP,
+	.fs_flags		= FS_REQUIRES_DEV | FS_ALLOW_IDMAP | FS_ALLOW_HSM,
 };
 
 MODULE_ALIAS_FS("bcachefs");
