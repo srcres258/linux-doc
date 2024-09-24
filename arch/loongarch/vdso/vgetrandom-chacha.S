@@ -68,11 +68,11 @@ SYM_FUNC_START(__arch_chacha20_blocks_nostack)
 #define line2		state8, state9, state10, state11
 #define line3		state12, state13, state14, state15
 
-#define	line1_perm	state5, state6, state7, state4
-#define	line2_perm	state10, state11, state8, state9
-#define	line3_perm	state15, state12, state13, state14
+#define line1_perm	state5, state6, state7, state4
+#define line2_perm	state10, state11, state8, state9
+#define line3_perm	state15, state12, state13, state14
 
-#define	copy		copy0, copy1, copy2, copy3
+#define copy		copy0, copy1, copy2, copy3
 
 #define _16		16, 16, 16, 16
 #define _20		20, 20, 20, 20

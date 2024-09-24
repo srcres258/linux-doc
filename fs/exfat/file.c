@@ -554,8 +554,6 @@ static int exfat_extend_valid_size(struct file *file, loff_t new_valid_size)
 		if (err)
 			goto out;
 
-		folio_zero_range(folio, offset_in_folio(folio, pos), len);
-
 		err = ops->write_end(file, mapping, pos, len, len, folio, NULL);
 		if (err < 0)
 			goto out;

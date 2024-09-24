@@ -398,7 +398,7 @@ enum cxl_devtype {
  * struct cxl_dpa_perf - DPA performance property entry
  * @dpa_range: range for DPA address
  * @coord: QoS performance data (i.e. latency, bandwidth)
- * @cdat_coord - raw QoS performance data from CDAT
+ * @cdat_coord: raw QoS performance data from CDAT
  * @qos_class: QoS Class cookies
  */
 struct cxl_dpa_perf {

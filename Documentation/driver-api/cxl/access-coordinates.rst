@@ -28,18 +28,18 @@ Window Structure (CFMWS).
 
 An example hierarchy:
 
-                CFMWS 0
-                  |
-         _________|_________
-        |                   |
-    ACPI0017-0          ACPI0017-1
- GP0/HB0/ACPI0016-0   GP1/HB1/ACPI0016-1
-    |          |        |           |
-   RP0        RP1      RP2         RP3
-    |          |        |           |
-  SW 0       SW 1     SW 2        SW 3
-  |   |      |   |    |   |       |   |
- EP0 EP1    EP2 EP3  EP4  EP5    EP6 EP7
+>                CFMWS 0
+>                  |
+>         _________|_________
+>        |                   |
+>    ACPI0017-0          ACPI0017-1
+> GP0/HB0/ACPI0016-0   GP1/HB1/ACPI0016-1
+>    |          |        |           |
+>   RP0        RP1      RP2         RP3
+>    |          |        |           |
+>  SW 0       SW 1     SW 2        SW 3
+>  |   |      |   |    |   |       |   |
+> EP0 EP1    EP2 EP3  EP4  EP5    EP6 EP7
 
 Computation for the example hierarchy:
 
@@ -57,7 +57,6 @@ Min (GP1 to CPU BW,
      Min(SW 3 Upstream Link to RP3 BW,
          Min(SW3SSLBIS for SW3DSP0 (EP6), EP6 DSLBIS, EP6 Upstream Link) +
          Min(SW3SSLBIS for SW3DSP1 (EP7), EP7 DSLBIS, EP7 Upstream link))))
-
 
 The calculation starts at cxl_region_shared_upstream_perf_update(). A xarray
 is created to collect all the endpoint bandwidths via the

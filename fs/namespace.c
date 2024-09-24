@@ -5296,7 +5296,7 @@ static struct mnt_namespace *grab_requested_mnt_ns(const struct mnt_id_req *kreq
 		struct ns_common *ns;
 
 		CLASS(fd, f)(kreq->spare);
-		if (!fd_file(f))
+		if (fd_empty(f))
 			return ERR_PTR(-EBADF);
 
 		if (!proc_ns_file(fd_file(f)))

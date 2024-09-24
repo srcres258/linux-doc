@@ -963,8 +963,9 @@ static void cxl_region_update_bandwidth(struct cxl_region *cxlr,
 }
 
 /**
- * cxl_region_shared_upstream_perf_update - Recalculate the bandwidth for the region
- * @cxl_region: the cxl region to recalculate
+ * cxl_region_shared_upstream_bandwidth_update - Recalculate the bandwidth for
+ *						 the region
+ * @cxlr: the cxl region to recalculate
  *
  * The function walks the topology from bottom up and calculates the bandwidth. It
  * starts at the endpoints, processes at the switches if any, processes at the rootport
