@@ -315,8 +315,8 @@ enum {
 	MLX5_CMD_OP_MODIFY_VHCA_STATE             = 0xb0e,
 	MLX5_CMD_OP_SYNC_CRYPTO                   = 0xb12,
 	MLX5_CMD_OP_ALLOW_OTHER_VHCA_ACCESS       = 0xb16,
-	MLX5_CMD_OPCODE_QUERY_VUID                = 0xb22,
 	MLX5_CMD_OP_GENERATE_WQE                  = 0xb17,
+	MLX5_CMD_OPCODE_QUERY_VUID                = 0xb22,
 	MLX5_CMD_OP_MAX
 };
 
