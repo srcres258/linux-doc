@@ -1266,6 +1266,16 @@ SMB2_negotiate(const unsigned int xid,
 		else
 			cifs_server_dbg(VFS, "Missing expected negotiate contexts\n");
 	}
+
+	if (server->cipher_type && !rc) {
+		if (!SERVER_IS_CHAN(server)) {
+			rc = smb3_crypto_aead_allocate(server);
+		} else {
+			/* For channels, just reuse the primary server crypto secmech. */
+			server->secmech.enc = server->primary_server->secmech.enc;
+			server->secmech.dec = server->primary_server->secmech.dec;
+		}
+	}
 neg_exit:
 	free_rsp_buf(resp_buftype, rsp);
 	return rc;
@@ -1626,8 +1636,8 @@ SMB2_auth_kerberos(struct SMB2_sess_data *sess_data)
 	spnego_key = cifs_get_spnego_key(ses, server);
 	if (IS_ERR(spnego_key)) {
 		rc = PTR_ERR(spnego_key);
-		if (rc == -ENOKEY)
-			cifs_dbg(VFS, "Verify user has a krb5 ticket and keyutils is installed\n");
+		cifs_dbg(FYI, "%s: couldn't auth with kerberos: %d\n",
+			 __func__, rc);
 		spnego_key = NULL;
 		goto out;
 	}
