@@ -131,7 +131,7 @@ static inline void ref_walk_set_tcon(struct dfs_ref_walk *rw,
 	for (; ref <= ref_walk_cur(rw); ref++) {
 		if (WARN_ON_ONCE(!ref->ses))
 			continue;
-		list_add_tail(&ref->ses->dlist, &tcon->dfs_ses_list);
+		list_add(&ref->ses->dlist, &tcon->dfs_ses_list);
 		ref->ses = NULL;
 	}
 }
