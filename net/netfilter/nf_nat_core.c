@@ -210,7 +210,7 @@ hash_by_src(const struct net *net,
  * ... which would mean incoming packets cannot be distinguished between
  * the existing and the newly added entry (identical IP_CT_DIR_REPLY tuple).
  *
- * Returns true if the proposed NAT mapping collides with an existing entry.
+ * @return: true if the proposed NAT mapping collides with an existing entry.
  */
 static int
 nf_nat_used_tuple(const struct nf_conntrack_tuple *tuple,
@@ -242,7 +242,7 @@ static bool nf_nat_allow_clash(const struct nf_conn *ct)
  * direction. Should be called only when @tuple has not been altered, i.e.
  * @ignored_conntrack will not be subject to NAT.
  *
- * Returns true if the proposed NAT mapping collides with existing entry.
+ * @return: true if the proposed NAT mapping collides with existing entry.
  */
 static noinline bool
 nf_nat_used_tuple_new(const struct nf_conntrack_tuple *tuple,

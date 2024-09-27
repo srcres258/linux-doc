@@ -834,7 +834,7 @@ static int probes_profile_seq_show(struct seq_file *m, void *v)
 
 	nhits = 0;
 	for_each_possible_cpu(cpu) {
-		nhits += READ_ONCE(*per_cpu_ptr(tu->nhits, cpu));
+		nhits += per_cpu(*tu->nhits, cpu);
 	}
 
 	seq_printf(m, "  %s %-44s %15lu\n", tu->filename,

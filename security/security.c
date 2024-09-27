@@ -1678,6 +1678,7 @@ int security_path_notify(const struct path *path, u64 mask,
 /**
  * security_inode_alloc() - Allocate an inode LSM blob
  * @inode: the inode
+ * #gfp: allocation flags
  *
  * Allocate and attach a security structure to @inode->i_security.  The
  * i_security field is initialized to NULL when the inode structure is

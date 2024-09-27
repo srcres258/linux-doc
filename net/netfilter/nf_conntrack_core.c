@@ -1005,7 +1005,7 @@ static void __nf_conntrack_insert_prepare(struct nf_conn *ct)
  * Note we don't compare netns because ct entries in different net
  * namespace cannot clash to begin with.
  *
- * Returns true if ct1 and ct2 are identical when swapping origin/reply.
+ * @return: true if ct1 and ct2 are identical when swapping origin/reply.
  */
 static bool
 nf_ct_match_reverse(const struct nf_conn *ct1, const struct nf_conn *ct2)

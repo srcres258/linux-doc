@@ -27,9 +27,11 @@ struct folio_queue *netfs_buffer_make_space(struct netfs_io_request *rreq)
 		prev_nr_slots = folioq_nr_slots(tail);
 	}
 
-	tail = netfs_folioq_alloc(rreq, GFP_NOFS);
+	tail = kmalloc(sizeof(*tail), GFP_NOFS);
 	if (!tail)
 		return ERR_PTR(-ENOMEM);
+	netfs_stat(&netfs_n_folioq);
+	folioq_init(tail);
 	tail->prev = prev;
 	if (prev)
 		/* [!] NOTE: After we set prev->next, the consumer is entirely
