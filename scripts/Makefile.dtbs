@@ -34,7 +34,7 @@ $(obj)/dtbs-list: $(dtb-y) FORCE
 # Assembly file to wrap dtb(o)
 # ---------------------------------------------------------------------------
 
-builtin-dtb-section = $(if $(filter arch/%, $(obj)),.dtb.init.rodata,.init.rodata)
+builtin-dtb-section = $(if $(filter arch/$(SRCARCH)/boot/dts%, $(obj)),.dtb.init.rodata,.rodata)
 
 # Generate an assembly file to wrap the output of the device tree compiler
 quiet_cmd_wrap_S_dtb = WRAP    $@

@@ -477,13 +477,6 @@ static void tty_show_fdinfo(struct seq_file *m, struct file *file)
 }
 
 static const struct file_operations tty_fops = {
-	/*
-	 * WARNING: You must implement all callbacks defined in tty_fops in
-	 * hung_up_tty_fops, for tty_fops and hung_up_tty_fops are toggled
-	 * after "struct file" is published. Failure to synchronize has a risk
-	 * of NULL pointer dereference bug.
-	 */
-	.llseek		= no_llseek,
 	.read_iter	= tty_read,
 	.write_iter	= tty_write,
 	.splice_read	= copy_splice_read,
@@ -498,7 +491,6 @@ static const struct file_operations tty_fops = {
 };
 
 static const struct file_operations console_fops = {
-	.llseek		= no_llseek,
 	.read_iter	= tty_read,
 	.write_iter	= redirected_tty_write,
 	.splice_read	= copy_splice_read,
@@ -512,13 +504,6 @@ static const struct file_operations console_fops = {
 };
 
 static const struct file_operations hung_up_tty_fops = {
-	/*
-	 * WARNING: You must implement all callbacks defined in hung_up_tty_fops
-	 * in tty_fops, for tty_fops and hung_up_tty_fops are toggled after
-	 * "struct file" is published. Failure to synchronize has a risk of
-	 * NULL pointer dereference bug.
-	 */
-	.llseek		= no_llseek,
 	.read_iter	= hung_up_tty_read,
 	.write_iter	= hung_up_tty_write,
 	.splice_read    = hung_up_copy_splice_read,

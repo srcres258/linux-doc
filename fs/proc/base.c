@@ -902,79 +902,22 @@ static const struct file_operations proc_single_file_operations = {
 
 static void report_mem_rw_reject(const char *action, struct task_struct *task)
 {
-	pr_warn_ratelimited("Denied %s of /proc/%d/mem (%s) by pid %d (%s)\n",
-			    action, task_pid_nr(task), task->comm,
-			    task_pid_nr(current), current->comm);
-}
+	struct task_struct *task = get_proc_task(inode);
+	struct mm_struct *mm;
 
-static int __mem_open_access_permitted(struct file *file, struct task_struct *task)
-{
-	bool is_ptracer;
+	if (!task)
+		return ERR_PTR(-ESRCH);
 
-	rcu_read_lock();
-	is_ptracer = current == ptrace_parent(task);
-	rcu_read_unlock();
+	mm = mm_access(task, mode | PTRACE_MODE_FSCREDS);
+	put_task_struct(task);
 
-	if (file->f_mode & FMODE_WRITE) {
-		/* Deny if writes are unconditionally disabled via param */
-		if (static_branch_maybe(CONFIG_PROC_MEM_RESTRICT_OPEN_WRITE_DEFAULT,
-					&proc_mem_restrict_open_write_all)) {
-			report_mem_rw_reject("all open-for-write", task);
-			return -EACCES;
-		}
+	if (IS_ERR(mm))
+		return mm == ERR_PTR(-ESRCH) ? NULL : mm;
 
-		/* Deny if writes are allowed only for ptracers via param */
-		if (static_branch_maybe(CONFIG_PROC_MEM_RESTRICT_OPEN_WRITE_PTRACE_DEFAULT,
-					&proc_mem_restrict_open_write_ptracer) &&
-		    !is_ptracer) {
-			report_mem_rw_reject("non-ptracer open-for-write", task);
-			return -EACCES;
-		}
-	}
-
-	if (file->f_mode & FMODE_READ) {
-		/* Deny if reads are unconditionally disabled via param */
-		if (static_branch_maybe(CONFIG_PROC_MEM_RESTRICT_OPEN_READ_DEFAULT,
-					&proc_mem_restrict_open_read_all)) {
-			report_mem_rw_reject("all open-for-read", task);
-			return -EACCES;
-		}
-
-		/* Deny if reads are allowed only for ptracers via param */
-		if (static_branch_maybe(CONFIG_PROC_MEM_RESTRICT_OPEN_READ_PTRACE_DEFAULT,
-					&proc_mem_restrict_open_read_ptracer) &&
-		    !is_ptracer) {
-			report_mem_rw_reject("non-ptracer open-for-read", task);
-			return -EACCES;
-		}
-	}
-
-	return 0; /* R/W are not restricted */
-}
-
-struct mm_struct *proc_mem_open(struct file  *file, unsigned int mode)
-{
-	struct task_struct *task = get_proc_task(file_inode(file));
-	struct mm_struct *mm = ERR_PTR(-ESRCH);
-	int ret;
-
-	if (task) {
-		ret = __mem_open_access_permitted(file, task);
-		if (ret) {
-			put_task_struct(task);
-			return ERR_PTR(ret);
-		}
-
-		mm = mm_access(task, mode | PTRACE_MODE_FSCREDS);
-		put_task_struct(task);
-
-		if (!IS_ERR_OR_NULL(mm)) {
-			/* ensure this mm_struct can't be freed */
-			mmgrab(mm);
-			/* but do not pin its memory */
-			mmput(mm);
-		}
-	}
+	/* ensure this mm_struct can't be freed */
+	mmgrab(mm);
+	/* but do not pin its memory */
+	mmput(mm);
 
 	return mm;
 }
@@ -2348,7 +2291,7 @@ static int map_files_d_revalidate(struct dentry *dentry,
 		goto out_notask;
 
 	mm = mm_access(task, PTRACE_MODE_READ_FSCREDS);
-	if (IS_ERR_OR_NULL(mm))
+	if (IS_ERR(mm))
 		goto out;
 
 	if (!dname_to_vma_addr(dentry, &vm_start, &vm_end)) {

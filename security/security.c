@@ -740,6 +740,7 @@ static int lsm_file_alloc(struct file *file)
 /**
  * lsm_inode_alloc - allocate a composite inode blob
  * @inode: the inode that needs a blob
+ * @gfp: allocation flags
  *
  * Allocate the inode blob for all the modules
  *
@@ -1678,7 +1679,7 @@ int security_path_notify(const struct path *path, u64 mask,
 /**
  * security_inode_alloc() - Allocate an inode LSM blob
  * @inode: the inode
- * #gfp: allocation flags
+ * @gfp: allocation flags
  *
  * Allocate and attach a security structure to @inode->i_security.  The
  * i_security field is initialized to NULL when the inode structure is
