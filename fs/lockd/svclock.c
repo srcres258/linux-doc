@@ -480,7 +480,7 @@ nlmsvc_lock(struct svc_rqst *rqstp, struct nlm_file *file,
 	    struct nlm_host *host, struct nlm_lock *lock, int wait,
 	    struct nlm_cookie *cookie, int reclaim)
 {
-	struct inode		*inode = nlmsvc_file_inode(file);
+	struct inode		*inode __maybe_unused = nlmsvc_file_inode(file);
 	struct nlm_block	*block = NULL;
 	int			error;
 	int			mode;
