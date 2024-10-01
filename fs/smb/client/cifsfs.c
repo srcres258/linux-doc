@@ -161,7 +161,7 @@ __u32 cifs_lock_secret;
 
 /*
  * Bumps refcount for cifs super block.
- * Note that it should be only called if a referece to VFS super block is
+ * Note that it should be only called if a reference to VFS super block is
  * already held, e.g. in open-type syscalls context. Otherwise it can race with
  * atomic_dec_and_test in deactivate_locked_super.
  */
@@ -289,7 +289,7 @@ static void cifs_kill_sb(struct super_block *sb)
 	struct cifs_sb_info *cifs_sb = CIFS_SB(sb);
 
 	/*
-	 * We ned to release all dentries for the cached directories
+	 * We need to release all dentries for the cached directories
 	 * before we kill the sb.
 	 */
 	if (cifs_sb->root) {
@@ -910,7 +910,7 @@ cifs_smb3_do_mount(struct file_system_type *fs_type,
 	if (cifsFYI) {
 		cifs_dbg(FYI, "%s: devname=%s flags=0x%x\n", __func__,
 			 old_ctx->source, flags);
-	} else {
+	} else if (!old_ctx->automount) {
 		cifs_info("Attempting to mount %s\n", old_ctx->source);
 	}
 
@@ -937,7 +937,7 @@ cifs_smb3_do_mount(struct file_system_type *fs_type,
 
 	rc = cifs_mount(cifs_sb, cifs_sb->ctx);
 	if (rc) {
-		if (!(flags & SB_SILENT))
+		if (!(flags & SB_SILENT) && !old_ctx->automount)
 			cifs_dbg(VFS, "cifs_mount failed w/return code = %d\n",
 				 rc);
 		root = ERR_PTR(rc);
