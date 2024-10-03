@@ -326,12 +326,12 @@ static int dm_wait_for_idle(void *handle)
 	return 0;
 }
 
-static bool dm_check_soft_reset(void *handle)
+static bool dm_check_soft_reset(struct amdgpu_ip_block *ip_block)
 {
 	return false;
 }
 
-static int dm_soft_reset(void *handle)
+static int dm_soft_reset(struct amdgpu_ip_block *ip_block)
 {
 	/* XXX todo */
 	return 0;
@@ -770,6 +770,12 @@ static void dmub_hpd_callback(struct amdgpu_device *adev,
 		return;
 	}
 
+	/* Skip DMUB HPD IRQ in suspend/resume. We will probe them later. */
+	if (notify->type == DMUB_NOTIFICATION_HPD && adev->in_suspend) {
+		DRM_INFO("Skip DMUB HPD IRQ callback in suspend/resume\n");
+		return;
+	}
+
 	link_index = notify->link_index;
 	link = adev->dm.dc->links[link_index];
 	dev = adev->dm.ddev;
@@ -962,7 +968,7 @@ static int dm_set_powergating_state(void *handle,
 }
 
 /* Prototypes of private functions */
-static int dm_early_init(void *handle);
+static int dm_early_init(struct amdgpu_ip_block *ip_block);
 
 /* Allocate memory for FBC compressed data  */
 static void amdgpu_dm_fbc_init(struct drm_connector *connector)
@@ -2026,7 +2032,8 @@ static int amdgpu_dm_init(struct amdgpu_device *adev)
 			DRM_ERROR("amdgpu: failed to initialize vblank_workqueue.\n");
 	}
 
-	if (adev->dm.dc->caps.ips_support && adev->dm.dc->config.disable_ips == DMUB_IPS_ENABLE)
+	if (adev->dm.dc->caps.ips_support &&
+	    adev->dm.dc->config.disable_ips != DMUB_IPS_DISABLE_ALL)
 		adev->dm.idle_workqueue = idle_create_workqueue(adev);
 
 	if (adev->dm.dc->caps.max_links > 0 && adev->family >= AMDGPU_FAMILY_RV) {
@@ -2108,9 +2115,9 @@ error:
 	return -EINVAL;
 }
 
-static int amdgpu_dm_early_fini(void *handle)
+static int amdgpu_dm_early_fini(struct amdgpu_ip_block *ip_block)
 {
-	struct amdgpu_device *adev = (struct amdgpu_device *)handle;
+	struct amdgpu_device *adev = ip_block->adev;
 
 	amdgpu_dm_audio_fini(adev);
 
@@ -2502,9 +2509,9 @@ static int dm_dmub_sw_init(struct amdgpu_device *adev)
 	return 0;
 }
 
-static int dm_sw_init(void *handle)
+static int dm_sw_init(struct amdgpu_ip_block *ip_block)
 {
-	struct amdgpu_device *adev = (struct amdgpu_device *)handle;
+	struct amdgpu_device *adev = ip_block->adev;
 	int r;
 
 	adev->dm.cgs_device = amdgpu_cgs_create_device(adev);
@@ -2524,9 +2531,9 @@ static int dm_sw_init(void *handle)
 	return load_dmcu_fw(adev);
 }
 
-static int dm_sw_fini(void *handle)
+static int dm_sw_fini(struct amdgpu_ip_block *ip_block)
 {
-	struct amdgpu_device *adev = (struct amdgpu_device *)handle;
+	struct amdgpu_device *adev = ip_block->adev;
 	struct dal_allocation *da;
 
 	list_for_each_entry(da, &adev->dm.da_list, list) {
@@ -2591,9 +2598,9 @@ static int detect_mst_link_for_all_connectors(struct drm_device *dev)
 	return ret;
 }
 
-static int dm_late_init(void *handle)
+static int dm_late_init(struct amdgpu_ip_block *ip_block)
 {
-	struct amdgpu_device *adev = (struct amdgpu_device *)handle;
+	struct amdgpu_device *adev = ip_block->adev;
 
 	struct dmcu_iram_parameters params;
 	unsigned int linear_lut[16];
@@ -5249,9 +5256,9 @@ static int dm_init_microcode(struct amdgpu_device *adev)
 	return r;
 }
 
-static int dm_early_init(void *handle)
+static int dm_early_init(struct amdgpu_ip_block *ip_block)
 {
-	struct amdgpu_device *adev = (struct amdgpu_device *)handle;
+	struct amdgpu_device *adev = ip_block->adev;
 	struct amdgpu_mode_info *mode_info = &adev->mode_info;
 	struct atom_context *ctx = mode_info->atom_context;
 	int index = GetIndexIntoMasterTable(DATA, Object_Header);
@@ -6735,12 +6742,21 @@ create_stream_for_sink(struct drm_connector *connector,
 	if (stream->signal == SIGNAL_TYPE_DISPLAY_PORT ||
 	    stream->signal == SIGNAL_TYPE_DISPLAY_PORT_MST ||
 	    stream->signal == SIGNAL_TYPE_EDP) {
+		const struct dc_edid_caps *edid_caps;
+		unsigned int disable_colorimetry = 0;
+
+		if (aconnector->dc_sink) {
+			edid_caps = &aconnector->dc_sink->edid_caps;
+			disable_colorimetry = edid_caps->panel_patch.disable_colorimetry;
+		}
+
 		//
 		// should decide stream support vsc sdp colorimetry capability
 		// before building vsc info packet
 		//
 		stream->use_vsc_sdp_for_colorimetry = stream->link->dpcd_caps.dpcd_rev.raw >= 0x14 &&
-						      stream->link->dpcd_caps.dprx_feature.bits.VSC_SDP_COLORIMETRY_SUPPORTED;
+						      stream->link->dpcd_caps.dprx_feature.bits.VSC_SDP_COLORIMETRY_SUPPORTED &&
+						      !disable_colorimetry;
 
 		if (stream->out_transfer_func.tf == TRANSFER_FUNCTION_GAMMA22)
 			tf = TRANSFER_FUNC_GAMMA_22;
@@ -12229,9 +12245,6 @@ void amdgpu_dm_update_freesync_caps(struct drm_connector *connector,
 	} else if (edid && sink->sink_signal == SIGNAL_TYPE_HDMI_TYPE_A) {
 		i = parse_hdmi_amd_vsdb(amdgpu_dm_connector, edid, &vsdb_info);
 		if (i >= 0 && vsdb_info.freesync_supported) {
-			timing  = &edid->detailed_timings[i];
-			data    = &timing->data.other_data;
-
 			amdgpu_dm_connector->min_vfreq = vsdb_info.min_refresh_rate_hz;
 			amdgpu_dm_connector->max_vfreq = vsdb_info.max_refresh_rate_hz;
 			if (amdgpu_dm_connector->max_vfreq - amdgpu_dm_connector->min_vfreq > 10)
