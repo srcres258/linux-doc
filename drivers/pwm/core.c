@@ -49,6 +49,381 @@ static void pwmchip_unlock(struct pwm_chip *chip)
 		mutex_unlock(&chip->nonatomic_lock);
 }
 
+DEFINE_GUARD(pwmchip, struct pwm_chip *, pwmchip_lock(_T), pwmchip_unlock(_T))
+
+static bool pwm_wf_valid(const struct pwm_waveform *wf)
+{
+	/*
+	 * For now restrict waveforms to period_length_ns <= S64_MAX to provide
+	 * some space for future extensions. One possibility is to simplify
+	 * representing waveforms with inverted polarity using negative values
+	 * somehow.
+	 */
+	if (wf->period_length_ns > S64_MAX)
+		return false;
+
+	if (wf->duty_length_ns > wf->period_length_ns)
+		return false;
+
+	/*
+	 * .duty_offset_ns is supposed to be smaller than .period_length_ns, apart
+	 * from the corner case .duty_offset_ns == 0 && .period_length_ns == 0.
+	 */
+	if (wf->duty_offset_ns && wf->duty_offset_ns >= wf->period_length_ns)
+		return false;
+
+	return true;
+}
+
+static void pwm_wf2state(const struct pwm_waveform *wf, struct pwm_state *state)
+{
+	if (wf->period_length_ns) {
+		if (wf->duty_length_ns + wf->duty_offset_ns < wf->period_length_ns)
+			*state = (struct pwm_state){
+				.enabled = true,
+				.polarity = PWM_POLARITY_NORMAL,
+				.period = wf->period_length_ns,
+				.duty_cycle = wf->duty_length_ns,
+			};
+		else
+			*state = (struct pwm_state){
+				.enabled = true,
+				.polarity = PWM_POLARITY_INVERSED,
+				.period = wf->period_length_ns,
+				.duty_cycle = wf->period_length_ns - wf->duty_length_ns,
+			};
+	} else {
+		*state = (struct pwm_state){
+			.enabled = false,
+		};
+	}
+}
+
+static void pwm_state2wf(const struct pwm_state *state, struct pwm_waveform *wf)
+{
+	if (state->enabled) {
+		if (state->polarity == PWM_POLARITY_NORMAL)
+			*wf = (struct pwm_waveform){
+				.period_length_ns = state->period,
+				.duty_length_ns = state->duty_cycle,
+				.duty_offset_ns = 0,
+			};
+		else
+			*wf = (struct pwm_waveform){
+				.period_length_ns = state->period,
+				.duty_length_ns = state->period - state->duty_cycle,
+				.duty_offset_ns = state->duty_cycle,
+			};
+	} else {
+		*wf = (struct pwm_waveform){
+			.period_length_ns = 0,
+		};
+	}
+}
+
+static int pwmwfcmp(const struct pwm_waveform *a, const struct pwm_waveform *b)
+{
+	if (a->period_length_ns > b->period_length_ns)
+		return 1;
+
+	if (a->period_length_ns < b->period_length_ns)
+		return -1;
+
+	if (a->duty_length_ns > b->duty_length_ns)
+		return 1;
+
+	if (a->duty_length_ns < b->duty_length_ns)
+		return -1;
+
+	if (a->duty_offset_ns > b->duty_offset_ns)
+		return 1;
+
+	if (a->duty_offset_ns < b->duty_offset_ns)
+		return -1;
+
+	return 0;
+}
+
+static bool pwm_check_rounding(const struct pwm_waveform *wf,
+			       const struct pwm_waveform *wf_rounded)
+{
+	if (!wf->period_length_ns)
+		return true;
+
+	if (wf->period_length_ns < wf_rounded->period_length_ns)
+		return false;
+
+	if (wf->duty_length_ns < wf_rounded->duty_length_ns)
+		return false;
+
+	if (wf->duty_offset_ns < wf_rounded->duty_offset_ns)
+		return false;
+
+	return true;
+}
+
+static int __pwm_round_waveform_tohw(struct pwm_chip *chip, struct pwm_device *pwm,
+				     const struct pwm_waveform *wf, void *wfhw)
+{
+	const struct pwm_ops *ops = chip->ops;
+	int ret;
+
+	ret = ops->round_waveform_tohw(chip, pwm, wf, wfhw);
+	trace_pwm_round_waveform_tohw(pwm, wf, wfhw, ret);
+
+	return ret;
+}
+
+static int __pwm_round_waveform_fromhw(struct pwm_chip *chip, struct pwm_device *pwm,
+				       const void *wfhw, struct pwm_waveform *wf)
+{
+	const struct pwm_ops *ops = chip->ops;
+	int ret;
+
+	ret = ops->round_waveform_fromhw(chip, pwm, wfhw, wf);
+	trace_pwm_round_waveform_fromhw(pwm, wfhw, wf, ret);
+
+	return ret;
+}
+
+static int __pwm_read_waveform(struct pwm_chip *chip, struct pwm_device *pwm, void *wfhw)
+{
+	const struct pwm_ops *ops = chip->ops;
+	int ret;
+
+	ret = ops->read_waveform(chip, pwm, wfhw);
+	trace_pwm_read_waveform(pwm, wfhw, ret);
+
+	return ret;
+}
+
+static int __pwm_write_waveform(struct pwm_chip *chip, struct pwm_device *pwm, const void *wfhw)
+{
+	const struct pwm_ops *ops = chip->ops;
+	int ret;
+
+	ret = ops->write_waveform(chip, pwm, wfhw);
+	trace_pwm_write_waveform(pwm, wfhw, ret);
+
+	return ret;
+}
+
+#define WFHWSIZE 20
+
+/**
+ * pwm_round_waveform_might_sleep - Query hardware capabilities
+ * Cannot be used in atomic context.
+ * @pwm: PWM device
+ * @wf: waveform to round and output parameter
+ *
+ * Typically a given waveform cannot be implemented exactly by hardware, e.g.
+ * because hardware only supports coarse period resolution or no duty_offset.
+ * This function returns the actually implemented waveform if you pass wf to
+ * pwm_set_waveform_might_sleep now.
+ *
+ * Note however that the world doesn't stop turning when you call it, so when
+ * doing
+ *
+ * 	pwm_round_waveform_might_sleep(mypwm, &wf);
+ * 	pwm_set_waveform_might_sleep(mypwm, &wf, true);
+ *
+ * the latter might fail, e.g. because an input clock changed its rate between
+ * these two calls and the waveform determined by
+ * pwm_round_waveform_might_sleep() cannot be implemented any more.
+ *
+ * Returns 0 on success, 1 if there is no valid hardware configuration matching
+ * the input waveform under the PWM rounding rules or a negative errno.
+ */
+int pwm_round_waveform_might_sleep(struct pwm_device *pwm, struct pwm_waveform *wf)
+{
+	struct pwm_chip *chip = pwm->chip;
+	const struct pwm_ops *ops = chip->ops;
+	struct pwm_waveform wf_req = *wf;
+	char wfhw[WFHWSIZE];
+	int ret_tohw, ret_fromhw;
+
+	BUG_ON(WFHWSIZE < ops->sizeof_wfhw);
+
+	if (!pwm_wf_valid(wf))
+		return -EINVAL;
+
+	guard(pwmchip)(chip);
+
+	if (!chip->operational)
+		return -ENODEV;
+
+	ret_tohw = __pwm_round_waveform_tohw(chip, pwm, wf, wfhw);
+	if (ret_tohw < 0)
+		return ret_tohw;
+
+	if (IS_ENABLED(CONFIG_PWM_DEBUG) && ret_tohw > 1)
+		dev_err(&chip->dev, "Unexpected return value from __pwm_round_waveform_tohw: requested %llu/%llu [+%llu], return value %d\n",
+			wf_req.duty_length_ns, wf_req.period_length_ns, wf_req.duty_offset_ns, ret_tohw);
+
+	ret_fromhw = __pwm_round_waveform_fromhw(chip, pwm, wfhw, wf);
+	if (ret_fromhw < 0)
+		return ret_fromhw;
+
+	if (IS_ENABLED(CONFIG_PWM_DEBUG) && ret_fromhw > 0)
+		dev_err(&chip->dev, "Unexpected return value from __pwm_round_waveform_fromhw: requested %llu/%llu [+%llu], return value %d\n",
+			wf_req.duty_length_ns, wf_req.period_length_ns, wf_req.duty_offset_ns, ret_tohw);
+
+	if (IS_ENABLED(CONFIG_PWM_DEBUG) &&
+	    ret_tohw == 0 && !pwm_check_rounding(&wf_req, wf))
+		dev_err(&chip->dev, "Wrong rounding: requested %llu/%llu [+%llu], result %llu/%llu [+%llu]\n",
+			wf_req.duty_length_ns, wf_req.period_length_ns, wf_req.duty_offset_ns,
+			wf->duty_length_ns, wf->period_length_ns, wf->duty_offset_ns);
+
+	return ret_tohw;
+}
+EXPORT_SYMBOL_GPL(pwm_round_waveform_might_sleep);
+
+/**
+ * pwm_get_waveform_might_sleep - Query hardware about current configuration
+ * Cannot be used in atomic context.
+ * @pwm: PWM device
+ * @wf: output parameter
+ *
+ * Stores the current configuration of the PWM in @wf. Note this is the
+ * equivalent of pwm_get_state_hw() (and not pwm_get_state()) for pwm_waveform.
+ */
+int pwm_get_waveform_might_sleep(struct pwm_device *pwm, struct pwm_waveform *wf)
+{
+	struct pwm_chip *chip = pwm->chip;
+	const struct pwm_ops *ops = chip->ops;
+	char wfhw[WFHWSIZE];
+	int err;
+
+	BUG_ON(WFHWSIZE < ops->sizeof_wfhw);
+
+	guard(pwmchip)(chip);
+
+	if (!chip->operational)
+		return -ENODEV;
+
+	err = __pwm_read_waveform(chip, pwm, &wfhw);
+	if (err)
+		return err;
+
+	return __pwm_round_waveform_fromhw(chip, pwm, &wfhw, wf);
+}
+EXPORT_SYMBOL_GPL(pwm_get_waveform_might_sleep);
+
+/* Called with the pwmchip lock held */
+static int __pwm_set_waveform(struct pwm_device *pwm,
+			      const struct pwm_waveform *wf,
+			      bool exact)
+{
+	struct pwm_chip *chip = pwm->chip;
+	const struct pwm_ops *ops = chip->ops;
+	char wfhw[WFHWSIZE];
+	struct pwm_waveform wf_rounded;
+	int err;
+
+	BUG_ON(WFHWSIZE < ops->sizeof_wfhw);
+
+	if (!pwm_wf_valid(wf))
+		return -EINVAL;
+
+	err = __pwm_round_waveform_tohw(chip, pwm, wf, &wfhw);
+	if (err)
+		return err;
+
+	if ((IS_ENABLED(CONFIG_PWM_DEBUG) || exact) && wf->period_length_ns) {
+		err = __pwm_round_waveform_fromhw(chip, pwm, &wfhw, &wf_rounded);
+		if (err)
+			return err;
+
+		if (IS_ENABLED(CONFIG_PWM_DEBUG) && !pwm_check_rounding(wf, &wf_rounded))
+			dev_err(&chip->dev, "Wrong rounding: requested %llu/%llu [+%llu], result %llu/%llu [+%llu]\n",
+				wf->duty_length_ns, wf->period_length_ns, wf->duty_offset_ns,
+				wf_rounded.duty_length_ns, wf_rounded.period_length_ns, wf_rounded.duty_offset_ns);
+
+		if (exact && pwmwfcmp(wf, &wf_rounded)) {
+			dev_dbg(&chip->dev, "Requested no rounding, but %llu/%llu [+%llu] -> %llu/%llu [+%llu]\n",
+				wf->duty_length_ns, wf->period_length_ns, wf->duty_offset_ns,
+				wf_rounded.duty_length_ns, wf_rounded.period_length_ns, wf_rounded.duty_offset_ns);
+
+			return 1;
+		}
+	}
+
+	err = __pwm_write_waveform(chip, pwm, &wfhw);
+	if (err)
+		return err;
+
+	/* update .state */
+	pwm_wf2state(wf, &pwm->state);
+
+	if (IS_ENABLED(CONFIG_PWM_DEBUG) && ops->read_waveform && wf->period_length_ns) {
+		struct pwm_waveform wf_set;
+
+		err = __pwm_read_waveform(chip, pwm, &wfhw);
+		if (err)
+			/* maybe ignore? */
+			return err;
+
+		err = __pwm_round_waveform_fromhw(chip, pwm, &wfhw, &wf_set);
+		if (err)
+			/* maybe ignore? */
+			return err;
+
+		if (pwmwfcmp(&wf_set, &wf_rounded) != 0)
+			dev_err(&chip->dev,
+				"Unexpected setting: requested %llu/%llu [+%llu], expected %llu/%llu [+%llu], set %llu/%llu [+%llu]\n",
+				wf->duty_length_ns, wf->period_length_ns, wf->duty_offset_ns,
+				wf_rounded.duty_length_ns, wf_rounded.period_length_ns, wf_rounded.duty_offset_ns,
+				wf_set.duty_length_ns, wf_set.period_length_ns, wf_set.duty_offset_ns);
+	}
+	return 0;
+}
+
+/**
+ * pwm_set_waveform_might_sleep - Apply a new waveform
+ * Cannot be used in atomic context.
+ * @pwm: PWM device
+ * @wf: The waveform to apply
+ * @exact: If true no rounding is allowed
+ *
+ * Typically a requested waveform cannot be implemented exactly, e.g. because
+ * you requested .period_length_ns = 100 ns, but the hardware can only set
+ * periods that are a multiple of 8.5 ns. With that hardware passing exact =
+ * true results in pwm_set_waveform_might_sleep() failing and returning 1. If
+ * exact = false you get a period of 93.5 ns (i.e. the biggest period not bigger
+ * than the requested value).
+ * Note that even with exact = true, some rounding by less than 1 is
+ * possible/needed. In the above example requesting .period_length_ns = 94 and
+ * exact = true, you get the hardware configured with period = 93.5 ns.
+ */
+int pwm_set_waveform_might_sleep(struct pwm_device *pwm,
+				 const struct pwm_waveform *wf, bool exact)
+{
+	struct pwm_chip *chip = pwm->chip;
+	int err;
+
+	might_sleep();
+
+	guard(pwmchip)(chip);
+
+	if (!chip->operational)
+		return -ENODEV;
+
+	if (IS_ENABLED(CONFIG_PWM_DEBUG) && chip->atomic) {
+		/*
+		 * Catch any drivers that have been marked as atomic but
+		 * that will sleep anyway.
+		 */
+		non_block_start();
+		err = __pwm_set_waveform(pwm, wf, exact);
+		non_block_end();
+	} else {
+		err = __pwm_set_waveform(pwm, wf, exact);
+	}
+
+	return err;
+}
+EXPORT_SYMBOL_GPL(pwm_set_waveform_might_sleep);
+
 static void pwm_apply_debug(struct pwm_device *pwm,
 			    const struct pwm_state *state)
 {
@@ -182,6 +557,7 @@ static bool pwm_state_valid(const struct pwm_state *state)
 static int __pwm_apply(struct pwm_device *pwm, const struct pwm_state *state)
 {
 	struct pwm_chip *chip;
+	const struct pwm_ops *ops;
 	int err;
 
 	if (!pwm || !state)
@@ -205,6 +581,7 @@ static int __pwm_apply(struct pwm_device *pwm, const struct pwm_state *state)
 	}
 
 	chip = pwm->chip;
+	ops = chip->ops;
 
 	if (state->period == pwm->state.period &&
 	    state->duty_cycle == pwm->state.duty_cycle &&
@@ -213,18 +590,69 @@ static int __pwm_apply(struct pwm_device *pwm, const struct pwm_state *state)
 	    state->usage_power == pwm->state.usage_power)
 		return 0;
 
-	err = chip->ops->apply(chip, pwm, state);
-	trace_pwm_apply(pwm, state, err);
-	if (err)
-		return err;
+	if (ops->write_waveform) {
+		struct pwm_waveform wf;
+		char wfhw[WFHWSIZE];
 
-	pwm->state = *state;
+		BUG_ON(WFHWSIZE < ops->sizeof_wfhw);
 
-	/*
-	 * only do this after pwm->state was applied as some
-	 * implementations of .get_state depend on this
-	 */
-	pwm_apply_debug(pwm, state);
+		pwm_state2wf(state, &wf);
+
+		/*
+		 * The rounding is wrong here for states with inverted polarity.
+		 * While .apply() rounds down duty_cycle (which represents the
+		 * time from the start of the period to the inner edge),
+		 * .round_waveform_tohw() rounds down the time the PWM is high.
+		 * Can be fixed if the need arises, until reported otherwise
+		 * let's assume that consumers don't care.
+		 */
+
+		err = __pwm_round_waveform_tohw(chip, pwm, &wf, &wfhw);
+		if (err) {
+			if (err > 0)
+				/*
+				 * This signals an invalid request, typically
+				 * the requested period (or duty_offset) is
+				 * smaller than possible with the hardware.
+				 */
+				return -EINVAL;
+
+			return err;
+		}
+
+		if (IS_ENABLED(CONFIG_PWM_DEBUG)) {
+			struct pwm_waveform wf_rounded;
+
+			err = __pwm_round_waveform_fromhw(chip, pwm, &wfhw, &wf_rounded);
+			if (err)
+				return err;
+
+			if (!pwm_check_rounding(&wf, &wf_rounded))
+				dev_err(&chip->dev, "Wrong rounding: requested %llu/%llu [+%llu], result %llu/%llu [+%llu]\n",
+					wf.duty_length_ns, wf.period_length_ns, wf.duty_offset_ns,
+					wf_rounded.duty_length_ns, wf_rounded.period_length_ns, wf_rounded.duty_offset_ns);
+		}
+
+		err = __pwm_write_waveform(chip, pwm, &wfhw);
+		if (err)
+			return err;
+
+		pwm->state = *state;
+
+	} else {
+		err = ops->apply(chip, pwm, state);
+		trace_pwm_apply(pwm, state, err);
+		if (err)
+			return err;
+
+		pwm->state = *state;
+
+		/*
+		 * only do this after pwm->state was applied as some
+		 * implementations of .get_state() depend on this
+		 */
+		pwm_apply_debug(pwm, state);
+	}
 
 	return 0;
 }
@@ -249,11 +677,10 @@ int pwm_apply_might_sleep(struct pwm_device *pwm, const struct pwm_state *state)
 	 */
 	might_sleep();
 
-	pwmchip_lock(chip);
-	if (!chip->operational) {
-		pwmchip_unlock(chip);
+	guard(pwmchip)(chip);
+
+	if (!chip->operational)
 		return -ENODEV;
-	}
 
 	if (IS_ENABLED(CONFIG_PWM_DEBUG) && chip->atomic) {
 		/*
@@ -281,8 +708,15 @@ EXPORT_SYMBOL_GPL(pwm_apply_might_sleep);
  */
 int pwm_apply_atomic(struct pwm_device *pwm, const struct pwm_state *state)
 {
-	WARN_ONCE(!pwm->chip->atomic,
+	struct pwm_chip *chip = pwm->chip;
+
+	WARN_ONCE(!chip->atomic,
 		  "sleeping PWM driver used in atomic context\n");
+
+	guard(pwmchip)(chip);
+
+	if (!chip->operational)
+		return -ENODEV;
 
 	return __pwm_apply(pwm, state);
 }
@@ -294,12 +728,28 @@ static int pwm_get_state_hw(struct pwm_device *pwm, struct pwm_state *state)
 	const struct pwm_ops *ops = chip->ops;
 	int ret = -EOPNOTSUPP;
 
-	if (ops->get_state) {
-		pwmchip_lock(chip);
+	if (ops->read_waveform) {
+		char wfhw[WFHWSIZE];
+		struct pwm_waveform wf;
 
-		ret = ops->get_state(chip, pwm, state);
+		BUG_ON(WFHWSIZE < ops->sizeof_wfhw);
 
-		pwmchip_unlock(chip);
+		scoped_guard(pwmchip, chip) {
+
+			ret = __pwm_read_waveform(chip, pwm, &wfhw);
+			if (ret)
+				return ret;
+
+			ret = __pwm_round_waveform_fromhw(chip, pwm, &wfhw, &wf);
+			if (ret)
+				return ret;
+		}
+
+		pwm_wf2state(&wf, state);
+
+	} else if (ops->get_state) {
+		scoped_guard(pwmchip, chip)
+			ret = ops->get_state(chip, pwm, state);
 
 		trace_pwm_get(pwm, state, ret);
 	}
@@ -380,7 +830,17 @@ static int pwm_capture(struct pwm_device *pwm, struct pwm_capture *result,
 	if (!ops->capture)
 		return -ENOSYS;
 
+	/*
+	 * Holding the pwm_lock is probably not needed. If you use pwm_capture()
+	 * and you're interested to speed it up, please convince yourself it's
+	 * really not needed, test and then suggest a patch on the mailing list.
+	 */
 	guard(mutex)(&pwm_lock);
+
+	guard(pwmchip)(chip);
+
+	if (!chip->operational)
+		return -ENODEV;
 
 	return ops->capture(chip, pwm, result, timeout);
 }
@@ -440,7 +900,7 @@ err_get_device:
 		}
 	}
 
-	if (ops->get_state) {
+	if (ops->read_waveform || ops->get_state) {
 		/*
 		 * Zero-initialize state because most drivers are unaware of
 		 * .usage_power. The other members of state are supposed to be
@@ -1072,6 +1532,7 @@ struct pwm_chip *pwmchip_alloc(struct device *parent, unsigned int npwm, size_t 
 
 	chip->npwm = npwm;
 	chip->uses_pwmchip_alloc = true;
+	chip->operational = false;
 
 	pwmchip_dev = &chip->dev;
 	device_initialize(pwmchip_dev);
@@ -1136,381 +1597,27 @@ static bool pwm_ops_check(const struct pwm_chip *chip)
 {
 	const struct pwm_ops *ops = chip->ops;
 
-	if (!ops->apply)
-		return false;
+	if (ops->write_waveform) {
+		if (!ops->round_waveform_tohw ||
+		    !ops->round_waveform_fromhw ||
+		    !ops->write_waveform)
+			return false;
 
-	if (IS_ENABLED(CONFIG_PWM_DEBUG) && !ops->get_state)
-		dev_warn(pwmchip_parent(chip),
-			 "Please implement the .get_state() callback\n");
+		if (WFHWSIZE < ops->sizeof_wfhw) {
+			dev_warn(pwmchip_parent(chip), "WFHWSIZE < %zu\n", ops->sizeof_wfhw);
+			return false;
+		}
+	} else {
+		if (!ops->apply)
+			return false;
+
+		if (IS_ENABLED(CONFIG_PWM_DEBUG) && !ops->get_state)
+			dev_warn(pwmchip_parent(chip),
+				 "Please implement the .get_state() callback\n");
+	}
 
 	return true;
 }
-
-struct pwm_cdev_data {
-	struct pwm_chip *chip;
-	struct pwm_device *pwm[];
-};
-
-static int pwm_cdev_open(struct inode *inode, struct file *file)
-{
-	struct pwm_chip *chip = container_of(inode->i_cdev, struct pwm_chip, cdev);
-	struct pwm_cdev_data *cdata;
-	int ret;
-
-	mutex_lock(&pwm_lock);
-
-	if (!chip->operational) {
-		ret = -ENXIO;
-		goto out_unlock;
-	}
-
-	cdata = kzalloc(struct_size(cdata, pwm, chip->npwm), GFP_KERNEL);
-	if (!cdata) {
-		ret = -ENOMEM;
-		goto out_unlock;
-	}
-
-	cdata->chip = chip;
-
-	file->private_data = cdata;
-
-	ret = nonseekable_open(inode, file);
-
-out_unlock:
-	mutex_unlock(&pwm_lock);
-
-	return ret;
-}
-
-static int pwm_cdev_release(struct inode *inode, struct file *file)
-{
-	struct pwm_cdev_data *cdata = file->private_data;
-	unsigned int i;
-
-	for (i = 0; i < cdata->chip->npwm; ++i) {
-		if (cdata->pwm[i])
-			pwm_put(cdata->pwm[i]);
-	}
-	kfree(cdata);
-
-	return 0;
-}
-
-static int pwm_cdev_request(struct pwm_cdev_data *cdata, unsigned int hwpwm)
-{
-	struct pwm_chip *chip = cdata->chip;
-
-	if (hwpwm >= chip->npwm)
-		return -EINVAL;
-
-	if (!cdata->pwm[hwpwm]) {
-		struct pwm_device *pwm = &chip->pwms[hwpwm];
-		int ret;
-
-		ret = pwm_device_request(pwm, "pwm-cdev");
-		if (ret < 0)
-			return ret;
-
-		cdata->pwm[hwpwm] = pwm;
-	}
-
-	return 0;
-}
-
-static int pwm_cdev_free(struct pwm_cdev_data *cdata, unsigned int hwpwm)
-{
-	struct pwm_chip *chip = cdata->chip;
-
-	if (hwpwm >= chip->npwm)
-		return -EINVAL;
-
-	if (cdata->pwm[hwpwm]) {
-		struct pwm_device *pwm = cdata->pwm[hwpwm];
-
-		pwm_put(pwm);
-
-		cdata->pwm[hwpwm] = NULL;
-	}
-
-	return 0;
-}
-
-static long pwm_cdev_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
-{
-	int ret = 0;
-	struct pwm_cdev_data *cdata = file->private_data;
-	struct pwm_chip *chip = cdata->chip;
-
-	mutex_lock(&pwm_lock);
-
-	if (!chip->operational) {
-		ret = -ENODEV;
-		goto out_unlock;
-	}
-
-	switch (cmd) {
-	case PWM_IOCTL_GET_NUM_PWMS:
-		ret = chip->npwm;
-		break;
-
-	case PWM_IOCTL_REQUEST:
-		{
-			unsigned int hwpwm;
-
-			ret = get_user(hwpwm, (unsigned int __user *)arg);
-			if (ret)
-				goto out_unlock;
-
-			ret = pwm_cdev_request(cdata, hwpwm);
-		}
-		break;
-
-	case PWM_IOCTL_FREE:
-		{
-			unsigned int hwpwm;
-
-			ret = get_user(hwpwm, (unsigned int __user *)arg);
-			if (ret)
-				goto out_unlock;
-
-			ret = pwm_cdev_free(cdata, hwpwm);
-		}
-		break;
-
-	case PWM_IOCTL_GET:
-		{
-			struct pwmchip_state cstate;
-			struct pwm_state state;
-			struct pwm_device *pwm;
-
-			ret = copy_from_user(&cstate, (struct pwmchip_state __user *)arg, sizeof(cstate));
-			if (ret) {
-				ret = -EFAULT;
-				goto out_unlock;
-			}
-
-			ret = pwm_cdev_request(cdata, cstate.hwpwm);
-			if (ret)
-				goto out_unlock;
-
-			pwm = cdata->pwm[cstate.hwpwm];
-
-			ret = pwm_get_state_hw(pwm, &state);
-			if (ret)
-				goto out_unlock;
-
-			if (state.enabled) {
-				cstate.period = state.period;
-				if (state.polarity == PWM_POLARITY_NORMAL) {
-					cstate.duty_offset = 0;
-					cstate.duty_cycle = state.duty_cycle;
-				} else {
-					cstate.duty_offset = state.duty_cycle;
-					cstate.duty_cycle = state.period - state.duty_cycle;
-				}
-			} else {
-				cstate.period = 0;
-				cstate.duty_cycle = 0;
-				cstate.duty_offset = 0;
-			}
-			ret = copy_to_user((struct pwmchip_state __user *)arg, &cstate, sizeof(cstate));
-			if (ret)
-				ret = -EFAULT;
-		}
-		break;
-
-	case PWM_IOCTL_APPLY:
-		{
-			struct pwmchip_state cstate;
-			struct pwm_state state = { };
-			struct pwm_device *pwm;
-
-			ret = copy_from_user(&cstate, (struct pwmchip_state __user *)arg, sizeof(cstate));
-			if (ret) {
-				ret = -EFAULT;
-				goto out_unlock;
-			}
-
-			if (cstate.period > 0 &&
-			    (cstate.duty_cycle > cstate.period ||
-			     cstate.duty_offset >= cstate.period)) {
-				ret = -EINVAL;
-				goto out_unlock;
-			}
-
-			/*
-			 * While the API provides a duty_offset member
-			 * to describe (among others) also inversed
-			 * polarity wave forms, the translation into the
-			 * traditional representation with a (binary) polarity
-			 * isn't trivial because the lowlevel drivers round
-			 * duty_cycle down when applying a setting and so in the
-			 * representation with duty_offset the rounding is
-			 * inconsistent. I have no idea what's the best way to
-			 * fix that, so to not commit to a solution yet, just
-			 * refuse requests with .duty_offset that would yield
-			 * inversed polarity for now.
-			 */
-			if (cstate.duty_cycle < cstate.period &&
-			    cstate.duty_offset + cstate.duty_cycle >= cstate.period) {
-				ret = -EINVAL;
-				goto out_unlock;
-			}
-
-			ret = pwm_cdev_request(cdata, cstate.hwpwm);
-			if (ret)
-				goto out_unlock;
-
-			pwm = cdata->pwm[cstate.hwpwm];
-
-			if (cstate.period > 0) {
-				state.enabled = true;
-				state.period = cstate.period;
-				state.polarity = PWM_POLARITY_NORMAL;
-				state.duty_cycle = cstate.duty_cycle;
-			} else {
-				state.enabled = false;
-			}
-
-			ret = pwm_apply_might_sleep(pwm, &state);
-		}
-		break;
-
-	default:
-		ret = -ENOTTY;
-		break;
-	}
-out_unlock:
-	mutex_unlock(&pwm_lock);
-
-	return ret;
-}
-
-static const struct file_operations pwm_cdev_fileops = {
-	.open = pwm_cdev_open,
-	.release = pwm_cdev_release,
-	.owner = THIS_MODULE,
-	.llseek = no_llseek,
-	.unlocked_ioctl = pwm_cdev_ioctl,
-};
-
-static dev_t pwm_devt;
-
-/**
- * __pwmchip_add() - register a new PWM chip
- * @chip: the PWM chip to add
- * @owner: reference to the module providing the chip.
- *
- * Register a new PWM chip. @owner is supposed to be THIS_MODULE, use the
- * pwmchip_add wrapper to do this right.
- *
- * Returns: 0 on success or a negative error code on failure.
- */
-int __pwmchip_add(struct pwm_chip *chip, struct module *owner)
-{
-	int ret;
-
-	if (!chip || !pwmchip_parent(chip) || !chip->ops || !chip->npwm)
-		return -EINVAL;
-
-	/*
-	 * a struct pwm_chip must be allocated using (devm_)pwmchip_alloc,
-	 * otherwise the embedded struct device might disappear too early
-	 * resulting in memory corruption.
-	 * Catch drivers that were not converted appropriately.
-	 */
-	if (!chip->uses_pwmchip_alloc)
-		return -EINVAL;
-
-	if (!pwm_ops_check(chip))
-		return -EINVAL;
-
-	chip->owner = owner;
-
-	guard(mutex)(&pwm_lock);
-
-	ret = idr_alloc(&pwm_chips, chip, 0, 0, GFP_KERNEL);
-	if (ret < 0)
-		return ret;
-
-	chip->id = ret;
-
-	dev_set_name(&chip->dev, "pwmchip%u", chip->id);
-
-	if (IS_ENABLED(CONFIG_OF))
-		of_pwmchip_add(chip);
-
-	ret = device_add(&chip->dev);
-	if (ret)
-		goto err_device_add;
-
-	return 0;
-
-err_device_add:
-	if (IS_ENABLED(CONFIG_OF))
-		of_pwmchip_remove(chip);
-
-	idr_remove(&pwm_chips, chip->id);
-
-	return ret;
-}
-EXPORT_SYMBOL_GPL(__pwmchip_add);
-
-/**
- * pwmchip_remove() - remove a PWM chip
- * @chip: the PWM chip to remove
- *
- * Removes a PWM chip.
- */
-void pwmchip_remove(struct pwm_chip *chip)
-{
-	pwmchip_sysfs_unexport(chip);
-	unsigned int i;
-
-	mutex_lock(&pwm_lock);
-
-	pwmchip_lock(chip);
-	chip->operational = false;
-	pwmchip_unlock(chip);
-
-	for (i = 0; i < chip->npwm; ++i) {
-		struct pwm_device *pwm = &chip->pwms[i];
-
-		if (test_and_clear_bit(PWMF_REQUESTED, &pwm->flags)) {
-			dev_alert(&chip->dev, "Freeing requested PWM #%u\n", i);
-			if (pwm->chip->ops->free)
-				pwm->chip->ops->free(pwm->chip, pwm);
-		}
-	}
-
-	if (IS_ENABLED(CONFIG_OF))
-		of_pwmchip_remove(chip);
-
-	scoped_guard(mutex, &pwm_lock)
-		idr_remove(&pwm_chips, chip->id);
-
-	device_del(&chip->dev);
-}
-EXPORT_SYMBOL_GPL(pwmchip_remove);
-
-static void devm_pwmchip_remove(void *data)
-{
-	struct pwm_chip *chip = data;
-
-	pwmchip_remove(chip);
-}
-
-int __devm_pwmchip_add(struct device *dev, struct pwm_chip *chip, struct module *owner)
-{
-	int ret;
-
-	ret = __pwmchip_add(chip, owner);
-	if (ret)
-		return ret;
-
-	return devm_add_action_or_reset(dev, devm_pwmchip_remove, chip);
-}
-EXPORT_SYMBOL_GPL(__devm_pwmchip_add);
 
 static struct device_link *pwm_device_link_add(struct device *dev,
 					       struct pwm_device *pwm)
@@ -1690,36 +1797,6 @@ static DEFINE_MUTEX(pwm_lookup_lock);
 static LIST_HEAD(pwm_lookup_list);
 
 /**
- * pwm_add_table() - register PWM device consumers
- * @table: array of consumers to register
- * @num: number of consumers in table
- */
-void pwm_add_table(struct pwm_lookup *table, size_t num)
-{
-	guard(mutex)(&pwm_lookup_lock);
-
-	while (num--) {
-		list_add_tail(&table->list, &pwm_lookup_list);
-		table++;
-	}
-}
-
-/**
- * pwm_remove_table() - unregister PWM device consumers
- * @table: array of consumers to unregister
- * @num: number of consumers in table
- */
-void pwm_remove_table(struct pwm_lookup *table, size_t num)
-{
-	guard(mutex)(&pwm_lookup_lock);
-
-	while (num--) {
-		list_del(&table->list);
-		table++;
-	}
-}
-
-/**
  * pwm_get() - look up and request a PWM device
  * @dev: device for PWM consumer
  * @con_id: consumer name
@@ -1858,16 +1935,16 @@ void pwm_put(struct pwm_device *pwm)
 	guard(mutex)(&pwm_lock);
 
 	/*
-	 * If the chip isn't operational, PWMF_REQUESTED was already cleared. So
-	 * don't warn in this case. This can only happen if a consumer called
-	 * pwm_put() twice.
+	 * Trigger a warning if a consumer called pwm_put() twice.
+	 * If the chip isn't operational, PWMF_REQUESTED was already cleared in
+	 * pwmchip_remove(). So don't warn in this case.
 	 */
 	if (chip->operational && !test_and_clear_bit(PWMF_REQUESTED, &pwm->flags)) {
 		pr_warn("PWM device already freed\n");
 		return;
 	}
 
-	if (chip->ops->free)
+	if (chip->operational && chip->ops->free)
 		pwm->chip->ops->free(pwm->chip, pwm);
 
 	pwm->label = NULL;
@@ -1944,6 +2021,162 @@ struct pwm_device *devm_fwnode_pwm_get(struct device *dev,
 	return pwm;
 }
 EXPORT_SYMBOL_GPL(devm_fwnode_pwm_get);
+
+/**
+ * __pwmchip_add() - register a new PWM chip
+ * @chip: the PWM chip to add
+ * @owner: reference to the module providing the chip.
+ *
+ * Register a new PWM chip. @owner is supposed to be THIS_MODULE, use the
+ * pwmchip_add wrapper to do this right.
+ *
+ * Returns: 0 on success or a negative error code on failure.
+ */
+int __pwmchip_add(struct pwm_chip *chip, struct module *owner)
+{
+	int ret;
+
+	if (!chip || !pwmchip_parent(chip) || !chip->ops || !chip->npwm)
+		return -EINVAL;
+
+	/*
+	 * a struct pwm_chip must be allocated using (devm_)pwmchip_alloc,
+	 * otherwise the embedded struct device might disappear too early
+	 * resulting in memory corruption.
+	 * Catch drivers that were not converted appropriately.
+	 */
+	if (!chip->uses_pwmchip_alloc)
+		return -EINVAL;
+
+	if (!pwm_ops_check(chip))
+		return -EINVAL;
+
+	chip->owner = owner;
+
+	if (chip->atomic)
+		spin_lock_init(&chip->atomic_lock);
+	else
+		mutex_init(&chip->nonatomic_lock);
+
+	guard(mutex)(&pwm_lock);
+
+	ret = idr_alloc(&pwm_chips, chip, 0, 0, GFP_KERNEL);
+	if (ret < 0)
+		return ret;
+
+	chip->id = ret;
+
+	dev_set_name(&chip->dev, "pwmchip%u", chip->id);
+
+	if (IS_ENABLED(CONFIG_OF))
+		of_pwmchip_add(chip);
+
+	scoped_guard(pwmchip, chip)
+		chip->operational = true;
+
+	ret = device_add(&chip->dev);
+	if (ret)
+		goto err_device_add;
+
+	return 0;
+
+err_device_add:
+	scoped_guard(pwmchip, chip)
+		chip->operational = false;
+
+	if (IS_ENABLED(CONFIG_OF))
+		of_pwmchip_remove(chip);
+
+	idr_remove(&pwm_chips, chip->id);
+
+	return ret;
+}
+EXPORT_SYMBOL_GPL(__pwmchip_add);
+
+/**
+ * pwmchip_remove() - remove a PWM chip
+ * @chip: the PWM chip to remove
+ *
+ * Removes a PWM chip.
+ */
+void pwmchip_remove(struct pwm_chip *chip)
+{
+	pwmchip_sysfs_unexport(chip);
+
+	scoped_guard(mutex, &pwm_lock) {
+		unsigned int i;
+
+		scoped_guard(pwmchip, chip)
+			chip->operational = false;
+
+		for (i = 0; i < chip->npwm; ++i) {
+			struct pwm_device *pwm = &chip->pwms[i];
+
+			if (test_and_clear_bit(PWMF_REQUESTED, &pwm->flags)) {
+				dev_warn(&chip->dev, "Freeing requested PWM #%u\n", i);
+				if (pwm->chip->ops->free)
+					pwm->chip->ops->free(pwm->chip, pwm);
+			}
+		}
+
+		if (IS_ENABLED(CONFIG_OF))
+			of_pwmchip_remove(chip);
+
+		idr_remove(&pwm_chips, chip->id);
+	}
+
+	device_del(&chip->dev);
+}
+EXPORT_SYMBOL_GPL(pwmchip_remove);
+
+static void devm_pwmchip_remove(void *data)
+{
+	struct pwm_chip *chip = data;
+
+	pwmchip_remove(chip);
+}
+
+int __devm_pwmchip_add(struct device *dev, struct pwm_chip *chip, struct module *owner)
+{
+	int ret;
+
+	ret = __pwmchip_add(chip, owner);
+	if (ret)
+		return ret;
+
+	return devm_add_action_or_reset(dev, devm_pwmchip_remove, chip);
+}
+EXPORT_SYMBOL_GPL(__devm_pwmchip_add);
+
+/**
+ * pwm_add_table() - register PWM device consumers
+ * @table: array of consumers to register
+ * @num: number of consumers in table
+ */
+void pwm_add_table(struct pwm_lookup *table, size_t num)
+{
+	guard(mutex)(&pwm_lookup_lock);
+
+	while (num--) {
+		list_add_tail(&table->list, &pwm_lookup_list);
+		table++;
+	}
+}
+
+/**
+ * pwm_remove_table() - unregister PWM device consumers
+ * @table: array of consumers to unregister
+ * @num: number of consumers in table
+ */
+void pwm_remove_table(struct pwm_lookup *table, size_t num)
+{
+	guard(mutex)(&pwm_lookup_lock);
+
+	while (num--) {
+		list_del(&table->list);
+		table++;
+	}
+}
 
 static void pwm_dbg_show(struct pwm_chip *chip, struct seq_file *s)
 {

@@ -41,11 +41,18 @@ static_assert(BITS_PER_TYPE(access_mask_t) >= LANDLOCK_NUM_SCOPE);
 static_assert(sizeof(unsigned long) >= sizeof(access_mask_t));
 
 /* Ruleset access masks. */
-struct access_masks {
-	access_mask_t fs : LANDLOCK_NUM_ACCESS_FS;
-	access_mask_t net : LANDLOCK_NUM_ACCESS_NET;
-	access_mask_t scope : LANDLOCK_NUM_SCOPE;
+union access_masks {
+	struct {
+		access_mask_t fs : LANDLOCK_NUM_ACCESS_FS;
+		access_mask_t net : LANDLOCK_NUM_ACCESS_NET;
+		access_mask_t scope : LANDLOCK_NUM_SCOPE;
+	};
+	u32 all;
 };
+
+/* Makes sure all fields are covered. */
+static_assert(sizeof(((union access_masks *)NULL)->all) ==
+	      sizeof(union access_masks));
 
 typedef u16 layer_mask_t;
 /* Makes sure all layers can be checked. */
@@ -229,7 +236,7 @@ struct landlock_ruleset {
 			 * layers are set once and never changed for the
 			 * lifetime of the ruleset.
 			 */
-			struct access_masks access_masks[];
+			union access_masks access_masks[];
 		};
 	};
 };
@@ -260,52 +267,29 @@ static inline void landlock_get_ruleset(struct landlock_ruleset *const ruleset)
 		refcount_inc(&ruleset->usage);
 }
 
-/**
- * expand_ioctl - return the dst flags from either the src flag or the
- * LANDLOCK_ACCESS_FS_IOCTL flag, depending on whether the
- * LANDLOCK_ACCESS_FS_IOCTL and src access rights are handled or not.
- *
- * @handled: Handled access rights
- * @access:  The access mask to copy values from
- * @src:     A single access right to copy from in @access.
- * @dst:     One or more access rights to copy to
- *
- * Returns:
- * @dst, or 0
- */
-static inline access_mask_t expand_ioctl(access_mask_t handled,
-					 access_mask_t access,
-					 access_mask_t src, access_mask_t dst)
+static inline union access_masks
+landlock_merge_access_masks(const struct landlock_ruleset *const domain)
 {
-	if (!(handled & LANDLOCK_ACCESS_FS_IOCTL))
-		return 0;
+	size_t layer_level;
+	union access_masks matches = {};
 
-	access_mask_t copy_from = (handled & src) ? src :
-						    LANDLOCK_ACCESS_FS_IOCTL;
-	if (access & copy_from)
-		return dst;
-	return 0;
+	for (layer_level = 0; layer_level < domain->num_layers; layer_level++)
+		matches.all |= domain->access_masks[layer_level].all;
+
+	return matches;
 }
 
-/**
- * Returns @access with the synthetic IOCTL group flags enabled if necessary.
- *
- * @handled: Handled FS access rights.
- * @access:  FS access rights to expand.
- *
- * Returns:
- * @access expanded by the necessary flags for the synthetic IOCTL access rights.
- */
-static inline access_mask_t expand_all_ioctl(access_mask_t handled,
-					     access_mask_t access)
+static inline const struct landlock_ruleset *
+landlock_filter_access_masks(const struct landlock_ruleset *const domain,
+			     const union access_masks masks)
 {
-	return access |
-	       expand_ioctl(handled, access, LANDLOCK_ACCESS_FS_WRITE_FILE,
-			    IOCTL_CMD_G1 | IOCTL_CMD_G2 | IOCTL_CMD_G4) |
-	       expand_ioctl(handled, access, LANDLOCK_ACCESS_FS_READ_FILE,
-			    IOCTL_CMD_G1 | IOCTL_CMD_G2 | IOCTL_CMD_G3) |
-	       expand_ioctl(handled, access, LANDLOCK_ACCESS_FS_READ_DIR,
-			    IOCTL_CMD_G1);
+	if (!domain)
+		return NULL;
+
+	if (landlock_merge_access_masks(domain).all & masks.all)
+		return domain;
+
+	return NULL;
 }
 
 static inline void
@@ -344,18 +328,11 @@ landlock_add_scope_mask(struct landlock_ruleset *const ruleset,
 }
 
 static inline access_mask_t
-landlock_get_raw_fs_access_mask(const struct landlock_ruleset *const ruleset,
-				const u16 layer_level)
-{
-	return ruleset->access_masks[layer_level].fs;
-}
-
-static inline access_mask_t
 landlock_get_fs_access_mask(const struct landlock_ruleset *const ruleset,
 			    const u16 layer_level)
 {
 	/* Handles all initially denied by default access rights. */
-	return landlock_get_raw_fs_access_mask(ruleset, layer_level) |
+	return ruleset->access_masks[layer_level].fs |
 	       LANDLOCK_ACCESS_FS_INITIALLY_DENIED;
 }
 

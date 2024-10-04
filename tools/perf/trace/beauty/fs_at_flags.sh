@@ -13,14 +13,14 @@ printf "static const char *fs_at_flags[] = {\n"
 regex='^[[:space:]]*#[[:space:]]*define[[:space:]]+AT_([^_]+[[:alnum:]_]+)[[:space:]]+(0x[[:xdigit:]]+)[[:space:]]*.*'
 # AT_EACCESS is only meaningful to faccessat, so we will special case it there...
 # AT_STATX_SYNC_TYPE is not a bit, its a mask of AT_STATX_SYNC_AS_STAT, AT_STATX_FORCE_SYNC and AT_STATX_DONT_SYNC
-# AT_RENAME_* flags are just aliases of RENAME_* flags and we don't need to include them.
-# AT_HANDLE_* flags are only meaningful for name_to_handle_at, which we don't support.
-
+# AT_HANDLE_FID and AT_HANDLE_MNT_ID_UNIQUE are reusing values and are valid only for name_to_handle_at()
+# AT_RENAME_NOREPLACE reuses 0x1 and is valid only for renameat2()
 grep -E $regex ${linux_fcntl} | \
 	grep -v AT_EACCESS | \
 	grep -v AT_STATX_SYNC_TYPE | \
-	grep -Ev "AT_RENAME_(NOREPLACE|EXCHANGE|WHITEOUT)" | \
-	grep -Ev "AT_HANDLE_(FID|MNT_ID_UNIQUE)" | \
+	grep -v AT_HANDLE_FID | \
+	grep -v AT_HANDLE_MNT_ID_UNIQUE | \
+	grep -v AT_RENAME_NOREPLACE | \
 	sed -r "s/$regex/\2 \1/g"	| \
 	xargs printf "\t[ilog2(%s) + 1] = \"%s\",\n"
 printf "};\n"

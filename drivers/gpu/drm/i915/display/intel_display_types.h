@@ -524,7 +524,7 @@ struct intel_connector {
 
 	struct intel_dp *mst_port;
 
-	bool force_bigjoiner_enable;
+	int force_joined_pipes;
 
 	struct {
 		struct drm_dp_aux *dsc_decompression_aux;
@@ -1143,9 +1143,6 @@ struct intel_crtc_state {
 	/* w/a for waiting 2 vblanks during crtc enable */
 	enum pipe hsw_workaround_pipe;
 
-	/* IVB sprite scaling w/a (WaCxSRDisabledForSpriteScaling:ivb) */
-	bool disable_lp_wm;
-
 	struct intel_crtc_wm_state wm;
 
 	int min_cdclk[I915_MAX_PLANES];
@@ -1413,6 +1410,8 @@ struct intel_crtc {
 #ifdef CONFIG_DEBUG_FS
 	struct intel_pipe_crc pipe_crc;
 #endif
+
+	bool block_dc_for_vblank;
 };
 
 struct intel_plane {
@@ -1539,7 +1538,7 @@ struct intel_pps {
 		 * Pipe whose power sequencer is currently locked into
 		 * this port. Only relevant on VLV/CHV.
 		 */
-		enum pipe pps_pipe;
+		enum pipe vlv_pps_pipe;
 
 		/*
 		 * Power sequencer index. Only relevant on BXT+.
@@ -1552,12 +1551,12 @@ struct intel_pps {
 	 * the use of the PPS for any pipe currentrly driving
 	 * external DP as that will mess things up on VLV.
 	 */
-	enum pipe active_pipe;
+	enum pipe vlv_active_pipe;
 	/*
 	 * Set if the sequencer may be reset due to a power transition,
 	 * requiring a reinitialization. Only relevant on BXT+.
 	 */
-	bool pps_reset;
+	bool bxt_pps_reset;
 	struct edp_power_seq pps_delays;
 	struct edp_power_seq bios_pps_delays;
 };
@@ -1913,7 +1912,10 @@ static inline struct intel_dp *enc_to_intel_dp(struct intel_encoder *encoder)
 
 static inline struct intel_dp *intel_attached_dp(struct intel_connector *connector)
 {
-	return enc_to_intel_dp(intel_attached_encoder(connector));
+	if (connector->mst_port)
+		return connector->mst_port;
+	else
+		return enc_to_intel_dp(intel_attached_encoder(connector));
 }
 
 static inline bool intel_encoder_is_dp(struct intel_encoder *encoder)

@@ -1250,16 +1250,18 @@ struct inode *smb2_get_reparse_inode(struct cifs_open_info_data *data,
 		}
 	}
 
-	if (rc) {
-		/*
-		 * If CREATE was successful but SMB2_OP_SET_REPARSE failed then
-		 * remove the intermediate object created by CREATE. Otherwise
-		 * empty object stay on the server when reparse call failed.
-		 */
-		if (((struct smb2_hdr *)out_iov[0].iov_base)->Status == STATUS_SUCCESS &&
-		    ((struct smb2_hdr *)out_iov[1].iov_base)->Status != STATUS_SUCCESS)
-			smb2_unlink(xid, tcon, full_path, cifs_sb, NULL);
-	}
+
+	/*
+	 * If CREATE was successful but SMB2_OP_SET_REPARSE failed then
+	 * remove the intermediate object created by CREATE. Otherwise
+	 * empty object stay on the server when reparse call failed.
+	 */
+	if (rc &&
+	    out_iov[0].iov_base != NULL && out_buftype[0] != CIFS_NO_BUFFER &&
+	    ((struct smb2_hdr *)out_iov[0].iov_base)->Status == STATUS_SUCCESS &&
+	    (out_iov[1].iov_base == NULL || out_buftype[1] == CIFS_NO_BUFFER ||
+	     ((struct smb2_hdr *)out_iov[1].iov_base)->Status != STATUS_SUCCESS))
+		smb2_unlink(xid, tcon, full_path, cifs_sb, NULL);
 
 	for (i = 0; i < ARRAY_SIZE(out_buftype); i++)
 		free_rsp_buf(out_buftype[i], out_iov[i].iov_base);

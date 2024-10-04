@@ -124,6 +124,8 @@ void intel_crtc_vblank_on(const struct intel_crtc_state *crtc_state)
 {
 	struct intel_crtc *crtc = to_intel_crtc(crtc_state->uapi.crtc);
 
+	crtc->block_dc_for_vblank = intel_psr_needs_block_dc_vblank(crtc_state);
+
 	assert_vblank_disabled(&crtc->base);
 	drm_crtc_set_max_vblank_count(&crtc->base,
 				      intel_crtc_max_vblank_count(crtc_state));
@@ -140,6 +142,7 @@ void intel_crtc_vblank_on(const struct intel_crtc_state *crtc_state)
 void intel_crtc_vblank_off(const struct intel_crtc_state *crtc_state)
 {
 	struct intel_crtc *crtc = to_intel_crtc(crtc_state->uapi.crtc);
+	struct intel_display *display = to_intel_display(crtc);
 
 	/*
 	 * Should really happen exactly when we disable the pipe
@@ -150,6 +153,10 @@ void intel_crtc_vblank_off(const struct intel_crtc_state *crtc_state)
 
 	drm_crtc_vblank_off(&crtc->base);
 	assert_vblank_disabled(&crtc->base);
+
+	crtc->block_dc_for_vblank = false;
+
+	flush_work(&display->irq.vblank_dc_work);
 }
 
 struct intel_crtc_state *intel_crtc_state_alloc(struct intel_crtc *crtc)
@@ -387,6 +394,23 @@ fail:
 	intel_crtc_free(crtc);
 
 	return ret;
+}
+
+int intel_crtc_get_pipe_from_crtc_id_ioctl(struct drm_device *dev, void *data,
+					   struct drm_file *file)
+{
+	struct drm_i915_get_pipe_from_crtc_id *pipe_from_crtc_id = data;
+	struct drm_crtc *drm_crtc;
+	struct intel_crtc *crtc;
+
+	drm_crtc = drm_crtc_find(dev, file, pipe_from_crtc_id->crtc_id);
+	if (!drm_crtc)
+		return -ENOENT;
+
+	crtc = to_intel_crtc(drm_crtc);
+	pipe_from_crtc_id->pipe = crtc->pipe;
+
+	return 0;
 }
 
 static bool intel_crtc_needs_vblank_work(const struct intel_crtc_state *crtc_state)

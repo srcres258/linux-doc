@@ -2540,12 +2540,12 @@ int dev_pm_opp_set_config(struct device *dev, struct dev_pm_opp_config *config)
 		data->flags |= OPP_CONFIG_REGULATOR;
 	}
 
-	if (config->required_dev && config->required_opp_table) {
-		ret = _opp_set_required_dev(opp_table, dev,
-					    config->required_dev,
-					    config->required_opp_table);
-		if (ret < 0)
+	/* Attach genpds */
+	if (config->genpd_names) {
+		if (config->required_devs) {
+			ret = -EINVAL;
 			goto err;
+		}
 
 		data->index = ret;
 		data->flags |= OPP_CONFIG_REQUIRED_DEV;

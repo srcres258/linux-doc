@@ -1737,7 +1737,6 @@ static void dcn20_update_dchubp_dpp(
 	if (pipe_ctx->update_flags.bits.scaler ||
 			plane_state->update_flags.bits.scaling_change ||
 			plane_state->update_flags.bits.position_change ||
-			plane_state->update_flags.bits.clip_size_change ||
 			plane_state->update_flags.bits.per_pixel_alpha_change ||
 			pipe_ctx->stream->update_flags.bits.scaling) {
 		pipe_ctx->plane_res.scl_data.lb_params.alpha_en = pipe_ctx->plane_state->per_pixel_alpha;
@@ -1750,7 +1749,6 @@ static void dcn20_update_dchubp_dpp(
 	if (pipe_ctx->update_flags.bits.viewport ||
 			(context == dc->current_state && plane_state->update_flags.bits.position_change) ||
 			(context == dc->current_state && plane_state->update_flags.bits.scaling_change) ||
-			(context == dc->current_state && plane_state->update_flags.bits.clip_size_change) ||
 			(context == dc->current_state && pipe_ctx->stream->update_flags.bits.scaling)) {
 
 		hubp->funcs->mem_program_viewport(
@@ -2265,9 +2263,9 @@ void dcn20_post_unlock_program_front_end(
 			struct timing_generator *tg = pipe->stream_res.tg;
 
 
-			if (tg->funcs->get_double_buffer_pending) {
+			if (tg->funcs->get_optc_double_buffer_pending) {
 				for (j = 0; j < TIMEOUT_FOR_PIPE_ENABLE_US / polling_interval_us
-				&& tg->funcs->get_double_buffer_pending(tg); j++)
+				&& tg->funcs->get_optc_double_buffer_pending(tg); j++)
 					udelay(polling_interval_us);
 			}
 		}

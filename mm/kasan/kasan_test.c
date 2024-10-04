@@ -2057,6 +2057,7 @@ static struct kunit_case kasan_kunit_test_cases[] = {
 	KUNIT_CASE(match_all_not_assigned),
 	KUNIT_CASE(match_all_ptr_tag),
 	KUNIT_CASE(match_all_mem_tag),
+	KUNIT_CASE(copy_from_to_kernel_nofault_oob),
 	KUNIT_CASE(rust_uaf),
 	KUNIT_CASE(copy_from_to_kernel_nofault_oob),
 	{}

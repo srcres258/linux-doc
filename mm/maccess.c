@@ -32,7 +32,7 @@ long copy_from_kernel_nofault(void *dst, const void *src, size_t size)
 		return -ERANGE;
 
 	pagefault_disable();
-	instrument_memcpy_before(dst, src, size);
+	instrument_read(src, size);
 	if (!(align & 7))
 		copy_from_kernel_nofault_loop(dst, src, size, u64, Efault);
 	if (!(align & 3))
@@ -65,7 +65,7 @@ long copy_to_kernel_nofault(void *dst, const void *src, size_t size)
 		align = (unsigned long)dst | (unsigned long)src;
 
 	pagefault_disable();
-	instrument_memcpy_before(dst, src, size);
+	instrument_write(dst, size);
 	if (!(align & 7))
 		copy_to_kernel_nofault_loop(dst, src, size, u64, Efault);
 	if (!(align & 3))
