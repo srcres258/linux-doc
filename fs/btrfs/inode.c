@@ -32,7 +32,7 @@
 #include <linux/migrate.h>
 #include <linux/sched/mm.h>
 #include <linux/iomap.h>
-#include <asm/unaligned.h>
+#include <linux/unaligned.h>
 #include <linux/fsverity.h>
 #include <linux/io_uring/cmd.h>
 #include "misc.h"

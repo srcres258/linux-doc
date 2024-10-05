@@ -416,10 +416,11 @@ int intel_crtc_get_pipe_from_crtc_id_ioctl(struct drm_device *dev, void *data,
 static bool intel_crtc_needs_vblank_work(const struct intel_crtc_state *crtc_state)
 {
 	return crtc_state->hw.active &&
-		!intel_crtc_needs_modeset(crtc_state) &&
 		!crtc_state->preload_luts &&
+		!intel_crtc_needs_modeset(crtc_state) &&
 		intel_crtc_needs_color_update(crtc_state) &&
-		!intel_color_uses_dsb(crtc_state);
+		!intel_color_uses_dsb(crtc_state) &&
+		!crtc_state->use_dsb;
 }
 
 static void intel_crtc_vblank_work(struct kthread_work *base)
@@ -483,6 +484,17 @@ int intel_usecs_to_scanlines(const struct drm_display_mode *adjusted_mode,
 				1000 * adjusted_mode->crtc_htotal);
 }
 
+int intel_scanlines_to_usecs(const struct drm_display_mode *adjusted_mode,
+			     int scanlines)
+{
+	/* paranoia */
+	if (!adjusted_mode->crtc_clock)
+		return 1;
+
+	return DIV_ROUND_UP_ULL(mul_u32_u32(scanlines, adjusted_mode->crtc_htotal * 1000),
+				adjusted_mode->crtc_clock);
+}
+
 /**
  * intel_pipe_update_start() - start update of a set of display registers
  * @state: the atomic state
@@ -510,12 +522,8 @@ void intel_pipe_update_start(struct intel_atomic_state *state,
 	intel_psr_lock(new_crtc_state);
 
 	if (new_crtc_state->do_async_flip) {
-		spin_lock_irq(&crtc->base.dev->event_lock);
-		/* arm the event for the flip done irq handler */
-		crtc->flip_done_event = new_crtc_state->uapi.event;
-		spin_unlock_irq(&crtc->base.dev->event_lock);
-
-		new_crtc_state->uapi.event = NULL;
+		intel_crtc_prepare_vblank_event(new_crtc_state,
+						&crtc->flip_done_event);
 		return;
 	}
 
@@ -610,6 +618,19 @@ void intel_crtc_arm_vblank_event(struct intel_crtc_state *crtc_state)
 
 	spin_lock_irqsave(&crtc->base.dev->event_lock, irqflags);
 	drm_crtc_arm_vblank_event(&crtc->base, crtc_state->uapi.event);
+	spin_unlock_irqrestore(&crtc->base.dev->event_lock, irqflags);
+
+	crtc_state->uapi.event = NULL;
+}
+
+void intel_crtc_prepare_vblank_event(struct intel_crtc_state *crtc_state,
+				     struct drm_pending_vblank_event **event)
+{
+	struct intel_crtc *crtc = to_intel_crtc(crtc_state->uapi.crtc);
+	unsigned long irqflags;
+
+	spin_lock_irqsave(&crtc->base.dev->event_lock, irqflags);
+	*event = crtc_state->uapi.event;
 	spin_unlock_irqrestore(&crtc->base.dev->event_lock, irqflags);
 
 	crtc_state->uapi.event = NULL;
