@@ -89,10 +89,15 @@ static int ovl_change_flags(struct file *file, unsigned int flags)
 	return 0;
 }
 
+struct ovl_file {
+	struct file *realfile;
+};
+
 static int ovl_real_fdget_path(const struct file *file, struct fd *real,
 			       struct path *realpath)
 {
-	struct file *realfile = file->private_data;
+	struct ovl_file *of = file->private_data;
+	struct file *realfile = of->realfile;
 
 	real->word = (unsigned long)realfile;
 
@@ -144,6 +149,7 @@ static int ovl_open(struct inode *inode, struct file *file)
 	struct dentry *dentry = file_dentry(file);
 	struct file *realfile;
 	struct path realpath;
+	struct ovl_file *of;
 	int err;
 
 	/* lazy lookup and verify lowerdata */
@@ -162,18 +168,28 @@ static int ovl_open(struct inode *inode, struct file *file)
 	if (!realpath.dentry)
 		return -EIO;
 
-	realfile = ovl_open_realfile(file, &realpath);
-	if (IS_ERR(realfile))
-		return PTR_ERR(realfile);
+	of = kzalloc(sizeof(struct ovl_file), GFP_KERNEL);
+	if (!of)
+		return -ENOMEM;
 
-	file->private_data = realfile;
+	realfile = ovl_open_realfile(file, &realpath);
+	if (IS_ERR(realfile)) {
+		kfree(of);
+		return PTR_ERR(realfile);
+	}
+
+	of->realfile = realfile;
+	file->private_data = of;
 
 	return 0;
 }
 
 static int ovl_release(struct inode *inode, struct file *file)
 {
-	fput(file->private_data);
+	struct ovl_file *of = file->private_data;
+
+	fput(of->realfile);
+	kfree(of);
 
 	return 0;
 }
@@ -416,14 +432,14 @@ static int ovl_fsync(struct file *file, loff_t start, loff_t end, int datasync)
 
 static int ovl_mmap(struct file *file, struct vm_area_struct *vma)
 {
-	struct file *realfile = file->private_data;
+	struct ovl_file *of = file->private_data;
 	struct backing_file_ctx ctx = {
 		.cred = ovl_creds(file_inode(file)->i_sb),
 		.user_file = file,
 		.accessed = ovl_file_accessed,
 	};
 
-	return backing_file_mmap(realfile, vma, &ctx);
+	return backing_file_mmap(of->realfile, vma, &ctx);
 }
 
 static long ovl_fallocate(struct file *file, int mode, loff_t offset, loff_t len)
