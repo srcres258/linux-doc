@@ -336,7 +336,6 @@ static void __release_guc_id(struct xe_guc *guc, struct xe_exec_queue *q, u32 xa
 static int alloc_guc_id(struct xe_guc *guc, struct xe_exec_queue *q)
 {
 	int ret;
-	void *ptr;
 	int i;
 
 	/*
@@ -356,12 +355,10 @@ static int alloc_guc_id(struct xe_guc *guc, struct xe_exec_queue *q)
 	q->guc->id = ret;
 
 	for (i = 0; i < q->width; ++i) {
-		ptr = xa_store(&guc->submission_state.exec_queue_lookup,
-			       q->guc->id + i, q, GFP_NOWAIT);
-		if (IS_ERR(ptr)) {
-			ret = PTR_ERR(ptr);
+		ret = xa_err(xa_store(&guc->submission_state.exec_queue_lookup,
+				      q->guc->id + i, q, GFP_NOWAIT));
+		if (ret)
 			goto err_release;
-		}
 	}
 
 	return 0;
@@ -2182,7 +2179,7 @@ xe_guc_exec_queue_snapshot_print(struct xe_guc_submit_exec_queue_snapshot *snaps
 	if (!snapshot)
 		return;
 
-	drm_printf(p, "\nGuC ID: %d\n", snapshot->guc.id);
+	drm_printf(p, "GuC ID: %d\n", snapshot->guc.id);
 	drm_printf(p, "\tName: %s\n", snapshot->name);
 	drm_printf(p, "\tClass: %d\n", snapshot->class);
 	drm_printf(p, "\tLogical mask: 0x%x\n", snapshot->logical_mask);
