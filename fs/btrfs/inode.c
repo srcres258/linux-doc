@@ -832,32 +832,16 @@ static inline int inode_need_compress(struct btrfs_inode *inode, u64 start,
 		return 0;
 	}
 	/*
-	 * Special check for subpage.
+	 * Only enable sector perfect compression for experimental builds.
 	 *
-	 * We lock the full page then run each delalloc range in the page, thus
-	 * for the following case, we will hit some subpage specific corner case:
+	 * This is a big feature change for subpage cases, and can hit
+	 * different corner cases, so only limit this feature for
+	 * experimental build for now.
 	 *
-	 * 0		32K		64K
-	 * |	|///////|	|///////|
-	 *		\- A		\- B
-	 *
-	 * In above case, both range A and range B will try to unlock the full
-	 * page [0, 64K), causing the one finished later will have page
-	 * unlocked already, triggering various page lock requirement BUG_ON()s.
-	 *
-	 * So here we add an artificial limit that subpage compression can only
-	 * if the range is fully page aligned.
-	 *
-	 * In theory we only need to ensure the first page is fully covered, but
-	 * the tailing partial page will be locked until the full compression
-	 * finishes, delaying the write of other range.
-	 *
-	 * TODO: Make btrfs_run_delalloc_range() to lock all delalloc range
-	 * first to prevent any submitted async extent to unlock the full page.
-	 * By this, we can ensure for subpage case that only the last async_cow
-	 * will unlock the full page.
+	 * ETA for moving this out of experimental builds is 6.15.
 	 */
-	if (fs_info->sectorsize < PAGE_SIZE) {
+	if (fs_info->sectorsize < PAGE_SIZE &&
+	    !IS_ENABLED(CONFIG_BTRFS_EXPERIMENTAL)) {
 		if (!PAGE_ALIGNED(start) ||
 		    !PAGE_ALIGNED(end + 1))
 			return 0;
@@ -902,7 +886,8 @@ static int extent_range_clear_dirty_for_io(struct inode *inode, u64 start, u64 e
 				ret = PTR_ERR(folio);
 			continue;
 		}
-		folio_clear_dirty_for_io(folio);
+		btrfs_folio_clamp_clear_dirty(inode_to_fs_info(inode), folio, start,
+					      end + 1 - start);
 		folio_put(folio);
 	}
 	return ret;
@@ -1000,17 +985,6 @@ again:
 	if (total_compressed <= blocksize &&
 	   (start > 0 || end + 1 < inode->disk_i_size))
 		goto cleanup_and_bail_uncompressed;
-
-	/*
-	 * For subpage case, we require full page alignment for the sector
-	 * aligned range.
-	 * Thus we must also check against @actual_end, not just @end.
-	 */
-	if (blocksize < PAGE_SIZE) {
-		if (!PAGE_ALIGNED(start) ||
-		    !PAGE_ALIGNED(round_up(actual_end, blocksize)))
-			goto cleanup_and_bail_uncompressed;
-	}
 
 	total_compressed = min_t(unsigned long, total_compressed,
 			BTRFS_MAX_UNCOMPRESSED);
@@ -1513,7 +1487,7 @@ static noinline int cow_file_range(struct btrfs_inode *inode,
 		 * (which the caller expects to stay locked), don't clear any
 		 * dirty bits and don't set any writeback bits
 		 *
-		 * Do set the Ordered (Private2) bit so we know this page was
+		 * Do set the Ordered flag so we know this page was
 		 * properly setup for writepage.
 		 */
 		page_ops = (keep_locked ? 0 : PAGE_UNLOCK);
@@ -3094,34 +3068,6 @@ int btrfs_finish_one_ordered(struct btrfs_ordered_extent *ordered_extent)
 			goto out;
 	}
 
-	if (test_bit(BTRFS_ORDERED_NOCOW, &ordered_extent->flags)) {
-		BUG_ON(!list_empty(&ordered_extent->list)); /* Logic error */
-
-		btrfs_inode_safe_disk_i_size_write(inode, 0);
-		if (freespace_inode)
-			trans = btrfs_join_transaction_spacecache(root);
-		else
-			trans = btrfs_join_transaction(root);
-		if (IS_ERR(trans)) {
-			ret = PTR_ERR(trans);
-			trans = NULL;
-			goto out;
-		}
-		trans->block_rsv = &inode->block_rsv;
-		ret = btrfs_update_inode_fallback(trans, inode);
-		if (ret) /* -ENOMEM or corruption */
-			btrfs_abort_transaction(trans, ret);
-
-		ret = btrfs_insert_raid_extent(trans, ordered_extent);
-		if (ret)
-			btrfs_abort_transaction(trans, ret);
-
-		goto out;
-	}
-
-	clear_bits |= EXTENT_LOCKED;
-	lock_extent(io_tree, start, end, &cached_state);
-
 	if (freespace_inode)
 		trans = btrfs_join_transaction_spacecache(root);
 	else
@@ -3135,8 +3081,31 @@ int btrfs_finish_one_ordered(struct btrfs_ordered_extent *ordered_extent)
 	trans->block_rsv = &inode->block_rsv;
 
 	ret = btrfs_insert_raid_extent(trans, ordered_extent);
-	if (ret)
+	if (ret) {
+		btrfs_abort_transaction(trans, ret);
 		goto out;
+	}
+
+	if (test_bit(BTRFS_ORDERED_NOCOW, &ordered_extent->flags)) {
+		/* Logic error */
+		ASSERT(list_empty(&ordered_extent->list));
+		if (!list_empty(&ordered_extent->list)) {
+			ret = -EINVAL;
+			btrfs_abort_transaction(trans, ret);
+			goto out;
+		}
+
+		btrfs_inode_safe_disk_i_size_write(inode, 0);
+		ret = btrfs_update_inode_fallback(trans, inode);
+		if (ret) {
+			/* -ENOMEM or corruption */
+			btrfs_abort_transaction(trans, ret);
+		}
+		goto out;
+	}
+
+	clear_bits |= EXTENT_LOCKED;
+	lock_extent(io_tree, start, end, &cached_state);
 
 	if (test_bit(BTRFS_ORDERED_COMPRESSED, &ordered_extent->flags))
 		compress_type = ordered_extent->compress_type;
@@ -6026,7 +5995,7 @@ again:
 	 * offset.  This means that new entries created during readdir
 	 * are *guaranteed* to be seen in the future by that readdir.
 	 * This has broken buggy programs which operate on names as
-	 * they're returned by readdir.  Until we re-use freed offsets
+	 * they're returned by readdir.  Until we reuse freed offsets
 	 * we have this hack to stop new entries from being returned
 	 * under the assumption that they'll never reach this huge
 	 * offset.
@@ -7297,7 +7266,7 @@ static void btrfs_invalidate_folio(struct folio *folio, size_t offset,
 	 *
 	 * But already submitted bio can still be finished on this folio.
 	 * Furthermore, endio function won't skip folio which has Ordered
-	 * (Private2) already cleared, so it's possible for endio and
+	 * already cleared, so it's possible for endio and
 	 * invalidate_folio to do the same ordered extent accounting twice
 	 * on one folio.
 	 *
@@ -7363,7 +7332,7 @@ static void btrfs_invalidate_folio(struct folio *folio, size_t offset,
 		range_len = range_end + 1 - cur;
 		if (!btrfs_folio_test_ordered(fs_info, folio, cur, range_len)) {
 			/*
-			 * If Ordered (Private2) is cleared, it means endio has
+			 * If Ordered is cleared, it means endio has
 			 * already been executed for the range.
 			 * We can't delete the extent states as
 			 * btrfs_finish_ordered_io() may still use some of them.
@@ -7436,7 +7405,7 @@ next:
 	}
 	/*
 	 * We have iterated through all ordered extents of the page, the page
-	 * should not have Ordered (Private2) anymore, or the above iteration
+	 * should not have Ordered anymore, or the above iteration
 	 * did something wrong.
 	 */
 	ASSERT(!folio_test_ordered(folio));
