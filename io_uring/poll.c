@@ -927,13 +927,10 @@ int io_poll_remove(struct io_kiocb *req, unsigned int issue_flags)
 	io_ring_submit_lock(ctx, issue_flags);
 	preq = io_poll_find(ctx, true, &cd);
 	ret2 = io_poll_disarm(preq);
-	if (!ret2)
-		goto found;
 	if (ret2) {
 		ret = ret2;
 		goto out;
 	}
-found:
 	if (WARN_ON_ONCE(preq->opcode != IORING_OP_POLL_ADD)) {
 		ret = -EFAULT;
 		goto out;

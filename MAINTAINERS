@@ -1360,6 +1360,14 @@ F:	Documentation/ABI/testing/debugfs-iio-ad9467
 F:	Documentation/devicetree/bindings/iio/adc/adi,ad9467.yaml
 F:	drivers/iio/adc/ad9467.c
 
+ANALOG DEVICES INC AD8460 DRIVER
+M:	Mariel Tinaco <Mariel.Tinaco@analog.com>
+L:	linux-iio@vger.kernel.org
+S:	Supported
+W:	https://ez.analog.com/linux-software-drivers
+F:	Documentation/devicetree/bindings/iio/dac/adi,ad8460.yaml
+F:	drivers/iio/dac/ad8460.c
+
 ANALOG DEVICES INC AD9739a DRIVER
 M:	Nuno Sa <nuno.sa@analog.com>
 M:	Dragos Bogdan <dragos.bogdan@analog.com>
@@ -2824,6 +2832,7 @@ F:	arch/arm64/boot/dts/qcom/sdm845-cheza*
 
 ARM/QUALCOMM MAILING LIST
 L:	linux-arm-msm@vger.kernel.org
+C:	irc://irc.oftc.net/linux-msm
 F:	Documentation/devicetree/bindings/*/qcom*
 F:	Documentation/devicetree/bindings/soc/qcom/
 F:	arch/arm/boot/dts/qcom/
@@ -2865,13 +2874,14 @@ M:	Bjorn Andersson <andersson@kernel.org>
 M:	Konrad Dybcio <konradybcio@kernel.org>
 L:	linux-arm-msm@vger.kernel.org
 S:	Maintained
+C:	irc://irc.oftc.net/linux-msm
 T:	git git://git.kernel.org/pub/scm/linux/kernel/git/qcom/linux.git
 F:	Documentation/devicetree/bindings/arm/qcom-soc.yaml
 F:	Documentation/devicetree/bindings/arm/qcom.yaml
 F:	Documentation/devicetree/bindings/bus/qcom*
 F:	Documentation/devicetree/bindings/cache/qcom,llcc.yaml
 F:	Documentation/devicetree/bindings/firmware/qcom,scm.yaml
-F:	Documentation/devicetree/bindings/reserved-memory/qcom
+F:	Documentation/devicetree/bindings/reserved-memory/qcom*
 F:	Documentation/devicetree/bindings/soc/qcom/
 F:	arch/arm/boot/dts/qcom/
 F:	arch/arm/configs/qcom_defconfig
@@ -2922,6 +2932,7 @@ Q:	http://patchwork.kernel.org/project/linux-renesas-soc/list/
 C:	irc://irc.libera.chat/renesas-soc
 T:	git git://git.kernel.org/pub/scm/linux/kernel/git/geert/renesas-devel.git next
 F:	Documentation/devicetree/bindings/hwinfo/renesas,prr.yaml
+F:	Documentation/devicetree/bindings/nvmem/renesas,*
 F:	Documentation/devicetree/bindings/soc/renesas/
 F:	arch/arm/boot/dts/renesas/
 F:	arch/arm/configs/shmobile_defconfig
@@ -2929,6 +2940,7 @@ F:	arch/arm/include/debug/renesas-scif.S
 F:	arch/arm/mach-shmobile/
 F:	arch/arm64/boot/dts/renesas/
 F:	arch/riscv/boot/dts/renesas/
+F:	drivers/nvmem/rcar-efuse.c
 F:	drivers/pmdomain/renesas/
 F:	drivers/soc/renesas/
 F:	include/linux/soc/renesas/
@@ -4040,6 +4052,13 @@ L:	linux-iio@vger.kernel.org
 S:	Maintained
 F:	Documentation/devicetree/bindings/iio/accel/bosch,bma400.yaml
 F:	drivers/iio/accel/bma400*
+
+BOSCH SENSORTEC BMI270 IMU IIO DRIVER
+M:	Alex Lanzano <lanzano.alex@gmail.com>
+L:	linux-iio@vger.kernel.org
+S:	Maintained
+F:	Documentation/devicetree/bindings/iio/imu/bosch,bmi270.yaml
+F:	drivers/iio/imu/bmi270/
 
 BOSCH SENSORTEC BMI323 IMU IIO DRIVER
 M:	Jagath Jog J <jagathjog1996@gmail.com>
@@ -8933,6 +8952,7 @@ F:	include/linux/fortify-string.h
 F:	lib/fortify_kunit.c
 F:	lib/memcpy_kunit.c
 F:	lib/test_fortify/*
+K:	\bunsafe_memcpy\b
 K:	\b__NO_FORTIFY\b
 
 FPGA DFL DRIVERS
@@ -11495,7 +11515,7 @@ Q:	https://patchwork.kernel.org/project/linux-dmaengine/list/
 F:	drivers/dma/ioat*
 
 INTEL IAA CRYPTO DRIVER
-M:	Tom Zanussi <tom.zanussi@linux.intel.com>
+M:	Kristen Accardi <kristen.c.accardi@intel.com>
 L:	linux-crypto@vger.kernel.org
 S:	Supported
 F:	Documentation/driver-api/crypto/iaa/iaa-crypto.rst
@@ -11520,7 +11540,7 @@ F:	include/uapi/linux/idxd.h
 
 INTEL IN FIELD SCAN (IFS) DEVICE
 M:	Jithu Joseph <jithu.joseph@intel.com>
-R:	Ashok Raj <ashok.raj@intel.com>
+R:	Ashok Raj <ashok.raj.linux@gmail.com>
 R:	Tony Luck <tony.luck@intel.com>
 S:	Maintained
 F:	drivers/platform/x86/intel/ifs
@@ -12367,6 +12387,7 @@ F:	include/linux/randomize_kstack.h
 F:	kernel/configs/hardening.config
 F:	lib/usercopy_kunit.c
 F:	mm/usercopy.c
+F:	security/Kconfig.hardening
 K:	\b(add|choose)_random_kstack_offset\b
 K:	\b__check_(object_size|heap_object)\b
 K:	\b__counted_by\b
@@ -12483,7 +12504,7 @@ F:	virt/kvm/*
 KERNEL VIRTUAL MACHINE FOR ARM64 (KVM/arm64)
 M:	Marc Zyngier <maz@kernel.org>
 M:	Oliver Upton <oliver.upton@linux.dev>
-R:	James Morse <james.morse@arm.com>
+R:	Joey Gouly <joey.gouly@arm.com>
 R:	Suzuki K Poulose <suzuki.poulose@arm.com>
 R:	Zenghui Yu <yuzenghui@huawei.com>
 L:	linux-arm-kernel@lists.infradead.org (moderated for non-subscribers)
@@ -18343,6 +18364,7 @@ PIN CONTROLLER - QUALCOMM
 M:	Bjorn Andersson <andersson@kernel.org>
 L:	linux-arm-msm@vger.kernel.org
 S:	Maintained
+C:	irc://irc.oftc.net/linux-msm
 F:	Documentation/devicetree/bindings/pinctrl/qcom,*
 F:	drivers/pinctrl/qcom/
 
@@ -22249,6 +22271,12 @@ F:	drivers/*/stm32-*timer*
 F:	drivers/pwm/pwm-stm32*
 F:	include/linux/*/stm32-*tim*
 
+STM32MP25 USB3/PCIE COMBOPHY DRIVER
+M:	Christian Bruel <christian.bruel@foss.st.com>
+S:	Maintained
+F:	Documentation/devicetree/bindings/phy/st,stm32mp25-combophy.yaml
+F:	drivers/phy/st/phy-stm32-combophy.c
+
 STMMAC ETHERNET DRIVER
 M:	Alexandre Torgue <alexandre.torgue@foss.st.com>
 M:	Jose Abreu <joabreu@synopsys.com>
@@ -25454,7 +25482,7 @@ F:	include/xen/arm/swiotlb-xen.h
 F:	include/xen/swiotlb-xen.h
 
 XFS FILESYSTEM
-M:	Chandan Babu R <chandan.babu@oracle.com>
+M:	Carlos Maiolino <cem@kernel.org>
 R:	Darrick J. Wong <djwong@kernel.org>
 L:	linux-xfs@vger.kernel.org
 S:	Supported

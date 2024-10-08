@@ -394,6 +394,7 @@ encode_cb_getattr4args(struct xdr_stream *xdr, struct nfs4_cb_compound_hdr *hdr,
 	bmap[0] = FATTR4_WORD0_SIZE;
 	if (!ncf->ncf_file_modified)
 		bmap[0] |= FATTR4_WORD0_CHANGE;
+
 	if (dp->dl_deleg_ts) {
 		bmap[1] = 0;
 		bmap[2] = FATTR4_WORD2_TIME_DELEG_ACCESS | FATTR4_WORD2_TIME_DELEG_MODIFY;

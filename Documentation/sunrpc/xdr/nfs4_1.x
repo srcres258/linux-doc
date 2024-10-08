@@ -45,20 +45,20 @@ pragma header nfs4;
 /*
  * Basic typedefs for RFC 1832 data type definitions
  */
-typedef hyper           int64_t;
-typedef unsigned int    uint32_t;
+typedef hyper		int64_t;
+typedef unsigned int	uint32_t;
 
 /*
  * Basic data types
  */
-typedef uint32_t        bitmap4<>;
+typedef uint32_t	bitmap4<>;
 
 /*
  * Timeval
  */
 struct nfstime4 {
-        int64_t         seconds;
-        uint32_t        nseconds;
+	int64_t		seconds;
+	uint32_t	nseconds;
 };
 
 
@@ -150,8 +150,8 @@ const OPEN4_RESULT_NO_OPEN_STATEID = 0x00000010;
  */
 typedef nfstime4        fattr4_time_deleg_access;
 typedef nfstime4        fattr4_time_deleg_modify;
-pragma public           fattr4_time_deleg_access;
-pragma public           fattr4_time_deleg_modify;
+pragma public 		fattr4_time_deleg_access;
+pragma public		fattr4_time_deleg_modify;
 
 
 %/*

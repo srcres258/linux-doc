@@ -2949,6 +2949,7 @@ struct nfsd4_fattr_args {
 	struct kstat		stat;
 	struct kstatfs		statfs;
 	struct nfs4_acl		*acl;
+	u64			change_attr;
 #ifdef CONFIG_NFSD_V4_SECURITY_LABEL
 	void			*context;
 	int			contextlen;
@@ -3048,7 +3049,6 @@ static __be32 nfsd4_encode_fattr4_change(struct xdr_stream *xdr,
 					 const struct nfsd4_fattr_args *args)
 {
 	const struct svc_export *exp = args->exp;
-	u64 c;
 
 	if (unlikely(exp->ex_flags & NFSEXP_V4ROOT)) {
 		u32 flush_time = convert_to_wallclock(exp->cd->flush_time);
@@ -3059,9 +3059,7 @@ static __be32 nfsd4_encode_fattr4_change(struct xdr_stream *xdr,
 			return nfserr_resource;
 		return nfs_ok;
 	}
-
-	c = nfsd4_change_attribute(&args->stat, d_inode(args->dentry));
-	return nfsd4_encode_changeid4(xdr, c);
+	return nfsd4_encode_changeid4(xdr, args->change_attr);
 }
 
 static __be32 nfsd4_encode_fattr4_size(struct xdr_stream *xdr,
@@ -3431,7 +3429,8 @@ static __be32 nfsd4_encode_fattr4_xattr_support(struct xdr_stream *xdr,
 #define NFSD_OA_SHARE_ACCESS_WANT	(BIT(OPEN_ARGS_SHARE_ACCESS_WANT_ANY_DELEG)		| \
 					 BIT(OPEN_ARGS_SHARE_ACCESS_WANT_NO_DELEG)		| \
 					 BIT(OPEN_ARGS_SHARE_ACCESS_WANT_CANCEL)		| \
-					 BIT(OPEN_ARGS_SHARE_ACCESS_WANT_DELEG_TIMESTAMPS))
+					 BIT(OPEN_ARGS_SHARE_ACCESS_WANT_DELEG_TIMESTAMPS)	| \
+					 BIT(OPEN_ARGS_SHARE_ACCESS_WANT_OPEN_XOR_DELEGATION))
 
 #define NFSD_OA_OPEN_CLAIM	(BIT(OPEN_ARGS_OPEN_CLAIM_NULL)		| \
 				 BIT(OPEN_ARGS_OPEN_CLAIM_PREVIOUS)	| \
@@ -3641,16 +3640,21 @@ nfsd4_encode_fattr4(struct svc_rqst *rqstp, struct xdr_stream *xdr,
 		struct nfs4_cb_fattr *ncf = &dp->dl_cb_fattr;
 
 		if (ncf->ncf_file_modified) {
+			++ncf->ncf_initial_cinfo;
 			args.stat.size = ncf->ncf_cur_fsize;
 			if (!timespec64_is_epoch(&ncf->ncf_cb_mtime))
 				args.stat.mtime = ncf->ncf_cb_mtime;
 		}
+		args.change_attr = ncf->ncf_initial_cinfo;
 
 		if (!timespec64_is_epoch(&ncf->ncf_cb_atime))
 			args.stat.atime = ncf->ncf_cb_atime;
 
 		nfs4_put_stid(&dp->dl_stid);
+	} else {
+		args.change_attr = nfsd4_change_attribute(&args.stat, d_inode(dentry));
 	}
+
 	if (err)
 		goto out_nfserr;
 
@@ -4907,6 +4911,25 @@ nfsd4_encode_server_owner4(struct xdr_stream *xdr, struct svc_rqst *rqstp)
 }
 
 static __be32
+nfsd4_encode_nfs_impl_id4(struct xdr_stream *xdr, struct nfsd4_exchange_id *exid)
+{
+	__be32 status;
+
+	/* nii_domain */
+	status = nfsd4_encode_opaque(xdr, exid->nii_domain.data,
+				     exid->nii_domain.len);
+	if (status != nfs_ok)
+		return status;
+	/* nii_name */
+	status = nfsd4_encode_opaque(xdr, exid->nii_name.data,
+				     exid->nii_name.len);
+	if (status != nfs_ok)
+		return status;
+	/* nii_time */
+	return nfsd4_encode_nfstime4(xdr, &exid->nii_time);
+}
+
+static __be32
 nfsd4_encode_exchange_id(struct nfsd4_compoundres *resp, __be32 nfserr,
 			 union nfsd4_op_u *u)
 {
@@ -4940,8 +4963,11 @@ nfsd4_encode_exchange_id(struct nfsd4_compoundres *resp, __be32 nfserr,
 	if (nfserr != nfs_ok)
 		return nfserr;
 	/* eir_server_impl_id<1> */
-	if (xdr_stream_encode_u32(xdr, 0) != XDR_UNIT)
+	if (xdr_stream_encode_u32(xdr, 1) != XDR_UNIT)
 		return nfserr_resource;
+	nfserr = nfsd4_encode_nfs_impl_id4(xdr, exid);
+	if (nfserr != nfs_ok)
+		return nfserr;
 
 	return nfs_ok;
 }

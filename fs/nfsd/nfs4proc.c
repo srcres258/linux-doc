@@ -1150,10 +1150,10 @@ nfsd4_setattr(struct svc_rqst *rqstp, struct nfsd4_compound_state *cstate,
 		.na_iattr	= &setattr->sa_iattr,
 		.na_seclabel	= &setattr->sa_label,
 	};
+	bool save_no_wcc, deleg_attrs;
 	struct nfs4_stid *st = NULL;
 	struct inode *inode;
 	__be32 status = nfs_ok;
-	bool save_no_wcc, deleg_attrs;
 	int err;
 
 	deleg_attrs = setattr->sa_bmval[2] & (FATTR4_WORD2_TIME_DELEG_ACCESS |
@@ -3496,6 +3496,7 @@ static const struct nfsd4_operation nfsd4_ops[] = {
 	/* NFSv4.1 operations */
 	[OP_EXCHANGE_ID] = {
 		.op_func = nfsd4_exchange_id,
+		.op_release = nfsd4_exchange_id_release,
 		.op_flags = ALLOWED_WITHOUT_FH | ALLOWED_AS_FIRST_OP
 				| OP_MODIFIES_SOMETHING,
 		.op_name = "OP_EXCHANGE_ID",

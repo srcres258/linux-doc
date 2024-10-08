@@ -2,7 +2,7 @@
 VERSION = 6
 PATCHLEVEL = 12
 SUBLEVEL = 0
-EXTRAVERSION = -rc1
+EXTRAVERSION = -rc2
 NAME = Baby Opossum Posse
 
 # *DOCUMENTATION*
@@ -788,17 +788,22 @@ $(KCONFIG_CONFIG):
 else # !may-sync-config
 # External modules and some install targets need include/generated/autoconf.h
 # and include/config/auto.conf but do not care if they are up-to-date.
-# Use auto.conf to trigger the test
+# Use auto.conf to show the error message
+
+checked-configs := include/generated/autoconf.h include/generated/rustc_cfg include/config/auto.conf
+missing-configs := $(filter-out $(wildcard $(checked-configs)), $(checked-configs))
+
+ifdef missing-configs
 PHONY += include/config/auto.conf
 
 include/config/auto.conf:
-	@test -e include/generated/autoconf.h -a -e $@ || (		\
-	echo >&2;							\
-	echo >&2 "  ERROR: Kernel configuration is invalid.";		\
-	echo >&2 "         include/generated/autoconf.h or $@ are missing.";\
-	echo >&2 "         Run 'make oldconfig && make prepare' on kernel src to fix it.";	\
-	echo >&2 ;							\
-	/bin/false)
+	@echo   >&2 '***'
+	@echo   >&2 '***  ERROR: Kernel configuration is invalid. The following files are missing:'
+	@printf >&2 '***    - %s\n' $(missing-configs)
+	@echo   >&2 '***  Run "make oldconfig && make prepare" on kernel source to fix it.'
+	@echo   >&2 '***'
+	@/bin/false
+endif
 
 endif # may-sync-config
 endif # need-config
@@ -1196,7 +1201,8 @@ PHONY += prepare archprepare
 
 archprepare: outputmakefile archheaders archscripts scripts include/config/kernel.release \
 	asm-generic $(version_h) include/generated/utsrelease.h \
-	include/generated/compile.h include/generated/autoconf.h remove-stale-files
+	include/generated/compile.h include/generated/autoconf.h \
+	include/generated/rustc_cfg remove-stale-files
 
 prepare0: archprepare
 	$(Q)$(MAKE) $(build)=scripts/mod
@@ -1650,7 +1656,7 @@ help:
 		echo '* dtbs               - Build device tree blobs for enabled boards'; \
 		echo '  dtbs_install       - Install dtbs to $(INSTALL_DTBS_PATH)'; \
 		echo '  dt_binding_check   - Validate device tree binding documents and examples'; \
-		echo '  dt_binding_schema  - Build processed device tree binding schemas'; \
+		echo '  dt_binding_schemas - Build processed device tree binding schemas'; \
 		echo '  dtbs_check         - Validate device tree source files';\
 		echo '')
 

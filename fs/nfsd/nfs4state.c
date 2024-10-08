@@ -3497,6 +3497,12 @@ nfsd4_exchange_id(struct svc_rqst *rqstp, struct nfsd4_compound_state *cstate,
 		__func__, rqstp, exid, exid->clname.len, exid->clname.data,
 		addr_str, exid->flags, exid->spa_how);
 
+	exid->server_impl_name = kasprintf(GFP_KERNEL, "%s %s %s %s",
+					   utsname()->sysname, utsname()->release,
+					   utsname()->version, utsname()->machine);
+	if (!exid->server_impl_name)
+		return nfserr_jukebox;
+
 	if (exid->flags & ~EXCHGID4_FLAG_MASK_A)
 		return nfserr_inval;
 
@@ -3634,6 +3640,23 @@ out_copy:
 	exid->seqid = conf->cl_cs_slot.sl_seqid + 1;
 	nfsd4_set_ex_flags(conf, exid);
 
+	exid->nii_domain.len = sizeof("kernel.org") - 1;
+	exid->nii_domain.data = "kernel.org";
+
+	/*
+	 * Note that RFC 8881 places no length limit on
+	 * nii_name, but this implementation permits no
+	 * more than NFS4_OPAQUE_LIMIT bytes.
+	 */
+	exid->nii_name.len = strlen(exid->server_impl_name);
+	if (exid->nii_name.len > NFS4_OPAQUE_LIMIT)
+		exid->nii_name.len = NFS4_OPAQUE_LIMIT;
+	exid->nii_name.data = exid->server_impl_name;
+
+	/* just send zeros - the date is in nii_name */
+	exid->nii_time.tv_sec = 0;
+	exid->nii_time.tv_nsec = 0;
+
 	dprintk("nfsd4_exchange_id seqid %d flags %x\n",
 		conf->cl_cs_slot.sl_seqid, conf->cl_exchange_flags);
 	status = nfs_ok;
@@ -3648,6 +3671,14 @@ out_nolock:
 		expire_client(unconf);
 	}
 	return status;
+}
+
+void
+nfsd4_exchange_id_release(union nfsd4_op_u *u)
+{
+	struct nfsd4_exchange_id *exid = &u->exchange_id;
+
+	kfree(exid->server_impl_name);
 }
 
 static __be32 check_slot_seqid(u32 seqid, u32 slot_seqid, bool slot_inuse)
@@ -6157,13 +6188,18 @@ nfsd4_process_open2(struct svc_rqst *rqstp, struct svc_fh *current_fh, struct nf
 	* OPEN succeeds even if we fail.
 	*/
 	nfs4_open_delegation(open, stp, &resp->cstate.current_fh);
-	deleg_only = open_xor_delegation(open);
+
+	/*
+	 * If there is an existing open stateid, it must be updated and
+	 * returned. Only respect WANT_OPEN_XOR_DELEGATION when a new
+	 * open stateid would have to be created.
+	 */
+	deleg_only = new_stp && open_xor_delegation(open);
 nodeleg:
 	if (deleg_only) {
 		memcpy(&open->op_stateid, &zero_stateid, sizeof(open->op_stateid));
 		open->op_rflags |= OPEN4_RESULT_NO_OPEN_STATEID;
-		if (new_stp)
-			release_open_stateid(stp);
+		release_open_stateid(stp);
 	} else {
 		nfs4_inc_and_copy_stateid(&open->op_stateid, &stp->st_stid);
 	}
@@ -7175,6 +7211,7 @@ nfsd4_free_stateid(struct svc_rqst *rqstp, struct nfsd4_compound_state *cstate,
 	switch (s->sc_type) {
 	case SC_TYPE_DELEG:
 		if (s->sc_status & SC_STATUS_REVOKED) {
+			s->sc_status |= SC_STATUS_CLOSED;
 			spin_unlock(&s->sc_lock);
 			dp = delegstateid(s);
 			list_del_init(&dp->dl_recall_lru);
@@ -8942,7 +8979,7 @@ nfsd4_deleg_getattr_conflict(struct svc_rqst *rqstp, struct dentry *dentry,
 
 	ctx = locks_inode_context(inode);
 	if (!ctx)
-		return 0;
+		return nfs_ok;
 
 #define NON_NFSD_LEASE ((void *)1)
 
@@ -8998,20 +9035,16 @@ nfsd4_deleg_getattr_conflict(struct svc_rqst *rqstp, struct dentry *dentry,
 		 * not update the file's metadata with the client's
 		 * modified size
 		 */
-		attrs.ia_mtime = attrs.ia_ctime = current_time(inode);
-		attrs.ia_valid = ATTR_MTIME | ATTR_CTIME | ATTR_DELEG;
-		inode_lock(inode);
-		err = notify_change(&nop_mnt_idmap, dentry, &attrs, NULL);
-		inode_unlock(inode);
+		err = cb_getattr_update_times(dentry, dp);
 		if (err) {
 			status = nfserrno(err);
 			goto out_status;
 		}
 		ncf->ncf_cur_fsize = ncf->ncf_cb_fsize;
-		*size = ncf->ncf_cur_fsize;
-		*modified = true;
+		*pdp = dp;
+		return nfs_ok;
 	}
-	status = 0;
+	status = nfs_ok;
 out_status:
 	nfs4_put_stid(&dp->dl_stid);
 	return status;

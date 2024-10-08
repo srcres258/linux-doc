@@ -1889,7 +1889,7 @@ static int scrub_raid56_parity_stripe(struct scrub_ctx *sctx,
 	ASSERT(sctx->raid56_data_stripes);
 
 	/*
-	 * For data stripe search, we cannot re-use the same extent/csum paths,
+	 * For data stripe search, we cannot reuse the same extent/csum paths,
 	 * as the data stripe bytenr may be smaller than previous extent.  Thus
 	 * we have to use our own extent/csum paths.
 	 */
@@ -2191,7 +2191,6 @@ static noinline_for_stack int scrub_stripe(struct scrub_ctx *sctx,
 	/* Offset inside the chunk */
 	u64 offset;
 	u64 stripe_logical;
-	int stop_loop = 0;
 
 	/* Extent_path should be released by now. */
 	ASSERT(sctx->extent_path.nodes[0] == NULL);
@@ -2305,14 +2304,8 @@ next:
 		logical += increment;
 		physical += BTRFS_STRIPE_LEN;
 		spin_lock(&sctx->stat_lock);
-		if (stop_loop)
-			sctx->stat.last_physical =
-				map->stripes[stripe_index].physical + dev_stripe_len;
-		else
-			sctx->stat.last_physical = physical;
+		sctx->stat.last_physical = physical;
 		spin_unlock(&sctx->stat_lock);
-		if (stop_loop)
-			break;
 	}
 out:
 	ret2 = flush_scrub_stripes(sctx);

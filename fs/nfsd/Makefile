@@ -24,3 +24,17 @@ nfsd-$(CONFIG_NFSD_BLOCKLAYOUT) += blocklayout.o blocklayoutxdr.o
 nfsd-$(CONFIG_NFSD_SCSILAYOUT) += blocklayout.o blocklayoutxdr.o
 nfsd-$(CONFIG_NFSD_FLEXFILELAYOUT) += flexfilelayout.o flexfilelayoutxdr.o
 nfsd-$(CONFIG_NFS_LOCALIO) += localio.o
+
+
+.PHONY: xdrgen
+
+xdrgen: ../../include/linux/sunrpc/xdrgen/nfs4_1.h nfs4xdr_gen.h nfs4xdr_gen.c
+
+../../include/linux/sunrpc/xdrgen/nfs4_1.h: ../../Documentation/sunrpc/xdr/nfs4_1.x
+	../../tools/net/sunrpc/xdrgen/xdrgen definitions $< > $@
+
+nfs4xdr_gen.h: ../../Documentation/sunrpc/xdr/nfs4_1.x
+	../../tools/net/sunrpc/xdrgen/xdrgen declarations $< > $@
+
+nfs4xdr_gen.c: ../../Documentation/sunrpc/xdr/nfs4_1.x
+	../../tools/net/sunrpc/xdrgen/xdrgen source $< > $@
