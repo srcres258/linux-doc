@@ -8,7 +8,6 @@
 #include <linux/mm.h>
 #include <linux/sched.h>
 #include <linux/sched/mm.h>
-#include <linux/sched/coredump.h>
 #include <linux/sched/numa_balancing.h>
 #include <linux/highmem.h>
 #include <linux/hugetlb.h>
@@ -612,6 +611,7 @@ static struct kobj_attribute _name##_attr = __ATTR_RO(_name)
 DEFINE_MTHP_STAT_ATTR(anon_fault_alloc, MTHP_STAT_ANON_FAULT_ALLOC);
 DEFINE_MTHP_STAT_ATTR(anon_fault_fallback, MTHP_STAT_ANON_FAULT_FALLBACK);
 DEFINE_MTHP_STAT_ATTR(anon_fault_fallback_charge, MTHP_STAT_ANON_FAULT_FALLBACK_CHARGE);
+DEFINE_MTHP_STAT_ATTR(zswpout, MTHP_STAT_ZSWPOUT);
 DEFINE_MTHP_STAT_ATTR(swpout, MTHP_STAT_SWPOUT);
 DEFINE_MTHP_STAT_ATTR(swpout_fallback, MTHP_STAT_SWPOUT_FALLBACK);
 #ifdef CONFIG_SHMEM
@@ -630,6 +630,7 @@ static struct attribute *anon_stats_attrs[] = {
 	&anon_fault_fallback_attr.attr,
 	&anon_fault_fallback_charge_attr.attr,
 #ifndef CONFIG_SHMEM
+	&zswpout_attr.attr,
 	&swpout_attr.attr,
 	&swpout_fallback_attr.attr,
 #endif
@@ -660,6 +661,7 @@ static struct attribute_group file_stats_attr_grp = {
 
 static struct attribute *any_stats_attrs[] = {
 #ifdef CONFIG_SHMEM
+	&zswpout_attr.attr,
 	&swpout_attr.attr,
 	&swpout_fallback_attr.attr,
 #endif
@@ -3135,8 +3137,8 @@ static void __split_huge_page_tail(struct folio *folio, int tail,
 	/* ->mapping in first and second tail page is replaced by other uses */
 	VM_BUG_ON_PAGE(tail > 2 && page_tail->mapping != TAIL_MAPPING,
 			page_tail);
-	page_tail->mapping = head->mapping;
-	page_tail->index = head->index + tail;
+	new_folio->mapping = folio->mapping;
+	new_folio->index = folio->index + tail;
 
 	/*
 	 * page->private should not be set in tail pages. Fix up and warn once
@@ -3212,11 +3214,11 @@ static void __split_huge_page(struct page *page, struct list_head *list,
 	ClearPageHasHWPoisoned(head);
 
 	for (i = nr - new_nr; i >= new_nr; i -= new_nr) {
+		struct folio *tail;
 		__split_huge_page_tail(folio, i, lruvec, list, new_order);
+		tail = page_folio(head + i);
 		/* Some pages can be beyond EOF: drop them from page cache */
-		if (head[i].index >= end) {
-			struct folio *tail = page_folio(head + i);
-
+		if (tail->index >= end) {
 			if (shmem_mapping(folio->mapping))
 				nr_dropped++;
 			else if (folio_test_clear_dirty(tail))
@@ -3224,12 +3226,12 @@ static void __split_huge_page(struct page *page, struct list_head *list,
 					inode_to_wb(folio->mapping->host));
 			__filemap_remove_folio(tail, NULL);
 			folio_put(tail);
-		} else if (!PageAnon(page)) {
-			__xa_store(&folio->mapping->i_pages, head[i].index,
-					head + i, 0);
+		} else if (!folio_test_anon(folio)) {
+			__xa_store(&folio->mapping->i_pages, tail->index,
+					tail, 0);
 		} else if (swap_cache) {
 			__xa_store(&swap_cache->i_pages, offset + i,
-					head + i, 0);
+					tail, 0);
 		}
 	}
 
