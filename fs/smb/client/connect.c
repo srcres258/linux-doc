@@ -795,18 +795,6 @@ cifs_discard_from_socket(struct TCP_Server_Info *server, size_t to_read)
 }
 
 int
-cifs_read_page_from_socket(struct TCP_Server_Info *server, struct page *page,
-	unsigned int page_offset, unsigned int to_read)
-{
-	struct msghdr smb_msg = {};
-	struct bio_vec bv;
-
-	bvec_set_page(&bv, page, to_read, page_offset);
-	iov_iter_bvec(&smb_msg.msg_iter, ITER_DEST, &bv, 1, to_read);
-	return cifs_readv_from_socket(server, &smb_msg);
-}
-
-int
 cifs_read_iter_from_socket(struct TCP_Server_Info *server, struct iov_iter *iter,
 			   unsigned int to_read)
 {
@@ -3386,6 +3374,8 @@ int cifs_mount_get_session(struct cifs_mount_ctx *mnt_ctx)
 	ses = cifs_get_smb_ses(server, ctx);
 	if (IS_ERR(ses)) {
 		rc = PTR_ERR(ses);
+		if (rc == -ENOKEY && ctx->sectype == Kerberos)
+			cifs_dbg(VFS, "Verify user has a krb5 ticket and keyutils is installed\n");
 		ses = NULL;
 		goto out;
 	}
@@ -4004,7 +3994,7 @@ cifs_setup_session(const unsigned int xid, struct cifs_ses *ses,
 		rc = server->ops->sess_setup(xid, ses, server, nls_info);
 
 	if (rc) {
-		cifs_server_dbg(VFS, "Send error in SessSetup = %d\n", rc);
+		cifs_server_dbg(FYI, "Send error in SessSetup = %d\n", rc);
 		spin_lock(&ses->ses_lock);
 		if (ses->ses_status == SES_IN_SETUP)
 			ses->ses_status = SES_NEED_RECON;
