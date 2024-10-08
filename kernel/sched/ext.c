@@ -589,7 +589,7 @@ struct sched_ext_ops {
 	 * Update @tg's weight to @weight.
 	 */
 	void (*cgroup_set_weight)(struct cgroup *cgrp, u32 weight);
-#endif	/* CONFIG_CGROUPS */
+#endif	/* CONFIG_EXT_GROUP_SCHED */
 
 	/*
 	 * All online ops must come before ops.cpu_online().
@@ -625,6 +625,10 @@ struct sched_ext_ops {
 	/**
 	 * exit - Clean up after the BPF scheduler
 	 * @info: Exit info
+	 *
+	 * ops.exit() is also called on ops.init() failure, which is a bit
+	 * unusual. This is to allow rich reporting through @info on how
+	 * ops.init() failed.
 	 */
 	void (*exit)(struct scx_exit_info *info);
 
@@ -692,6 +696,7 @@ enum scx_enq_flags {
 	/* expose select ENQUEUE_* flags as enums */
 	SCX_ENQ_WAKEUP		= ENQUEUE_WAKEUP,
 	SCX_ENQ_HEAD		= ENQUEUE_HEAD,
+	SCX_ENQ_CPU_SELECTED	= ENQUEUE_RQ_SELECTED,
 
 	/* high 32bits are SCX specific */
 
@@ -2368,6 +2373,73 @@ static inline void move_remote_task_to_local_dsq(struct task_struct *p, u64 enq_
 static inline bool task_can_run_on_remote_rq(struct task_struct *p, struct rq *rq, bool trigger_error) { return false; }
 static inline bool consume_remote_task(struct rq *this_rq, struct task_struct *p, struct scx_dispatch_q *dsq, struct rq *task_rq) { return false; }
 #endif	/* CONFIG_SMP */
+
+/**
+ * move_task_between_dsqs() - Move a task from one DSQ to another
+ * @p: target task
+ * @enq_flags: %SCX_ENQ_*
+ * @src_dsq: DSQ @p is currently on, must not be a local DSQ
+ * @dst_dsq: DSQ @p is being moved to, can be any DSQ
+ *
+ * Must be called with @p's task_rq and @src_dsq locked. If @dst_dsq is a local
+ * DSQ and @p is on a different CPU, @p will be migrated and thus its task_rq
+ * will change. As @p's task_rq is locked, this function doesn't need to use the
+ * holding_cpu mechanism.
+ *
+ * On return, @src_dsq is unlocked and only @p's new task_rq, which is the
+ * return value, is locked.
+ */
+static struct rq *move_task_between_dsqs(struct task_struct *p, u64 enq_flags,
+					 struct scx_dispatch_q *src_dsq,
+					 struct scx_dispatch_q *dst_dsq)
+{
+	struct rq *src_rq = task_rq(p), *dst_rq;
+
+	BUG_ON(src_dsq->id == SCX_DSQ_LOCAL);
+	lockdep_assert_held(&src_dsq->lock);
+	lockdep_assert_rq_held(src_rq);
+
+	if (dst_dsq->id == SCX_DSQ_LOCAL) {
+		dst_rq = container_of(dst_dsq, struct rq, scx.local_dsq);
+		if (!task_can_run_on_remote_rq(p, dst_rq, true)) {
+			dst_dsq = find_global_dsq(p);
+			dst_rq = src_rq;
+		}
+	} else {
+		/* no need to migrate if destination is a non-local DSQ */
+		dst_rq = src_rq;
+	}
+
+	/*
+	 * Move @p into $dst_dsq. If $dst_dsq is the local DSQ of a different
+	 * CPU, @p will be migrated.
+	 */
+	if (dst_dsq->id == SCX_DSQ_LOCAL) {
+		/* @p is going from a non-local DSQ to a local DSQ */
+		if (src_rq == dst_rq) {
+			task_unlink_from_dsq(p, src_dsq);
+			move_local_task_to_local_dsq(p, enq_flags,
+						     src_dsq, dst_rq);
+			raw_spin_unlock(&src_dsq->lock);
+		} else {
+			raw_spin_unlock(&src_dsq->lock);
+			move_remote_task_to_local_dsq(p, enq_flags,
+						      src_rq, dst_rq);
+		}
+	} else {
+		/*
+		 * @p is going from a non-local DSQ to a non-local DSQ. As
+		 * $src_dsq is already locked, do an abbreviated dequeue.
+		 */
+		task_unlink_from_dsq(p, src_dsq);
+		p->scx.dsq = NULL;
+		raw_spin_unlock(&src_dsq->lock);
+
+		dispatch_enqueue(dst_dsq, p, enq_flags);
+	}
+
+	return dst_rq;
+}
 
 static bool consume_dispatch_q(struct rq *rq, struct scx_dispatch_q *dsq)
 {
@@ -4048,7 +4120,6 @@ static void scx_cgroup_exit(void)
 
 	percpu_rwsem_assert_held(&scx_cgroup_rwsem);
 
-	WARN_ON_ONCE(!scx_cgroup_enabled);
 	scx_cgroup_enabled = false;
 
 	/*
@@ -4117,6 +4188,7 @@ static int scx_cgroup_init(void)
 				      css->cgroup, &args);
 		if (ret) {
 			css_put(css);
+			scx_ops_error("ops.cgroup_init() failed (%d)", ret);
 			return ret;
 		}
 		tg->scx_flags |= SCX_TG_INITED;
@@ -5041,6 +5113,7 @@ static int scx_ops_enable(struct sched_ext_ops *ops, struct bpf_link *link)
 		if (ret) {
 			ret = ops_sanitize_err("init", ret);
 			cpus_read_unlock();
+			scx_ops_error("ops.init() failed (%d)", ret);
 			goto err_disable;
 		}
 	}
@@ -5150,8 +5223,8 @@ static int scx_ops_enable(struct sched_ext_ops *ops, struct bpf_link *link)
 			spin_lock_irq(&scx_tasks_lock);
 			scx_task_iter_exit(&sti);
 			spin_unlock_irq(&scx_tasks_lock);
-			pr_err("sched_ext: ops.init_task() failed (%d) for %s[%d] while loading\n",
-			       ret, p->comm, p->pid);
+			scx_ops_error("ops.init_task() failed (%d) for %s[%d]",
+				      ret, p->comm, p->pid);
 			goto err_disable_unlock_all;
 		}
 
@@ -5199,14 +5272,8 @@ static int scx_ops_enable(struct sched_ext_ops *ops, struct bpf_link *link)
 
 	scx_ops_bypass(false);
 
-	/*
-	 * Returning an error code here would lose the recorded error
-	 * information. Exit indicating success so that the error is notified
-	 * through ops.exit() with all the details.
-	 */
 	if (!scx_ops_tryset_enable_state(SCX_OPS_ENABLED, SCX_OPS_ENABLING)) {
 		WARN_ON_ONCE(atomic_read(&scx_exit_kind) == SCX_EXIT_NONE);
-		ret = 0;
 		goto err_disable;
 	}
 
@@ -5241,10 +5308,18 @@ err_disable_unlock_all:
 	scx_ops_bypass(false);
 err_disable:
 	mutex_unlock(&scx_ops_enable_mutex);
-	/* must be fully disabled before returning */
-	scx_ops_disable(SCX_EXIT_ERROR);
+	/*
+	 * Returning an error code here would not pass all the error information
+	 * to userspace. Record errno using scx_ops_error() for cases
+	 * scx_ops_error() wasn't already invoked and exit indicating success so
+	 * that the error is notified through ops.exit() with all the details.
+	 *
+	 * Flush scx_ops_disable_work to ensure that error is reported before
+	 * init completion.
+	 */
+	scx_ops_error("scx_ops_enable() failed (%d)", ret);
 	kthread_flush_work(&scx_ops_disable_work);
-	return ret;
+	return 0;
 }
 
 
@@ -6033,7 +6108,7 @@ static bool scx_dispatch_from_dsq(struct bpf_iter_scx_dsq_kern *kit,
 				  u64 enq_flags)
 {
 	struct scx_dispatch_q *src_dsq = kit->dsq, *dst_dsq;
-	struct rq *this_rq, *src_rq, *dst_rq, *locked_rq;
+	struct rq *this_rq, *src_rq, *locked_rq;
 	bool dispatched = false;
 	bool in_balance;
 	unsigned long flags;
@@ -6079,51 +6154,18 @@ static bool scx_dispatch_from_dsq(struct bpf_iter_scx_dsq_kern *kit,
 	/* @p is still on $src_dsq and stable, determine the destination */
 	dst_dsq = find_dsq_for_dispatch(this_rq, dsq_id, p);
 
-	if (dst_dsq->id == SCX_DSQ_LOCAL) {
-		dst_rq = container_of(dst_dsq, struct rq, scx.local_dsq);
-		if (!task_can_run_on_remote_rq(p, dst_rq, true)) {
-			dst_dsq = find_global_dsq(p);
-			dst_rq = src_rq;
-		}
-	} else {
-		/* no need to migrate if destination is a non-local DSQ */
-		dst_rq = src_rq;
-	}
-
 	/*
-	 * Move @p into $dst_dsq. If $dst_dsq is the local DSQ of a different
-	 * CPU, @p will be migrated.
+	 * Apply vtime and slice updates before moving so that the new time is
+	 * visible before inserting into $dst_dsq. @p is still on $src_dsq but
+	 * this is safe as we're locking it.
 	 */
-	if (dst_dsq->id == SCX_DSQ_LOCAL) {
-		/* @p is going from a non-local DSQ to a local DSQ */
-		if (src_rq == dst_rq) {
-			task_unlink_from_dsq(p, src_dsq);
-			move_local_task_to_local_dsq(p, enq_flags,
-						     src_dsq, dst_rq);
-			raw_spin_unlock(&src_dsq->lock);
-		} else {
-			raw_spin_unlock(&src_dsq->lock);
-			move_remote_task_to_local_dsq(p, enq_flags,
-						      src_rq, dst_rq);
-			locked_rq = dst_rq;
-		}
-	} else {
-		/*
-		 * @p is going from a non-local DSQ to a non-local DSQ. As
-		 * $src_dsq is already locked, do an abbreviated dequeue.
-		 */
-		task_unlink_from_dsq(p, src_dsq);
-		p->scx.dsq = NULL;
-		raw_spin_unlock(&src_dsq->lock);
-
-		if (kit->cursor.flags & __SCX_DSQ_ITER_HAS_VTIME)
-			p->scx.dsq_vtime = kit->vtime;
-		dispatch_enqueue(dst_dsq, p, enq_flags);
-	}
-
+	if (kit->cursor.flags & __SCX_DSQ_ITER_HAS_VTIME)
+		p->scx.dsq_vtime = kit->vtime;
 	if (kit->cursor.flags & __SCX_DSQ_ITER_HAS_SLICE)
 		p->scx.slice = kit->slice;
 
+	/* execute move */
+	locked_rq = move_task_between_dsqs(p, enq_flags, src_dsq, dst_dsq);
 	dispatched = true;
 out:
 	if (in_balance) {
@@ -7096,15 +7138,8 @@ __bpf_kfunc struct cgroup *scx_bpf_task_cgroup(struct task_struct *p)
 	if (!scx_kf_allowed_on_arg_tasks(__SCX_KF_RQ_LOCKED, p))
 		goto out;
 
-	/*
-	 * A task_group may either be a cgroup or an autogroup. In the latter
-	 * case, @tg->css.cgroup is %NULL. A task_group can't become the other
-	 * kind once created.
-	 */
-	if (tg && tg->css.cgroup)
-		cgrp = tg->css.cgroup;
-	else
-		cgrp = &cgrp_dfl_root.cgrp;
+	cgrp = tg_cgrp(tg);
+
 out:
 	cgroup_get(cgrp);
 	return cgrp;
