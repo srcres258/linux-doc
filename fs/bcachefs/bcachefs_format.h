@@ -499,8 +499,6 @@ struct bch_sb_field {
 #include "disk_groups_format.h"
 #include "extents_format.h"
 #include "ec_format.h"
-#include "dirent_format.h"
-#include "disk_groups_format.h"
 #include "inode_format.h"
 #include "journal_seq_blacklist_format.h"
 #include "logged_ops_format.h"
@@ -678,7 +676,8 @@ struct bch_sb_field_ext {
 	x(disk_accounting_v2,		BCH_VERSION(1,  9))		\
 	x(disk_accounting_v3,		BCH_VERSION(1, 10))		\
 	x(disk_accounting_inum,		BCH_VERSION(1, 11))		\
-	x(rebalance_work_acct_fix,	BCH_VERSION(1, 12))
+	x(rebalance_work_acct_fix,	BCH_VERSION(1, 12))		\
+	x(inode_has_child_snapshots,	BCH_VERSION(1, 13))
 
 enum bcachefs_metadata_version {
 	bcachefs_metadata_version_min = 9,
@@ -1360,6 +1359,8 @@ static inline bool btree_id_is_alloc(enum btree_id id)
 	case BTREE_ID_need_discard:
 	case BTREE_ID_freespace:
 	case BTREE_ID_bucket_gens:
+	case BTREE_ID_lru:
+	case BTREE_ID_accounting:
 		return true;
 	default:
 		return false;
