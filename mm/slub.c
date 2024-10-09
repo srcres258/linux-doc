@@ -4781,51 +4781,33 @@ __do_krealloc(const void *p, size_t new_size, gfp_t flags)
 {
 	void *ret;
 	size_t ks;
-	int orig_size = 0;
-	struct kmem_cache *s;
 
-	/* Check for double-free. */
+	/* Check for double-free before calling ksize. */
 	if (likely(!ZERO_OR_NULL_PTR(p))) {
 		if (!kasan_check_byte(p))
 			return NULL;
-
-		s = virt_to_cache(p);
-		orig_size = get_orig_size(s, (void *)p);
-		ks = s->object_size;
+		ks = ksize(p);
 	} else
 		ks = 0;
 
-	/* If the object doesn't fit, allocate a bigger one */
-	if (new_size > ks)
-		goto alloc_new;
-
-	/* Zero out spare memory. */
-	if (want_init_on_alloc(flags)) {
-		kasan_disable_current();
-		if (orig_size < new_size)
-			memset((void *)p + orig_size, 0, new_size - orig_size);
-		else
+	/* If the object still fits, repoison it precisely. */
+	if (ks >= new_size) {
+		/* Zero out spare memory. */
+		if (want_init_on_alloc(flags)) {
+			kasan_disable_current();
 			memset((void *)p + new_size, 0, ks - new_size);
-		kasan_enable_current();
+			kasan_enable_current();
+		}
+
+		p = kasan_krealloc((void *)p, new_size, flags);
+		return (void *)p;
 	}
 
-	if (slub_debug_orig_size(s) && !is_kfence_address(p)) {
-		set_orig_size(s, (void *)p, new_size);
-		if (s->flags & SLAB_RED_ZONE && new_size < ks)
-			memset_no_sanitize_memory((void *)p + new_size,
-						SLUB_RED_ACTIVE, ks - new_size);
-	}
-
-	p = kasan_krealloc((void *)p, new_size, flags);
-	return (void *)p;
-
-alloc_new:
 	ret = kmalloc_node_track_caller_noprof(new_size, flags, NUMA_NO_NODE, _RET_IP_);
 	if (ret && p) {
 		/* Disable KASAN checks as the object's redzone is accessed. */
 		kasan_disable_current();
-		if (orig_size)
-			memcpy(ret, kasan_reset_tag(p), orig_size);
+		memcpy(ret, kasan_reset_tag(p), ks);
 		kasan_enable_current();
 	}
 
@@ -4846,19 +4828,15 @@ alloc_new:
  * memory allocation is flagged with __GFP_ZERO. Otherwise, it is possible that
  * __GFP_ZERO is not fully honored by this API.
  *
- * When slub_debug_orig_size() is off, krealloc() only knows about the bucket
- * size of an allocation (but not the exact size it was allocated with) and
- * hence implements the following semantics for shrinking and growing buffers
- * with __GFP_ZERO.
+ * This is the case, since krealloc() only knows about the bucket size of an
+ * allocation (but not the exact size it was allocated with) and hence
+ * implements the following semantics for shrinking and growing buffers with
+ * __GFP_ZERO.
  *
  *         new             bucket
  * 0       size             size
  * |--------|----------------|
  * |  keep  |      zero      |
- *
- * Otherwise, the original allocation size 'orig_size' could be used to
- * precisely clear the requested size, and the new size will also be stored
- * as the new 'orig_size'.
  *
  * In any case, the contents of the object pointed to are preserved up to the
  * lesser of the new and old sizes.
@@ -5762,8 +5740,9 @@ static int __init setup_slab_strict_numa(char *str)
 	if (nr_node_ids > 1) {
 		static_branch_enable(&strict_numa);
 		pr_info("SLUB: Strict NUMA enabled.\n");
-	} else
+	} else {
 		pr_warn("slab_strict_numa parameter set on non NUMA system.\n");
+	}
 
 	return 1;
 }

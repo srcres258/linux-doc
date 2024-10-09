@@ -4260,7 +4260,7 @@ static int gfx_v8_0_cp_gfx_resume(struct amdgpu_device *adev)
 	ring->wptr = 0;
 	WREG32(mmCP_RB0_WPTR, lower_32_bits(ring->wptr));
 
-	/* set the wb address wether it's enabled or not */
+	/* set the wb address whether it's enabled or not */
 	rptr_addr = ring->rptr_gpu_addr;
 	WREG32(mmCP_RB0_RPTR_ADDR, lower_32_bits(rptr_addr));
 	WREG32(mmCP_RB0_RPTR_ADDR_HI, upper_32_bits(rptr_addr) & 0xFF);
@@ -4783,10 +4783,10 @@ static void gfx_v8_0_cp_enable(struct amdgpu_device *adev, bool enable)
 	gfx_v8_0_cp_compute_enable(adev, enable);
 }
 
-static int gfx_v8_0_hw_init(void *handle)
+static int gfx_v8_0_hw_init(struct amdgpu_ip_block *ip_block)
 {
 	int r;
-	struct amdgpu_device *adev = (struct amdgpu_device *)handle;
+	struct amdgpu_device *adev = ip_block->adev;
 
 	gfx_v8_0_init_golden_registers(adev);
 	gfx_v8_0_constants_init(adev);
@@ -4865,13 +4865,13 @@ static int gfx_v8_0_wait_for_rlc_idle(void *handle)
 	return -ETIMEDOUT;
 }
 
-static int gfx_v8_0_wait_for_idle(void *handle)
+static int gfx_v8_0_wait_for_idle(struct amdgpu_ip_block *ip_block)
 {
 	unsigned int i;
-	struct amdgpu_device *adev = (struct amdgpu_device *)handle;
+	struct amdgpu_device *adev = ip_block->adev;
 
 	for (i = 0; i < adev->usec_timeout; i++) {
-		if (gfx_v8_0_is_idle(handle))
+		if (gfx_v8_0_is_idle(adev))
 			return 0;
 
 		udelay(1);
@@ -4879,9 +4879,9 @@ static int gfx_v8_0_wait_for_idle(void *handle)
 	return -ETIMEDOUT;
 }
 
-static int gfx_v8_0_hw_fini(void *handle)
+static int gfx_v8_0_hw_fini(struct amdgpu_ip_block *ip_block)
 {
-	struct amdgpu_device *adev = (struct amdgpu_device *)handle;
+	struct amdgpu_device *adev = ip_block->adev;
 
 	amdgpu_irq_put(adev, &adev->gfx.priv_reg_irq, 0);
 	amdgpu_irq_put(adev, &adev->gfx.priv_inst_irq, 0);
@@ -4897,8 +4897,9 @@ static int gfx_v8_0_hw_fini(void *handle)
 		pr_debug("For SRIOV client, shouldn't do anything.\n");
 		return 0;
 	}
+
 	amdgpu_gfx_rlc_enter_safe_mode(adev, 0);
-	if (!gfx_v8_0_wait_for_idle(adev))
+	if (!gfx_v8_0_wait_for_idle(ip_block))
 		gfx_v8_0_cp_enable(adev, false);
 	else
 		pr_err("cp is busy, skip halt cp\n");
@@ -4911,14 +4912,14 @@ static int gfx_v8_0_hw_fini(void *handle)
 	return 0;
 }
 
-static int gfx_v8_0_suspend(void *handle)
+static int gfx_v8_0_suspend(struct amdgpu_ip_block *ip_block)
 {
-	return gfx_v8_0_hw_fini(handle);
+	return gfx_v8_0_hw_fini(ip_block);
 }
 
-static int gfx_v8_0_resume(void *handle)
+static int gfx_v8_0_resume(struct amdgpu_ip_block *ip_block)
 {
-	return gfx_v8_0_hw_init(handle);
+	return gfx_v8_0_hw_init(ip_block);
 }
 
 static bool gfx_v8_0_check_soft_reset(struct amdgpu_ip_block *ip_block)

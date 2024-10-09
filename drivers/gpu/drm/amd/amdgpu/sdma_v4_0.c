@@ -1951,9 +1951,9 @@ static int sdma_v4_0_sw_fini(struct amdgpu_ip_block *ip_block)
 	return 0;
 }
 
-static int sdma_v4_0_hw_init(void *handle)
+static int sdma_v4_0_hw_init(struct amdgpu_ip_block *ip_block)
 {
-	struct amdgpu_device *adev = (struct amdgpu_device *)handle;
+	struct amdgpu_device *adev = ip_block->adev;
 
 	if (adev->flags & AMD_IS_APU)
 		amdgpu_dpm_set_powergating_by_smu(adev, AMD_IP_BLOCK_TYPE_SDMA, false);
@@ -1964,9 +1964,9 @@ static int sdma_v4_0_hw_init(void *handle)
 	return sdma_v4_0_start(adev);
 }
 
-static int sdma_v4_0_hw_fini(void *handle)
+static int sdma_v4_0_hw_fini(struct amdgpu_ip_block *ip_block)
 {
-	struct amdgpu_device *adev = (struct amdgpu_device *)handle;
+	struct amdgpu_device *adev = ip_block->adev;
 	int i;
 
 	if (amdgpu_sriov_vf(adev))
@@ -1988,9 +1988,9 @@ static int sdma_v4_0_hw_fini(void *handle)
 	return 0;
 }
 
-static int sdma_v4_0_suspend(void *handle)
+static int sdma_v4_0_suspend(struct amdgpu_ip_block *ip_block)
 {
-	struct amdgpu_device *adev = (struct amdgpu_device *)handle;
+	struct amdgpu_device *adev = ip_block->adev;
 
 	/* SMU saves SDMA state for us */
 	if (adev->in_s0ix) {
@@ -1998,12 +1998,12 @@ static int sdma_v4_0_suspend(void *handle)
 		return 0;
 	}
 
-	return sdma_v4_0_hw_fini(adev);
+	return sdma_v4_0_hw_fini(ip_block);
 }
 
-static int sdma_v4_0_resume(void *handle)
+static int sdma_v4_0_resume(struct amdgpu_ip_block *ip_block)
 {
-	struct amdgpu_device *adev = (struct amdgpu_device *)handle;
+	struct amdgpu_device *adev = ip_block->adev;
 
 	/* SMU restores SDMA state for us */
 	if (adev->in_s0ix) {
@@ -2012,7 +2012,7 @@ static int sdma_v4_0_resume(void *handle)
 		return 0;
 	}
 
-	return sdma_v4_0_hw_init(adev);
+	return sdma_v4_0_hw_init(ip_block);
 }
 
 static bool sdma_v4_0_is_idle(void *handle)
@@ -2030,11 +2030,11 @@ static bool sdma_v4_0_is_idle(void *handle)
 	return true;
 }
 
-static int sdma_v4_0_wait_for_idle(void *handle)
+static int sdma_v4_0_wait_for_idle(struct amdgpu_ip_block *ip_block)
 {
 	unsigned i, j;
 	u32 sdma[AMDGPU_MAX_SDMA_INSTANCES];
-	struct amdgpu_device *adev = (struct amdgpu_device *)handle;
+	struct amdgpu_device *adev = ip_block->adev;
 
 	for (i = 0; i < adev->usec_timeout; i++) {
 		for (j = 0; j < adev->sdma.num_instances; j++) {

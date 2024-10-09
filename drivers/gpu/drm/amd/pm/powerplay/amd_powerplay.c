@@ -159,10 +159,10 @@ static int pp_sw_fini(struct amdgpu_ip_block *ip_block)
 	return 0;
 }
 
-static int pp_hw_init(void *handle)
+static int pp_hw_init(struct amdgpu_ip_block *ip_block)
 {
 	int ret = 0;
-	struct amdgpu_device *adev = handle;
+	struct amdgpu_device *adev = ip_block->adev;
 	struct pp_hwmgr *hwmgr = adev->powerplay.pp_handle;
 
 	ret = hwmgr_hw_init(hwmgr);
@@ -173,10 +173,9 @@ static int pp_hw_init(void *handle)
 	return ret;
 }
 
-static int pp_hw_fini(void *handle)
+static int pp_hw_fini(struct amdgpu_ip_block *ip_block)
 {
-	struct amdgpu_device *adev = handle;
-	struct pp_hwmgr *hwmgr = adev->powerplay.pp_handle;
+	struct pp_hwmgr *hwmgr = ip_block->adev->powerplay.pp_handle;
 
 	cancel_delayed_work_sync(&hwmgr->swctf_delayed_work);
 
@@ -245,7 +244,7 @@ static bool pp_is_idle(void *handle)
 	return false;
 }
 
-static int pp_wait_for_idle(void *handle)
+static int pp_wait_for_idle(struct amdgpu_ip_block *ip_block)
 {
 	return 0;
 }
@@ -261,9 +260,9 @@ static int pp_set_powergating_state(void *handle,
 	return 0;
 }
 
-static int pp_suspend(void *handle)
+static int pp_suspend(struct amdgpu_ip_block *ip_block)
 {
-	struct amdgpu_device *adev = handle;
+	struct amdgpu_device *adev = ip_block->adev;
 	struct pp_hwmgr *hwmgr = adev->powerplay.pp_handle;
 
 	cancel_delayed_work_sync(&hwmgr->swctf_delayed_work);
@@ -271,10 +270,9 @@ static int pp_suspend(void *handle)
 	return hwmgr_suspend(hwmgr);
 }
 
-static int pp_resume(void *handle)
+static int pp_resume(struct amdgpu_ip_block *ip_block)
 {
-	struct amdgpu_device *adev = handle;
-	struct pp_hwmgr *hwmgr = adev->powerplay.pp_handle;
+	struct pp_hwmgr *hwmgr = ip_block->adev->powerplay.pp_handle;
 
 	return hwmgr_resume(hwmgr);
 }

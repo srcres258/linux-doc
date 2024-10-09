@@ -985,9 +985,9 @@ static int gmc_v10_0_gart_enable(struct amdgpu_device *adev)
 	return 0;
 }
 
-static int gmc_v10_0_hw_init(void *handle)
+static int gmc_v10_0_hw_init(struct amdgpu_ip_block *ip_block)
 {
-	struct amdgpu_device *adev = (struct amdgpu_device *)handle;
+	struct amdgpu_device *adev = ip_block->adev;
 	int r;
 
 	adev->gmc.flush_pasid_uses_kiq = !amdgpu_emu_mode;
@@ -1032,9 +1032,9 @@ static void gmc_v10_0_gart_disable(struct amdgpu_device *adev)
 	adev->mmhub.funcs->gart_disable(adev);
 }
 
-static int gmc_v10_0_hw_fini(void *handle)
+static int gmc_v10_0_hw_fini(struct amdgpu_ip_block *ip_block)
 {
-	struct amdgpu_device *adev = (struct amdgpu_device *)handle;
+	struct amdgpu_device *adev = ip_block->adev;
 
 	gmc_v10_0_gart_disable(adev);
 
@@ -1053,25 +1053,22 @@ static int gmc_v10_0_hw_fini(void *handle)
 	return 0;
 }
 
-static int gmc_v10_0_suspend(void *handle)
+static int gmc_v10_0_suspend(struct amdgpu_ip_block *ip_block)
 {
-	struct amdgpu_device *adev = (struct amdgpu_device *)handle;
-
-	gmc_v10_0_hw_fini(adev);
+	gmc_v10_0_hw_fini(ip_block);
 
 	return 0;
 }
 
-static int gmc_v10_0_resume(void *handle)
+static int gmc_v10_0_resume(struct amdgpu_ip_block *ip_block)
 {
 	int r;
-	struct amdgpu_device *adev = (struct amdgpu_device *)handle;
 
-	r = gmc_v10_0_hw_init(adev);
+	r = gmc_v10_0_hw_init(ip_block);
 	if (r)
 		return r;
 
-	amdgpu_vmid_reset_all(adev);
+	amdgpu_vmid_reset_all(ip_block->adev);
 
 	return 0;
 }
@@ -1082,7 +1079,7 @@ static bool gmc_v10_0_is_idle(void *handle)
 	return true;
 }
 
-static int gmc_v10_0_wait_for_idle(void *handle)
+static int gmc_v10_0_wait_for_idle(struct amdgpu_ip_block *ip_block)
 {
 	/* There is no need to wait for MC idle in GMC v10.*/
 	return 0;

@@ -1467,10 +1467,10 @@ static int sdma_v4_4_2_sw_fini(struct amdgpu_ip_block *ip_block)
 	return 0;
 }
 
-static int sdma_v4_4_2_hw_init(void *handle)
+static int sdma_v4_4_2_hw_init(struct amdgpu_ip_block *ip_block)
 {
 	int r;
-	struct amdgpu_device *adev = (struct amdgpu_device *)handle;
+	struct amdgpu_device *adev = ip_block->adev;
 	uint32_t inst_mask;
 
 	inst_mask = GENMASK(adev->sdma.num_instances - 1, 0);
@@ -1482,9 +1482,9 @@ static int sdma_v4_4_2_hw_init(void *handle)
 	return r;
 }
 
-static int sdma_v4_4_2_hw_fini(void *handle)
+static int sdma_v4_4_2_hw_fini(struct amdgpu_ip_block *ip_block)
 {
-	struct amdgpu_device *adev = (struct amdgpu_device *)handle;
+	struct amdgpu_device *adev = ip_block->adev;
 	uint32_t inst_mask;
 	int i;
 
@@ -1508,21 +1508,19 @@ static int sdma_v4_4_2_hw_fini(void *handle)
 static int sdma_v4_4_2_set_clockgating_state(void *handle,
 					     enum amd_clockgating_state state);
 
-static int sdma_v4_4_2_suspend(void *handle)
+static int sdma_v4_4_2_suspend(struct amdgpu_ip_block *ip_block)
 {
-	struct amdgpu_device *adev = (struct amdgpu_device *)handle;
+	struct amdgpu_device *adev = ip_block->adev;
 
 	if (amdgpu_in_reset(adev))
 		sdma_v4_4_2_set_clockgating_state(adev, AMD_CG_STATE_UNGATE);
 
-	return sdma_v4_4_2_hw_fini(adev);
+	return sdma_v4_4_2_hw_fini(ip_block);
 }
 
-static int sdma_v4_4_2_resume(void *handle)
+static int sdma_v4_4_2_resume(struct amdgpu_ip_block *ip_block)
 {
-	struct amdgpu_device *adev = (struct amdgpu_device *)handle;
-
-	return sdma_v4_4_2_hw_init(adev);
+	return sdma_v4_4_2_hw_init(ip_block);
 }
 
 static bool sdma_v4_4_2_is_idle(void *handle)
@@ -1540,11 +1538,11 @@ static bool sdma_v4_4_2_is_idle(void *handle)
 	return true;
 }
 
-static int sdma_v4_4_2_wait_for_idle(void *handle)
+static int sdma_v4_4_2_wait_for_idle(struct amdgpu_ip_block *ip_block)
 {
 	unsigned i, j;
 	u32 sdma[AMDGPU_MAX_SDMA_INSTANCES];
-	struct amdgpu_device *adev = (struct amdgpu_device *)handle;
+	struct amdgpu_device *adev = ip_block->adev;
 
 	for (i = 0; i < adev->usec_timeout; i++) {
 		for (j = 0; j < adev->sdma.num_instances; j++) {

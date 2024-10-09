@@ -455,13 +455,13 @@ static int uvd_v6_0_sw_fini(struct amdgpu_ip_block *ip_block)
 /**
  * uvd_v6_0_hw_init - start and test UVD block
  *
- * @handle: handle used to pass amdgpu_device pointer
+ * @ip_block: Pointer to the amdgpu_ip_block for this hw instance.
  *
  * Initialize the hardware, boot up the VCPU and do some testing
  */
-static int uvd_v6_0_hw_init(void *handle)
+static int uvd_v6_0_hw_init(struct amdgpu_ip_block *ip_block)
 {
-	struct amdgpu_device *adev = (struct amdgpu_device *)handle;
+	struct amdgpu_device *adev = ip_block->adev;
 	struct amdgpu_ring *ring = &adev->uvd.inst->ring;
 	uint32_t tmp;
 	int i, r;
@@ -524,13 +524,13 @@ done:
 /**
  * uvd_v6_0_hw_fini - stop the hardware block
  *
- * @handle: handle used to pass amdgpu_device pointer
+ * @ip_block: Pointer to the amdgpu_ip_block for this hw instance.
  *
  * Stop the UVD block, mark ring as not ready any more
  */
-static int uvd_v6_0_hw_fini(void *handle)
+static int uvd_v6_0_hw_fini(struct amdgpu_ip_block *ip_block)
 {
-	struct amdgpu_device *adev = (struct amdgpu_device *)handle;
+	struct amdgpu_device *adev = ip_block->adev;
 
 	cancel_delayed_work_sync(&adev->uvd.idle_work);
 
@@ -547,10 +547,10 @@ static int uvd_v6_0_prepare_suspend(struct amdgpu_ip_block *ip_block)
 	return amdgpu_uvd_prepare_suspend(adev);
 }
 
-static int uvd_v6_0_suspend(void *handle)
+static int uvd_v6_0_suspend(struct amdgpu_ip_block *ip_block)
 {
 	int r;
-	struct amdgpu_device *adev = (struct amdgpu_device *)handle;
+	struct amdgpu_device *adev = ip_block->adev;
 
 	/*
 	 * Proper cleanups before halting the HW engine:
@@ -576,23 +576,22 @@ static int uvd_v6_0_suspend(void *handle)
 						       AMD_CG_STATE_GATE);
 	}
 
-	r = uvd_v6_0_hw_fini(adev);
+	r = uvd_v6_0_hw_fini(ip_block);
 	if (r)
 		return r;
 
 	return amdgpu_uvd_suspend(adev);
 }
 
-static int uvd_v6_0_resume(void *handle)
+static int uvd_v6_0_resume(struct amdgpu_ip_block *ip_block)
 {
 	int r;
-	struct amdgpu_device *adev = (struct amdgpu_device *)handle;
 
-	r = amdgpu_uvd_resume(adev);
+	r = amdgpu_uvd_resume(ip_block->adev);
 	if (r)
 		return r;
 
-	return uvd_v6_0_hw_init(adev);
+	return uvd_v6_0_hw_init(ip_block);
 }
 
 /**
@@ -1151,13 +1150,13 @@ static bool uvd_v6_0_is_idle(void *handle)
 	return !(RREG32(mmSRBM_STATUS) & SRBM_STATUS__UVD_BUSY_MASK);
 }
 
-static int uvd_v6_0_wait_for_idle(void *handle)
+static int uvd_v6_0_wait_for_idle(struct amdgpu_ip_block *ip_block)
 {
 	unsigned i;
-	struct amdgpu_device *adev = (struct amdgpu_device *)handle;
+	struct amdgpu_device *adev = ip_block->adev;
 
 	for (i = 0; i < adev->usec_timeout; i++) {
-		if (uvd_v6_0_is_idle(handle))
+		if (uvd_v6_0_is_idle(adev))
 			return 0;
 	}
 	return -ETIMEDOUT;
@@ -1455,11 +1454,16 @@ static int uvd_v6_0_set_clockgating_state(void *handle,
 					  enum amd_clockgating_state state)
 {
 	struct amdgpu_device *adev = (struct amdgpu_device *)handle;
+	struct amdgpu_ip_block *ip_block;
 	bool enable = (state == AMD_CG_STATE_GATE);
+
+	ip_block = amdgpu_device_ip_get_ip_block(adev, AMD_IP_BLOCK_TYPE_UVD);
+	if (!ip_block)
+		return -EINVAL;
 
 	if (enable) {
 		/* wait for STATUS to clear */
-		if (uvd_v6_0_wait_for_idle(handle))
+		if (uvd_v6_0_wait_for_idle(ip_block))
 			return -EBUSY;
 		uvd_v6_0_enable_clock_gating(adev, true);
 		/* enable HW gates because UVD is idle */

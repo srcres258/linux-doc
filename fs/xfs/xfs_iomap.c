@@ -707,7 +707,7 @@ imap_needs_cow(
 		return false;
 
 	/* when zeroing we don't have to COW holes or unwritten extents */
-	if (flags & IOMAP_ZERO) {
+	if (flags & (IOMAP_UNSHARE | IOMAP_ZERO)) {
 		if (!nimaps ||
 		    imap->br_startblock == HOLESTARTBLOCK ||
 		    imap->br_state == XFS_EXT_UNWRITTEN)
@@ -1192,7 +1192,8 @@ found_cow:
 		if (error)
 			goto out_unlock;
 	} else {
-		xfs_trim_extent(&cmap, offset_fsb, imap.br_startoff - offset_fsb);
+		xfs_trim_extent(&cmap, offset_fsb,
+				imap.br_startoff - offset_fsb);
 	}
 
 	iomap_flags |= IOMAP_F_SHARED;
@@ -1240,16 +1241,17 @@ xfs_buffered_write_iomap_end(
 		return 0;
 
 	/* For zeroing operations the callers already hold invalidate_lock. */
-	if (flags & IOMAP_ZERO)
+	if (flags & (IOMAP_UNSHARE | IOMAP_ZERO)) {
 		rwsem_assert_held_write(&inode->i_mapping->invalidate_lock);
-	else
+		iomap_write_delalloc_release(inode, start_byte, end_byte, flags,
+				iomap, xfs_buffered_write_delalloc_punch);
+	} else {
 		filemap_invalidate_lock(inode->i_mapping);
-
-	iomap_write_delalloc_release(inode, start_byte, end_byte, flags, iomap,
-			xfs_buffered_write_delalloc_punch);
-
-	if (!(flags & IOMAP_ZERO))
+		iomap_write_delalloc_release(inode, start_byte, end_byte, flags,
+				iomap, xfs_buffered_write_delalloc_punch);
 		filemap_invalidate_unlock(inode->i_mapping);
+	}
+
 	return 0;
 }
 

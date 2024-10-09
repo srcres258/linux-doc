@@ -878,10 +878,10 @@ static int sdma_v2_4_sw_fini(struct amdgpu_ip_block *ip_block)
 	return 0;
 }
 
-static int sdma_v2_4_hw_init(void *handle)
+static int sdma_v2_4_hw_init(struct amdgpu_ip_block *ip_block)
 {
 	int r;
-	struct amdgpu_device *adev = (struct amdgpu_device *)handle;
+	struct amdgpu_device *adev = ip_block->adev;
 
 	sdma_v2_4_init_golden_registers(adev);
 
@@ -892,27 +892,21 @@ static int sdma_v2_4_hw_init(void *handle)
 	return r;
 }
 
-static int sdma_v2_4_hw_fini(void *handle)
+static int sdma_v2_4_hw_fini(struct amdgpu_ip_block *ip_block)
 {
-	struct amdgpu_device *adev = (struct amdgpu_device *)handle;
-
-	sdma_v2_4_enable(adev, false);
+	sdma_v2_4_enable(ip_block->adev, false);
 
 	return 0;
 }
 
-static int sdma_v2_4_suspend(void *handle)
+static int sdma_v2_4_suspend(struct amdgpu_ip_block *ip_block)
 {
-	struct amdgpu_device *adev = (struct amdgpu_device *)handle;
-
-	return sdma_v2_4_hw_fini(adev);
+	return sdma_v2_4_hw_fini(ip_block);
 }
 
-static int sdma_v2_4_resume(void *handle)
+static int sdma_v2_4_resume(struct amdgpu_ip_block *ip_block)
 {
-	struct amdgpu_device *adev = (struct amdgpu_device *)handle;
-
-	return sdma_v2_4_hw_init(adev);
+	return sdma_v2_4_hw_init(ip_block);
 }
 
 static bool sdma_v2_4_is_idle(void *handle)
@@ -927,11 +921,11 @@ static bool sdma_v2_4_is_idle(void *handle)
 	return true;
 }
 
-static int sdma_v2_4_wait_for_idle(void *handle)
+static int sdma_v2_4_wait_for_idle(struct amdgpu_ip_block *ip_block)
 {
 	unsigned i;
 	u32 tmp;
-	struct amdgpu_device *adev = (struct amdgpu_device *)handle;
+	struct amdgpu_device *adev = ip_block->adev;
 
 	for (i = 0; i < adev->usec_timeout; i++) {
 		tmp = RREG32(mmSRBM_STATUS2) & (SRBM_STATUS2__SDMA_BUSY_MASK |

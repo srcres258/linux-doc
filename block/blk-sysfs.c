@@ -23,8 +23,8 @@
 struct queue_sysfs_entry {
 	struct attribute attr;
 	ssize_t (*show)(struct gendisk *disk, char *page);
-	int (*load_module)(struct gendisk *disk, const char *page, size_t count);
 	ssize_t (*store)(struct gendisk *disk, const char *page, size_t count);
+	void (*load_module)(struct gendisk *disk, const char *page, size_t count);
 };
 
 static ssize_t
@@ -280,6 +280,7 @@ static ssize_t queue_iostats_passthrough_show(struct gendisk *disk, char *page)
 static ssize_t queue_iostats_passthrough_store(struct gendisk *disk,
 					       const char *page, size_t count)
 {
+	struct queue_limits lim;
 	unsigned long ios;
 	ssize_t ret;
 
@@ -287,12 +288,15 @@ static ssize_t queue_iostats_passthrough_store(struct gendisk *disk,
 	if (ret < 0)
 		return ret;
 
+	lim = queue_limits_start_update(disk->queue);
 	if (ios)
-		blk_queue_flag_set(QUEUE_FLAG_IOSTATS_PASSTHROUGH,
-				   disk->queue);
+		lim.flags |= BLK_FLAG_IOSTATS_PASSTHROUGH;
 	else
-		blk_queue_flag_clear(QUEUE_FLAG_IOSTATS_PASSTHROUGH,
-				     disk->queue);
+		lim.flags &= ~BLK_FLAG_IOSTATS_PASSTHROUGH;
+
+	ret = queue_limits_commit_update(disk->queue, &lim);
+	if (ret)
+		return ret;
 
 	return count;
 }
@@ -710,11 +714,8 @@ queue_attr_store(struct kobject *kobj, struct attribute *attr,
 	 * queue to ensure that the module file can be read when the request
 	 * queue is the one for the device storing the module file.
 	 */
-	if (entry->load_module) {
-		res = entry->load_module(disk, page, length);
-		if (res)
-			return res;
-	}
+	if (entry->load_module)
+		entry->load_module(disk, page, length);
 
 	blk_mq_freeze_queue(q);
 	mutex_lock(&q->sysfs_lock);

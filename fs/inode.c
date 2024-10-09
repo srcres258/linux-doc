@@ -111,55 +111,48 @@ long get_nr_dirty_inodes(void)
 }
 
 #ifdef CONFIG_DEBUG_FS
-static DEFINE_PER_CPU(unsigned long, mg_ctime_updates);
-static DEFINE_PER_CPU(unsigned long, mg_fine_stamps);
-static DEFINE_PER_CPU(unsigned long, mg_floor_swaps);
-static DEFINE_PER_CPU(unsigned long, mg_ctime_swaps);
+static DEFINE_PER_CPU(long, mg_ctime_updates);
+static DEFINE_PER_CPU(long, mg_fine_stamps);
+static DEFINE_PER_CPU(long, mg_ctime_swaps);
 
-static long get_mg_ctime_updates(void)
+static unsigned long get_mg_ctime_updates(void)
 {
+	unsigned long sum = 0;
 	int i;
-	long sum = 0;
+
 	for_each_possible_cpu(i)
-		sum += per_cpu(mg_ctime_updates, i);
-	return sum < 0 ? 0 : sum;
+		sum += data_race(per_cpu(mg_ctime_updates, i));
+	return sum;
 }
 
-static long get_mg_fine_stamps(void)
+static unsigned long get_mg_fine_stamps(void)
 {
+	unsigned long sum = 0;
 	int i;
-	long sum = 0;
+
 	for_each_possible_cpu(i)
-		sum += per_cpu(mg_fine_stamps, i);
-	return sum < 0 ? 0 : sum;
+		sum += data_race(per_cpu(mg_fine_stamps, i));
+	return sum;
 }
 
-static long get_mg_floor_swaps(void)
+static unsigned long get_mg_ctime_swaps(void)
 {
+	unsigned long sum = 0;
 	int i;
-	long sum = 0;
-	for_each_possible_cpu(i)
-		sum += per_cpu(mg_floor_swaps, i);
-	return sum < 0 ? 0 : sum;
-}
 
-static long get_mg_ctime_swaps(void)
-{
-	int i;
-	long sum = 0;
 	for_each_possible_cpu(i)
-		sum += per_cpu(mg_ctime_swaps, i);
-	return sum < 0 ? 0 : sum;
+		sum += data_race(per_cpu(mg_ctime_swaps, i));
+	return sum;
 }
 
 #define mgtime_counter_inc(__var)	this_cpu_inc(__var)
 
 static int mgts_show(struct seq_file *s, void *p)
 {
-	long ctime_updates = get_mg_ctime_updates();
-	long ctime_swaps = get_mg_ctime_swaps();
-	long fine_stamps = get_mg_fine_stamps();
-	long floor_swaps = get_mg_floor_swaps();
+	unsigned long ctime_updates = get_mg_ctime_updates();
+	unsigned long ctime_swaps = get_mg_ctime_swaps();
+	unsigned long fine_stamps = get_mg_fine_stamps();
+	unsigned long floor_swaps = timekeeping_get_mg_floor_swaps();
 
 	seq_printf(s, "%lu %lu %lu %lu\n",
 		   ctime_updates, ctime_swaps, fine_stamps, floor_swaps);
@@ -1323,16 +1316,15 @@ EXPORT_SYMBOL(unlock_two_nondirectories);
  * @data:	opaque data pointer to pass to @test and @set
  *
  * Search for the inode specified by @hashval and @data in the inode cache,
- * and if present it is return it with an increased reference count. This is
- * a variant of iget5_locked() for callers that don't want to fail on memory
- * allocation of inode.
+ * and if present return it with an increased reference count. This is a
+ * variant of iget5_locked() that doesn't allocate an inode.
  *
- * If the inode is not in cache, insert the pre-allocated inode to cache and
+ * If the inode is not present in the cache, insert the pre-allocated inode and
  * return it locked, hashed, and with the I_NEW flag set. The file system gets
  * to fill it in before unlocking it via unlock_new_inode().
  *
- * Note both @test and @set are called with the inode_hash_lock held, so can't
- * sleep.
+ * Note that both @test and @set are called with the inode_hash_lock held, so
+ * they can't sleep.
  */
 struct inode *inode_insert5(struct inode *inode, unsigned long hashval,
 			    int (*test)(struct inode *, void *),
@@ -1396,16 +1388,16 @@ EXPORT_SYMBOL(inode_insert5);
  * @data:	opaque data pointer to pass to @test and @set
  *
  * Search for the inode specified by @hashval and @data in the inode cache,
- * and if present it is return it with an increased reference count. This is
- * a generalized version of iget_locked() for file systems where the inode
+ * and if present return it with an increased reference count. This is a
+ * generalized version of iget_locked() for file systems where the inode
  * number is not sufficient for unique identification of an inode.
  *
- * If the inode is not in cache, allocate a new inode and return it locked,
- * hashed, and with the I_NEW flag set. The file system gets to fill it in
- * before unlocking it via unlock_new_inode().
+ * If the inode is not present in the cache, allocate and insert a new inode
+ * and return it locked, hashed, and with the I_NEW flag set. The file system
+ * gets to fill it in before unlocking it via unlock_new_inode().
  *
- * Note both @test and @set are called with the inode_hash_lock held, so can't
- * sleep.
+ * Note that both @test and @set are called with the inode_hash_lock held, so
+ * they can't sleep.
  */
 struct inode *iget5_locked(struct super_block *sb, unsigned long hashval,
 		int (*test)(struct inode *, void *),
@@ -2294,38 +2286,24 @@ int file_remove_privs(struct file *file)
 EXPORT_SYMBOL(file_remove_privs);
 
 /**
- * coarse_ctime - return the current coarse-grained time
- * @floor: current (monotonic) ctime_floor value
- *
- * Get the coarse-grained time, and then determine whether to
- * return it or the current floor value. Returns the later of the
- * floor and coarse grained timestamps, converted to realtime
- * clock value.
- */
-static ktime_t coarse_ctime(ktime_t floor)
-{
-	ktime_t coarse = ktime_get_coarse();
-
-	/* If coarse time is already newer, return that */
-	if (!ktime_after(floor, coarse))
-		return ktime_get_coarse_real();
-	return ktime_mono_to_real(floor);
-}
-
-/**
  * current_time - Return FS time (possibly fine-grained)
  * @inode: inode.
  *
  * Return the current time truncated to the time granularity supported by
  * the fs, as suitable for a ctime/mtime change. If the ctime is flagged
- * as having been QUERIED, get a fine-grained timestamp.
+ * as having been QUERIED, get a fine-grained timestamp, but don't update
+ * the floor.
+ *
+ * For a multigrain inode, this is effectively an estimate of the timestamp
+ * that a file would receive. An actual update must go through
+ * inode_set_ctime_current().
  */
 struct timespec64 current_time(struct inode *inode)
 {
-	ktime_t floor = atomic64_read(&ctime_floor);
-	ktime_t now = coarse_ctime(floor);
-	struct timespec64 now_ts = ktime_to_timespec64(now);
+	struct timespec64 now;
 	u32 cns;
+
+	ktime_get_coarse_real_ts64_mg(&now);
 
 	if (!is_mgtime(inode))
 		goto out;
@@ -2334,14 +2312,14 @@ struct timespec64 current_time(struct inode *inode)
 	cns = smp_load_acquire(&inode->i_ctime_nsec);
 	if (cns & I_CTIME_QUERIED) {
 		/*
-		 * If there is no apparent change, then
-		 * get a fine-grained timestamp.
+		 * If there is no apparent change, then get a fine-grained
+		 * timestamp.
 		 */
-		if (now_ts.tv_nsec == (cns & ~I_CTIME_QUERIED))
-			ktime_get_real_ts64(&now_ts);
+		if (now.tv_nsec == (cns & ~I_CTIME_QUERIED))
+			ktime_get_real_ts64(&now);
 	}
 out:
-	return timestamp_truncate(now_ts, inode);
+	return timestamp_truncate(now, inode);
 }
 EXPORT_SYMBOL(current_time);
 
@@ -2782,75 +2760,61 @@ EXPORT_SYMBOL(timestamp_truncate);
  *
  * Set the inode's ctime to the current value for the inode. Returns the
  * current value that was assigned. If this is not a multigrain inode, then we
- * just set it to whatever the coarse_ctime is.
+ * set it to the later of the coarse time and floor value.
  *
  * If it is multigrain, then we first see if the coarse-grained timestamp is
- * distinct from what we have. If so, then we'll just use that. If we have to
- * get a fine-grained timestamp, then do so, and try to swap it into the floor.
- * We accept the new floor value regardless of the outcome of the cmpxchg.
- * After that, we try to swap the new value into i_ctime_nsec. Again, we take
- * the resulting ctime, regardless of the outcome of the swap.
+ * distinct from what is already there. If so, then use that. Otherwise, get a
+ * fine-grained timestamp.
+ *
+ * After that, try to swap the new value into i_ctime_nsec. Accept the
+ * resulting ctime, regardless of the outcome of the swap. If it has
+ * already been replaced, then that timestamp is later than the earlier
+ * unacceptable one, and is thus acceptable.
  */
 struct timespec64 inode_set_ctime_current(struct inode *inode)
 {
-	ktime_t now, floor = atomic64_read(&ctime_floor);
-	struct timespec64 now_ts;
+	struct timespec64 now;
 	u32 cns, cur;
 
-	now = coarse_ctime(floor);
+	ktime_get_coarse_real_ts64_mg(&now);
+	now = timestamp_truncate(now, inode);
 
 	/* Just return that if this is not a multigrain fs */
 	if (!is_mgtime(inode)) {
-		now_ts = timestamp_truncate(ktime_to_timespec64(now), inode);
-		inode_set_ctime_to_ts(inode, now_ts);
+		inode_set_ctime_to_ts(inode, now);
 		goto out;
 	}
 
 	/*
-	 * We only need a fine-grained time if someone has queried it,
-	 * and the current coarse grained time isn't later than what's
-	 * already there.
+	 * A fine-grained time is only needed if someone has queried
+	 * for timestamps, and the current coarse grained time isn't
+	 * later than what's already there.
 	 */
 	cns = smp_load_acquire(&inode->i_ctime_nsec);
 	if (cns & I_CTIME_QUERIED) {
-		ktime_t ctime = ktime_set(inode->i_ctime_sec, cns & ~I_CTIME_QUERIED);
+		struct timespec64 ctime = { .tv_sec = inode->i_ctime_sec,
+					    .tv_nsec = cns & ~I_CTIME_QUERIED };
 
-		if (!ktime_after(now, ctime)) {
-			ktime_t old, fine;
-
-			/* Get a fine-grained time */
-			fine = ktime_get();
+		if (timespec64_compare(&now, &ctime) <= 0) {
+			ktime_get_real_ts64_mg(&now);
+			now = timestamp_truncate(now, inode);
 			mgtime_counter_inc(mg_fine_stamps);
-
-			/*
-			 * If the cmpxchg works, we take the new floor value. If
-			 * not, then that means that someone else changed it after we
-			 * fetched it but before we got here. That value is just
-			 * as good, so keep it.
-			 */
-			old = floor;
-			if (atomic64_try_cmpxchg(&ctime_floor, &old, fine))
-				mgtime_counter_inc(mg_floor_swaps);
-			else
-				fine = old;
-			now = ktime_mono_to_real(fine);
 		}
 	}
 	mgtime_counter_inc(mg_ctime_updates);
-	now_ts = timestamp_truncate(ktime_to_timespec64(now), inode);
-	cur = cns;
 
 	/* No need to cmpxchg if it's exactly the same */
-	if (cns == now_ts.tv_nsec && inode->i_ctime_sec == now_ts.tv_sec) {
-		trace_ctime_xchg_skip(inode, &now_ts);
+	if (cns == now.tv_nsec && inode->i_ctime_sec == now.tv_sec) {
+		trace_ctime_xchg_skip(inode, &now);
 		goto out;
 	}
+	cur = cns;
 retry:
 	/* Try to swap the nsec value into place. */
-	if (try_cmpxchg(&inode->i_ctime_nsec, &cur, now_ts.tv_nsec)) {
+	if (try_cmpxchg(&inode->i_ctime_nsec, &cur, now.tv_nsec)) {
 		/* If swap occurred, then we're (mostly) done */
-		inode->i_ctime_sec = now_ts.tv_sec;
-		trace_ctime_ns_xchg(inode, cns, now_ts.tv_nsec, cur);
+		inode->i_ctime_sec = now.tv_sec;
+		trace_ctime_ns_xchg(inode, cns, now.tv_nsec, cur);
 		mgtime_counter_inc(mg_ctime_swaps);
 	} else {
 		/*
@@ -2864,13 +2828,86 @@ retry:
 			goto retry;
 		}
 		/* Otherwise, keep the existing ctime */
-		now_ts.tv_sec = inode->i_ctime_sec;
-		now_ts.tv_nsec = cur & ~I_CTIME_QUERIED;
+		now.tv_sec = inode->i_ctime_sec;
+		now.tv_nsec = cur & ~I_CTIME_QUERIED;
 	}
 out:
-	return now_ts;
+	return now;
 }
 EXPORT_SYMBOL(inode_set_ctime_current);
+
+/**
+ * inode_set_ctime_deleg - try to update the ctime on a delegated inode
+ * @inode: inode to update
+ * @update: timespec64 to set the ctime
+ *
+ * Attempt to atomically update the ctime on behalf of a delegation holder.
+ *
+ * The nfs server can call back the holder of a delegation to get updated
+ * inode attributes, including the mtime. When updating the mtime, update
+ * the ctime to a value at least equal to that.
+ *
+ * This can race with concurrent updates to the inode, in which
+ * case the update is skipped.
+ *
+ * Note that this works even when multigrain timestamps are not enabled,
+ * so it is used in either case.
+ */
+struct timespec64 inode_set_ctime_deleg(struct inode *inode, struct timespec64 update)
+{
+	struct timespec64 now, cur_ts;
+	u32 cur, old;
+
+	/* pairs with try_cmpxchg below */
+	cur = smp_load_acquire(&inode->i_ctime_nsec);
+	cur_ts.tv_nsec = cur & ~I_CTIME_QUERIED;
+	cur_ts.tv_sec = inode->i_ctime_sec;
+
+	/* If the update is older than the existing value, skip it. */
+	if (timespec64_compare(&update, &cur_ts) <= 0)
+		return cur_ts;
+
+	ktime_get_coarse_real_ts64_mg(&now);
+
+	/* Clamp the update to "now" if it's in the future */
+	if (timespec64_compare(&update, &now) > 0)
+		update = now;
+
+	update = timestamp_truncate(update, inode);
+
+	/* No need to update if the values are already the same */
+	if (timespec64_equal(&update, &cur_ts))
+		return cur_ts;
+
+	/*
+	 * Try to swap the nsec value into place. If it fails, that means
+	 * it raced with an update due to a write or similar activity. That
+	 * stamp takes precedence, so just skip the update.
+	 */
+retry:
+	old = cur;
+	if (try_cmpxchg(&inode->i_ctime_nsec, &cur, update.tv_nsec)) {
+		inode->i_ctime_sec = update.tv_sec;
+		mgtime_counter_inc(mg_ctime_swaps);
+		return update;
+	}
+
+	/*
+	 * Was the change due to another task marking the old ctime QUERIED?
+	 *
+	 * If so, then retry the swap. This can only happen once since
+	 * the only way to clear I_CTIME_QUERIED is to stamp the inode
+	 * with a new ctime.
+	 */
+	if (!(old & I_CTIME_QUERIED) && (cur == (old | I_CTIME_QUERIED)))
+		goto retry;
+
+	/* Otherwise, it was a new timestamp. */
+	cur_ts.tv_sec = inode->i_ctime_sec;
+	cur_ts.tv_nsec = cur & ~I_CTIME_QUERIED;
+	return cur_ts;
+}
+EXPORT_SYMBOL(inode_set_ctime_deleg);
 
 /**
  * in_group_or_capable - check whether caller is CAP_FSETID privileged
@@ -2878,7 +2915,7 @@ EXPORT_SYMBOL(inode_set_ctime_current);
  * @inode:	inode to check
  * @vfsgid:	the new/current vfsgid of @inode
  *
- * Check wether @vfsgid is in the caller's group list or if the caller is
+ * Check whether @vfsgid is in the caller's group list or if the caller is
  * privileged with CAP_FSETID over @inode. This can be used to determine
  * whether the setgid bit can be kept or must be dropped.
  *

@@ -2345,10 +2345,10 @@ static void gfx_v9_4_3_xcc_fini(struct amdgpu_device *adev, int xcc_id)
 	gfx_v9_4_3_xcc_cp_compute_enable(adev, false, xcc_id);
 }
 
-static int gfx_v9_4_3_hw_init(void *handle)
+static int gfx_v9_4_3_hw_init(struct amdgpu_ip_block *ip_block)
 {
 	int r;
-	struct amdgpu_device *adev = (struct amdgpu_device *)handle;
+	struct amdgpu_device *adev = ip_block->adev;
 
 	amdgpu_gfx_cleaner_shader_init(adev, adev->gfx.cleaner_shader_size,
 				       adev->gfx.cleaner_shader_ptr);
@@ -2369,9 +2369,9 @@ static int gfx_v9_4_3_hw_init(void *handle)
 	return r;
 }
 
-static int gfx_v9_4_3_hw_fini(void *handle)
+static int gfx_v9_4_3_hw_fini(struct amdgpu_ip_block *ip_block)
 {
-	struct amdgpu_device *adev = (struct amdgpu_device *)handle;
+	struct amdgpu_device *adev = ip_block->adev;
 	int i, num_xcc;
 
 	amdgpu_irq_put(adev, &adev->gfx.priv_reg_irq, 0);
@@ -2386,14 +2386,14 @@ static int gfx_v9_4_3_hw_fini(void *handle)
 	return 0;
 }
 
-static int gfx_v9_4_3_suspend(void *handle)
+static int gfx_v9_4_3_suspend(struct amdgpu_ip_block *ip_block)
 {
-	return gfx_v9_4_3_hw_fini(handle);
+	return gfx_v9_4_3_hw_fini(ip_block);
 }
 
-static int gfx_v9_4_3_resume(void *handle)
+static int gfx_v9_4_3_resume(struct amdgpu_ip_block *ip_block)
 {
-	return gfx_v9_4_3_hw_init(handle);
+	return gfx_v9_4_3_hw_init(ip_block);
 }
 
 static bool gfx_v9_4_3_is_idle(void *handle)
@@ -2410,13 +2410,13 @@ static bool gfx_v9_4_3_is_idle(void *handle)
 	return true;
 }
 
-static int gfx_v9_4_3_wait_for_idle(void *handle)
+static int gfx_v9_4_3_wait_for_idle(struct amdgpu_ip_block *ip_block)
 {
 	unsigned i;
-	struct amdgpu_device *adev = (struct amdgpu_device *)handle;
+	struct amdgpu_device *adev = ip_block->adev;
 
 	for (i = 0; i < adev->usec_timeout; i++) {
-		if (gfx_v9_4_3_is_idle(handle))
+		if (gfx_v9_4_3_is_idle(adev))
 			return 0;
 		udelay(1);
 	}

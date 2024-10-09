@@ -1235,16 +1235,8 @@ static void disable_dangling_plane(struct dc *dc, struct dc_state *context)
 			 */
 			if (is_phantom) {
 				if (tg->funcs->enable_crtc) {
-					int main_pipe_width = 0, main_pipe_height = 0;
-					struct dc_stream_state *old_paired_stream = dc_state_get_paired_subvp_stream(dc->current_state, old_stream);
-
-					if (old_paired_stream) {
-						main_pipe_width = old_paired_stream->dst.width;
-						main_pipe_height = old_paired_stream->dst.height;
-					}
-
-					if (dc->hwss.blank_phantom)
-						dc->hwss.blank_phantom(dc, tg, main_pipe_width, main_pipe_height);
+					if (dc->hwseq->funcs.blank_pixel_data)
+						dc->hwseq->funcs.blank_pixel_data(dc, pipe, true);
 					tg->funcs->enable_crtc(tg);
 				}
 			}
@@ -1439,6 +1431,7 @@ void dc_hardware_init(struct dc *dc)
 	detect_edp_presence(dc);
 	if (dc->ctx->dce_environment != DCE_ENV_VIRTUAL_HW)
 		dc->hwss.init_hw(dc);
+	dc_dmub_srv_notify_fw_dc_power_state(dc->ctx->dmub_srv, DC_ACPI_CM_POWER_STATE_D0);
 }
 
 void dc_init_callbacks(struct dc *dc,
@@ -2194,6 +2187,14 @@ enum dc_status dc_commit_streams(struct dc *dc, struct dc_commit_streams_params 
 	context->power_source = params->power_source;
 
 	res = dc_validate_with_context(dc, set, params->stream_count, context, false);
+
+	/*
+	 * Only update link encoder to stream assignment after bandwidth validation passed.
+	 */
+	if (res == DC_OK && dc->res_pool->funcs->link_encs_assign)
+		dc->res_pool->funcs->link_encs_assign(
+			dc, context, context->streams, context->stream_count);
+
 	if (res != DC_OK) {
 		BREAK_TO_DEBUGGER();
 		goto fail;
@@ -2667,6 +2668,29 @@ static enum surface_update_type det_surface_update(const struct dc *dc,
 		elevate_update_type(&overall_type, type);
 	}
 	return overall_type;
+}
+
+/* May need to flip the desktop plane in cases where MPO plane receives a flip but desktop plane doesn't
+ * while both planes are flip_immediate
+ */
+static void force_immediate_gsl_plane_flip(struct dc *dc, struct dc_surface_update *updates, int surface_count)
+{
+	bool has_flip_immediate_plane = false;
+	int i;
+
+	for (i = 0; i < surface_count; i++) {
+		if (updates[i].surface->flip_immediate) {
+			has_flip_immediate_plane = true;
+			break;
+		}
+	}
+
+	if (has_flip_immediate_plane && surface_count > 1) {
+		for (i = 0; i < surface_count; i++) {
+			if (updates[i].surface->flip_immediate)
+				updates[i].surface->update_flags.bits.addr_update = 1;
+		}
+	}
 }
 
 static enum surface_update_type check_update_surfaces_for_stream(
@@ -3185,6 +3209,11 @@ static bool update_planes_and_stream_state(struct dc *dc,
 	context = dc->current_state;
 	update_type = dc_check_update_surfaces_for_stream(
 			dc, srf_updates, surface_count, stream_update, stream_status);
+	/* It is possible to receive a flip for one plane while there are multiple flip_immediate planes in the same stream.
+	 * E.g. Desktop and MPO plane are flip_immediate but only the MPO plane received a flip
+	 * Force the other flip_immediate planes to flip so GSL doesn't wait for a flip that won't come.
+	 */
+	force_immediate_gsl_plane_flip(dc, srf_updates, surface_count);
 	if (update_type == UPDATE_TYPE_FULL)
 		backup_planes_and_stream_state(&dc->scratch.current_state, stream);
 
@@ -4819,6 +4848,11 @@ static bool update_planes_and_stream_v1(struct dc *dc,
 
 	update_type = dc_check_update_surfaces_for_stream(
 				dc, srf_updates, surface_count, stream_update, stream_status);
+	/* It is possible to receive a flip for one plane while there are multiple flip_immediate planes in the same stream.
+	 * E.g. Desktop and MPO plane are flip_immediate but only the MPO plane received a flip
+	 * Force the other flip_immediate planes to flip so GSL doesn't wait for a flip that won't come.
+	 */
+	force_immediate_gsl_plane_flip(dc, srf_updates, surface_count);
 
 	if (update_type >= UPDATE_TYPE_FULL) {
 
@@ -5107,11 +5141,26 @@ static bool update_planes_and_stream_v3(struct dc *dc,
 	return true;
 }
 
+static void clear_update_flags(struct dc_surface_update *srf_updates,
+	int surface_count, struct dc_stream_state *stream)
+{
+	int i;
+
+	if (stream)
+		stream->update_flags.raw = 0;
+
+	for (i = 0; i < surface_count; i++)
+		if (srf_updates[i].surface)
+			srf_updates[i].surface->update_flags.raw = 0;
+}
+
 bool dc_update_planes_and_stream(struct dc *dc,
 		struct dc_surface_update *srf_updates, int surface_count,
 		struct dc_stream_state *stream,
 		struct dc_stream_update *stream_update)
 {
+	bool ret = false;
+
 	dc_exit_ips_for_hw_access(dc);
 	/*
 	 * update planes and stream version 3 separates FULL and FAST updates
@@ -5128,10 +5177,16 @@ bool dc_update_planes_and_stream(struct dc *dc,
 	 * features as they are now transparent to the new sequence.
 	 */
 	if (dc->ctx->dce_version >= DCN_VERSION_4_01)
-		return update_planes_and_stream_v3(dc, srf_updates,
+		ret = update_planes_and_stream_v3(dc, srf_updates,
 				surface_count, stream, stream_update);
-	return update_planes_and_stream_v2(dc, srf_updates,
+	else
+		ret = update_planes_and_stream_v2(dc, srf_updates,
 			surface_count, stream, stream_update);
+
+	if (ret)
+		clear_update_flags(srf_updates, surface_count, stream);
+
+	return ret;
 }
 
 void dc_commit_updates_for_stream(struct dc *dc,
@@ -5141,6 +5196,8 @@ void dc_commit_updates_for_stream(struct dc *dc,
 		struct dc_stream_update *stream_update,
 		struct dc_state *state)
 {
+	bool ret = false;
+
 	dc_exit_ips_for_hw_access(dc);
 	/* TODO: Since change commit sequence can have a huge impact,
 	 * we decided to only enable it for DCN3x. However, as soon as
@@ -5148,17 +5205,17 @@ void dc_commit_updates_for_stream(struct dc *dc,
 	 * the new sequence for all ASICs.
 	 */
 	if (dc->ctx->dce_version >= DCN_VERSION_4_01) {
-		update_planes_and_stream_v3(dc, srf_updates, surface_count,
+		ret = update_planes_and_stream_v3(dc, srf_updates, surface_count,
 				stream, stream_update);
-		return;
-	}
-	if (dc->ctx->dce_version >= DCN_VERSION_3_2) {
-		update_planes_and_stream_v2(dc, srf_updates, surface_count,
+	} else if (dc->ctx->dce_version >= DCN_VERSION_3_2) {
+		ret = update_planes_and_stream_v2(dc, srf_updates, surface_count,
 				stream, stream_update);
-		return;
-	}
-	update_planes_and_stream_v1(dc, srf_updates, surface_count, stream,
-			stream_update, state);
+	} else
+		ret = update_planes_and_stream_v1(dc, srf_updates, surface_count, stream,
+				stream_update, state);
+
+	if (ret)
+		clear_update_flags(srf_updates, surface_count, stream);
 }
 
 uint8_t dc_get_current_stream_count(struct dc *dc)
@@ -6017,15 +6074,13 @@ void dc_set_edp_power(const struct dc *dc, struct dc_link *edp_link,
 struct dc_power_profile dc_get_power_profile_for_dc_state(const struct dc_state *context)
 {
 	struct dc_power_profile profile = { 0 };
-	struct dc *dc = NULL;
 
 	if (!context || !context->clk_mgr || !context->clk_mgr->ctx || !context->clk_mgr->ctx->dc)
 		return profile;
+	struct dc *dc = context->clk_mgr->ctx->dc;
 
-	dc = context->clk_mgr->ctx->dc;
 
 	if (dc->res_pool->funcs->get_power_profile)
 		profile.power_level = dc->res_pool->funcs->get_power_profile(context);
-
 	return profile;
 }

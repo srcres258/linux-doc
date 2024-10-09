@@ -37,6 +37,10 @@
  * Given @inode, grab the ctime and mtime out if it and store the result
  * in @stat. When fetching the value, flag it as QUERIED (if not already)
  * so the next write will record a distinct timestamp.
+ *
+ * NB: The QUERIED flag is tracked in the ctime, but we set it there even
+ * if only the mtime was requested, as that ensures that the next mtime
+ * change will be distinct.
  */
 void fill_mg_cmtime(struct kstat *stat, u32 request_mask, struct inode *inode)
 {

@@ -1704,9 +1704,9 @@ static int vi_common_sw_fini(struct amdgpu_ip_block *ip_block)
 	return 0;
 }
 
-static int vi_common_hw_init(void *handle)
+static int vi_common_hw_init(struct amdgpu_ip_block *ip_block)
 {
-	struct amdgpu_device *adev = (struct amdgpu_device *)handle;
+	struct amdgpu_device *adev = ip_block->adev;
 
 	/* move the golden regs per IP block */
 	vi_init_golden_registers(adev);
@@ -1718,9 +1718,9 @@ static int vi_common_hw_init(void *handle)
 	return 0;
 }
 
-static int vi_common_hw_fini(void *handle)
+static int vi_common_hw_fini(struct amdgpu_ip_block *ip_block)
 {
-	struct amdgpu_device *adev = (struct amdgpu_device *)handle;
+	struct amdgpu_device *adev = ip_block->adev;
 
 	/* enable the doorbell aperture */
 	vi_enable_doorbell_aperture(adev, false);
@@ -1731,18 +1731,14 @@ static int vi_common_hw_fini(void *handle)
 	return 0;
 }
 
-static int vi_common_suspend(void *handle)
+static int vi_common_suspend(struct amdgpu_ip_block *ip_block)
 {
-	struct amdgpu_device *adev = (struct amdgpu_device *)handle;
-
-	return vi_common_hw_fini(adev);
+	return vi_common_hw_fini(ip_block);
 }
 
-static int vi_common_resume(void *handle)
+static int vi_common_resume(struct amdgpu_ip_block *ip_block)
 {
-	struct amdgpu_device *adev = (struct amdgpu_device *)handle;
-
-	return vi_common_hw_init(adev);
+	return vi_common_hw_init(ip_block);
 }
 
 static bool vi_common_is_idle(void *handle)
@@ -1750,7 +1746,7 @@ static bool vi_common_is_idle(void *handle)
 	return true;
 }
 
-static int vi_common_wait_for_idle(void *handle)
+static int vi_common_wait_for_idle(struct amdgpu_ip_block *ip_block)
 {
 	return 0;
 }

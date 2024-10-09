@@ -2760,10 +2760,10 @@ static int dce_v6_0_sw_fini(struct amdgpu_ip_block *ip_block)
 	return 0;
 }
 
-static int dce_v6_0_hw_init(void *handle)
+static int dce_v6_0_hw_init(struct amdgpu_ip_block *ip_block)
 {
 	int i;
-	struct amdgpu_device *adev = (struct amdgpu_device *)handle;
+	struct amdgpu_device *adev = ip_block->adev;
 
 	/* disable vga render */
 	dce_v6_0_set_vga_render_state(adev, false);
@@ -2783,10 +2783,10 @@ static int dce_v6_0_hw_init(void *handle)
 	return 0;
 }
 
-static int dce_v6_0_hw_fini(void *handle)
+static int dce_v6_0_hw_fini(struct amdgpu_ip_block *ip_block)
 {
 	int i;
-	struct amdgpu_device *adev = (struct amdgpu_device *)handle;
+	struct amdgpu_device *adev = ip_block->adev;
 
 	dce_v6_0_hpd_fini(adev);
 
@@ -2801,9 +2801,9 @@ static int dce_v6_0_hw_fini(void *handle)
 	return 0;
 }
 
-static int dce_v6_0_suspend(void *handle)
+static int dce_v6_0_suspend(struct amdgpu_ip_block *ip_block)
 {
-	struct amdgpu_device *adev = (struct amdgpu_device *)handle;
+	struct amdgpu_device *adev = ip_block->adev;
 	int r;
 
 	r = amdgpu_display_suspend_helper(adev);
@@ -2812,18 +2812,18 @@ static int dce_v6_0_suspend(void *handle)
 	adev->mode_info.bl_level =
 		amdgpu_atombios_encoder_get_backlight_level_from_reg(adev);
 
-	return dce_v6_0_hw_fini(handle);
+	return dce_v6_0_hw_fini(ip_block);
 }
 
-static int dce_v6_0_resume(void *handle)
+static int dce_v6_0_resume(struct amdgpu_ip_block *ip_block)
 {
-	struct amdgpu_device *adev = (struct amdgpu_device *)handle;
+	struct amdgpu_device *adev = ip_block->adev;
 	int ret;
 
 	amdgpu_atombios_encoder_set_backlight_level_to_reg(adev,
 							   adev->mode_info.bl_level);
 
-	ret = dce_v6_0_hw_init(handle);
+	ret = dce_v6_0_hw_init(ip_block);
 
 	/* turn on the BL */
 	if (adev->mode_info.bl_encoder) {
@@ -2843,7 +2843,7 @@ static bool dce_v6_0_is_idle(void *handle)
 	return true;
 }
 
-static int dce_v6_0_wait_for_idle(void *handle)
+static int dce_v6_0_wait_for_idle(struct amdgpu_ip_block *ip_block)
 {
 	return 0;
 }

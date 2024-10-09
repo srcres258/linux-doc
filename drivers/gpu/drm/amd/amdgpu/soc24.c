@@ -470,9 +470,9 @@ static int soc24_common_sw_fini(struct amdgpu_ip_block *ip_block)
 	return 0;
 }
 
-static int soc24_common_hw_init(void *handle)
+static int soc24_common_hw_init(struct amdgpu_ip_block *ip_block)
 {
-	struct amdgpu_device *adev = (struct amdgpu_device *)handle;
+	struct amdgpu_device *adev = ip_block->adev;
 
 	/* enable aspm */
 	soc24_program_aspm(adev);
@@ -494,9 +494,9 @@ static int soc24_common_hw_init(void *handle)
 	return 0;
 }
 
-static int soc24_common_hw_fini(void *handle)
+static int soc24_common_hw_fini(struct amdgpu_ip_block *ip_block)
 {
-	struct amdgpu_device *adev = (struct amdgpu_device *)handle;
+	struct amdgpu_device *adev = ip_block->adev;
 
 	/* Disable the doorbell aperture and selfring doorbell aperture
 	 * separately in hw_fini because soc21_enable_doorbell_aperture
@@ -512,18 +512,14 @@ static int soc24_common_hw_fini(void *handle)
 	return 0;
 }
 
-static int soc24_common_suspend(void *handle)
+static int soc24_common_suspend(struct amdgpu_ip_block *ip_block)
 {
-	struct amdgpu_device *adev = (struct amdgpu_device *)handle;
-
-	return soc24_common_hw_fini(adev);
+	return soc24_common_hw_fini(ip_block);
 }
 
-static int soc24_common_resume(void *handle)
+static int soc24_common_resume(struct amdgpu_ip_block *ip_block)
 {
-	struct amdgpu_device *adev = (struct amdgpu_device *)handle;
-
-	return soc24_common_hw_init(adev);
+	return soc24_common_hw_init(ip_block);
 }
 
 static bool soc24_common_is_idle(void *handle)
@@ -531,7 +527,7 @@ static bool soc24_common_is_idle(void *handle)
 	return true;
 }
 
-static int soc24_common_wait_for_idle(void *handle)
+static int soc24_common_wait_for_idle(struct amdgpu_ip_block *ip_block)
 {
 	return 0;
 }

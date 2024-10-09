@@ -2134,9 +2134,9 @@ static int cik_common_sw_fini(struct amdgpu_ip_block *ip_block)
 	return 0;
 }
 
-static int cik_common_hw_init(void *handle)
+static int cik_common_hw_init(struct amdgpu_ip_block *ip_block)
 {
-	struct amdgpu_device *adev = (struct amdgpu_device *)handle;
+	struct amdgpu_device *adev = ip_block->adev;
 
 	/* move the golden regs per IP block */
 	cik_init_golden_registers(adev);
@@ -2148,23 +2148,19 @@ static int cik_common_hw_init(void *handle)
 	return 0;
 }
 
-static int cik_common_hw_fini(void *handle)
+static int cik_common_hw_fini(struct amdgpu_ip_block *ip_block)
 {
 	return 0;
 }
 
-static int cik_common_suspend(void *handle)
+static int cik_common_suspend(struct amdgpu_ip_block *ip_block)
 {
-	struct amdgpu_device *adev = (struct amdgpu_device *)handle;
-
-	return cik_common_hw_fini(adev);
+	return cik_common_hw_fini(ip_block);
 }
 
-static int cik_common_resume(void *handle)
+static int cik_common_resume(struct amdgpu_ip_block *ip_block)
 {
-	struct amdgpu_device *adev = (struct amdgpu_device *)handle;
-
-	return cik_common_hw_init(adev);
+	return cik_common_hw_init(ip_block);
 }
 
 static bool cik_common_is_idle(void *handle)
@@ -2172,7 +2168,7 @@ static bool cik_common_is_idle(void *handle)
 	return true;
 }
 
-static int cik_common_wait_for_idle(void *handle)
+static int cik_common_wait_for_idle(struct amdgpu_ip_block *ip_block)
 {
 	return 0;
 }

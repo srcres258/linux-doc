@@ -46,19 +46,13 @@ static int isp_sw_fini(struct amdgpu_ip_block *ip_block)
 /**
  * isp_hw_init - start and test isp block
  *
- * @handle: handle for amdgpu_device pointer
+ * @ip_block: Pointer to the amdgpu_ip_block for this hw instance.
  *
  */
-static int isp_hw_init(void *handle)
+static int isp_hw_init(struct amdgpu_ip_block *ip_block)
 {
-	struct amdgpu_device *adev = (struct amdgpu_device *)handle;
+	struct amdgpu_device *adev = ip_block->adev;
 	struct amdgpu_isp *isp = &adev->isp;
-
-	const struct amdgpu_ip_block *ip_block =
-		amdgpu_device_ip_get_ip_block(adev, AMD_IP_BLOCK_TYPE_ISP);
-
-	if (!ip_block)
-		return -EINVAL;
 
 	if (isp->funcs->hw_init != NULL)
 		return isp->funcs->hw_init(isp);
@@ -69,13 +63,12 @@ static int isp_hw_init(void *handle)
 /**
  * isp_hw_fini - stop the hardware block
  *
- * @handle: handle for amdgpu_device pointer
+ * @ip_block: Pointer to the amdgpu_ip_block for this hw instance.
  *
  */
-static int isp_hw_fini(void *handle)
+static int isp_hw_fini(struct amdgpu_ip_block *ip_block)
 {
-	struct amdgpu_device *adev = (struct amdgpu_device *)handle;
-	struct amdgpu_isp *isp = &adev->isp;
+	struct amdgpu_isp *isp = &ip_block->adev->isp;
 
 	if (isp->funcs->hw_fini != NULL)
 		return isp->funcs->hw_fini(isp);
@@ -83,12 +76,12 @@ static int isp_hw_fini(void *handle)
 	return -ENODEV;
 }
 
-static int isp_suspend(void *handle)
+static int isp_suspend(struct amdgpu_ip_block *ip_block)
 {
 	return 0;
 }
 
-static int isp_resume(void *handle)
+static int isp_resume(struct amdgpu_ip_block *ip_block)
 {
 	return 0;
 }
@@ -155,7 +148,7 @@ static bool isp_is_idle(void *handle)
 	return true;
 }
 
-static int isp_wait_for_idle(void *handle)
+static int isp_wait_for_idle(struct amdgpu_ip_block *ip_block)
 {
 	return 0;
 }

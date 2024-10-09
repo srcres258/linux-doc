@@ -79,6 +79,10 @@ is no such guarantee, and the second file may appear to have been modified
 before, after or at the same time as the first, regardless of which one was
 submitted first.
 
+Note that the above assumes that the system doesn't experience a backward jump
+of the realtime clock. If that occurs at an inopportune time, then timestamps
+can appear to go backward, even on a properly functioning system.
+
 Multigrain Timestamp Implementation
 ===================================
 Multigrain timestamps are aimed at ensuring that changes to a single file are
@@ -100,7 +104,7 @@ timestamp, and then a second file modified later could get a coarse-grained one
 that appears earlier than the first, which would break the kernel's timestamp
 ordering guarantees.
 
-To mitigate this problem, we maintain a global floor value that ensures that
+To mitigate this problem, maintain a global floor value that ensures that
 this can't happen. The two files in the above example may appear to have been
 modified at the same time in such a case, but they will never show the reverse
 order. To avoid problems with realtime clock jumps, the floor is managed as a
@@ -116,6 +120,6 @@ and the like that just mirror timestamp values from a server.
 For most filesystems, it's sufficient to just set the FS_MGTIME flag in the
 fstype->fs_flags in order to opt-in, providing the ctime is only ever set via
 inode_set_ctime_current(). If the filesystem has a ->getattr routine that
-doesn't call generic_fillattr, then you should have it call fill_mg_cmtime to
+doesn't call generic_fillattr, then it should call fill_mg_cmtime() to
 fill those values. For setattr, it should use setattr_copy() to update the
 timestamps, or otherwise mimic its behavior.

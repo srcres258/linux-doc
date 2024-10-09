@@ -170,7 +170,7 @@ static int lookup_dirent_in_snapshot(struct btree_trans *trans,
 	if (ret)
 		return ret;
 
-	struct bkey_s_c_dirent d = bkey_s_c_to_dirent(bch2_btree_iter_peek_slot(&iter));
+	struct bkey_s_c_dirent d = bkey_s_c_to_dirent(k);
 	*target = le64_to_cpu(d.v->d_inum);
 	*type = d.v->d_type;
 	bch2_trans_iter_exit(trans, &iter);
@@ -482,6 +482,13 @@ static int reattach_inode(struct btree_trans *trans, struct bch_inode_unpacked *
 	return ret;
 }
 
+static struct bkey_s_c_dirent dirent_get_by_pos(struct btree_trans *trans,
+						struct btree_iter *iter,
+						struct bpos pos)
+{
+	return bch2_bkey_get_iter_typed(trans, iter, BTREE_ID_dirents, pos, 0, dirent);
+}
+
 static int remove_backpointer(struct btree_trans *trans,
 			      struct bch_inode_unpacked *inode)
 {
@@ -490,13 +497,11 @@ static int remove_backpointer(struct btree_trans *trans,
 
 	struct bch_fs *c = trans->c;
 	struct btree_iter iter;
-	struct bkey_s_c_dirent d =
-		bch2_bkey_get_iter_typed(trans, &iter, BTREE_ID_dirents,
-				     SPOS(inode->bi_dir, inode->bi_dir_offset, inode->bi_snapshot), 0,
-				     dirent);
-	int ret =   bkey_err(d) ?:
-		dirent_points_to_inode(c, d, inode) ?:
-		__remove_dirent(trans, d.k->p);
+	struct bkey_s_c_dirent d = dirent_get_by_pos(trans, &iter,
+				     SPOS(inode->bi_dir, inode->bi_dir_offset, inode->bi_snapshot));
+	int ret = bkey_err(d) ?:
+		  dirent_points_to_inode(c, d, inode) ?:
+		  __remove_dirent(trans, d.k->p);
 	bch2_trans_iter_exit(trans, &iter);
 	return ret;
 }
@@ -1022,13 +1027,6 @@ fsck_err:
 	goto out;
 }
 
-static struct bkey_s_c_dirent dirent_get_by_pos(struct btree_trans *trans,
-						struct btree_iter *iter,
-						struct bpos pos)
-{
-	return bch2_bkey_get_iter_typed(trans, iter, BTREE_ID_dirents, pos, 0, dirent);
-}
-
 static struct bkey_s_c_dirent inode_get_dirent(struct btree_trans *trans,
 					       struct btree_iter *iter,
 					       struct bch_inode_unpacked *inode,
@@ -1213,7 +1211,11 @@ static int check_inode(struct btree_trans *trans,
 			if (ret)
 				goto err;
 		} else {
-			if (fsck_err_on(!bch2_inode_is_open(c, k.k->p),
+			ret = bch2_inode_or_descendents_is_open(trans, k.k->p);
+			if (ret < 0)
+				goto err;
+
+			if (fsck_err_on(!ret,
 					trans, inode_unlinked_and_not_open,
 				      "inode %llu%u unlinked and not open",
 				      u.bi_inum, u.bi_snapshot)) {
@@ -1221,6 +1223,7 @@ static int check_inode(struct btree_trans *trans,
 				bch_err_msg(c, ret, "in fsck deleting inode");
 				goto err_noprint;
 			}
+			ret = 0;
 		}
 	}
 
@@ -1978,7 +1981,7 @@ static int check_dirent_inode_dirent(struct btree_trans *trans,
 		return __bch2_fsck_write_inode(trans, target);
 	}
 
-	if (bch2_inode_should_have_bp(target) &&
+	if (bch2_inode_should_have_single_bp(target) &&
 	    !fsck_err(trans, inode_wrong_backpointer,
 		      "dirent points to inode that does not point back:\n  %s",
 		      (bch2_bkey_val_to_text(&buf, c, d.s_c),

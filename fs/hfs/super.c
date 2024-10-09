@@ -328,6 +328,7 @@ static int hfs_fill_super(struct super_block *sb, struct fs_context *fc)
 	spin_lock_init(&sbi->work_lock);
 	INIT_DELAYED_WORK(&sbi->mdb_work, flush_mdb);
 
+	sbi->sb = sb;
 	sb->s_op = &hfs_super_operations;
 	sb->s_xattr = hfs_xattr_handlers;
 	sb->s_flags |= SB_NODIRATIME;

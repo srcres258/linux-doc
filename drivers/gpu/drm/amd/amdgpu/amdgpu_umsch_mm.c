@@ -839,9 +839,9 @@ static int umsch_mm_sw_fini(struct amdgpu_ip_block *ip_block)
 	return 0;
 }
 
-static int umsch_mm_hw_init(void *handle)
+static int umsch_mm_hw_init(struct amdgpu_ip_block *ip_block)
 {
-	struct amdgpu_device *adev = (struct amdgpu_device *)handle;
+	struct amdgpu_device *adev = ip_block->adev;
 	int r;
 
 	r = umsch_mm_load_microcode(&adev->umsch_mm);
@@ -857,9 +857,9 @@ static int umsch_mm_hw_init(void *handle)
 	return 0;
 }
 
-static int umsch_mm_hw_fini(void *handle)
+static int umsch_mm_hw_fini(struct amdgpu_ip_block *ip_block)
 {
-	struct amdgpu_device *adev = (struct amdgpu_device *)handle;
+	struct amdgpu_device *adev = ip_block->adev;
 
 	umsch_mm_ring_stop(&adev->umsch_mm);
 
@@ -873,18 +873,14 @@ static int umsch_mm_hw_fini(void *handle)
 	return 0;
 }
 
-static int umsch_mm_suspend(void *handle)
+static int umsch_mm_suspend(struct amdgpu_ip_block *ip_block)
 {
-	struct amdgpu_device *adev = (struct amdgpu_device *)handle;
-
-	return umsch_mm_hw_fini(adev);
+	return umsch_mm_hw_fini(ip_block);
 }
 
-static int umsch_mm_resume(void *handle)
+static int umsch_mm_resume(struct amdgpu_ip_block *ip_block)
 {
-	struct amdgpu_device *adev = (struct amdgpu_device *)handle;
-
-	return umsch_mm_hw_init(adev);
+	return umsch_mm_hw_init(ip_block);
 }
 
 void amdgpu_umsch_fwlog_init(struct amdgpu_umsch_mm *umsch_mm)

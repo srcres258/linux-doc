@@ -28,6 +28,8 @@
 
 
 #define AMD_MAX_USEC_TIMEOUT		1000000  /* 1000 ms */
+struct amdgpu_ip_block;
+
 
 /*
  * Chip flags
@@ -337,6 +339,11 @@ enum DC_DEBUG_MASK {
 	 * @DC_FORCE_IPS_ENABLE: If set, force enable all IPS, all the time.
 	 */
 	DC_FORCE_IPS_ENABLE = 0x4000,
+	/**
+	 * @DC_DISABLE_ACPI_EDID: If set, don't attempt to fetch EDID for
+	 * eDP display from ACPI _DDC method.
+	 */
+	DC_DISABLE_ACPI_EDID = 0x8000,
 };
 
 enum amd_dpm_forced_level;
@@ -375,8 +382,6 @@ enum amd_dpm_forced_level;
  * making calls to hooks from each IP block. This list is ordered to ensure
  * that the driver initializes the IP blocks in a safe sequence.
  */
-struct amdgpu_ip_block;
-
 struct amd_ip_funcs {
 	char *name;
 	int (*early_init)(struct amdgpu_ip_block *ip_block);
@@ -384,14 +389,14 @@ struct amd_ip_funcs {
 	int (*sw_init)(struct amdgpu_ip_block *ip_block);
 	int (*sw_fini)(struct amdgpu_ip_block *ip_block);
 	int (*early_fini)(struct amdgpu_ip_block *ip_block);
-	int (*hw_init)(void *handle);
-	int (*hw_fini)(void *handle);
+	int (*hw_init)(struct amdgpu_ip_block *ip_block);
+	int (*hw_fini)(struct amdgpu_ip_block *ip_block);
 	void (*late_fini)(struct amdgpu_ip_block *ip_block);
 	int (*prepare_suspend)(struct amdgpu_ip_block *ip_block);
-	int (*suspend)(void *handle);
-	int (*resume)(void *handle);
+	int (*suspend)(struct amdgpu_ip_block *ip_block);
+	int (*resume)(struct amdgpu_ip_block *ip_block);
 	bool (*is_idle)(void *handle);
-	int (*wait_for_idle)(void *handle);
+	int (*wait_for_idle)(struct amdgpu_ip_block *ip_block);
 	bool (*check_soft_reset)(struct amdgpu_ip_block *ip_block);
 	int (*pre_soft_reset)(struct amdgpu_ip_block *ip_block);
 	int (*soft_reset)(struct amdgpu_ip_block *ip_block);

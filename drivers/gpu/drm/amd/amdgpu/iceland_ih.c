@@ -311,34 +311,28 @@ static int iceland_ih_sw_fini(struct amdgpu_ip_block *ip_block)
 	return 0;
 }
 
-static int iceland_ih_hw_init(void *handle)
+static int iceland_ih_hw_init(struct amdgpu_ip_block *ip_block)
 {
-	struct amdgpu_device *adev = (struct amdgpu_device *)handle;
+	struct amdgpu_device *adev = ip_block->adev;
 
 	return iceland_ih_irq_init(adev);
 }
 
-static int iceland_ih_hw_fini(void *handle)
+static int iceland_ih_hw_fini(struct amdgpu_ip_block *ip_block)
 {
-	struct amdgpu_device *adev = (struct amdgpu_device *)handle;
-
-	iceland_ih_irq_disable(adev);
+	iceland_ih_irq_disable(ip_block->adev);
 
 	return 0;
 }
 
-static int iceland_ih_suspend(void *handle)
+static int iceland_ih_suspend(struct amdgpu_ip_block *ip_block)
 {
-	struct amdgpu_device *adev = (struct amdgpu_device *)handle;
-
-	return iceland_ih_hw_fini(adev);
+	return iceland_ih_hw_fini(ip_block);
 }
 
-static int iceland_ih_resume(void *handle)
+static int iceland_ih_resume(struct amdgpu_ip_block *ip_block)
 {
-	struct amdgpu_device *adev = (struct amdgpu_device *)handle;
-
-	return iceland_ih_hw_init(adev);
+	return iceland_ih_hw_init(ip_block);
 }
 
 static bool iceland_ih_is_idle(void *handle)
@@ -352,11 +346,11 @@ static bool iceland_ih_is_idle(void *handle)
 	return true;
 }
 
-static int iceland_ih_wait_for_idle(void *handle)
+static int iceland_ih_wait_for_idle(struct amdgpu_ip_block *ip_block)
 {
 	unsigned i;
 	u32 tmp;
-	struct amdgpu_device *adev = (struct amdgpu_device *)handle;
+	struct amdgpu_device *adev = ip_block->adev;
 
 	for (i = 0; i < adev->usec_timeout; i++) {
 		/* read MC_STATUS */

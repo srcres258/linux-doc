@@ -2633,9 +2633,9 @@ static void si_fix_pci_max_read_req_size(struct amdgpu_device *adev)
 		pcie_set_readrq(adev->pdev, 512);
 }
 
-static int si_common_hw_init(void *handle)
+static int si_common_hw_init(struct amdgpu_ip_block *ip_block)
 {
-	struct amdgpu_device *adev = (struct amdgpu_device *)handle;
+	struct amdgpu_device *adev = ip_block->adev;
 
 	si_fix_pci_max_read_req_size(adev);
 	si_init_golden_registers(adev);
@@ -2645,23 +2645,19 @@ static int si_common_hw_init(void *handle)
 	return 0;
 }
 
-static int si_common_hw_fini(void *handle)
+static int si_common_hw_fini(struct amdgpu_ip_block *ip_block)
 {
 	return 0;
 }
 
-static int si_common_suspend(void *handle)
+static int si_common_suspend(struct amdgpu_ip_block *ip_block)
 {
-	struct amdgpu_device *adev = (struct amdgpu_device *)handle;
-
-	return si_common_hw_fini(adev);
+	return si_common_hw_fini(ip_block);
 }
 
-static int si_common_resume(void *handle)
+static int si_common_resume(struct amdgpu_ip_block *ip_block)
 {
-	struct amdgpu_device *adev = (struct amdgpu_device *)handle;
-
-	return si_common_hw_init(adev);
+	return si_common_hw_init(ip_block);
 }
 
 static bool si_common_is_idle(void *handle)
@@ -2669,7 +2665,7 @@ static bool si_common_is_idle(void *handle)
 	return true;
 }
 
-static int si_common_wait_for_idle(void *handle)
+static int si_common_wait_for_idle(struct amdgpu_ip_block *ip_block)
 {
 	return 0;
 }
