@@ -1064,10 +1064,12 @@ static int expand_upwards(struct vm_area_struct *vma, unsigned long address)
 		gap_addr = TASK_SIZE;
 
 	next = find_vma_intersection(mm, vma->vm_end, gap_addr);
-	if (next && vma_is_accessible(next)) {
-		if (!(next->vm_flags & VM_GROWSUP))
+	if (next && !(next->vm_flags & VM_GROWSUP)) {
+		/* see comments in expand_downwards() */
+		if (vma_is_accessible(next))
 			return -ENOMEM;
-		/* Check that both stack segments have the same anon_vma? */
+		if (address == next->vm_start)
+			return -ENOMEM;
 	}
 
 	if (next)
@@ -1155,10 +1157,47 @@ int expand_downwards(struct vm_area_struct *vma, unsigned long address)
 	/* Enforce stack_guard_gap */
 	prev = vma_prev(&vmi);
 	/* Check that both stack segments have the same anon_vma? */
-	if (prev) {
-		if (!(prev->vm_flags & VM_GROWSDOWN) &&
-		    vma_is_accessible(prev) &&
-		    (address - prev->vm_end < stack_guard_gap))
+	if (prev && !(prev->vm_flags & VM_GROWSDOWN) &&
+	    (address - prev->vm_end < stack_guard_gap)) {
+		/*
+		 * If the previous VMA is accessible, this is the normal case
+		 * where the main stack is growing down towards some unrelated
+		 * VMA. Enforce the full stack guard gap.
+		 */
+		if (vma_is_accessible(prev))
+			return -ENOMEM;
+
+		/*
+		 * If the previous VMA is not accessible, we have a problem:
+		 * We can't tell what userspace's intent is.
+		 *
+		 * Case A:
+		 * Maybe userspace wants to use the previous VMA as a
+		 * "guard region" at the bottom of the main stack, in which case
+		 * userspace wants us to grow the stack until it is adjacent to
+		 * the guard region. Apparently some Java runtime environments
+		 * and Rust do that?
+		 * That is kind of ugly, and in that case userspace really ought
+		 * to ensure that the stack is fully expanded immediately, but
+		 * we have to handle this case.
+		 *
+		 * Case B:
+		 * But maybe the previous VMA is entirely unrelated to the stack
+		 * and is only *temporarily* PROT_NONE. For example, glibc
+		 * malloc arenas create a big PROT_NONE region and then
+		 * progressively mark parts of it as writable.
+		 * In that case, we must not let the stack become adjacent to
+		 * the previous VMA. Otherwise, after the region later becomes
+		 * writable, a stack overflow will cause the stack to grow into
+		 * the previous VMA, and we won't have any stack gap to protect
+		 * against this.
+		 *
+		 * As an ugly tradeoff, enforce a single-page gap.
+		 * A single page will hopefully be small enough to not be
+		 * noticed in case A, while providing the same level of
+		 * protection in case B that normal userspace threads get.
+		 */
+		if (address == prev->vm_end)
 			return -ENOMEM;
 	}
 
@@ -1371,7 +1410,7 @@ unsigned long mmap_region(struct file *file, unsigned long addr,
 	struct maple_tree mt_detach;
 	unsigned long end = addr + len;
 	bool writable_file_mapping = false;
-	int error = -ENOMEM;
+	int error;
 	VMA_ITERATOR(vmi, mm, addr);
 	VMG_STATE(vmg, mm, &vmi, addr, end, vm_flags, pgoff);
 
@@ -1396,8 +1435,10 @@ unsigned long mmap_region(struct file *file, unsigned long addr,
 	}
 
 	/* Check against address space limit. */
-	if (!may_expand_vm(mm, vm_flags, pglen - vms.nr_pages))
+	if (!may_expand_vm(mm, vm_flags, pglen - vms.nr_pages)) {
+		error = -ENOMEM;
 		goto abort_munmap;
+	}
 
 	/*
 	 * Private writable mapping: check memory availability
@@ -1405,8 +1446,11 @@ unsigned long mmap_region(struct file *file, unsigned long addr,
 	if (accountable_mapping(file, vm_flags)) {
 		charged = pglen;
 		charged -= vms.nr_accounted;
-		if (charged && security_vm_enough_memory_mm(mm, charged))
-			goto abort_munmap;
+		if (charged) {
+			error = security_vm_enough_memory_mm(mm, charged);
+			if (error)
+				goto abort_munmap;
+		}
 
 		vms.nr_accounted = 0;
 		vm_flags |= VM_ACCOUNT;
@@ -1422,8 +1466,10 @@ unsigned long mmap_region(struct file *file, unsigned long addr,
 	 * not unmapped, but the maps are removed from the list.
 	 */
 	vma = vm_area_alloc(mm);
-	if (!vma)
+	if (!vma) {
+		error = -ENOMEM;
 		goto unacct_error;
+	}
 
 	vma_iter_config(&vmi, addr, end);
 	vma_set_range(vma, addr, end, pgoff);
@@ -1453,9 +1499,10 @@ unsigned long mmap_region(struct file *file, unsigned long addr,
 		 * Expansion is handled above, merging is handled below.
 		 * Drivers should not alter the address of the VMA.
 		 */
-		error = -EINVAL;
-		if (WARN_ON((addr != vma->vm_start)))
+		if (WARN_ON((addr != vma->vm_start))) {
+			error = -EINVAL;
 			goto close_and_free_vma;
+		}
 
 		vma_iter_config(&vmi, addr, end);
 		/*
@@ -1500,13 +1547,15 @@ unsigned long mmap_region(struct file *file, unsigned long addr,
 	}
 
 	/* Allow architectures to sanity-check the vm_flags */
-	error = -EINVAL;
-	if (!arch_validate_flags(vma->vm_flags))
+	if (!arch_validate_flags(vma->vm_flags)) {
+		error = -EINVAL;
 		goto close_and_free_vma;
+	}
 
-	error = -ENOMEM;
-	if (vma_iter_prealloc(&vmi, vma))
+	if (vma_iter_prealloc(&vmi, vma)) {
+		error = -ENOMEM;
 		goto close_and_free_vma;
+	}
 
 	/* Lock the VMA since it is modified after insertion into VMA tree */
 	vma_start_write(vma);
