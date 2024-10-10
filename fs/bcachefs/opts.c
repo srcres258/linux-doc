@@ -427,7 +427,9 @@ void bch2_opt_to_text(struct printbuf *out,
 			prt_printf(out, "%lli", v);
 		break;
 	case BCH_OPT_STR:
-		if (flags & OPT_SHOW_FULL_LIST)
+		if (v < opt->min || v >= opt->max - 1)
+			prt_printf(out, "(invalid option %lli)", v);
+		else if (flags & OPT_SHOW_FULL_LIST)
 			prt_string_option(out, opt->choices, v);
 		else
 			prt_str(out, opt->choices[v]);
@@ -520,9 +522,8 @@ int bch2_parse_one_mount_opt(struct bch_fs *c, struct bch_opts *opts,
 		val = "0";
 	}
 
-	/* Unknown options are ignored: */
 	if (id < 0)
-		return 0;
+		goto bad_opt;
 
 	if (!(bch2_opt_table[id].flags & OPT_MOUNT))
 		goto bad_opt;
