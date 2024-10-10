@@ -4199,11 +4199,6 @@ fallback:
 	return __alloc_swap_folio(vmf);
 }
 #else /* !CONFIG_TRANSPARENT_HUGEPAGE */
-static inline bool can_swapin_thp(struct vm_fault *vmf, pte_t *ptep, int nr_pages)
-{
-	return false;
-}
-
 static struct folio *alloc_swap_folio(struct vm_fault *vmf)
 {
 	return __alloc_swap_folio(vmf);
@@ -4673,7 +4668,8 @@ out:
 	/* Clear the swap cache pin for direct swapin after PTL unlock */
 	if (need_clear_cache) {
 		swapcache_clear(si, entry, nr_pages);
-		wake_up(&swapcache_wq);
+		if (waitqueue_active(&swapcache_wq))
+			wake_up(&swapcache_wq);
 	}
 	if (si)
 		put_swap_device(si);
@@ -4693,7 +4689,8 @@ out_release:
 	}
 	if (need_clear_cache) {
 		swapcache_clear(si, entry, nr_pages);
-		wake_up(&swapcache_wq);
+		if (waitqueue_active(&swapcache_wq))
+			wake_up(&swapcache_wq);
 	}
 	if (si)
 		put_swap_device(si);

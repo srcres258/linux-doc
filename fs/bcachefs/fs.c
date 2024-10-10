@@ -277,8 +277,9 @@ static void __wait_on_freeing_inode(struct bch_fs *c,
 				    struct bch_inode_info *inode,
 				    subvol_inum inum)
 {
+	struct wait_bit_queue_entry wait;
 	wait_queue_head_t *wq;
-	DEFINE_WAIT_BIT(wait, &inode->v.i_state, __I_NEW);
+
 	wq = inode_bit_waitqueue(&wait, &inode->v, __I_NEW);
 	prepare_to_wait(wq, &wait.wq_entry, TASK_UNINTERRUPTIBLE);
 	spin_unlock(&inode->v.i_lock);
@@ -2037,7 +2038,7 @@ static int bch2_show_options(struct seq_file *seq, struct dentry *root)
 	bch2_opts_to_text(&buf, c->opts, c, c->disk_sb.sb,
 			  OPT_MOUNT, OPT_HIDDEN, OPT_SHOW_MOUNT_STYLE);
 	printbuf_nul_terminate(&buf);
-	seq_puts(seq, buf.buf);
+	seq_printf(seq, ",%s", buf.buf);
 
 	int ret = buf.allocation_failure ? -ENOMEM : 0;
 	printbuf_exit(&buf);

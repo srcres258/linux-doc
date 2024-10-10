@@ -801,17 +801,24 @@ static bool is_same_device(struct btrfs_device *device, const char *new_path)
 {
 	struct path old = { .mnt = NULL, .dentry = NULL };
 	struct path new = { .mnt = NULL, .dentry = NULL };
-	char *old_path;
+	char *old_path = NULL;
 	bool is_same = false;
 	int ret;
 
 	if (!device->name)
 		goto out;
 
+	old_path = kzalloc(PATH_MAX, GFP_NOFS);
+	if (!old_path)
+		goto out;
+
 	rcu_read_lock();
-	old_path = rcu_str_deref(device->name);
-	ret = kern_path(old_path, LOOKUP_FOLLOW, &old);
+	ret = strscpy(old_path, rcu_str_deref(device->name), PATH_MAX);
 	rcu_read_unlock();
+	if (ret < 0)
+		goto out;
+
+	ret = kern_path(old_path, LOOKUP_FOLLOW, &old);
 	if (ret)
 		goto out;
 	ret = kern_path(new_path, LOOKUP_FOLLOW, &new);
@@ -820,6 +827,7 @@ static bool is_same_device(struct btrfs_device *device, const char *new_path)
 	if (path_equal(&old, &new))
 		is_same = true;
 out:
+	kfree(old_path);
 	path_put(&old);
 	path_put(&new);
 	return is_same;

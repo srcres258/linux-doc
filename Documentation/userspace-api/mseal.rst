@@ -57,7 +57,7 @@ mseal syscall signature
       - For above error cases, users can expect the given memory range is
         unmodified, i.e. no partial update.
       - There might be other internal errors/cases not listed here, e.g.
-        error during merging/splitting VMAs, or the process reaching the max
+        error during merging/splitting VMAs, or the process reaching the maximum
         number of supported VMAs. In those cases, partial updates to the given
         memory range could happen. However, those cases should be rare.
 
@@ -69,7 +69,7 @@ mseal syscall signature
       is a no-action (not error).
 
    **no munseal**
-      Once mapping is sealed, it can't be unsealed. kernel should never
+      Once mapping is sealed, it can't be unsealed. The kernel should never
       have munseal, this is consistent with other sealing feature, e.g.
       F_SEAL_SEAL for file.
 
@@ -94,23 +94,27 @@ Blocked mm syscall for sealed mapping
       - some destructive madvise behaviors: MADV_DONTNEED, MADV_FREE,
         MADV_DONTNEED_LOCKED, MADV_FREE, MADV_DONTFORK, MADV_WIPEONFORK
 
-   The first set of syscall to block is munmap, mremap, mmap. They can
-   either leave an empty space in the address space, therefore allow
+   The first set of syscalls to block is munmap, mremap, mmap. They can
+   either leave an empty space in the address space, therefore allowing
    replacement with a new mapping with new set of attributes, or can
    overwrite the existing mapping with another mapping.
 
    mprotect and pkey_mprotect are blocked because they changes the
    protection bits (RWX) of the mapping.
 
-   Some destructive madvise behaviors (MADV_DONTNEED, MADV_FREE,
-   MADV_DONTNEED_LOCKED, MADV_FREE, MADV_DONTFORK, MADV_WIPEONFORK)
-   for anonymous memory, when users don't have write permission to the
-   memory. Those behaviors can alter region contents by discarding pages,
-   effectively a memset(0) for anonymous memory.
+   Certain destructive madvise behaviors, specifically MADV_DONTNEED,
+   MADV_FREE, MADV_DONTNEED_LOCKED, and MADV_WIPEONFORK, can introduce
+   risks when applied to anonymous memory by threads lacking write
+   permissions. Consequently, these operations are prohibited under such
+   conditions. The aforementioned behaviors have the potential to modify
+   region contents by discarding pages, effectively performing a memset(0)
+   operation on the anonymous memory.
 
    Kernel will return -EPERM for blocked syscalls.
 
-   When blocked syscall return -EPERM due to sealing, the memory regions may or may not be changed, depends on the syscall being blocked:
+   When blocked syscall return -EPERM due to sealing, the memory regions may
+   or may not be changed, depends on the syscall being blocked:
+
       - munmap: munmap is atomic. If one of VMAs in the given range is
         sealed, none of VMAs are updated.
       - mprotect, pkey_mprotect, madvise: partial update might happen, e.g.
@@ -168,6 +172,7 @@ to RO memory, which is, in a way, by design. And those could be blocked
 by different security measures.
 
 Those cases are:
+
    - Write to read-only memory through /proc/self/mem interface (FOLL_FORCE).
    - Write to read-only memory through ptrace (such as PTRACE_POKETEXT).
    - userfaultfd.

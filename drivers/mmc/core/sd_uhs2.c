@@ -120,7 +120,7 @@ static int sd_uhs2_legacy_init(struct mmc_host *host, struct mmc_card *card)
 static int sd_uhs2_init_card(struct mmc_host *host)
 {
 	struct mmc_card *card;
-	u32 node_id;
+	u32 node_id = 0;
 	int err;
 
 	err = sd_uhs2_dev_init(host);

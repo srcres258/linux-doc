@@ -1070,7 +1070,7 @@ static int expand_upwards(struct vm_area_struct *vma, unsigned long address)
 	next = find_vma_intersection(mm, vma->vm_end, gap_addr);
 	if (next && !(next->vm_flags & VM_GROWSUP)) {
 		/* see comments in expand_downwards() */
-		if (vma_is_accessible(prev))
+		if (vma_is_accessible(next))
 			return -ENOMEM;
 		if (address == next->vm_start)
 			return -ENOMEM;

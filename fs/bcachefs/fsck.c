@@ -1180,7 +1180,7 @@ static int check_inode(struct btree_trans *trans,
 		if (ret)
 			u.bi_flags |= BCH_INODE_has_child_snapshot;
 		else
-			u.bi_flags &= !BCH_INODE_has_child_snapshot;
+			u.bi_flags &= ~BCH_INODE_has_child_snapshot;
 		do_update = true;
 	}
 	ret = 0;
