@@ -34,7 +34,7 @@
 #include <linux/iio/trigger_consumer.h>
 #include <linux/iio/triggered_buffer.h>
 
-#include <asm/unaligned.h>
+#include <linux/unaligned.h>
 
 #define MAX1363_SETUP_BYTE(a) ((a) | 0x80)
 
