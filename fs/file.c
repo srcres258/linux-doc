@@ -352,9 +352,10 @@ static inline void __set_close_on_exec(unsigned int fd, struct fdtable *fdt,
 	}
 }
 
-static inline void __set_open(unsigned int fd, struct fdtable *fdt, bool set)
+static inline void __set_open_fd(unsigned int fd, struct fdtable *fdt, bool set)
 {
 	__set_bit(fd, fdt->open_fds);
+	__set_close_on_exec(fd, fdt, set);
 	fd /= BITS_PER_LONG;
 	if (!~fdt->open_fds[fd])
 		__set_bit(fd, fdt->full_fds_bits);

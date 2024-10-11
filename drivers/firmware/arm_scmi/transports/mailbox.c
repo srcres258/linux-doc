@@ -25,6 +25,7 @@
  * @chan_platform_receiver: Optional Platform Receiver mailbox unidirectional channel
  * @cinfo: SCMI channel info
  * @shmem: Transmit/Receive shared memory area
+ * @chan_lock: Lock to protect access to Tx/Rx shared memory area and channel.
  * @io_ops: Transport specific I/O operations
  */
 struct scmi_mailbox {
@@ -34,6 +35,7 @@ struct scmi_mailbox {
 	struct mbox_chan *chan_platform_receiver;
 	struct scmi_chan_info *cinfo;
 	struct scmi_shared_mem __iomem *shmem;
+	struct mutex chan_lock;
 	struct scmi_shmem_io_ops *io_ops;
 };
 
@@ -209,6 +211,7 @@ static int mailbox_chan_setup(struct scmi_chan_info *cinfo, struct device *dev,
 	cl->rx_callback = rx_callback;
 	cl->tx_block = false;
 	cl->knows_txdone = tx;
+	mutex_init(&smbox->chan_lock);
 
 	smbox->chan = mbox_request_channel(cl, tx ? 0 : p2a_chan);
 	if (IS_ERR(smbox->chan)) {
@@ -271,11 +274,21 @@ static int mailbox_send_message(struct scmi_chan_info *cinfo,
 	struct scmi_mailbox *smbox = cinfo->transport_info;
 	int ret;
 
+	/*
+	 * The mailbox layer has it's own queue. However the mailbox queue confuses
+	 * the per message SCMI timeouts since the clock starts when the message is
+	 * submitted into the mailbox queue. So when multiple messages are queued up
+	 * the clock starts on all messages instead of only the one inflight.
+	 */
+	mutex_lock(&smbox->chan_lock);
+
 	ret = mbox_send_message(smbox->chan, xfer);
 
 	/* mbox_send_message returns non-negative value on success, so reset */
 	if (ret > 0)
 		ret = 0;
+	else
+		mutex_unlock(&smbox->chan_lock);
 
 	return ret;
 }
@@ -285,13 +298,10 @@ static void mailbox_mark_txdone(struct scmi_chan_info *cinfo, int ret,
 {
 	struct scmi_mailbox *smbox = cinfo->transport_info;
 
-	/*
-	 * NOTE: we might prefer not to need the mailbox ticker to manage the
-	 * transfer queueing since the protocol layer queues things by itself.
-	 * Unfortunately, we have to kick the mailbox framework after we have
-	 * received our message.
-	 */
 	mbox_client_txdone(smbox->chan, ret);
+
+	/* Release channel */
+	mutex_unlock(&smbox->chan_lock);
 }
 
 static void mailbox_fetch_response(struct scmi_chan_info *cinfo,

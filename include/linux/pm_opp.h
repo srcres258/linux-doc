@@ -62,8 +62,8 @@ typedef int (*config_clks_t)(struct device *dev, struct opp_table *opp_table,
  * @supported_hw: Array of hierarchy of versions to match.
  * @supported_hw_count: Number of elements in the array.
  * @regulator_names: Array of pointers to the names of the regulator, NULL terminated.
- * @required_dev: Required OPP device.
- * @required_opp_table: The corresponding required OPP table for @required_dev.
+ * @required_dev: The required OPP device.
+ * @required_dev_index: The index of the required OPP for the @required_dev.
  *
  * This structure contains platform specific OPP configurations for the device.
  */
@@ -77,7 +77,7 @@ struct dev_pm_opp_config {
 	unsigned int supported_hw_count;
 	const char * const *regulator_names;
 	struct device *required_dev;
-	struct opp_table *required_opp_table;
+	unsigned int required_dev_index;
 };
 
 #define OPP_LEVEL_UNSET			U32_MAX

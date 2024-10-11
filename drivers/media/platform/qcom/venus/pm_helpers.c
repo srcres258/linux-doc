@@ -874,7 +874,7 @@ static int vcodec_domains_get(struct venus_core *core)
 	struct dev_pm_domain_attach_data opp_pd_data = {
 		.pd_names = res->opp_pmdomain,
 		.num_pd_names = 1,
-		.pd_flags = PD_FLAG_DEV_LINK_ON,
+		.pd_flags = PD_FLAG_DEV_LINK_ON | PD_FLAG_REQUIRED_OPP,
 	};
 
 	if (!res->vcodec_pmdomains_num)

@@ -2356,14 +2356,10 @@ static void _opp_put_config_regulators_helper(struct opp_table *opp_table)
 static int _opp_set_required_dev(struct opp_table *opp_table,
 				 struct device *dev,
 				 struct device *required_dev,
-				 struct opp_table *required_opp_table)
+				 unsigned int index)
 {
-	int i;
-
-	if (!opp_table->required_devs) {
-		dev_err(dev, "Required OPPs not available, can't set required devs\n");
-		return -EINVAL;
-	}
+	struct opp_table *required_table, *pd_table;
+	struct device *gdev;
 
 	/* Genpd core takes care of propagation to parent genpd */
 	if (opp_table->is_genpd) {
@@ -2371,52 +2367,46 @@ static int _opp_set_required_dev(struct opp_table *opp_table,
 		return -EOPNOTSUPP;
 	}
 
-	for (i = 0; i < opp_table->required_opp_count; i++) {
-		struct opp_table *table = opp_table->required_opp_tables[i];
+	if (index >= opp_table->required_opp_count) {
+		dev_err(dev, "Required OPPs not available, can't set required devs\n");
+		return -EINVAL;
+	}
 
-		/*
-		 * The OPP table should be available at this point. If not, it's
-		 * not the one we are looking for.
-		 */
-		if (IS_ERR(table))
-			continue;
+	required_table = opp_table->required_opp_tables[index];
+	if (IS_ERR(required_table)) {
+		dev_err(dev, "Missing OPP table, unable to set the required devs\n");
+		return -ENODEV;
+	}
 
-		/* Move to the next available index. */
-		if (opp_table->required_devs[i])
-			continue;
+	/*
+	 * The required_opp_tables parsing is not perfect, as the OPP core does
+	 * the parsing solely based on the DT node pointers. The core sets the
+	 * required_opp_tables entry to the first OPP table in the "opp_tables"
+	 * list, that matches with the node pointer.
+	 *
+	 * If the target DT OPP table is used by multiple devices and they all
+	 * create separate instances of 'struct opp_table' from it, then it is
+	 * possible that the required_opp_tables entry may be set to the
+	 * incorrect sibling device.
+	 *
+	 * Cross check it again and fix if required.
+	 */
+	gdev = dev_to_genpd_dev(required_dev);
+	if (IS_ERR(gdev))
+		return PTR_ERR(gdev);
 
-		/*
-		 * We need to compare the nodes for the OPP tables, rather than
-		 * the OPP tables themselves, as we may have separate instances.
-		 */
-		if (required_opp_table->np == table->np) {
-			/*
-			 * The required_opp_tables parsing is not perfect, as
-			 * the OPP core does the parsing solely based on the DT
-			 * node pointers. The core sets the required_opp_tables
-			 * entry to the first OPP table in the "opp_tables"
-			 * list, that matches with the node pointer.
-			 *
-			 * If the target DT OPP table is used by multiple
-			 * devices and they all create separate instances of
-			 * 'struct opp_table' from it, then it is possible that
-			 * the required_opp_tables entry may be set to the
-			 * incorrect sibling device. Cross check it again and
-			 * fix if required.
-			 */
-			if (required_opp_table != table) {
-				dev_pm_opp_put_opp_table(table);
-				_get_opp_table_kref(required_opp_table);
-				opp_table->required_opp_tables[i] = required_opp_table;
-			}
-
-			opp_table->required_devs[i] = required_dev;
-			return i;
+	pd_table = _find_opp_table(gdev);
+	if (!IS_ERR(pd_table)) {
+		if (pd_table != required_table) {
+			dev_pm_opp_put_opp_table(required_table);
+			opp_table->required_opp_tables[index] = pd_table;
+		} else {
+			dev_pm_opp_put_opp_table(pd_table);
 		}
 	}
 
-	dev_err(dev, "Missing OPP table, unable to set the required dev\n");
-	return -ENODEV;
+	opp_table->required_devs[index] = required_dev;
+	return 0;
 }
 
 static void _opp_put_required_dev(struct opp_table *opp_table,
@@ -2428,7 +2418,8 @@ static void _opp_put_required_dev(struct opp_table *opp_table,
 static void _opp_clear_config(struct opp_config_data *data)
 {
 	if (data->flags & OPP_CONFIG_REQUIRED_DEV)
-		_opp_put_required_dev(data->opp_table, data->index);
+		_opp_put_required_dev(data->opp_table,
+				      data->required_dev_index);
 	if (data->flags & OPP_CONFIG_REGULATOR)
 		_opp_put_regulators(data->opp_table);
 	if (data->flags & OPP_CONFIG_SUPPORTED_HW)
@@ -2540,14 +2531,14 @@ int dev_pm_opp_set_config(struct device *dev, struct dev_pm_opp_config *config)
 		data->flags |= OPP_CONFIG_REGULATOR;
 	}
 
-	/* Attach genpds */
-	if (config->genpd_names) {
-		if (config->required_devs) {
-			ret = -EINVAL;
+	if (config->required_dev) {
+		ret = _opp_set_required_dev(opp_table, dev,
+					    config->required_dev,
+					    config->required_dev_index);
+		if (ret)
 			goto err;
-		}
 
-		data->index = ret;
+		data->required_dev_index = config->required_dev_index;
 		data->flags |= OPP_CONFIG_REQUIRED_DEV;
 	}
 

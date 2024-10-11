@@ -5785,6 +5785,15 @@ F:	fs/configfs/
 F:	include/linux/configfs.h
 F:	samples/configfs/
 
+CONGATEC BOARD CONTROLLER MFD DRIVER
+M:	Thomas Richard <thomas.richard@bootlin.com>
+S:	Maintained
+F:	drivers/gpio/gpio-cgbc.c
+F:	drivers/i2c/busses/i2c-cgbc.c
+F:	drivers/mfd/cgbc-core.c
+F:	drivers/watchdog/cgbc_wdt.c
+F:	include/linux/mfd/cgbc.h
+
 CONSOLE SUBSYSTEM
 M:	Greg Kroah-Hartman <gregkh@linuxfoundation.org>
 S:	Supported
@@ -9501,6 +9510,14 @@ M:	Kieran Bingham <kbingham@kernel.org>
 S:	Supported
 F:	scripts/gdb/
 
+GE HEALTHCARE PMC ADC DRIVER
+M:	Herve Codina <herve.codina@bootlin.com>
+L:	linux-iio@vger.kernel.org
+S:	Maintained
+F:	Documentation/devicetree/bindings/iio/adc/gehc,pmc-adc.yaml
+F:	drivers/iio/adc/gehc-pmc-adc.c
+F:	include/dt-bindings/iio/adc/gehc,pmc-adc.h
+
 GEMINI CRYPTO DRIVER
 M:	Corentin Labbe <clabbe@baylibre.com>
 L:	linux-crypto@vger.kernel.org
@@ -11933,7 +11950,7 @@ F:	Documentation/devicetree/bindings/media/i2c/isil,isl79987.yaml
 F:	drivers/media/i2c/isl7998x.c
 
 INVENSENSE ICM-426xx IMU DRIVER
-M:	Jean-Baptiste Maneyrol <jmaneyrol@invensense.com>
+M:	Jean-Baptiste Maneyrol <jean-baptiste.maneyrol@tdk.com>
 L:	linux-iio@vger.kernel.org
 S:	Maintained
 W:	https://invensense.tdk.com/
@@ -11947,6 +11964,14 @@ L:	linux-iio@vger.kernel.org
 S:	Maintained
 F:	Documentation/devicetree/bindings/iio/gyroscope/invensense,mpu3050.yaml
 F:	drivers/iio/gyro/mpu3050*
+
+INVENSENSE MPU-6050 IMU DRIVER
+M:	Jean-Baptiste Maneyrol <jean-baptiste.maneyrol@tdk.com>
+L:	linux-iio@vger.kernel.org
+S:	Maintained
+W:	https://invensense.tdk.com/
+F:	Documentation/devicetree/bindings/iio/imu/invensense,mpu6050.yaml
+F:	drivers/iio/imu/inv_mpu6050/
 
 IOC3 ETHERNET DRIVER
 M:	Ralf Baechle <ralf@linux-mips.org>
@@ -12992,7 +13017,6 @@ LIBATA PATA ARASAN COMPACT FLASH CONTROLLER
 M:	Viresh Kumar <vireshk@kernel.org>
 L:	linux-ide@vger.kernel.org
 S:	Maintained
-T:	git git://git.kernel.org/pub/scm/linux/kernel/git/axboe/linux-block.git
 F:	drivers/ata/pata_arasan_cf.c
 F:	include/linux/pata_arasan_cf_data.h
 
@@ -13006,17 +13030,14 @@ LIBATA PATA FARADAY FTIDE010 AND GEMINI SATA BRIDGE DRIVERS
 M:	Linus Walleij <linus.walleij@linaro.org>
 L:	linux-ide@vger.kernel.org
 S:	Maintained
-T:	git git://git.kernel.org/pub/scm/linux/kernel/git/axboe/linux-block.git
 F:	drivers/ata/pata_ftide010.c
 F:	drivers/ata/sata_gemini.c
 F:	drivers/ata/sata_gemini.h
 
 LIBATA SATA AHCI PLATFORM devices support
 M:	Hans de Goede <hdegoede@redhat.com>
-M:	Jens Axboe <axboe@kernel.dk>
 L:	linux-ide@vger.kernel.org
 S:	Maintained
-T:	git git://git.kernel.org/pub/scm/linux/kernel/git/axboe/linux-block.git
 F:	drivers/ata/ahci_platform.c
 F:	drivers/ata/libahci_platform.c
 F:	include/linux/ahci_platform.h
@@ -13025,7 +13046,6 @@ LIBATA SATA AHCI SYNOPSYS DWC CONTROLLER DRIVER
 M:	Serge Semin <fancer.lancer@gmail.com>
 L:	linux-ide@vger.kernel.org
 S:	Maintained
-T:	git git://git.kernel.org/pub/scm/linux/kernel/git/dlemoal/libata.git
 F:	Documentation/devicetree/bindings/ata/baikal,bt1-ahci.yaml
 F:	Documentation/devicetree/bindings/ata/snps,dwc-ahci.yaml
 F:	drivers/ata/ahci_dwc.c
@@ -13034,7 +13054,6 @@ LIBATA SATA PROMISE TX2/TX4 CONTROLLER DRIVER
 M:	Mikael Pettersson <mikpelinux@gmail.com>
 L:	linux-ide@vger.kernel.org
 S:	Maintained
-T:	git git://git.kernel.org/pub/scm/linux/kernel/git/axboe/linux-block.git
 F:	drivers/ata/sata_promise.*
 
 LIBATA SUBSYSTEM (Serial and Parallel ATA drivers)
@@ -16177,6 +16196,7 @@ F:	include/linux/platform_data/wiznet.h
 F:	include/uapi/linux/cn_proc.h
 F:	include/uapi/linux/ethtool_netlink.h
 F:	include/uapi/linux/if_*
+F:	include/uapi/linux/net_shaper.h
 F:	include/uapi/linux/netdev*
 F:	tools/testing/selftests/drivers/net/
 X:	Documentation/devicetree/bindings/net/bluetooth/
@@ -16258,8 +16278,19 @@ F:	lib/random32.c
 F:	net/
 F:	tools/net/
 F:	tools/testing/selftests/net/
+X:	Documentation/networking/mac80211-injection.rst
+X:	Documentation/networking/mac80211_hwsim/
+X:	Documentation/networking/regulatory.rst
+X:	include/net/cfg80211.h
+X:	include/net/ieee80211_radiotap.h
+X:	include/net/iw_handler.h
+X:	include/net/mac80211.h
+X:	include/net/wext.h
 X:	net/9p/
 X:	net/bluetooth/
+X:	net/mac80211/
+X:	net/rfkill/
+X:	net/wireless/
 
 NETWORKING [IPSEC]
 M:	Steffen Klassert <steffen.klassert@secunet.com>
@@ -16549,7 +16580,6 @@ F:	Documentation/core-api/symbol-namespaces.rst
 F:	scripts/nsdeps
 
 NTB AMD DRIVER
-M:	Sanjay R Mehta <sanju.mehta@amd.com>
 M:	Shyam Sundar S K <Shyam-sundar.S-k@amd.com>
 L:	ntb@lists.linux.dev
 S:	Supported
@@ -24268,8 +24298,12 @@ F:	drivers/usb/host/xhci*
 
 USER DATAGRAM PROTOCOL (UDP)
 M:	Willem de Bruijn <willemdebruijn.kernel@gmail.com>
+L:	netdev@vger.kernel.org
 S:	Maintained
 F:	include/linux/udp.h
+F:	include/net/udp.h
+F:	include/trace/events/udp.h
+F:	include/uapi/linux/udp.h
 F:	net/ipv4/udp.c
 F:	net/ipv6/udp.c
 

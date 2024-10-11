@@ -522,7 +522,8 @@ static int qcom_cpufreq_probe(struct platform_device *pdev)
 			struct dev_pm_domain_attach_data attach_data = {
 				.pd_names = drv->data->pd_names,
 				.num_pd_names = drv->data->num_pd_names,
-				.pd_flags = PD_FLAG_DEV_LINK_ON,
+				.pd_flags = PD_FLAG_DEV_LINK_ON |
+					    PD_FLAG_REQUIRED_OPP,
 			};
 
 			ret = dev_pm_domain_attach_list(cpu_dev, &attach_data,

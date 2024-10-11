@@ -375,6 +375,7 @@ static int gr3d_init_power(struct device *dev, struct gr3d *gr3d)
 	struct dev_pm_domain_attach_data pd_data = {
 		.pd_names = (const char *[]) { "3d0", "3d1" },
 		.num_pd_names = 2,
+		.pd_flags = PD_FLAG_REQUIRED_OPP,
 	};
 	int err;
 

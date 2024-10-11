@@ -40,7 +40,7 @@ extern struct list_head opp_tables;
  * struct opp_config_data - data for set config operations
  * @opp_table: OPP table
  * @flags: OPP config flags
- * @index: The position in the array of required_devs
+ * @required_dev_index: The position in the array of required_devs
  *
  * This structure stores the OPP config information for each OPP table
  * configuration by the callers.
@@ -48,7 +48,7 @@ extern struct list_head opp_tables;
 struct opp_config_data {
 	struct opp_table *opp_table;
 	unsigned int flags;
-	unsigned int index;
+	unsigned int required_dev_index;
 };
 
 /**
