@@ -202,20 +202,29 @@ static __le16 get_rtscts_time(struct vnt_private *priv,
 
 	data_time = bb_get_frame_time(priv->preamble_type, pkt_type, frame_length, current_rate);
 	if (rts_rsvtype == 0) { /* RTSTxRrvTime_bb */
-		rts_time = bb_get_frame_time(priv->preamble_type, pkt_type, 20, priv->byTopCCKBasicRate);
-		ack_time = bb_get_frame_time(priv->preamble_type, pkt_type, 14, priv->byTopCCKBasicRate);
+		rts_time = bb_get_frame_time(priv->preamble_type, pkt_type, 20,
+					     priv->byTopCCKBasicRate);
+		ack_time = bb_get_frame_time(priv->preamble_type, pkt_type, 14,
+					     priv->byTopCCKBasicRate);
 		cts_time = ack_time;
 	} else if (rts_rsvtype == 1) { /* RTSTxRrvTime_ba, only in 2.4GHZ */
-		rts_time = bb_get_frame_time(priv->preamble_type, pkt_type, 20, priv->byTopCCKBasicRate);
-		cts_time = bb_get_frame_time(priv->preamble_type, pkt_type, 14, priv->byTopCCKBasicRate);
-		ack_time = bb_get_frame_time(priv->preamble_type, pkt_type, 14, priv->byTopOFDMBasicRate);
+		rts_time = bb_get_frame_time(priv->preamble_type, pkt_type, 20,
+					     priv->byTopCCKBasicRate);
+		cts_time = bb_get_frame_time(priv->preamble_type, pkt_type, 14,
+					     priv->byTopCCKBasicRate);
+		ack_time = bb_get_frame_time(priv->preamble_type, pkt_type, 14,
+					     priv->byTopOFDMBasicRate);
 	} else if (rts_rsvtype == 2) { /* RTSTxRrvTime_aa */
-		rts_time = bb_get_frame_time(priv->preamble_type, pkt_type, 20, priv->byTopOFDMBasicRate);
-		ack_time = bb_get_frame_time(priv->preamble_type, pkt_type, 14, priv->byTopOFDMBasicRate);
+		rts_time = bb_get_frame_time(priv->preamble_type, pkt_type, 20,
+					     priv->byTopOFDMBasicRate);
+		ack_time = bb_get_frame_time(priv->preamble_type, pkt_type, 14,
+					     priv->byTopOFDMBasicRate);
 		cts_time = ack_time;
 	} else if (rts_rsvtype == 3) { /* CTSTxRrvTime_ba, only in 2.4GHZ */
-		cts_time = bb_get_frame_time(priv->preamble_type, pkt_type, 14, priv->byTopCCKBasicRate);
-		ack_time = bb_get_frame_time(priv->preamble_type, pkt_type, 14, priv->byTopOFDMBasicRate);
+		cts_time = bb_get_frame_time(priv->preamble_type, pkt_type, 14,
+					     priv->byTopCCKBasicRate);
+		ack_time = bb_get_frame_time(priv->preamble_type, pkt_type, 14,
+					     priv->byTopOFDMBasicRate);
 		rrv_time = cts_time + ack_time + data_time + 2 * priv->uSIFS;
 		return cpu_to_le16((u16)rrv_time);
 	}
@@ -226,99 +235,95 @@ static __le16 get_rtscts_time(struct vnt_private *priv,
 }
 
 /* byFreqType 0: 5GHz, 1:2.4Ghz */
-static
-unsigned int
-s_uGetDataDuration(
-	struct vnt_private *pDevice,
-	unsigned char byDurType,
-	unsigned int cbFrameLength,
-	unsigned char byPktType,
-	unsigned short wRate,
-	bool bNeedAck,
-	unsigned int uFragIdx,
-	unsigned int cbLastFragmentSize,
-	unsigned int uMACfragNum,
-	unsigned char byFBOption
-)
+static unsigned int s_uGetDataDuration(struct vnt_private *priv,
+				       unsigned char dur_type,
+				       unsigned int frame_length,
+				       unsigned char pkt_type,
+				       unsigned short rate,
+				       bool need_ack,
+				       unsigned int frag_idx,
+				       unsigned int last_fragment_size,
+				       unsigned int mac_frag_num,
+				       unsigned char fb_option)
 {
-	bool bLastFrag = false;
-	unsigned int uAckTime = 0, uNextPktTime = 0, len;
+	bool last_frag = false;
+	unsigned int ack_time = 0, next_pkt_time = 0, len;
 
-	if (uFragIdx == (uMACfragNum - 1))
-		bLastFrag = true;
+	if (frag_idx == (mac_frag_num - 1))
+		last_frag = true;
 
-	if (uFragIdx == (uMACfragNum - 2))
-		len = cbLastFragmentSize;
+	if (frag_idx == (mac_frag_num - 2))
+		len = last_fragment_size;
 	else
-		len = cbFrameLength;
+		len = frame_length;
 
-	switch (byDurType) {
+	switch (dur_type) {
 	case DATADUR_B:    /* DATADUR_B */
-		if (bNeedAck) {
-			uAckTime = bb_get_frame_time(pDevice->preamble_type,
-						     byPktType, 14,
-						     pDevice->byTopCCKBasicRate);
+		if (need_ack) {
+			ack_time = bb_get_frame_time(priv->preamble_type,
+						     pkt_type, 14,
+						     priv->byTopCCKBasicRate);
 		}
 		/* Non Frag or Last Frag */
-		if ((uMACfragNum == 1) || bLastFrag) {
-			if (!bNeedAck)
+		if ((mac_frag_num == 1) || last_frag) {
+			if (!need_ack)
 				return 0;
 		} else {
 			/* First Frag or Mid Frag */
-			uNextPktTime = s_uGetTxRsvTime(pDevice, byPktType,
-						       len, wRate, bNeedAck);
+			next_pkt_time = s_uGetTxRsvTime(priv, pkt_type,
+							len, rate, need_ack);
 		}
 
-		return pDevice->uSIFS + uAckTime + uNextPktTime;
+		return priv->uSIFS + ack_time + next_pkt_time;
 
 	case DATADUR_A:    /* DATADUR_A */
-		if (bNeedAck) {
-			uAckTime = bb_get_frame_time(pDevice->preamble_type,
-						     byPktType, 14,
-						     pDevice->byTopOFDMBasicRate);
+		if (need_ack) {
+			ack_time = bb_get_frame_time(priv->preamble_type,
+						     pkt_type, 14,
+						     priv->byTopOFDMBasicRate);
 		}
 		/* Non Frag or Last Frag */
-		if ((uMACfragNum == 1) || bLastFrag) {
-			if (!bNeedAck)
+		if ((mac_frag_num == 1) || last_frag) {
+			if (!need_ack)
 				return 0;
 		} else {
 			/* First Frag or Mid Frag */
-			uNextPktTime = s_uGetTxRsvTime(pDevice, byPktType,
-						       len, wRate, bNeedAck);
+			next_pkt_time = s_uGetTxRsvTime(priv, pkt_type,
+							len, rate, need_ack);
 		}
 
-		return pDevice->uSIFS + uAckTime + uNextPktTime;
+		return priv->uSIFS + ack_time + next_pkt_time;
 
 	case DATADUR_A_F0:    /* DATADUR_A_F0 */
 	case DATADUR_A_F1:    /* DATADUR_A_F1 */
-		if (bNeedAck) {
-			uAckTime = bb_get_frame_time(pDevice->preamble_type,
-						     byPktType, 14,
-						     pDevice->byTopOFDMBasicRate);
+		if (need_ack) {
+			ack_time = bb_get_frame_time(priv->preamble_type,
+						     pkt_type, 14,
+						     priv->byTopOFDMBasicRate);
 		}
 		/* Non Frag or Last Frag */
-		if ((uMACfragNum == 1) || bLastFrag) {
-			if (!bNeedAck)
+		if ((mac_frag_num == 1) || last_frag) {
+			if (!need_ack)
 				return 0;
 		} else {
 			/* First Frag or Mid Frag */
-			if (wRate < RATE_18M)
-				wRate = RATE_18M;
-			else if (wRate > RATE_54M)
-				wRate = RATE_54M;
+			if (rate < RATE_18M)
+				rate = RATE_18M;
+			else if (rate > RATE_54M)
+				rate = RATE_54M;
 
-			wRate -= RATE_18M;
+			rate -= RATE_18M;
 
-			if (byFBOption == AUTO_FB_0)
-				wRate = fb_opt0[FB_RATE0][wRate];
+			if (fb_option == AUTO_FB_0)
+				rate = fb_opt0[FB_RATE0][rate];
 			else
-				wRate = fb_opt1[FB_RATE0][wRate];
+				rate = fb_opt1[FB_RATE0][rate];
 
-			uNextPktTime = s_uGetTxRsvTime(pDevice, byPktType,
-						       len, wRate, bNeedAck);
+			next_pkt_time = s_uGetTxRsvTime(priv, pkt_type,
+							len, rate, need_ack);
 		}
 
-		return pDevice->uSIFS + uAckTime + uNextPktTime;
+		return priv->uSIFS + ack_time + next_pkt_time;
 
 	default:
 		break;
