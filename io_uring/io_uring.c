@@ -275,11 +275,8 @@ static int io_alloc_hash_table(struct io_hash_table *table, unsigned bits)
 	} while (1);
 
 	table->hash_bits = bits;
-	for (i = 0; i < hash_buckets; i++) {
+	for (i = 0; i < hash_buckets; i++)
 		INIT_HLIST_HEAD(&table->hbs[i].list);
-		table->hbs[i].nr_entries = 0;
-	}
-	table->last_resize = jiffies;
 	return 0;
 }
 

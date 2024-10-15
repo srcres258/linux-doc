@@ -18,7 +18,7 @@ struct ksmbd_user {
 
 	size_t			passkey_sz;
 	char			*passkey;
-	unsigned int		ngroups;
+	int			ngroups;
 	gid_t			*sgid;
 };
 

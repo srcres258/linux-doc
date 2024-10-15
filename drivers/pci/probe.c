@@ -3108,12 +3108,9 @@ int pci_host_probe(struct pci_host_bridge *bridge)
 	list_for_each_entry(child, &bus->children, node)
 		pcie_bus_configure_settings(child);
 
+	pci_lock_rescan_remove();
 	pci_bus_add_devices(bus);
-
-	pm_runtime_set_active(&bridge->dev);
-	pm_runtime_no_callbacks(&bridge->dev);
-	devm_pm_runtime_enable(&bridge->dev);
-
+	pci_unlock_rescan_remove();
 	return 0;
 }
 EXPORT_SYMBOL_GPL(pci_host_probe);

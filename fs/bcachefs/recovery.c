@@ -42,7 +42,10 @@ int bch2_btree_lost_data(struct bch_fs *c, enum btree_id btree)
 	mutex_lock(&c->sb_lock);
 
 	if (!(c->sb.btrees_lost_data & b)) {
-		bch_err(c, "flagging btree %s lost data", bch2_btree_id_str(btree));
+		struct printbuf buf = PRINTBUF;
+		bch2_btree_id_to_text(&buf, btree);
+		bch_err(c, "flagging btree %s lost data", buf.buf);
+		printbuf_exit(&buf);
 		bch2_sb_field_get(c->disk_sb.sb, ext)->btrees_lost_data |= cpu_to_le64(b);
 	}
 
@@ -318,7 +321,8 @@ int bch2_journal_replay(struct bch_fs *c)
 				BCH_TRANS_COMMIT_no_enospc|
 				BCH_TRANS_COMMIT_journal_reclaim|
 				BCH_TRANS_COMMIT_skip_accounting_apply|
-				BCH_TRANS_COMMIT_no_journal_res,
+				BCH_TRANS_COMMIT_no_journal_res|
+				BCH_WATERMARK_reclaim,
 			     bch2_journal_replay_accounting_key(trans, k));
 		if (bch2_fs_fatal_err_on(ret, c, "error replaying accounting; %s", bch2_err_str(ret)))
 			goto err;
@@ -385,10 +389,13 @@ int bch2_journal_replay(struct bch_fs *c)
 				 ? BCH_TRANS_COMMIT_no_journal_res|BCH_WATERMARK_reclaim
 				 : 0),
 			     bch2_journal_replay_key(trans, k));
-		bch_err_msg(c, ret, "while replaying key at btree %s level %u:",
-			    bch2_btree_id_str(k->btree_id), k->level);
-		if (ret)
+		if (ret) {
+			struct printbuf buf = PRINTBUF;
+			bch2_btree_id_level_to_text(&buf, k->btree_id, k->level);
+			bch_err_msg(c, ret, "while replaying key at %s:", buf.buf);
+			printbuf_exit(&buf);
 			goto err;
+		}
 
 		BUG_ON(k->btree_id != BTREE_ID_accounting && !k->overwritten);
 	}
@@ -536,6 +543,7 @@ static int journal_replay_early(struct bch_fs *c,
 
 static int read_btree_roots(struct bch_fs *c)
 {
+	struct printbuf buf = PRINTBUF;
 	int ret = 0;
 
 	for (unsigned i = 0; i < btree_id_nr_alive(c); i++) {
@@ -547,14 +555,17 @@ static int read_btree_roots(struct bch_fs *c)
 		if (btree_id_is_alloc(i) && c->opts.reconstruct_alloc)
 			continue;
 
+		printbuf_reset(&buf);
+		bch2_btree_id_level_to_text(&buf, i, r->level);
+
 		if (mustfix_fsck_err_on((ret = r->error),
 					c, btree_root_bkey_invalid,
 					"invalid btree root %s",
-					bch2_btree_id_str(i)) ||
+					buf.buf) ||
 		    mustfix_fsck_err_on((ret = r->error = bch2_btree_root_read(c, i, &r->key, r->level)),
 					c, btree_root_read_error,
-					"error reading btree root %s l=%u: %s",
-					bch2_btree_id_str(i), r->level, bch2_err_str(ret))) {
+					"error reading btree root %s: %s",
+					buf.buf, bch2_err_str(ret))) {
 			if (btree_id_is_alloc(i))
 				r->error = 0;
 
@@ -572,6 +583,7 @@ static int read_btree_roots(struct bch_fs *c)
 		}
 	}
 fsck_err:
+	printbuf_exit(&buf);
 	return ret;
 }
 
@@ -680,7 +692,7 @@ int bch2_fs_recovery(struct bch_fs *c)
 	}
 
 	if (c->opts.norecovery)
-		c->opts.recovery_pass_last = BCH_RECOVERY_PASS_journal_replay - 1;
+		c->opts.recovery_pass_last = BCH_RECOVERY_PASS_snapshots_read;
 
 	mutex_lock(&c->sb_lock);
 	struct bch_sb_field_ext *ext = bch2_sb_field_get(c->disk_sb.sb, ext);
@@ -887,11 +899,9 @@ use_clean:
 	set_bit(BCH_FS_accounting_replay_done, &c->flags);
 
 	/* fsync if we fixed errors */
-	if (test_bit(BCH_FS_errors_fixed, &c->flags) &&
-	    bch2_write_ref_tryget(c, BCH_WRITE_REF_fsync)) {
+	if (test_bit(BCH_FS_errors_fixed, &c->flags)) {
 		bch2_journal_flush_all_pins(&c->journal);
 		bch2_journal_meta(&c->journal);
-		bch2_write_ref_put(c, BCH_WRITE_REF_fsync);
 	}
 
 	/* If we fixed errors, verify that fs is actually clean now: */

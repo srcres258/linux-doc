@@ -25,7 +25,7 @@
  * @chan_platform_receiver: Optional Platform Receiver mailbox unidirectional channel
  * @cinfo: SCMI channel info
  * @shmem: Transmit/Receive shared memory area
- * @chan_lock: Lock to protect access to Tx/Rx shared memory area and channel.
+ * @chan_lock: Lock that prevents multiple xfers from being queued
  * @io_ops: Transport specific I/O operations
  */
 struct scmi_mailbox {
@@ -245,6 +245,7 @@ static int mailbox_chan_setup(struct scmi_chan_info *cinfo, struct device *dev,
 
 	cinfo->transport_info = smbox;
 	smbox->cinfo = cinfo;
+	mutex_init(&smbox->chan_lock);
 
 	return 0;
 }
@@ -275,22 +276,22 @@ static int mailbox_send_message(struct scmi_chan_info *cinfo,
 	int ret;
 
 	/*
-	 * The mailbox layer has it's own queue. However the mailbox queue confuses
-	 * the per message SCMI timeouts since the clock starts when the message is
-	 * submitted into the mailbox queue. So when multiple messages are queued up
-	 * the clock starts on all messages instead of only the one inflight.
+	 * The mailbox layer has its own queue. However the mailbox queue
+	 * confuses the per message SCMI timeouts since the clock starts when
+	 * the message is submitted into the mailbox queue. So when multiple
+	 * messages are queued up the clock starts on all messages instead of
+	 * only the one inflight.
 	 */
 	mutex_lock(&smbox->chan_lock);
 
 	ret = mbox_send_message(smbox->chan, xfer);
-
-	/* mbox_send_message returns non-negative value on success, so reset */
-	if (ret > 0)
-		ret = 0;
-	else
+	/* mbox_send_message returns non-negative value on success */
+	if (ret < 0) {
 		mutex_unlock(&smbox->chan_lock);
+		return ret;
+	}
 
-	return ret;
+	return 0;
 }
 
 static void mailbox_mark_txdone(struct scmi_chan_info *cinfo, int ret,

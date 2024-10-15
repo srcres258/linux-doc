@@ -577,12 +577,12 @@ int smb2_parse_native_symlink(char **target, const char *buf, unsigned int len,
 		 * which is the top level directory of the Linux mount point.
 		 * Linux does not support such relative symlinks, so convert
 		 * it to the relative symlink from the current directory.
-		 * full_path is the SMB path to the symlink (from which is
-		 * extracted current directory) and smb_target is the SMB path
-		 * where symlink points, therefore full_path must always be on
-		 * the SMB share.
+		 * full_path is the SMB path to symlink (from which is extracted
+		 * current directory) and smb_target is SMB path where symlink
+		 * points, therefore full_path must always be on the SMB share
 		 */
 		int smb_target_len = strlen(smb_target)+1;
+
 		levels = 0;
 		for (i = 1; full_path[i]; i++) { /* i=1 to skip leading sep */
 			if (full_path[i] == sep)
@@ -598,7 +598,8 @@ int smb2_parse_native_symlink(char **target, const char *buf, unsigned int len,
 			linux_target[i*3 + 1] = '.';
 			linux_target[i*3 + 2] = sep;
 		}
-		memcpy(linux_target + levels*3, smb_target+1, smb_target_len); /* +1 to skip leading sep */
+		/* +1 to skip leading sep */
+		memcpy(linux_target + levels*3, smb_target+1, smb_target_len);
 	} else {
 		linux_target = smb_target;
 		smb_target = NULL;
@@ -609,7 +610,6 @@ int smb2_parse_native_symlink(char **target, const char *buf, unsigned int len,
 
 	rc = 0;
 	*target = linux_target;
-
 	cifs_dbg(FYI, "%s: symlink target: %s\n", __func__, *target);
 
 out:

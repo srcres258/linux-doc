@@ -23,6 +23,7 @@
 #include "recv_osdep.h"
 #include "xmit_osdep.h"
 #include "mlme_osdep.h"
+#include "rtl871x_security.h"
 #include "sta_info.h"
 #include "wifi.h"
 #include "wlan_bssdef.h"
@@ -219,10 +220,10 @@ int r8712_is_same_ibss(struct _adapter *adapter, struct wlan_network *pnetwork)
 	int ret = true;
 	struct security_priv *psecuritypriv = &adapter->securitypriv;
 
-	if ((psecuritypriv->PrivacyAlgrthm != _NO_PRIVACY_) &&
+	if ((psecuritypriv->privacy_algorithm != _NO_PRIVACY_) &&
 		    (pnetwork->network.Privacy == cpu_to_le32(0)))
 		ret = false;
-	else if ((psecuritypriv->PrivacyAlgrthm == _NO_PRIVACY_) &&
+	else if ((psecuritypriv->privacy_algorithm == _NO_PRIVACY_) &&
 		 (pnetwork->network.Privacy == cpu_to_le32(1)))
 		ret = false;
 	else
@@ -426,7 +427,7 @@ static int is_desired_network(struct _adapter *adapter,
 			return true;
 		return false;
 	}
-	if ((psecuritypriv->PrivacyAlgrthm != _NO_PRIVACY_) &&
+	if ((psecuritypriv->privacy_algorithm != _NO_PRIVACY_) &&
 		    (pnetwork->network.Privacy == 0))
 		bselected = false;
 	if (check_fwstate(&adapter->mlmepriv, WIFI_ADHOC_STATE)) {
@@ -768,13 +769,13 @@ void r8712_joinbss_event_callback(struct _adapter *adapter, u8 *pbuf)
 					ptarget_sta->aid = pnetwork->join_res;
 					ptarget_sta->qos_option = 1;
 					ptarget_sta->mac_id = 5;
-					if (adapter->securitypriv.AuthAlgrthm == 2) {
+					if (adapter->securitypriv.auth_algorithm == _AUTH_8021x_) {
 						adapter->securitypriv.binstallGrpkey = false;
 						adapter->securitypriv.busetkipkey = false;
 						adapter->securitypriv.bgrpkey_handshake = false;
 						ptarget_sta->ieee8021x_blocked = true;
 						ptarget_sta->XPrivacy =
-							adapter->securitypriv.PrivacyAlgrthm;
+							adapter->securitypriv.privacy_algorithm;
 						memset((u8 *)&ptarget_sta->x_UncstKey,
 							0,
 							sizeof(union Keytype));
@@ -869,8 +870,8 @@ void r8712_stassoc_event_callback(struct _adapter *adapter, u8 *pbuf)
 	psta->mac_id = le32_to_cpu(pstassoc->cam_id);
 	/* psta->aid = (uint)pstassoc->cam_id; */
 
-	if (adapter->securitypriv.AuthAlgrthm == 2)
-		psta->XPrivacy = adapter->securitypriv.PrivacyAlgrthm;
+	if (adapter->securitypriv.auth_algorithm == _AUTH_8021x_)
+		psta->XPrivacy = adapter->securitypriv.privacy_algorithm;
 	psta->ieee8021x_blocked = false;
 	spin_lock_irqsave(&pmlmepriv->lock, irqL);
 	if (check_fwstate(pmlmepriv, WIFI_ADHOC_MASTER_STATE) ||
@@ -1131,7 +1132,7 @@ int r8712_set_auth(struct _adapter *adapter,
 		kfree(pcmd);
 		return -ENOMEM;
 	}
-	psetauthparm->mode = (u8)psecuritypriv->AuthAlgrthm;
+	psetauthparm->mode = (u8)psecuritypriv->auth_algorithm;
 	pcmd->cmdcode = _SetAuth_CMD_;
 	pcmd->parmbuf = (unsigned char *)psetauthparm;
 	pcmd->cmdsz = sizeof(struct setauth_parm);
@@ -1160,12 +1161,12 @@ int r8712_set_key(struct _adapter *adapter,
 		ret = -ENOMEM;
 		goto err_free_cmd;
 	}
-	if (psecuritypriv->AuthAlgrthm == 2) { /* 802.1X */
+	if (psecuritypriv->auth_algorithm == _AUTH_8021x_) {
 		psetkeyparm->algorithm =
 			 (u8)psecuritypriv->XGrpPrivacy;
 	} else { /* WEP */
 		psetkeyparm->algorithm =
-			 (u8)psecuritypriv->PrivacyAlgrthm;
+			 (u8)psecuritypriv->privacy_algorithm;
 	}
 	psetkeyparm->keyid = (u8)keyid;
 
@@ -1542,7 +1543,7 @@ void r8712_update_registrypriv_dev_network(struct _adapter *adapter)
 	struct security_priv	*psecuritypriv = &adapter->securitypriv;
 	struct wlan_network	*cur_network = &adapter->mlmepriv.cur_network;
 
-	pdev_network->Privacy = cpu_to_le32(psecuritypriv->PrivacyAlgrthm
+	pdev_network->Privacy = cpu_to_le32(psecuritypriv->privacy_algorithm
 					    > 0 ? 1 : 0); /* adhoc no 802.1x */
 	pdev_network->Rssi = 0;
 	switch (pregistrypriv->wireless_mode) {

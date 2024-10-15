@@ -94,6 +94,25 @@ struct ovl_file {
 	struct file *upperfile;
 };
 
+struct ovl_file *ovl_file_alloc(struct file *realfile)
+{
+	struct ovl_file *of = kzalloc(sizeof(struct ovl_file), GFP_KERNEL);
+
+	if (unlikely(!of))
+		return NULL;
+
+	of->realfile = realfile;
+	return of;
+}
+
+void ovl_file_free(struct ovl_file *of)
+{
+	fput(of->realfile);
+	if (of->upperfile)
+		fput(of->upperfile);
+	kfree(of);
+}
+
 static bool ovl_is_real_file(const struct file *realfile,
 			     const struct path *realpath)
 {
@@ -204,13 +223,12 @@ static int ovl_open(struct inode *inode, struct file *file)
 	if (!of)
 		return -ENOMEM;
 
-	realfile = ovl_open_realfile(file, &realpath);
-	if (IS_ERR(realfile)) {
-		kfree(of);
-		return PTR_ERR(realfile);
+	of = ovl_file_alloc(realfile);
+	if (!of) {
+		fput(realfile);
+		return -ENOMEM;
 	}
 
-	of->realfile = realfile;
 	file->private_data = of;
 
 	return 0;
@@ -218,13 +236,7 @@ static int ovl_open(struct inode *inode, struct file *file)
 
 static int ovl_release(struct inode *inode, struct file *file)
 {
-	struct ovl_file *of = file->private_data;
-
-	fput(of->realfile);
-	if (of->upperfile)
-		fput(of->upperfile);
-	kfree(of);
-
+	ovl_file_free(file->private_data);
 	return 0;
 }
 

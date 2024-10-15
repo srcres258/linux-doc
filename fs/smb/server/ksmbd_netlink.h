@@ -153,7 +153,7 @@ struct ksmbd_login_response {
  */
 struct ksmbd_login_response_ext {
 	__u32	handle;
-	__u32	ngroups;			/* supplementary group count */
+	__s32	ngroups;			/* supplementary group count */
 	__s8	reserved[128];			/* Reserved room */
 	__s8	____payload[];
 };

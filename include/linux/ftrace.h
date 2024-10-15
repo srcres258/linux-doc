@@ -113,9 +113,9 @@ static inline int ftrace_mod_get_kallsym(unsigned int symnum, unsigned long *val
 
 #ifdef CONFIG_FUNCTION_TRACER
 
-extern int ftrace_enabled;
+#include <linux/ftrace_regs.h>
 
-#ifndef CONFIG_HAVE_DYNAMIC_FTRACE_WITH_ARGS
+extern int ftrace_enabled;
 
 /**
  * ftrace_regs - ftrace partial/optimal register set
@@ -142,11 +142,25 @@ extern int ftrace_enabled;
  *
  * NOTE: user *must not* access regs directly, only do it via APIs, because
  * the member can be changed according to the architecture.
+ * This is why the structure is empty here, so that nothing accesses
+ * the ftrace_regs directly.
  */
 struct ftrace_regs {
-	struct pt_regs		regs;
+	/* Nothing to see here, use the accessor functions! */
 };
-#define arch_ftrace_get_regs(fregs) (&(fregs)->regs)
+
+#define ftrace_regs_size()	sizeof(struct __arch_ftrace_regs)
+
+#ifndef CONFIG_HAVE_DYNAMIC_FTRACE_WITH_ARGS
+/*
+ * Architectures that define HAVE_DYNAMIC_FTRACE_WITH_ARGS must define their own
+ * arch_ftrace_get_regs() where it only returns pt_regs *if* it is fully
+ * populated. It should return NULL otherwise.
+ */
+static inline struct pt_regs *arch_ftrace_get_regs(struct ftrace_regs *fregs)
+{
+	return &arch_ftrace_regs(fregs)->regs;
+}
 
 /*
  * ftrace_regs_set_instruction_pointer() is to be defined by the architecture
@@ -175,23 +189,6 @@ static __always_inline bool ftrace_regs_has_args(struct ftrace_regs *fregs)
 
 	return ftrace_get_regs(fregs) != NULL;
 }
-
-#ifndef CONFIG_HAVE_DYNAMIC_FTRACE_WITH_ARGS
-#define ftrace_regs_get_instruction_pointer(fregs) \
-	instruction_pointer(ftrace_get_regs(fregs))
-#define ftrace_regs_get_argument(fregs, n) \
-	regs_get_kernel_argument(ftrace_get_regs(fregs), n)
-#define ftrace_regs_get_stack_pointer(fregs) \
-	kernel_stack_pointer(ftrace_get_regs(fregs))
-#define ftrace_regs_return_value(fregs) \
-	regs_return_value(ftrace_get_regs(fregs))
-#define ftrace_regs_set_return_value(fregs, ret) \
-	regs_set_return_value(ftrace_get_regs(fregs), ret)
-#define ftrace_override_function_with_return(fregs) \
-	override_function_with_return(ftrace_get_regs(fregs))
-#define ftrace_regs_query_register_offset(name) \
-	regs_query_register_offset(name)
-#endif
 
 typedef void (*ftrace_func_t)(unsigned long ip, unsigned long parent_ip,
 			      struct ftrace_ops *op, struct ftrace_regs *fregs);
@@ -1041,6 +1038,17 @@ struct ftrace_graph_ent {
 } __packed;
 
 /*
+ * Structure that defines an entry function trace with retaddr.
+ * It's already packed but the attribute "packed" is needed
+ * to remove extra padding at the end.
+ */
+struct fgraph_retaddr_ent {
+	unsigned long func; /* Current function */
+	int depth;
+	unsigned long retaddr;  /* Return address */
+} __packed;
+
+/*
  * Structure that defines a return function trace.
  * It's already packed but the attribute "packed" is needed
  * to remove extra padding at the end.
@@ -1065,7 +1073,8 @@ typedef void (*trace_func_graph_ret_t)(struct ftrace_graph_ret *,
 typedef int (*trace_func_graph_ent_t)(struct ftrace_graph_ent *,
 				      struct fgraph_ops *); /* entry */
 
-extern int ftrace_graph_entry_stub(struct ftrace_graph_ent *trace, struct fgraph_ops *gops);
+extern int ftrace_graph_entry_stub(struct ftrace_graph_ent *trace,
+				   struct fgraph_ops *gops);
 bool ftrace_pids_enabled(struct ftrace_ops *ops);
 
 #ifdef CONFIG_FUNCTION_GRAPH_TRACER
@@ -1110,6 +1119,7 @@ function_graph_enter(unsigned long ret, unsigned long func,
 
 struct ftrace_ret_stack *
 ftrace_graph_get_ret_stack(struct task_struct *task, int skip);
+unsigned long ftrace_graph_top_ret_addr(struct task_struct *task);
 
 unsigned long ftrace_graph_ret_addr(struct task_struct *task, int *idx,
 				    unsigned long ret, unsigned long *retp);

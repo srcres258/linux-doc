@@ -124,14 +124,10 @@ static void io_poll_req_insert(struct io_kiocb *req)
 {
 	struct io_hash_table *table = &req->ctx->cancel_table;
 	u32 index = hash_long(req->cqe.user_data, table->hash_bits);
-	struct io_hash_bucket *hb = &table->hbs[index];
 
 	lockdep_assert_held(&req->ctx->uring_lock);
 
-	hlist_add_head(&req->hash_node, &hb->list);
-	hb->nr_entries++;
-	if (hb->nr_entries > MAX_HASH_ENTRIES)
-		io_resize_hash_table(req->ctx);
+	hlist_add_head(&req->hash_node, &table->hbs[index].list);
 }
 
 static void io_init_poll_iocb(struct io_poll *poll, __poll_t events)
@@ -342,7 +338,7 @@ void io_poll_task_func(struct io_kiocb *req, struct io_tw_state *ts)
 	}
 	io_poll_remove_entries(req);
 	/* task_work always has ->uring_lock held */
-	io_hash_del(req);
+	hash_del(&req->hash_node);
 
 	if (req->opcode == IORING_OP_POLL_ADD) {
 		if (ret == IOU_POLL_DONE) {

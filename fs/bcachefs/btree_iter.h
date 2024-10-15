@@ -364,7 +364,7 @@ static int btree_trans_restart(struct btree_trans *trans, int err)
 static inline int trans_maybe_inject_restart(struct btree_trans *trans, unsigned long ip)
 {
 #ifdef CONFIG_BCACHEFS_INJECT_TRANSACTION_RESTARTS
-	if (!(ktime_get_ns() & ~(~0UL << min(63, (10 + trans->restart_count_this_trans))))) {
+	if (!(ktime_get_ns() & ~(~0ULL << min(63, (10 + trans->restart_count_this_trans))))) {
 		trace_and_count(trans->c, trans_restart_injected, trans, ip);
 		return btree_trans_restart_ip(trans,
 					BCH_ERR_transaction_restart_fault_inject, ip);
@@ -608,13 +608,18 @@ static inline struct bkey_s_c bch2_bkey_get_iter(struct btree_trans *trans,
 	bkey_s_c_to_##_type(__bch2_bkey_get_iter(_trans, _iter,			\
 				       _btree_id, _pos, _flags, KEY_TYPE_##_type))
 
+static inline void __bkey_val_copy(void *dst_v, unsigned dst_size, struct bkey_s_c src_k)
+{
+	unsigned b = min_t(unsigned, dst_size, bkey_val_bytes(src_k.k));
+	memcpy(dst_v, src_k.v, b);
+	if (unlikely(b < dst_size))
+		memset(dst_v + b, 0, dst_size - b);
+}
+
 #define bkey_val_copy(_dst_v, _src_k)					\
 do {									\
-	unsigned b = min_t(unsigned, sizeof(*_dst_v),			\
-			   bkey_val_bytes(_src_k.k));			\
-	memcpy(_dst_v, _src_k.v, b);					\
-	if (b < sizeof(*_dst_v))					\
-		memset((void *) (_dst_v) + b, 0, sizeof(*_dst_v) - b);	\
+	BUILD_BUG_ON(!__typecheck(*_dst_v, *_src_k.v));			\
+	__bkey_val_copy(_dst_v, sizeof(*_dst_v), _src_k.s_c);		\
 } while (0)
 
 static inline int __bch2_bkey_get_val_typed(struct btree_trans *trans,
@@ -623,17 +628,10 @@ static inline int __bch2_bkey_get_val_typed(struct btree_trans *trans,
 				unsigned val_size, void *val)
 {
 	struct btree_iter iter;
-	struct bkey_s_c k;
-	int ret;
-
-	k = __bch2_bkey_get_iter(trans, &iter, btree_id, pos, flags, type);
-	ret = bkey_err(k);
+	struct bkey_s_c k = __bch2_bkey_get_iter(trans, &iter, btree_id, pos, flags, type);
+	int ret = bkey_err(k);
 	if (!ret) {
-		unsigned b = min_t(unsigned, bkey_val_bytes(k.k), val_size);
-
-		memcpy(val, k.v, b);
-		if (unlikely(b < sizeof(*val)))
-			memset((void *) val + b, 0, sizeof(*val) - b);
+		__bkey_val_copy(val, val_size, k);
 		bch2_trans_iter_exit(trans, &iter);
 	}
 

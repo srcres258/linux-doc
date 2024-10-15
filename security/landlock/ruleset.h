@@ -267,27 +267,42 @@ static inline void landlock_get_ruleset(struct landlock_ruleset *const ruleset)
 		refcount_inc(&ruleset->usage);
 }
 
+/**
+ * landlock_merge_access_masks - Return the merge of a ruleset's access_masks
+ *
+ * @ruleset: Landlock ruleset (used as a domain)
+ *
+ * Returns: an access_masks result of the OR of all the ruleset's access masks.
+ */
 static inline union access_masks
-landlock_merge_access_masks(const struct landlock_ruleset *const domain)
+landlock_merge_access_masks(const struct landlock_ruleset *const ruleset)
 {
 	size_t layer_level;
 	union access_masks matches = {};
 
-	for (layer_level = 0; layer_level < domain->num_layers; layer_level++)
-		matches.all |= domain->access_masks[layer_level].all;
+	for (layer_level = 0; layer_level < ruleset->num_layers; layer_level++)
+		matches.all |= ruleset->access_masks[layer_level].all;
 
 	return matches;
 }
 
+/**
+ * landlock_match_ruleset - Return @ruleset if any @masks right matches
+ *
+ * @ruleset: Landlock ruleset (used as a domain)
+ * @masks: access masks
+ *
+ * Returns: @ruleset if @masks matches, or NULL otherwise.
+ */
 static inline const struct landlock_ruleset *
-landlock_filter_access_masks(const struct landlock_ruleset *const domain,
-			     const union access_masks masks)
+landlock_match_ruleset(const struct landlock_ruleset *const ruleset,
+		       const union access_masks masks)
 {
-	if (!domain)
+	if (!ruleset)
 		return NULL;
 
-	if (landlock_merge_access_masks(domain).all & masks.all)
-		return domain;
+	if (landlock_merge_access_masks(ruleset).all & masks.all)
+		return ruleset;
 
 	return NULL;
 }

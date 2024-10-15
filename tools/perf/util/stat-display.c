@@ -22,6 +22,7 @@
 #include "iostat.h"
 #include "pmu.h"
 #include "pmus.h"
+#include "tool_pmu.h"
 
 #define CNTR_NOT_SUPPORTED	"<not supported>"
 #define CNTR_NOT_COUNTED	"<not counted>"
@@ -982,9 +983,16 @@ static bool should_skip_zero_counter(struct perf_stat_config *config,
 	if (config->aggr_mode == AGGR_THREAD && config->system_wide)
 		return true;
 
-	/* Tool events have the software PMU but are only gathered on 1. */
-	if (evsel__is_tool(counter))
-		return true;
+	/*
+	 * Many tool events are only gathered on the first index, skip other
+	 * zero values.
+	 */
+	if (evsel__is_tool(counter)) {
+		struct aggr_cpu_id own_id =
+			config->aggr_get_id(config, (struct perf_cpu){ .cpu = 0 });
+
+		return !aggr_cpu_id__equal(id, &own_id);
+	}
 
 	/*
 	 * Skip value 0 when it's an uncore event and the given aggr id

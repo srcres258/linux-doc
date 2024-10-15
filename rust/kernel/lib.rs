@@ -15,8 +15,8 @@
 #![feature(arbitrary_self_types)]
 #![feature(coerce_unsized)]
 #![feature(dispatch_from_dyn)]
+#![feature(inline_const)]
 #![feature(lint_reasons)]
-#![feature(new_uninit)]
 #![feature(unsize)]
 
 // Ensure conditional compilation based on the kernel configuration works;

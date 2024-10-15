@@ -210,8 +210,8 @@ static const struct landlock_ruleset *get_current_unix_scope_domain(void)
 		.scope = LANDLOCK_SCOPE_ABSTRACT_UNIX_SOCKET,
 	};
 
-	return landlock_filter_access_masks(landlock_get_current_domain(),
-					    unix_scope);
+	return landlock_match_ruleset(landlock_get_current_domain(),
+				      unix_scope);
 }
 
 static int hook_unix_stream_connect(struct sock *const sock,
@@ -270,7 +270,7 @@ static int hook_task_kill(struct task_struct *const p,
 	} else {
 		dom = landlock_get_current_domain();
 	}
-	dom = landlock_filter_access_masks(dom, signal_scope);
+	dom = landlock_match_ruleset(dom, signal_scope);
 
 	/* Quick return for non-landlocked tasks. */
 	if (!dom)
@@ -294,8 +294,8 @@ static int hook_file_send_sigiotask(struct task_struct *tsk,
 
 	/* Lock already held by send_sigio() and send_sigurg(). */
 	lockdep_assert_held(&fown->lock);
-	dom = landlock_filter_access_masks(
-		landlock_file(fown->file)->fown_domain, signal_scope);
+	dom = landlock_match_ruleset(landlock_file(fown->file)->fown_domain,
+				     signal_scope);
 
 	/* Quick return for unowned socket. */
 	if (!dom)

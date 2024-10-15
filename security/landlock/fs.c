@@ -402,11 +402,11 @@ get_handled_fs_accesses(const struct landlock_ruleset *const domain)
 static const struct landlock_ruleset *
 get_fs_domain(const struct landlock_ruleset *const domain)
 {
-	const union access_masks all_fs = {
+	const union access_masks any_fs = {
 		.fs = ~0,
 	};
 
-	return landlock_filter_access_masks(domain, all_fs);
+	return landlock_match_ruleset(domain, any_fs);
 }
 
 static const struct landlock_ruleset *get_current_fs_domain(void)
