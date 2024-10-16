@@ -57,7 +57,7 @@ LIB_MIN=			1
 
 PACKAGE =			cpupower
 PACKAGE_BUGREPORT =		linux-pm@vger.kernel.org
-LANGUAGES = 			de fr it cs pt ka
+LANGUAGES = 			de fr it cs pt ka zh_CN
 
 
 # Directory definitions. These are default and most probably
@@ -86,12 +86,12 @@ INSTALL_SCRIPT = ${INSTALL} -m 644
 # If you are running a cross compiler, you may want to set this
 # to something more interesting, like "arm-linux-".  If you want
 # to compile vs uClibc, that can be done here as well.
-CROSS = #/usr/i386-linux-uclibc/usr/bin/i386-uclibc-
-CC = $(CROSS)gcc
-LD = $(CROSS)gcc
-AR = $(CROSS)ar
-STRIP = $(CROSS)strip
-RANLIB = $(CROSS)ranlib
+CROSS ?= #/usr/i386-linux-uclibc/usr/bin/i386-uclibc-
+CC ?= $(CROSS)gcc
+LD ?= $(CROSS)gcc
+AR ?= $(CROSS)ar
+STRIP ?= $(CROSS)strip
+RANLIB ?= $(CROSS)ranlib
 HOSTCC = gcc
 MKDIR = mkdir
 
