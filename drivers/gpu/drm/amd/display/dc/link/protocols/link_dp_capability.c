@@ -1636,6 +1636,8 @@ static bool retrieve_link_cap(struct dc_link *link)
 
 	/* Read DP tunneling information. */
 	status = dpcd_get_tunneling_device_data(link);
+	if (status != DC_OK)
+		dm_error("%s: Read tunndeling device data failed.\n", __func__);
 
 	dpcd_set_source_specific_data(link);
 	/* Sink may need to configure internals based on vendor, so allow some
@@ -1852,6 +1854,9 @@ static bool retrieve_link_cap(struct dc_link *link)
 				DP_FEC_CAPABILITY,
 				&link->dpcd_caps.fec_cap.raw,
 				sizeof(link->dpcd_caps.fec_cap.raw));
+		if (status != DC_OK)
+			DC_LOG_ERROR("%s:%d: core_link_read_dpcd (DP_FEC_CAPABILITY) failed\n", __func__, __LINE__);
+
 		status = core_link_read_dpcd(
 				link,
 				DP_DSC_SUPPORT,
@@ -1874,6 +1879,9 @@ static bool retrieve_link_cap(struct dc_link *link)
 					DP_DSC_BRANCH_OVERALL_THROUGHPUT_0,
 					link->dpcd_caps.dsc_caps.dsc_branch_decoder_caps.raw,
 					sizeof(link->dpcd_caps.dsc_caps.dsc_branch_decoder_caps.raw));
+			if (status != DC_OK)
+				DC_LOG_ERROR("%s:%d: core_link_read_dpcd (DP_DSC_BRANCH_OVERALL_THROUGHPUT_0) failed\n", __func__, __LINE__);
+
 			DC_LOG_DSC("DSC branch decoder capability is read at link %d", link->link_index);
 			DC_LOG_DSC("\tBRANCH_OVERALL_THROUGHPUT_0 = 0x%02x",
 					link->dpcd_caps.dsc_caps.dsc_branch_decoder_caps.fields.BRANCH_OVERALL_THROUGHPUT_0);
@@ -2065,6 +2073,14 @@ void detect_edp_sink_caps(struct dc_link *link)
 	core_link_read_dpcd(link, DP_SINK_PR_MAX_NUMBER_OF_DEVIATION_LINE,
 			&link->dpcd_caps.pr_info.max_deviation_line,
 			sizeof(link->dpcd_caps.pr_info.max_deviation_line));
+
+	/*
+	 * OLED Emission Rate info
+	 */
+	if (link->dpcd_sink_ext_caps.bits.emission_output)
+		core_link_read_dpcd(link, DP_SINK_EMISSION_RATE,
+				(uint8_t *)&link->dpcd_caps.edp_oled_emission_rate,
+				sizeof(link->dpcd_caps.edp_oled_emission_rate));
 }
 
 bool dp_get_max_link_enc_cap(const struct dc_link *link, struct dc_link_settings *max_link_enc_cap)

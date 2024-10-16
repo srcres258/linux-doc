@@ -5,7 +5,7 @@
 //!
 //! In order to allow userspace test cases to make use of such types as well, implement the
 //! `Cmalloc` allocator within the allocator_test module and type alias all kernel allocators to
-//! `Cmalloc`. The `Cmalloc` allocator uses libc's realloc() function as allocator backend.
+//! `Cmalloc`. The `Cmalloc` allocator uses libc's `realloc()` function as allocator backend.
 
 #![allow(missing_docs)]
 

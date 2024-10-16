@@ -647,7 +647,7 @@ static bool can_cow_file_range_inline(struct btrfs_inode *inode,
  * If being used directly, you must have already checked we're allowed to cow
  * the range by getting true from can_cow_file_range_inline().
  */
-static noinline int __cow_file_range_inline(struct btrfs_inode *inode, u64 offset,
+static noinline int __cow_file_range_inline(struct btrfs_inode *inode,
 					    u64 size, size_t compressed_size,
 					    int compress_type,
 					    struct folio *compressed_folio,
@@ -737,7 +737,7 @@ static noinline int cow_file_range_inline(struct btrfs_inode *inode,
 		return 1;
 
 	lock_extent(&inode->io_tree, offset, end, &cached);
-	ret = __cow_file_range_inline(inode, offset, size, compressed_size,
+	ret = __cow_file_range_inline(inode, size, compressed_size,
 				      compress_type, compressed_folio,
 				      update_i_size);
 	if (ret > 0) {
@@ -6759,8 +6759,7 @@ static noinline int uncompress_inline(struct btrfs_path *path,
 	return ret;
 }
 
-static int read_inline_extent(struct btrfs_inode *inode, struct btrfs_path *path,
-			      struct folio *folio)
+static int read_inline_extent(struct btrfs_path *path, struct folio *folio)
 {
 	struct btrfs_file_extent_item *fi;
 	void *kaddr;
@@ -6958,7 +6957,7 @@ next:
 		ASSERT(em->disk_bytenr == EXTENT_MAP_INLINE);
 		ASSERT(em->len == fs_info->sectorsize);
 
-		ret = read_inline_extent(inode, path, folio);
+		ret = read_inline_extent(path, folio);
 		if (ret < 0)
 			goto out;
 		goto insert;
@@ -9096,51 +9095,9 @@ static void btrfs_encoded_read_ioctl_endio(struct btrfs_bio *bbio)
 	bio_put(&bbio->bio);
 }
 
-static inline struct btrfs_encoded_read_private *btrfs_uring_encoded_read_pdu(
-		struct io_uring_cmd *cmd)
-{
-	return *(struct btrfs_encoded_read_private **)cmd->pdu;
-}
-static void btrfs_finish_uring_encoded_read(struct io_uring_cmd *cmd,
-					    unsigned int issue_flags)
-{
-	struct btrfs_encoded_read_private *priv;
-	ssize_t ret;
-
-	priv = btrfs_uring_encoded_read_pdu(cmd);
-	ret = btrfs_encoded_read_finish(priv, -EIOCBQUEUED);
-
-	io_uring_cmd_done(priv->cmd, ret, 0, priv->issue_flags);
-
-	kfree(priv);
-}
-
-static void btrfs_encoded_read_uring_endio(struct btrfs_bio *bbio)
-{
-	struct btrfs_encoded_read_private *priv = bbio->private;
-
-	if (bbio->bio.bi_status) {
-		/*
-		 * The memory barrier implied by the atomic_dec_return() here
-		 * pairs with the memory barrier implied by the
-		 * atomic_dec_return() or io_wait_event() in
-		 * btrfs_encoded_read_regular_fill_pages() to ensure that this
-		 * write is observed before the load of status in
-		 * btrfs_encoded_read_regular_fill_pages().
-		 */
-		WRITE_ONCE(priv->status, bbio->bio.bi_status);
-	}
-	if (!atomic_dec_return(&priv->pending)) {
-		io_uring_cmd_complete_in_task(priv->cmd,
-					      btrfs_finish_uring_encoded_read);
-	}
-	bio_put(&bbio->bio);
-}
-
-static void _btrfs_encoded_read_regular_fill_pages(struct btrfs_inode *inode,
-					u64 file_offset, u64 disk_bytenr,
-					u64 disk_io_size,
-					struct btrfs_encoded_read_private *priv)
+int btrfs_encoded_read_regular_fill_pages(struct btrfs_inode *inode,
+					  u64 disk_bytenr, u64 disk_io_size,
+					  struct page **pages)
 {
 	struct btrfs_fs_info *fs_info = inode->root->fs_info;
 	unsigned long i = 0;
@@ -9199,7 +9156,12 @@ ssize_t btrfs_encoded_read_regular_end(struct btrfs_encoded_read_private *priv)
 	start = ALIGN_DOWN(priv->args.offset, fs_info->sectorsize);
 	lockend = start + BTRFS_MAX_UNCOMPRESSED - 1;
 
-	unlock_extent(io_tree, start, lockend, &priv->cached_state);
+	ret = btrfs_encoded_read_regular_fill_pages(inode, disk_bytenr,
+						    disk_io_size, pages);
+	if (ret)
+		goto out;
+
+	unlock_extent(io_tree, start, lockend, cached_state);
 	btrfs_inode_unlock(inode, BTRFS_ILOCK_SHARED);
 
 	ret = blk_status_to_errno(READ_ONCE(priv->status));
@@ -9564,7 +9526,7 @@ ssize_t btrfs_do_encoded_write(struct kiocb *iocb, struct iov_iter *from,
 	if (encoded->unencoded_len == encoded->len &&
 	    encoded->unencoded_offset == 0 &&
 	    can_cow_file_range_inline(inode, start, encoded->len, orig_count)) {
-		ret = __cow_file_range_inline(inode, start, encoded->len,
+		ret = __cow_file_range_inline(inode, encoded->len,
 					      orig_count, compression, folios[0],
 					      true);
 		if (ret <= 0) {

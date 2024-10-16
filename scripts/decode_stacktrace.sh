@@ -311,7 +311,7 @@ handle_line() {
 	parse_symbol # modifies $symbol
 
 	# Add up the line number to the symbol
-	if [ -z ${module} ]
+	if [[ -z ${module} ]]
 	then
 		echo "${words[@]}" "$symbol"
 	else

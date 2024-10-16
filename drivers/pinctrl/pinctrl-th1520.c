@@ -152,6 +152,16 @@ static enum th1520_muxtype th1520_muxtype_get(const char *str)
 		(TH1520_MUX_##m0 <<  0) | (TH1520_MUX_##m1 <<  5) | (TH1520_MUX_##m2 << 10) | \
 		(TH1520_MUX_##m3 << 15) | (TH1520_MUX_##m4 << 20) | (TH1520_MUX_##m5 << 25)) }
 
+static unsigned long th1520_pad_muxdata(void *drv_data)
+{
+	return (uintptr_t)drv_data & TH1520_PAD_MUXDATA;
+}
+
+static bool th1520_pad_no_padcfg(void *drv_data)
+{
+	return (uintptr_t)drv_data & TH1520_PAD_NO_PADCFG;
+}
+
 static const struct pinctrl_pin_desc th1520_group1_pins[] = {
 	TH1520_PAD(0,  OSC_CLK_IN,    ____, ____, ____, ____, ____, ____, TH1520_PAD_NO_PADCFG),
 	TH1520_PAD(1,  OSC_CLK_OUT,   ____, ____, ____, ____, ____, ____, TH1520_PAD_NO_PADCFG),
@@ -221,9 +231,9 @@ static const struct pinctrl_pin_desc th1520_group2_pins[] = {
 	TH1520_PAD(15, UART4_RTSN,    UART, ____, ____, GPIO, ____, ____, 0),
 	TH1520_PAD(16, UART3_TXD,     DBG,  UART, ____, GPIO, ____, ____, 0),
 	TH1520_PAD(17, UART3_RXD,     DBG,  UART, ____, GPIO, ____, ____, 0),
-	TH1520_PAD(18, GPIO0_18,      GPIO, I2C,  ____, ____, ____, ____, 0),
-	TH1520_PAD(19, GPIO0_19,      GPIO, I2C,  ____, ____, ____, ____, 0),
-	TH1520_PAD(20, GPIO0_20,      GPIO, UART, IR,   ____, ____, ____, 0),
+	TH1520_PAD(18, GPIO0_18,      GPIO, I2C,  ____, ____, DPU0, DPU1, 0),
+	TH1520_PAD(19, GPIO0_19,      GPIO, I2C,  ____, ____, DPU0, DPU1, 0),
+	TH1520_PAD(20, GPIO0_20,      GPIO, UART, IR,   ____, DPU0, DPU1, 0),
 	TH1520_PAD(21, GPIO0_21,      GPIO, UART, IR,   ____, DPU0, DPU1, 0),
 	TH1520_PAD(22, GPIO0_22,      GPIO, JTAG, I2C,  ____, DPU0, DPU1, 0),
 	TH1520_PAD(23, GPIO0_23,      GPIO, JTAG, I2C,  ____, DPU0, DPU1, 0),
@@ -241,7 +251,7 @@ static const struct pinctrl_pin_desc th1520_group2_pins[] = {
 	TH1520_PAD(35, GPIO1_3,       GPIO, JTAG, ____, ____, DPU0, DPU1, 0),
 	TH1520_PAD(36, GPIO1_4,       GPIO, JTAG, ____, ____, DPU0, DPU1, 0),
 	TH1520_PAD(37, GPIO1_5,       GPIO, ____, ____, ____, DPU0, DPU1, 0),
-	TH1520_PAD(38, GPIO1_6,       GPIO, ____, ____, ____, DPU0, DPU1, 0),
+	TH1520_PAD(38, GPIO1_6,       GPIO, QSPI, ____, ____, DPU0, DPU1, 0),
 	TH1520_PAD(39, GPIO1_7,       GPIO, QSPI, ____, ____, DPU0, DPU1, 0),
 	TH1520_PAD(40, GPIO1_8,       GPIO, QSPI, ____, ____, DPU0, DPU1, 0),
 	TH1520_PAD(41, GPIO1_9,       GPIO, QSPI, ____, ____, DPU0, DPU1, 0),
@@ -256,11 +266,11 @@ static const struct pinctrl_pin_desc th1520_group2_pins[] = {
 	TH1520_PAD(50, CLK_OUT_1,     BSEL, CLK,  ____, GPIO, ____, ____, 0),
 	TH1520_PAD(51, CLK_OUT_2,     BSEL, CLK,  ____, GPIO, ____, ____, 0),
 	TH1520_PAD(52, CLK_OUT_3,     BSEL, CLK,  ____, GPIO, ____, ____, 0),
-	TH1520_PAD(53, GPIO1_21,      GPIO, ____, ISP,  ____, ____, ____, 0),
-	TH1520_PAD(54, GPIO1_22,      GPIO, ____, ISP,  ____, ____, ____, 0),
-	TH1520_PAD(55, GPIO1_23,      GPIO, ____, ISP,  ____, ____, ____, 0),
-	TH1520_PAD(56, GPIO1_24,      GPIO, ____, ISP,  ____, ____, ____, 0),
-	TH1520_PAD(57, GPIO1_25,      GPIO, ____, ISP,  ____, ____, ____, 0),
+	TH1520_PAD(53, GPIO1_21,      JTAG, ____, ISP,  GPIO, ____, ____, 0),
+	TH1520_PAD(54, GPIO1_22,      JTAG, ____, ISP,  GPIO, ____, ____, 0),
+	TH1520_PAD(55, GPIO1_23,      JTAG, ____, ISP,  GPIO, ____, ____, 0),
+	TH1520_PAD(56, GPIO1_24,      JTAG, ____, ISP,  GPIO, ____, ____, 0),
+	TH1520_PAD(57, GPIO1_25,      JTAG, ____, ISP,  GPIO, ____, ____, 0),
 	TH1520_PAD(58, GPIO1_26,      GPIO, ____, ISP,  ____, ____, ____, 0),
 	TH1520_PAD(59, GPIO1_27,      GPIO, ____, ISP,  ____, ____, ____, 0),
 	TH1520_PAD(60, GPIO1_28,      GPIO, ____, ISP,  ____, ____, ____, 0),
@@ -590,8 +600,8 @@ static int th1520_pinconf_get(struct pinctrl_dev *pctldev,
 	u32 value;
 	u32 arg;
 
-	if ((uintptr_t)desc->drv_data & TH1520_PAD_NO_PADCFG)
-		return -EOPNOTSUPP;
+	if (th1520_pad_no_padcfg(desc->drv_data))
+		return -ENOTSUPP;
 
 	value = readl_relaxed(th1520_padcfg(thp, pin));
 	value = (value >> th1520_padcfg_shift(pin)) & GENMASK(9, 0);
@@ -636,7 +646,7 @@ static int th1520_pinconf_get(struct pinctrl_dev *pctldev,
 		arg = enabled ? 1 : 0;
 		break;
 	default:
-		return -EOPNOTSUPP;
+		return -ENOTSUPP;
 	}
 
 	*config = pinconf_to_config_packed(param, arg);
@@ -660,8 +670,8 @@ static int th1520_pinconf_set(struct pinctrl_dev *pctldev, unsigned int pin,
 	unsigned int i;
 	u16 mask, value;
 
-	if ((uintptr_t)desc->drv_data & TH1520_PAD_NO_PADCFG)
-		return -EOPNOTSUPP;
+	if (th1520_pad_no_padcfg(desc->drv_data))
+		return -ENOTSUPP;
 
 	mask = 0;
 	value = 0;
@@ -676,14 +686,14 @@ static int th1520_pinconf_set(struct pinctrl_dev *pctldev, unsigned int pin,
 			break;
 		case PIN_CONFIG_BIAS_PULL_DOWN:
 			if (arg == 0)
-				return -EOPNOTSUPP;
+				return -ENOTSUPP;
 			mask |= TH1520_PADCFG_BIAS;
 			value &= ~TH1520_PADCFG_BIAS;
 			value |= TH1520_PADCFG_PE;
 			break;
 		case PIN_CONFIG_BIAS_PULL_UP:
 			if (arg == 0)
-				return -EOPNOTSUPP;
+				return -ENOTSUPP;
 			mask |= TH1520_PADCFG_BIAS;
 			value &= ~TH1520_PADCFG_BIAS;
 			if (arg == TH1520_PULL_STRONG_OHM)
@@ -718,7 +728,7 @@ static int th1520_pinconf_set(struct pinctrl_dev *pctldev, unsigned int pin,
 				value &= ~TH1520_PADCFG_SL;
 			break;
 		default:
-			return -EOPNOTSUPP;
+			return -ENOTSUPP;
 		}
 	}
 
@@ -793,12 +803,14 @@ static int th1520_pinmux_set_mux(struct pinctrl_dev *pctldev,
 {
 	struct th1520_pinctrl *thp = pinctrl_dev_get_drvdata(pctldev);
 	const struct function_desc *func = pinmux_generic_get_function(pctldev, fsel);
+	enum th1520_muxtype muxtype = (uintptr_t)func->data;
 
 	if (!func)
 		return -EINVAL;
+
 	return th1520_pinmux_set(thp, thp->desc.pins[gsel].number,
-				 (uintptr_t)thp->desc.pins[gsel].drv_data & TH1520_PAD_MUXDATA,
-				 (uintptr_t)func->data);
+				 th1520_pad_muxdata(thp->desc.pins[gsel].drv_data),
+				 muxtype);
 }
 
 static int th1520_gpio_request_enable(struct pinctrl_dev *pctldev,
@@ -809,7 +821,7 @@ static int th1520_gpio_request_enable(struct pinctrl_dev *pctldev,
 	const struct pin_desc *desc = pin_desc_get(pctldev, offset);
 
 	return th1520_pinmux_set(thp, offset,
-				 (uintptr_t)desc->drv_data & TH1520_PAD_MUXDATA,
+				 th1520_pad_muxdata(desc->drv_data),
 				 TH1520_MUX_GPIO);
 }
 

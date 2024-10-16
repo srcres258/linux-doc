@@ -2636,7 +2636,7 @@ if (wbc->range_cyclic) {
  * not race in and drop the bit.
  */
 static bool try_release_extent_state(struct extent_io_tree *tree,
-				    struct folio *folio, gfp_t mask)
+				     struct folio *folio)
 {
 	u64 start = folio_pos(folio);
 	u64 end = start + PAGE_SIZE - 1;
@@ -3088,7 +3088,7 @@ next:
 
 		cond_resched(); /* Allow large-extent preemption. */
 	}
-	return try_release_extent_state(io_tree, folio, mask);
+	return try_release_extent_state(io_tree, folio);
 }
 
 static void __free_extent_buffer(struct extent_buffer *eb)
@@ -3102,7 +3102,7 @@ return (test_bit(EXTENT_BUFFER_WRITEBACK, &eb->bflags) ||
 	test_bit(EXTENT_BUFFER_DIRTY, &eb->bflags));
 }
 
-static bool folio_range_has_eb(struct btrfs_fs_info *fs_info, struct folio *folio)
+static bool folio_range_has_eb(struct folio *folio)
 {
 struct btrfs_subpage *subpage;
 
@@ -3136,8 +3136,54 @@ if (mapped)
 
 if (!folio_test_private(folio)) {
 	if (mapped)
-		spin_unlock(&folio->mapping->i_private_lock);
-	return;
+		spin_lock(&folio->mapping->i_private_lock);
+
+	if (!folio_test_private(folio)) {
+		if (mapped)
+			spin_unlock(&folio->mapping->i_private_lock);
+		return;
+	}
+
+	if (fs_info->nodesize >= PAGE_SIZE) {
+		/*
+		 * We do this since we'll remove the pages after we've
+		 * removed the eb from the radix tree, so we could race
+		 * and have this page now attached to the new eb.  So
+		 * only clear folio if it's still connected to
+		 * this eb.
+		 */
+		if (folio_test_private(folio) && folio_get_private(folio) == eb) {
+			BUG_ON(test_bit(EXTENT_BUFFER_DIRTY, &eb->bflags));
+			BUG_ON(folio_test_dirty(folio));
+			BUG_ON(folio_test_writeback(folio));
+			/* We need to make sure we haven't be attached to a new eb. */
+			folio_detach_private(folio);
+		}
+		if (mapped)
+			spin_unlock(&folio->mapping->i_private_lock);
+		return;
+	}
+
+	/*
+	 * For subpage, we can have dummy eb with folio private attached.  In
+	 * this case, we can directly detach the private as such folio is only
+	 * attached to one dummy eb, no sharing.
+	 */
+	if (!mapped) {
+		btrfs_detach_subpage(fs_info, folio);
+		return;
+	}
+
+	btrfs_folio_dec_eb_refs(fs_info, folio);
+
+	/*
+	 * We can only detach the folio private if there are no other ebs in the
+	 * page range and no unfinished IO.
+	 */
+	if (!folio_range_has_eb(folio))
+		btrfs_detach_subpage(fs_info, folio);
+
+	spin_unlock(&folio->mapping->i_private_lock);
 }
 
 /* Release all pages attached to the extent buffer */

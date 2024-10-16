@@ -237,8 +237,10 @@ static int vl6180_measure(struct vl6180_data *data, int addr)
 
 	if (client->irq) {
 		time_left = wait_for_completion_timeout(&data->completion, HZ / 10);
-		if (time_left == 0)
-			return -ETIMEDOUT;
+		if (time_left == 0) {
+			ret = -ETIMEDOUT;
+			goto fail;
+		}
 	} else {
 		while (tries--) {
 			ret = vl6180_read_byte(client, VL6180_INTR_STATUS);

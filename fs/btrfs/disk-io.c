@@ -919,8 +919,7 @@ fail:
 	return ERR_PTR(ret);
 }
 
-static struct btrfs_root *alloc_log_tree(struct btrfs_trans_handle *trans,
-					 struct btrfs_fs_info *fs_info)
+static struct btrfs_root *alloc_log_tree(struct btrfs_fs_info *fs_info)
 {
 	struct btrfs_root *root;
 
@@ -968,7 +967,7 @@ int btrfs_init_log_root_tree(struct btrfs_trans_handle *trans,
 {
 	struct btrfs_root *log_root;
 
-	log_root = alloc_log_tree(trans, fs_info);
+	log_root = alloc_log_tree(fs_info);
 	if (IS_ERR(log_root))
 		return PTR_ERR(log_root);
 
@@ -994,7 +993,7 @@ int btrfs_add_log_tree(struct btrfs_trans_handle *trans,
 	struct btrfs_inode_item *inode_item;
 	int ret;
 
-	log_root = alloc_log_tree(trans, fs_info);
+	log_root = alloc_log_tree(fs_info);
 	if (IS_ERR(log_root))
 		return PTR_ERR(log_root);
 
@@ -3207,8 +3206,7 @@ int btrfs_check_features(struct btrfs_fs_info *fs_info, bool is_rw_mount)
 	return 0;
 }
 
-int __cold open_ctree(struct super_block *sb, struct btrfs_fs_devices *fs_devices,
-		      const char *options)
+int __cold open_ctree(struct super_block *sb, struct btrfs_fs_devices *fs_devices)
 {
 	u32 sectorsize;
 	u32 nodesize;

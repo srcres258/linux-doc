@@ -985,7 +985,6 @@ static int aw9523_probe(struct i2c_client *client)
 	pdesc = devm_kzalloc(dev, sizeof(*pdesc), GFP_KERNEL);
 	if (!pdesc)
 		return -ENOMEM;
-
 	ret = aw9523_hw_init(awi);
 	if (ret)
 		return ret;

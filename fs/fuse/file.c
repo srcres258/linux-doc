@@ -483,6 +483,21 @@ static void fuse_wait_on_page_writeback(struct inode *inode, pgoff_t index)
 	wait_event(fi->page_waitq, !fuse_page_is_writeback(inode, index));
 }
 
+static inline bool fuse_folio_is_writeback(struct inode *inode,
+					   struct folio *folio)
+{
+	pgoff_t last = folio_next_index(folio) - 1;
+	return fuse_range_is_writeback(inode, folio_index(folio), last);
+}
+
+static void fuse_wait_on_folio_writeback(struct inode *inode,
+					 struct folio *folio)
+{
+	struct fuse_inode *fi = get_fuse_inode(inode);
+
+	wait_event(fi->page_waitq, !fuse_folio_is_writeback(inode, folio));
+}
+
 /*
  * Wait for all pending writepages on the inode to finish.
  *
@@ -855,12 +870,13 @@ static void fuse_short_read(struct inode *inode, u64 attr_ver, size_t num_read,
 	}
 }
 
-static int fuse_do_readpage(struct file *file, struct page *page)
+static int fuse_do_readfolio(struct file *file, struct folio *folio)
 {
-	struct inode *inode = page->mapping->host;
+	struct inode *inode = folio->mapping->host;
 	struct fuse_mount *fm = get_fuse_mount(inode);
-	loff_t pos = page_offset(page);
+	loff_t pos = folio_pos(folio);
 	struct fuse_page_desc desc = { .length = PAGE_SIZE };
+	struct page *page = &folio->page;
 	struct fuse_io_args ia = {
 		.ap.args.page_zeroing = true,
 		.ap.args.out_pages = true,
@@ -872,11 +888,11 @@ static int fuse_do_readpage(struct file *file, struct page *page)
 	u64 attr_ver;
 
 	/*
-	 * Page writeback can extend beyond the lifetime of the
-	 * page-cache page, so make sure we read a properly synced
-	 * page.
+	 * With the temporary pages that are used to complete writeback, we can
+	 * have writeback that extends beyond the lifetime of the folio.  So
+	 * make sure we read a properly synced folio.
 	 */
-	fuse_wait_on_page_writeback(inode, page->index);
+	fuse_wait_on_folio_writeback(inode, folio);
 
 	attr_ver = fuse_get_attr_version(fm->fc);
 
@@ -894,25 +910,24 @@ static int fuse_do_readpage(struct file *file, struct page *page)
 	if (res < desc.length)
 		fuse_short_read(inode, attr_ver, res, &ia.ap);
 
-	SetPageUptodate(page);
+	folio_mark_uptodate(folio);
 
 	return 0;
 }
 
 static int fuse_read_folio(struct file *file, struct folio *folio)
 {
-	struct page *page = &folio->page;
-	struct inode *inode = page->mapping->host;
+	struct inode *inode = folio->mapping->host;
 	int err;
 
 	err = -EIO;
 	if (fuse_is_bad(inode))
 		goto out;
 
-	err = fuse_do_readpage(file, page);
+	err = fuse_do_readfolio(file, folio);
 	fuse_invalidate_atime(inode);
  out:
-	unlock_page(page);
+	folio_unlock(folio);
 	return err;
 }
 
@@ -945,7 +960,6 @@ static void fuse_readpages_end(struct fuse_mount *fm, struct fuse_args *args,
 		struct folio *folio = page_folio(ap->pages[i]);
 
 		folio_end_read(folio, !err);
-		folio_put(folio);
 	}
 	if (ia->ff)
 		fuse_file_put(ia->ff, false);
@@ -992,18 +1006,36 @@ static void fuse_send_readpages(struct fuse_io_args *ia, struct file *file)
 static void fuse_readahead(struct readahead_control *rac)
 {
 	struct inode *inode = rac->mapping->host;
+	struct fuse_inode *fi = get_fuse_inode(inode);
 	struct fuse_conn *fc = get_fuse_conn(inode);
-	unsigned int i, max_pages, nr_pages = 0;
+	unsigned int max_pages, nr_pages;
+	pgoff_t first = readahead_index(rac);
+	pgoff_t last = first + readahead_count(rac) - 1;
 
 	if (fuse_is_bad(inode))
 		return;
 
+	wait_event(fi->page_waitq, !fuse_range_is_writeback(inode, first, last));
+
 	max_pages = min_t(unsigned int, fc->max_pages,
 			fc->max_read / PAGE_SIZE);
 
-	for (;;) {
+	/*
+	 * This is only accurate the first time through, since readahead_folio()
+	 * doesn't update readahead_count() from the previous folio until the
+	 * next call.  Grab nr_pages here so we know how many pages we're going
+	 * to have to process.  This means that we will exit here with
+	 * readahead_count() == folio_nr_pages(last_folio), but we will have
+	 * consumed all of the folios, and read_pages() will call
+	 * readahead_folio() again which will clean up the rac.
+	 */
+	nr_pages = readahead_count(rac);
+
+	while (nr_pages) {
 		struct fuse_io_args *ia;
 		struct fuse_args_pages *ap;
+		struct folio *folio;
+		unsigned cur_pages = min(max_pages, nr_pages);
 
 		if (fc->num_background >= fc->congestion_threshold &&
 		    rac->ra->async_size >= readahead_count(rac))
@@ -1013,23 +1045,19 @@ static void fuse_readahead(struct readahead_control *rac)
 			 */
 			break;
 
-		nr_pages = readahead_count(rac) - nr_pages;
-		if (nr_pages > max_pages)
-			nr_pages = max_pages;
-		if (nr_pages == 0)
-			break;
-		ia = fuse_io_alloc(NULL, nr_pages);
+		ia = fuse_io_alloc(NULL, cur_pages);
 		if (!ia)
 			return;
 		ap = &ia->ap;
-		nr_pages = __readahead_batch(rac, ap->pages, nr_pages);
-		for (i = 0; i < nr_pages; i++) {
-			fuse_wait_on_page_writeback(inode,
-						    readahead_index(rac) + i);
-			ap->descs[i].length = PAGE_SIZE;
+
+		while (ap->num_pages < cur_pages) {
+			folio = readahead_folio(rac);
+			ap->pages[ap->num_pages] = &folio->page;
+			ap->descs[ap->num_pages].length = folio_size(folio);
+			ap->num_pages++;
 		}
-		ap->num_pages = nr_pages;
 		fuse_send_readpages(ia, rac->file);
+		nr_pages -= cur_pages;
 	}
 }
 
@@ -1162,23 +1190,23 @@ static ssize_t fuse_send_write_pages(struct fuse_io_args *ia,
 	offset = ap->descs[0].offset;
 	count = ia->write.out.size;
 	for (i = 0; i < ap->num_pages; i++) {
-		struct page *page = ap->pages[i];
+		struct folio *folio = page_folio(ap->pages[i]);
 
 		if (err) {
-			ClearPageUptodate(page);
+			folio_clear_uptodate(folio);
 		} else {
-			if (count >= PAGE_SIZE - offset)
-				count -= PAGE_SIZE - offset;
+			if (count >= folio_size(folio) - offset)
+				count -= folio_size(folio) - offset;
 			else {
 				if (short_write)
-					ClearPageUptodate(page);
+					folio_clear_uptodate(folio);
 				count = 0;
 			}
 			offset = 0;
 		}
 		if (ia->write.page_locked && (i == ap->num_pages - 1))
-			unlock_page(page);
-		put_page(page);
+			folio_unlock(folio);
+		folio_put(folio);
 	}
 
 	return err;
@@ -1200,7 +1228,7 @@ static ssize_t fuse_fill_write_pages(struct fuse_io_args *ia,
 
 	do {
 		size_t tmp;
-		struct page *page;
+		struct folio *folio;
 		pgoff_t index = pos >> PAGE_SHIFT;
 		size_t bytes = min_t(size_t, PAGE_SIZE - offset,
 				     iov_iter_count(ii));
@@ -1212,25 +1240,27 @@ static ssize_t fuse_fill_write_pages(struct fuse_io_args *ia,
 		if (fault_in_iov_iter_readable(ii, bytes))
 			break;
 
-		err = -ENOMEM;
-		page = grab_cache_page_write_begin(mapping, index);
-		if (!page)
+		folio = __filemap_get_folio(mapping, index, FGP_WRITEBEGIN,
+					    mapping_gfp_mask(mapping));
+		if (IS_ERR(folio)) {
+			err = PTR_ERR(folio);
 			break;
+		}
 
 		if (mapping_writably_mapped(mapping))
-			flush_dcache_page(page);
+			flush_dcache_folio(folio);
 
-		tmp = copy_page_from_iter_atomic(page, offset, bytes, ii);
-		flush_dcache_page(page);
+		tmp = copy_folio_from_iter_atomic(folio, offset, bytes, ii);
+		flush_dcache_folio(folio);
 
 		if (!tmp) {
-			unlock_page(page);
-			put_page(page);
+			folio_unlock(folio);
+			folio_put(folio);
 			goto again;
 		}
 
 		err = 0;
-		ap->pages[ap->num_pages] = page;
+		ap->pages[ap->num_pages] = &folio->page;
 		ap->descs[ap->num_pages].length = tmp;
 		ap->num_pages++;
 
@@ -1242,10 +1272,10 @@ static ssize_t fuse_fill_write_pages(struct fuse_io_args *ia,
 
 		/* If we copied full page, mark it uptodate */
 		if (tmp == PAGE_SIZE)
-			SetPageUptodate(page);
+			folio_mark_uptodate(folio);
 
-		if (PageUptodate(page)) {
-			unlock_page(page);
+		if (folio_test_uptodate(folio)) {
+			folio_unlock(folio);
 		} else {
 			ia->write.page_locked = true;
 			break;
@@ -1437,11 +1467,7 @@ writethrough:
 
 	task_io_account_write(count);
 
-	err = file_remove_privs(file);
-	if (err)
-		goto out;
-
-	err = file_update_time(file);
+	err = kiocb_modified(iocb);
 	if (err)
 		goto out;
 
@@ -1794,12 +1820,12 @@ static void fuse_writepage_free(struct fuse_writepage_args *wpa)
 	kfree(wpa);
 }
 
-static void fuse_writepage_finish_stat(struct inode *inode, struct page *page)
+static void fuse_writepage_finish_stat(struct inode *inode, struct folio *folio)
 {
 	struct backing_dev_info *bdi = inode_to_bdi(inode);
 
 	dec_wb_stat(&bdi->wb, WB_WRITEBACK);
-	dec_node_page_state(page, NR_WRITEBACK_TEMP);
+	node_stat_sub_folio(folio, NR_WRITEBACK_TEMP);
 	wb_writeout_inc(&bdi->wb);
 }
 
@@ -1811,7 +1837,7 @@ static void fuse_writepage_finish(struct fuse_writepage_args *wpa)
 	int i;
 
 	for (i = 0; i < ap->num_pages; i++)
-		fuse_writepage_finish_stat(inode, ap->pages[i]);
+		fuse_writepage_finish_stat(inode, page_folio(ap->pages[i]));
 
 	wake_up(&fi->page_waitq);
 }
@@ -1866,7 +1892,8 @@ __acquires(fi->lock)
 	for (aux = wpa->next; aux; aux = next) {
 		next = aux->next;
 		aux->next = NULL;
-		fuse_writepage_finish_stat(aux->inode, aux->ia.ap.pages[0]);
+		fuse_writepage_finish_stat(aux->inode,
+					   page_folio(aux->ia.ap.pages[0]));
 		fuse_writepage_free(aux);
 	}
 
@@ -2086,7 +2113,7 @@ static void fuse_writepage_args_page_fill(struct fuse_writepage_args *wpa, struc
 	ap->descs[page_index].length = PAGE_SIZE;
 
 	inc_wb_stat(&inode_to_bdi(inode)->wb, WB_WRITEBACK);
-	inc_node_page_state(&tmp_folio->page, NR_WRITEBACK_TEMP);
+	node_stat_add_folio(tmp_folio, NR_WRITEBACK_TEMP);
 }
 
 static struct fuse_writepage_args *fuse_writepage_args_setup(struct folio *folio,
@@ -2260,14 +2287,15 @@ static bool fuse_writepage_add(struct fuse_writepage_args *new_wpa,
 	spin_unlock(&fi->lock);
 
 	if (tmp) {
-		fuse_writepage_finish_stat(new_wpa->inode, new_ap->pages[0]);
+		fuse_writepage_finish_stat(new_wpa->inode,
+					   page_folio(new_ap->pages[0]));
 		fuse_writepage_free(new_wpa);
 	}
 
 	return false;
 }
 
-static bool fuse_writepage_need_send(struct fuse_conn *fc, struct page *page,
+static bool fuse_writepage_need_send(struct fuse_conn *fc, struct folio *folio,
 				     struct fuse_args_pages *ap,
 				     struct fuse_fill_wb_data *data)
 {
@@ -2279,7 +2307,7 @@ static bool fuse_writepage_need_send(struct fuse_conn *fc, struct page *page,
 	 * the pages are faulted with get_user_pages(), and then after the read
 	 * completed.
 	 */
-	if (fuse_page_is_writeback(data->inode, page->index))
+	if (fuse_folio_is_writeback(data->inode, folio))
 		return true;
 
 	/* Reached max pages */
@@ -2291,7 +2319,7 @@ static bool fuse_writepage_need_send(struct fuse_conn *fc, struct page *page,
 		return true;
 
 	/* Discontinuity */
-	if (data->orig_pages[ap->num_pages - 1]->index + 1 != page->index)
+	if (data->orig_pages[ap->num_pages - 1]->index + 1 != folio_index(folio))
 		return true;
 
 	/* Need to grow the pages array?  If so, did the expansion fail? */
@@ -2313,7 +2341,7 @@ static int fuse_writepages_fill(struct folio *folio,
 	struct folio *tmp_folio;
 	int err;
 
-	if (wpa && fuse_writepage_need_send(fc, &folio->page, ap, data)) {
+	if (wpa && fuse_writepage_need_send(fc, folio, ap, data)) {
 		fuse_writepages_send(data);
 		data->wpa = NULL;
 	}
@@ -2448,7 +2476,7 @@ static int fuse_write_begin(struct file *file, struct address_space *mapping,
 			folio_zero_segment(folio, 0, off);
 		goto success;
 	}
-	err = fuse_do_readpage(file, &folio->page);
+	err = fuse_do_readfolio(file, folio);
 	if (err)
 		goto cleanup;
 success:
@@ -2537,17 +2565,17 @@ static void fuse_vma_close(struct vm_area_struct *vma)
  */
 static vm_fault_t fuse_page_mkwrite(struct vm_fault *vmf)
 {
-	struct page *page = vmf->page;
+	struct folio *folio = page_folio(vmf->page);
 	struct inode *inode = file_inode(vmf->vma->vm_file);
 
 	file_update_time(vmf->vma->vm_file);
-	lock_page(page);
-	if (page->mapping != inode->i_mapping) {
-		unlock_page(page);
+	folio_lock(folio);
+	if (folio->mapping != inode->i_mapping) {
+		folio_unlock(folio);
 		return VM_FAULT_NOPAGE;
 	}
 
-	fuse_wait_on_page_writeback(inode, page->index);
+	fuse_wait_on_folio_writeback(inode, folio);
 	return VM_FAULT_LOCKED;
 }
 

@@ -1088,12 +1088,12 @@ static __be32 nfsd4_decode_share_access(struct nfsd4_compoundargs *argp, u32 *sh
 	if (!argp->minorversion)
 		return nfserr_bad_xdr;
 	switch (w & NFS4_SHARE_WANT_TYPE_MASK) {
-	case NFS4_SHARE_WANT_NO_PREFERENCE:
-	case NFS4_SHARE_WANT_READ_DELEG:
-	case NFS4_SHARE_WANT_WRITE_DELEG:
-	case NFS4_SHARE_WANT_ANY_DELEG:
-	case NFS4_SHARE_WANT_NO_DELEG:
-	case NFS4_SHARE_WANT_CANCEL:
+	case OPEN4_SHARE_ACCESS_WANT_NO_PREFERENCE:
+	case OPEN4_SHARE_ACCESS_WANT_READ_DELEG:
+	case OPEN4_SHARE_ACCESS_WANT_WRITE_DELEG:
+	case OPEN4_SHARE_ACCESS_WANT_ANY_DELEG:
+	case OPEN4_SHARE_ACCESS_WANT_NO_DELEG:
+	case OPEN4_SHARE_ACCESS_WANT_CANCEL:
 		break;
 	default:
 		return nfserr_bad_xdr;
@@ -3652,7 +3652,7 @@ nfsd4_encode_fattr4(struct svc_rqst *rqstp, struct xdr_stream *xdr,
 
 		nfs4_put_stid(&dp->dl_stid);
 	} else {
-		args.change_attr = nfsd4_change_attribute(&args.stat, d_inode(dentry));
+		args.change_attr = nfsd4_change_attribute(&args.stat);
 	}
 
 	if (err)
@@ -4323,18 +4323,20 @@ nfsd4_encode_open_delegation4(struct xdr_stream *xdr, struct nfsd4_open *open)
 	if (xdr_stream_encode_u32(xdr, open->op_delegate_type) != XDR_UNIT)
 		return nfserr_resource;
 	switch (open->op_delegate_type) {
-	case NFS4_OPEN_DELEGATE_NONE:
+	case OPEN_DELEGATE_NONE:
 		status = nfs_ok;
 		break;
-	case NFS4_OPEN_DELEGATE_READ:
+	case OPEN_DELEGATE_READ:
+	case OPEN_DELEGATE_READ_ATTRS_DELEG:
 		/* read */
 		status = nfsd4_encode_open_read_delegation4(xdr, open);
 		break;
-	case NFS4_OPEN_DELEGATE_WRITE:
+	case OPEN_DELEGATE_WRITE:
+	case OPEN_DELEGATE_WRITE_ATTRS_DELEG:
 		/* write */
 		status = nfsd4_encode_open_write_delegation4(xdr, open);
 		break;
-	case NFS4_OPEN_DELEGATE_NONE_EXT:
+	case OPEN_DELEGATE_NONE_EXT:
 		/* od_whynone */
 		status = nfsd4_encode_open_none_delegation4(xdr, open);
 		break;

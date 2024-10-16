@@ -1387,12 +1387,42 @@ gmc_v9_0_get_memory_partition(struct amdgpu_device *adev, u32 *supp_modes)
 }
 
 static enum amdgpu_memory_partition
+gmc_v9_0_query_vf_memory_partition(struct amdgpu_device *adev)
+{
+	switch (adev->gmc.num_mem_partitions) {
+	case 0:
+		return UNKNOWN_MEMORY_PARTITION_MODE;
+	case 1:
+		return AMDGPU_NPS1_PARTITION_MODE;
+	case 2:
+		return AMDGPU_NPS2_PARTITION_MODE;
+	case 4:
+		return AMDGPU_NPS4_PARTITION_MODE;
+	default:
+		return AMDGPU_NPS1_PARTITION_MODE;
+	}
+
+	return AMDGPU_NPS1_PARTITION_MODE;
+}
+
+static enum amdgpu_memory_partition
 gmc_v9_0_query_memory_partition(struct amdgpu_device *adev)
 {
 	if (amdgpu_sriov_vf(adev))
-		return AMDGPU_NPS1_PARTITION_MODE;
+		return gmc_v9_0_query_vf_memory_partition(adev);
 
 	return gmc_v9_0_get_memory_partition(adev, NULL);
+}
+
+static bool gmc_v9_0_need_reset_on_init(struct amdgpu_device *adev)
+{
+	if (adev->nbio.funcs && adev->nbio.funcs->is_nps_switch_requested &&
+	    adev->nbio.funcs->is_nps_switch_requested(adev)) {
+		adev->gmc.reset_flags |= AMDGPU_GMC_INIT_RESET_NPS;
+		return true;
+	}
+
+	return false;
 }
 
 static const struct amdgpu_gmc_funcs gmc_v9_0_gmc_funcs = {
@@ -1406,6 +1436,8 @@ static const struct amdgpu_gmc_funcs gmc_v9_0_gmc_funcs = {
 	.override_vm_pte_flags = gmc_v9_0_override_vm_pte_flags,
 	.get_vbios_fb_size = gmc_v9_0_get_vbios_fb_size,
 	.query_mem_partition_mode = &gmc_v9_0_query_memory_partition,
+	.request_mem_partition_mode = &amdgpu_gmc_request_memory_partition,
+	.need_reset_on_init = &gmc_v9_0_need_reset_on_init,
 };
 
 static void gmc_v9_0_set_gmc_funcs(struct amdgpu_device *adev)
@@ -1543,6 +1575,28 @@ static void gmc_v9_0_set_xgmi_ras_funcs(struct amdgpu_device *adev)
 {
 	if (!adev->gmc.xgmi.connected_to_cpu)
 		adev->gmc.xgmi.ras = &xgmi_ras;
+}
+
+static void gmc_v9_0_init_nps_details(struct amdgpu_device *adev)
+{
+	adev->gmc.supported_nps_modes = 0;
+
+	if (amdgpu_sriov_vf(adev) || (adev->flags & AMD_IS_APU))
+		return;
+
+	/*TODO: Check PSP version also which supports NPS switch. Otherwise keep
+	 * supported modes as 0.
+	 */
+	switch (amdgpu_ip_version(adev, GC_HWIP, 0)) {
+	case IP_VERSION(9, 4, 3):
+	case IP_VERSION(9, 4, 4):
+		adev->gmc.supported_nps_modes =
+			BIT(AMDGPU_NPS1_PARTITION_MODE) |
+			BIT(AMDGPU_NPS4_PARTITION_MODE);
+		break;
+	default:
+		break;
+	}
 }
 
 static int gmc_v9_0_early_init(struct amdgpu_ip_block *ip_block)
@@ -1900,6 +1954,8 @@ gmc_v9_0_init_sw_mem_ranges(struct amdgpu_device *adev,
 
 	switch (mode) {
 	case UNKNOWN_MEMORY_PARTITION_MODE:
+		adev->gmc.num_mem_partitions = 0;
+		break;
 	case AMDGPU_NPS1_PARTITION_MODE:
 		adev->gmc.num_mem_partitions = 1;
 		break;
@@ -1919,7 +1975,7 @@ gmc_v9_0_init_sw_mem_ranges(struct amdgpu_device *adev,
 
 	/* Use NPS range info, if populated */
 	r = amdgpu_gmc_get_nps_memranges(adev, mem_ranges,
-					 adev->gmc.num_mem_partitions);
+					 &adev->gmc.num_mem_partitions);
 	if (!r) {
 		l = 0;
 		for (i = 1; i < adev->gmc.num_mem_partitions; ++i) {
@@ -1929,6 +1985,11 @@ gmc_v9_0_init_sw_mem_ranges(struct amdgpu_device *adev,
 		}
 
 	} else {
+		if (!adev->gmc.num_mem_partitions) {
+			dev_err(adev->dev,
+				"Not able to detect NPS mode, fall back to NPS1");
+			adev->gmc.num_mem_partitions = 1;
+		}
 		/* Fallback to sw based calculation */
 		size = (adev->gmc.real_vram_size + SZ_16M) >> AMDGPU_GPU_PAGE_SHIFT;
 		size /= adev->gmc.num_mem_partitions;
@@ -2165,6 +2226,7 @@ static int gmc_v9_0_sw_init(struct amdgpu_ip_block *ip_block)
 	if (r)
 		return r;
 
+	gmc_v9_0_init_nps_details(adev);
 	/*
 	 * number of VMs
 	 * VMID 0 is reserved for System
@@ -2435,7 +2497,16 @@ static int gmc_v9_0_suspend(struct amdgpu_ip_block *ip_block)
 
 static int gmc_v9_0_resume(struct amdgpu_ip_block *ip_block)
 {
+	struct amdgpu_device *adev = ip_block->adev;
 	int r;
+
+	/* If a reset is done for NPS mode switch, read the memory range
+	 * information again.
+	 */
+	if (adev->gmc.reset_flags & AMDGPU_GMC_INIT_RESET_NPS) {
+		gmc_v9_0_init_sw_mem_ranges(adev, adev->gmc.mem_partitions);
+		adev->gmc.reset_flags &= ~AMDGPU_GMC_INIT_RESET_NPS;
+	}
 
 	r = gmc_v9_0_hw_init(ip_block);
 	if (r)

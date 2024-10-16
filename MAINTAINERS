@@ -11684,7 +11684,7 @@ F:	drivers/crypto/intel/keembay/ocs-hcu.c
 F:	drivers/crypto/intel/keembay/ocs-hcu.h
 
 INTEL MANAGEMENT ENGINE (mei)
-M:	Tomas Winkler <tomas.winkler@intel.com>
+M:	Alexander Usyskin <alexander.usyskin@intel.com>
 L:	linux-kernel@vger.kernel.org
 S:	Supported
 F:	Documentation/driver-api/mei/*
@@ -15009,6 +15009,7 @@ M:	Andrew Morton <akpm@linux-foundation.org>
 M:	Liam R. Howlett <Liam.Howlett@oracle.com>
 M:	Lorenzo Stoakes <lorenzo.stoakes@oracle.com>
 R:	Vlastimil Babka <vbabka@suse.cz>
+R:	Jann Horn <jannh@google.com>
 L:	linux-mm@kvack.org
 S:	Maintained
 W:	http://www.linux-mm.org
@@ -17044,14 +17045,6 @@ L:	linux-i2c@vger.kernel.org
 S:	Maintained
 F:	Documentation/devicetree/bindings/i2c/ti,omap4-i2c.yaml
 F:	drivers/i2c/busses/i2c-omap.c
-
-OMAP IMAGING SUBSYSTEM (OMAP3 ISP and OMAP4 ISS)
-M:	Laurent Pinchart <laurent.pinchart@ideasonboard.com>
-L:	linux-media@vger.kernel.org
-S:	Maintained
-F:	Documentation/devicetree/bindings/media/ti,omap3isp.txt
-F:	drivers/media/platform/ti/omap3isp/
-F:	drivers/staging/media/omap4iss/
 
 OMAP MMC SUPPORT
 M:	Aaro Koskinen <aaro.koskinen@iki.fi>
@@ -23385,7 +23378,7 @@ F:	Documentation/devicetree/bindings/net/ti,icss*.yaml
 F:	drivers/net/ethernet/ti/icssg/*
 
 TI J721E CSI2RX DRIVER
-M:	Jai Luthra <j-luthra@ti.com>
+M:	Jai Luthra <jai.luthra@linux.dev>
 L:	linux-media@vger.kernel.org
 S:	Maintained
 F:	Documentation/devicetree/bindings/media/ti,j721e-csi2rx-shim.yaml
@@ -24881,6 +24874,7 @@ M:	Andrew Morton <akpm@linux-foundation.org>
 M:	Liam R. Howlett <Liam.Howlett@oracle.com>
 M:	Lorenzo Stoakes <lorenzo.stoakes@oracle.com>
 R:	Vlastimil Babka <vbabka@suse.cz>
+R:	Jann Horn <jannh@google.com>
 L:	linux-mm@kvack.org
 S:	Maintained
 W:	https://www.linux-mm.org

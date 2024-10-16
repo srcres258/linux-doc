@@ -1167,16 +1167,13 @@ nfsd4_setattr(struct svc_rqst *rqstp, struct nfsd4_compound_state *cstate,
 			return status;
 	}
 
-	/*
-	 * If client is trying to set delegated timestamps, ensure that the
-	 * stateid refers to a write delegation.
-	 */
 	if (deleg_attrs) {
 		status = nfserr_bad_stateid;
 		if (st->sc_type & SC_TYPE_DELEG) {
 			struct nfs4_delegation *dp = delegstateid(st);
 
-			if (dp->dl_type == NFS4_OPEN_DELEGATE_WRITE)
+			/* Only for *_ATTRS_DELEG flavors */
+			if (deleg_attrs_deleg(dp->dl_type))
 				status = nfs_ok;
 		}
 	}

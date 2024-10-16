@@ -1458,8 +1458,12 @@ void dcn20_pipe_control_lock(
 	} else {
 		if (lock)
 			pipe->stream_res.tg->funcs->lock(pipe->stream_res.tg);
-		else
-			pipe->stream_res.tg->funcs->unlock(pipe->stream_res.tg);
+		else {
+			if (dc->hwseq->funcs.perform_3dlut_wa_unlock)
+				dc->hwseq->funcs.perform_3dlut_wa_unlock(pipe);
+			else
+				pipe->stream_res.tg->funcs->unlock(pipe->stream_res.tg);
+		}
 	}
 }
 
@@ -2772,7 +2776,6 @@ void dcn20_reset_back_end_for_pipe(
 		struct pipe_ctx *pipe_ctx,
 		struct dc_state *context)
 {
-	int i;
 	struct dc_link *link = pipe_ctx->stream->link;
 	const struct link_hwss *link_hwss = get_link_hwss(link, &pipe_ctx->link_res);
 
@@ -2839,19 +2842,16 @@ void dcn20_reset_back_end_for_pipe(
 		}
 	}
 
-	for (i = 0; i < dc->res_pool->pipe_count; i++)
-		if (&dc->current_state->res_ctx.pipe_ctx[i] == pipe_ctx)
-			break;
-
-	if (i == dc->res_pool->pipe_count)
-		return;
-
 /*
  * In case of a dangling plane, setting this to NULL unconditionally
  * causes failures during reset hw ctx where, if stream is NULL,
  * it is expected that the pipe_ctx pointers to pipes and plane are NULL.
  */
 	pipe_ctx->stream = NULL;
+	pipe_ctx->top_pipe = NULL;
+	pipe_ctx->bottom_pipe = NULL;
+	pipe_ctx->next_odm_pipe = NULL;
+	pipe_ctx->prev_odm_pipe = NULL;
 	DC_LOG_DEBUG("Reset back end for pipe %d, tg:%d\n",
 					pipe_ctx->pipe_idx, pipe_ctx->stream_res.tg->inst);
 }

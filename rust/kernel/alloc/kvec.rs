@@ -354,8 +354,7 @@ where
     ///
     /// - `ptr` must have been allocated with the allocator `A`.
     /// - `ptr` must satisfy or exceed the alignment requirements of `T`.
-    /// - `ptr` must point to memory with a size of at least `size_of::<T>() * capacity`.
-    ///    bytes.
+    /// - `ptr` must point to memory with a size of at least `size_of::<T>() * capacity` bytes.
     /// - The allocated size in bytes must not be larger than `isize::MAX`.
     /// - `length` must be less than or equal to `capacity`.
     /// - The first `length` elements must be initialized values of type `T`.
