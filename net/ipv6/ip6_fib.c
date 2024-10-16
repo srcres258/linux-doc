@@ -198,16 +198,9 @@ static void node_free_immediate(struct net *net, struct fib6_node *fn)
 	net->ipv6.rt6_stats->fib_nodes--;
 }
 
-static void node_free_rcu(struct rcu_head *head)
-{
-	struct fib6_node *fn = container_of(head, struct fib6_node, rcu);
-
-	kmem_cache_free(fib6_node_kmem, fn);
-}
-
 static void node_free(struct net *net, struct fib6_node *fn)
 {
-	call_rcu(&fn->rcu, node_free_rcu);
+	kfree_rcu(fn, rcu);
 	net->ipv6.rt6_stats->fib_nodes--;
 }
 
@@ -345,17 +338,17 @@ static void __net_init fib6_tables_init(struct net *net)
 
 #endif
 
-unsigned int fib6_tables_seq_read(struct net *net)
+unsigned int fib6_tables_seq_read(const struct net *net)
 {
 	unsigned int h, fib_seq = 0;
 
 	rcu_read_lock();
 	for (h = 0; h < FIB6_TABLE_HASHSZ; h++) {
-		struct hlist_head *head = &net->ipv6.fib_table_hash[h];
-		struct fib6_table *tb;
+		const struct hlist_head *head = &net->ipv6.fib_table_hash[h];
+		const struct fib6_table *tb;
 
 		hlist_for_each_entry_rcu(tb, head, tb6_hlist)
-			fib_seq += tb->fib_seq;
+			fib_seq += READ_ONCE(tb->fib_seq);
 	}
 	rcu_read_unlock();
 
@@ -400,7 +393,7 @@ int call_fib6_entry_notifiers(struct net *net,
 		.rt = rt,
 	};
 
-	rt->fib6_table->fib_seq++;
+	WRITE_ONCE(rt->fib6_table->fib_seq, rt->fib6_table->fib_seq + 1);
 	return call_fib6_notifiers(net, event_type, &info.info);
 }
 
@@ -416,7 +409,7 @@ int call_fib6_multipath_entry_notifiers(struct net *net,
 		.nsiblings = nsiblings,
 	};
 
-	rt->fib6_table->fib_seq++;
+	WRITE_ONCE(rt->fib6_table->fib_seq, rt->fib6_table->fib_seq + 1);
 	return call_fib6_notifiers(net, event_type, &info.info);
 }
 
@@ -427,7 +420,7 @@ int call_fib6_entry_notifiers_replace(struct net *net, struct fib6_info *rt)
 		.nsiblings = rt->fib6_nsiblings,
 	};
 
-	rt->fib6_table->fib_seq++;
+	WRITE_ONCE(rt->fib6_table->fib_seq, rt->fib6_table->fib_seq + 1);
 	return call_fib6_notifiers(net, FIB_EVENT_ENTRY_REPLACE, &info.info);
 }
 
