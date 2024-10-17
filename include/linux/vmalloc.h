@@ -261,13 +261,13 @@ static inline bool is_vm_area_hugepages(const void *addr)
 }
 
 /* for /proc/kcore */
-extern long vread_iter(struct iov_iter *iter, const char *addr, size_t count);
+long vread_iter(struct iov_iter *iter, const char *addr, size_t count);
 
 /*
  *	Internals.  Don't use..
  */
-extern __init void vm_area_add_early(struct vm_struct *vm);
-extern __init void vm_area_register_early(struct vm_struct *vm, size_t align);
+__init void vm_area_add_early(struct vm_struct *vm);
+__init void vm_area_register_early(struct vm_struct *vm, size_t align);
 
 int register_vmap_purge_notifier(struct notifier_block *nb);
 int unregister_vmap_purge_notifier(struct notifier_block *nb);
@@ -275,7 +275,7 @@ int unregister_vmap_purge_notifier(struct notifier_block *nb);
 #ifdef CONFIG_MMU
 #define VMALLOC_TOTAL (VMALLOC_END - VMALLOC_START)
 
-extern unsigned long vmalloc_nr_pages(void);
+unsigned long vmalloc_nr_pages(void);
 
 int vm_area_map_pages(struct vm_struct *area, unsigned long start,
 		      unsigned long end, struct page **pages);

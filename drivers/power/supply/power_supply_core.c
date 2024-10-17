@@ -152,7 +152,7 @@ static void power_supply_deferred_register_work(struct work_struct *work)
 						deferred_register_work.work);
 
 	if (psy->dev.parent) {
-		while (!mutex_trylock(&psy->dev.parent->mutex)) {
+		while (!device_trylock(psy->dev.parent)) {
 			if (psy->removing)
 				return;
 			msleep(10);
@@ -162,7 +162,7 @@ static void power_supply_deferred_register_work(struct work_struct *work)
 	power_supply_changed(psy);
 
 	if (psy->dev.parent)
-		mutex_unlock(&psy->dev.parent->mutex);
+		device_unlock(psy->dev.parent);
 }
 
 #ifdef CONFIG_OF
@@ -1231,7 +1231,6 @@ int power_supply_property_is_writeable(struct power_supply *psy,
 {
 	return psy->desc->property_is_writeable && psy->desc->property_is_writeable(psy, psp);
 }
-EXPORT_SYMBOL_GPL(power_supply_property_is_writeable);
 
 void power_supply_external_power_changed(struct power_supply *psy)
 {

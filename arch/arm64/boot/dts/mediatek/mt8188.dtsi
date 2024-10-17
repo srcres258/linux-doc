@@ -1465,14 +1465,14 @@
 			status = "disabled";
 		};
 
-		adsp_mailbox0: mailbox@10b86000 {
+		adsp_mailbox0: mailbox@10b86100 {
 			compatible = "mediatek,mt8188-adsp-mbox", "mediatek,mt8186-adsp-mbox";
 			reg = <0 0x10b86100 0 0x1000>;
 			interrupts = <GIC_SPI 478 IRQ_TYPE_LEVEL_HIGH 0>;
 			#mbox-cells = <0>;
 		};
 
-		adsp_mailbox1: mailbox@10b87000 {
+		adsp_mailbox1: mailbox@10b87100 {
 			compatible = "mediatek,mt8188-adsp-mbox", "mediatek,mt8186-adsp-mbox";
 			reg = <0 0x10b87100 0 0x1000>;
 			interrupts = <GIC_SPI 479 IRQ_TYPE_LEVEL_HIGH 0>;

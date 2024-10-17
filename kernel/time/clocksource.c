@@ -20,6 +20,8 @@
 #include "tick-internal.h"
 #include "timekeeping_internal.h"
 
+static void clocksource_enqueue(struct clocksource *cs);
+
 static noinline u64 cycles_to_nsec_safe(struct clocksource *cs, u64 start, u64 end)
 {
 	u64 delta = clocksource_delta(end, start, cs->mask);
@@ -188,6 +190,13 @@ static void clocksource_watchdog_work(struct work_struct *work)
 	 * watchdog_list will find the unstable clock again.
 	 */
 	kthread_run(clocksource_watchdog_kthread, NULL, "kwatchdog");
+}
+
+static void clocksource_change_rating(struct clocksource *cs, int rating)
+{
+	list_del(&cs->list);
+	cs->rating = rating;
+	clocksource_enqueue(cs);
 }
 
 static void __clocksource_unstable(struct clocksource *cs)
@@ -705,7 +714,7 @@ static int __clocksource_watchdog_kthread(void)
 	list_for_each_entry_safe(cs, tmp, &watchdog_list, wd_list) {
 		if (cs->flags & CLOCK_SOURCE_UNSTABLE) {
 			list_del_init(&cs->wd_list);
-			__clocksource_change_rating(cs, 0);
+			clocksource_change_rating(cs, 0);
 			select = 1;
 		}
 		if (cs->flags & CLOCK_SOURCE_RESELECT) {

@@ -1207,19 +1207,17 @@ static inline void mas_push_node(struct ma_state *mas, struct maple_node *used)
 
 	reuse->request_count = 0;
 	reuse->node_count = 0;
-	if (count && (head->node_count < MAPLE_ALLOC_SLOTS)) {
-		head->slot[head->node_count++] = reuse;
-		head->total++;
-		goto done;
-	}
-
-	reuse->total = 1;
-	if ((head) && !((unsigned long)head & 0x1)) {
+	if (count) {
+		if (head->node_count < MAPLE_ALLOC_SLOTS) {
+			head->slot[head->node_count++] = reuse;
+			head->total++;
+			goto done;
+		}
 		reuse->slot[0] = head;
 		reuse->node_count = 1;
-		reuse->total += head->total;
 	}
 
+	reuse->total = count + 1;
 	mas->alloc = reuse;
 done:
 	if (requested > 1)
@@ -1265,11 +1263,11 @@ static inline void mas_alloc_nodes(struct ma_state *mas, gfp_t gfp)
 
 		mas->alloc = node;
 		node->total = ++allocated;
+		node->request_count = 0;
 		requested--;
 	}
 
 	node = mas->alloc;
-	node->request_count = 0;
 	while (requested) {
 		max_req = MAPLE_ALLOC_SLOTS - node->node_count;
 		slots = (void **)&node->slot[node->node_count];
@@ -1297,10 +1295,9 @@ static inline void mas_alloc_nodes(struct ma_state *mas, gfp_t gfp)
 nomem_bulk:
 	/* Clean up potential freed allocations on bulk failure */
 	memset(slots, 0, max_req * sizeof(unsigned long));
+	mas->alloc->total = allocated;
 nomem_one:
 	mas_set_alloc_req(mas, requested);
-	if (mas->alloc && !(((unsigned long)mas->alloc & 0x1)))
-		mas->alloc->total = allocated;
 	mas_set_err(mas, -ENOMEM);
 }
 
@@ -3886,7 +3883,7 @@ static inline void mas_wr_slot_store(struct ma_wr_state *wr_mas)
 			wr_mas->pivots[offset] = mas->index - 1;
 			mas->offset++; /* Keep mas accurate. */
 		}
-	} else if (!mt_in_rcu(mas->tree)) {
+	} else {
 		/*
 		 * Expand the range, only partially overwriting the previous and
 		 * next ranges
@@ -3896,8 +3893,6 @@ static inline void mas_wr_slot_store(struct ma_wr_state *wr_mas)
 		wr_mas->pivots[offset] = mas->index - 1;
 		wr_mas->pivots[offset + 1] = mas->last;
 		mas->offset++; /* Keep mas accurate. */
-	} else {
-		return;
 	}
 
 	trace_ma_write(__func__, mas, 0, wr_mas->entry);
@@ -4196,13 +4191,13 @@ static inline enum store_type mas_wr_store_type(struct ma_wr_state *wr_mas)
 	if (!wr_mas->entry)
 		mas_wr_extend_null(wr_mas);
 
-	new_end = mas_wr_new_end(wr_mas);
 	if ((wr_mas->r_min == mas->index) && (wr_mas->r_max == mas->last))
 		return wr_exact_fit;
 
 	if (unlikely(!mas->index && mas->last == ULONG_MAX))
 		return wr_new_root;
 
+	new_end = mas_wr_new_end(wr_mas);
 	/* Potential spanning rebalance collapsing a node */
 	if (new_end < mt_min_slots[wr_mas->type]) {
 		if (!mte_is_root(mas->node) && !(mas->mas_flags & MA_STATE_BULK))

@@ -1148,11 +1148,13 @@ static int cfi_disable_callers(s32 *start, s32 *end, struct module *mod)
 
 	for (s = start; s < end; s++) {
 		void *addr = (void *)s + *s;
-		void *wr_addr = module_writable_address(mod, addr);
+		void *wr_addr;
 		u32 hash;
 
 		addr -= fineibt_caller_size;
-		hash = decode_caller_hash(addr);
+		wr_addr = module_writable_address(mod, addr);
+		hash = decode_caller_hash(wr_addr);
+
 		if (!hash) /* nocfi callers */
 			continue;
 
@@ -1172,11 +1174,12 @@ static int cfi_enable_callers(s32 *start, s32 *end, struct module *mod)
 
 	for (s = start; s < end; s++) {
 		void *addr = (void *)s + *s;
-		void *wr_addr = module_writable_address(mod, addr);
+		void *wr_addr;
 		u32 hash;
 
 		addr -= fineibt_caller_size;
-		hash = decode_caller_hash(addr);
+		wr_addr = module_writable_address(mod, addr);
+		hash = decode_caller_hash(wr_addr);
 		if (!hash) /* nocfi callers */
 			continue;
 
@@ -1249,11 +1252,12 @@ static int cfi_rand_callers(s32 *start, s32 *end, struct module *mod)
 
 	for (s = start; s < end; s++) {
 		void *addr = (void *)s + *s;
-		void *wr_addr = module_writable_address(mod, addr);
+		void *wr_addr;
 		u32 hash;
 
 		addr -= fineibt_caller_size;
-		hash = decode_caller_hash(addr);
+		wr_addr = module_writable_address(mod, addr);
+		hash = decode_caller_hash(wr_addr);
 		if (hash) {
 			hash = -cfi_rehash(hash);
 			text_poke_early(wr_addr + 2, &hash, 4);
@@ -1269,14 +1273,15 @@ static int cfi_rewrite_callers(s32 *start, s32 *end, struct module *mod)
 
 	for (s = start; s < end; s++) {
 		void *addr = (void *)s + *s;
-		void *wr_addr = module_writable_address(mod, addr);
+		void *wr_addr;
 		u32 hash;
 
 		addr -= fineibt_caller_size;
-		hash = decode_caller_hash(addr);
+		wr_addr = module_writable_address(mod, addr);
+		hash = decode_caller_hash(wr_addr);
 		if (hash) {
 			text_poke_early(wr_addr, fineibt_caller_start, fineibt_caller_size);
-			WARN_ON(*(u32 *)(addr + fineibt_caller_hash) != 0x12345678);
+			WARN_ON(*(u32 *)(wr_addr + fineibt_caller_hash) != 0x12345678);
 			text_poke_early(wr_addr + fineibt_caller_hash, &hash, 4);
 		}
 		/* rely on apply_retpolines() */

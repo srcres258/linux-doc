@@ -6,6 +6,8 @@
  * Copyright (C) 2024 Mike Rapoport IBM.
  */
 
+#define pr_fmt(fmt) "execmem: " fmt
+
 #include <linux/mm.h>
 #include <linux/mutex.h>
 #include <linux/vmalloc.h>
@@ -23,6 +25,54 @@ static struct execmem_info *execmem_info __ro_after_init;
 static struct execmem_info default_execmem_info __ro_after_init;
 
 #ifdef CONFIG_MMU
+static void *execmem_vmalloc(struct execmem_range *range, size_t size,
+			     pgprot_t pgprot, unsigned long vm_flags)
+{
+	bool kasan = range->flags & EXECMEM_KASAN_SHADOW;
+	gfp_t gfp_flags = GFP_KERNEL | __GFP_NOWARN;
+	unsigned int align = range->alignment;
+	unsigned long start = range->start;
+	unsigned long end = range->end;
+	void *p;
+
+	if (kasan)
+		vm_flags |= VM_DEFER_KMEMLEAK;
+
+	if (vm_flags & VM_ALLOW_HUGE_VMAP)
+		align = PMD_SIZE;
+
+	p = __vmalloc_node_range(size, align, start, end, gfp_flags,
+				 pgprot, vm_flags, NUMA_NO_NODE,
+				 __builtin_return_address(0));
+	if (!p && range->fallback_start) {
+		start = range->fallback_start;
+		end = range->fallback_end;
+		p = __vmalloc_node_range(size, align, start, end, gfp_flags,
+					 pgprot, vm_flags, NUMA_NO_NODE,
+					 __builtin_return_address(0));
+	}
+
+	if (!p) {
+		pr_warn_ratelimited("unable to allocate memory\n");
+		return NULL;
+	}
+
+	if (kasan && (kasan_alloc_module_shadow(p, size, GFP_KERNEL) < 0)) {
+		vfree(p);
+		return NULL;
+	}
+
+	return p;
+}
+#else
+static void *execmem_vmalloc(struct execmem_range *range, size_t size,
+			     pgprot_t pgprot, unsigned long vm_flags)
+{
+	return vmalloc(size);
+}
+#endif /* CONFIG_MMU */
+
+#ifdef CONFIG_ARCH_HAS_EXECMEM_ROX
 struct execmem_cache {
 	struct mutex mutex;
 	struct maple_tree busy_areas;
@@ -73,12 +123,7 @@ static void execmem_cache_clean(struct work_struct *work)
 
 	mutex_lock(mutex);
 	mas_for_each(&mas, area, ULONG_MAX) {
-		size_t size;
-
-		if (!area)
-			continue;
-
-		size = mas_range_len(&mas);
+		size_t size = mas_range_len(&mas);
 
 		if (IS_ALIGNED(size, PMD_SIZE) &&
 		    IS_ALIGNED(mas.index, PMD_SIZE)) {
@@ -93,46 +138,6 @@ static void execmem_cache_clean(struct work_struct *work)
 }
 
 static DECLARE_WORK(execmem_cache_clean_work, execmem_cache_clean);
-
-static void *execmem_vmalloc(struct execmem_range *range, size_t size,
-			     pgprot_t pgprot, unsigned long vm_flags)
-{
-	bool kasan = range->flags & EXECMEM_KASAN_SHADOW;
-	gfp_t gfp_flags = GFP_KERNEL | __GFP_NOWARN;
-	unsigned int align = range->alignment;
-	unsigned long start = range->start;
-	unsigned long end = range->end;
-	void *p;
-
-	if (kasan)
-		vm_flags |= VM_DEFER_KMEMLEAK;
-
-	if (vm_flags & VM_ALLOW_HUGE_VMAP)
-		align = PMD_SIZE;
-
-	p = __vmalloc_node_range(size, align, start, end, gfp_flags,
-				 pgprot, vm_flags, NUMA_NO_NODE,
-				 __builtin_return_address(0));
-	if (!p && range->fallback_start) {
-		start = range->fallback_start;
-		end = range->fallback_end;
-		p = __vmalloc_node_range(size, align, start, end, gfp_flags,
-					 pgprot, vm_flags, NUMA_NO_NODE,
-					 __builtin_return_address(0));
-	}
-
-	if (!p) {
-		pr_warn_ratelimited("execmem: unable to allocate memory\n");
-		return NULL;
-	}
-
-	if (kasan && (kasan_alloc_module_shadow(p, size, GFP_KERNEL) < 0)) {
-		vfree(p);
-		return NULL;
-	}
-
-	return p;
-}
 
 static int execmem_cache_add(void *ptr, size_t size)
 {
@@ -252,7 +257,7 @@ static int execmem_cache_populate(struct execmem_range *range, size_t size)
 		goto err_free_mem;
 
 	/* fill memory with instructions that will trap */
-	execmem_info->fill_trapping_insns(p, alloc_size, /* writable = */ true);
+	execmem_fill_trapping_insns(p, alloc_size, /* writable = */ true);
 
 	start = (unsigned long)p;
 	end = start + alloc_size;
@@ -315,7 +320,7 @@ static bool execmem_cache_free(void *ptr)
 	mas_store_gfp(&mas, NULL, GFP_KERNEL);
 	mutex_unlock(mutex);
 
-	execmem_info->fill_trapping_insns(ptr, size, /* writable = */ false);
+	execmem_fill_trapping_insns(ptr, size, /* writable = */ false);
 
 	execmem_cache_add(ptr, size);
 
@@ -323,9 +328,21 @@ static bool execmem_cache_free(void *ptr)
 
 	return true;
 }
-
-static void *__execmem_alloc(struct execmem_range *range, size_t size)
+#else /* CONFIG_ARCH_HAS_EXECMEM_ROX */
+static void *execmem_cache_alloc(struct execmem_range *range, size_t size)
 {
+	return NULL;
+}
+
+static bool execmem_cache_free(void *ptr)
+{
+	return false;
+}
+#endif /* CONFIG_ARCH_HAS_EXECMEM_ROX */
+
+void *execmem_alloc(enum execmem_type type, size_t size)
+{
+	struct execmem_range *range = &execmem_info->ranges[type];
 	bool use_cache = range->flags & EXECMEM_ROX_CACHE;
 	unsigned long vm_flags = VM_FLUSH_RESET_PERMS;
 	pgprot_t pgprot = range->pgprot;
@@ -337,24 +354,6 @@ static void *__execmem_alloc(struct execmem_range *range, size_t size)
 		p = execmem_vmalloc(range, size, pgprot, vm_flags);
 
 	return kasan_reset_tag(p);
-}
-#else
-static void *__execmem_alloc(struct execmem_range *range, size_t size)
-{
-	return vmalloc(size);
-}
-
-static bool execmem_cache_free(void *ptr)
-{
-	return false;
-}
-#endif
-
-void *execmem_alloc(enum execmem_type type, size_t size)
-{
-	struct execmem_range *range = &execmem_info->ranges[type];
-
-	return __execmem_alloc(range, size);
 }
 
 void execmem_free(void *ptr)
@@ -386,6 +385,17 @@ static bool execmem_validate(struct execmem_info *info)
 	if (!r->alignment || !r->start || !r->end || !pgprot_val(r->pgprot)) {
 		pr_crit("Invalid parameters for execmem allocator, module loading will fail");
 		return false;
+	}
+
+	if (!IS_ENABLED(CONFIG_ARCH_HAS_EXECMEM_ROX)) {
+		for (int i = EXECMEM_DEFAULT; i < EXECMEM_TYPE_MAX; i++) {
+			r = &info->ranges[i];
+
+			if (r->flags & EXECMEM_ROX_CACHE) {
+				pr_warn_once("ROX cache is not supported\n");
+				r->flags &= ~EXECMEM_ROX_CACHE;
+			}
+		}
 	}
 
 	return true;
