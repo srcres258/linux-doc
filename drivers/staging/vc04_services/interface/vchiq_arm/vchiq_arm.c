@@ -1328,7 +1328,6 @@ MODULE_DEVICE_TABLE(of, vchiq_of_match);
 
 static int vchiq_probe(struct platform_device *pdev)
 {
-	struct device_node *fw_node;
 	const struct vchiq_platform_info *info;
 	struct vchiq_drv_mgmt *mgmt;
 	int ret;
@@ -1337,8 +1336,8 @@ static int vchiq_probe(struct platform_device *pdev)
 	if (!info)
 		return -EINVAL;
 
-	fw_node = of_find_compatible_node(NULL, NULL,
-					  "raspberrypi,bcm2835-firmware");
+	struct device_node *fw_node __free(device_node) =
+		of_find_compatible_node(NULL, NULL, "raspberrypi,bcm2835-firmware");
 	if (!fw_node) {
 		dev_err(&pdev->dev, "Missing firmware node\n");
 		return -ENOENT;
@@ -1349,7 +1348,6 @@ static int vchiq_probe(struct platform_device *pdev)
 		return -ENOMEM;
 
 	mgmt->fw = devm_rpi_firmware_get(&pdev->dev, fw_node);
-	of_node_put(fw_node);
 	if (!mgmt->fw)
 		return -EPROBE_DEFER;
 
@@ -1357,8 +1355,10 @@ static int vchiq_probe(struct platform_device *pdev)
 	platform_set_drvdata(pdev, mgmt);
 
 	ret = vchiq_platform_init(pdev, &mgmt->state);
-	if (ret)
-		goto failed_platform_init;
+	if (ret) {
+		dev_err(&pdev->dev, "arm: Could not initialize vchiq platform\n");
+		return ret;
+	}
 
 	vchiq_debugfs_init(&mgmt->state);
 
@@ -1372,18 +1372,13 @@ static int vchiq_probe(struct platform_device *pdev)
 	ret = vchiq_register_chrdev(&pdev->dev);
 	if (ret) {
 		dev_err(&pdev->dev, "arm: Failed to initialize vchiq cdev\n");
-		goto error_exit;
+		return ret;
 	}
 
 	bcm2835_audio = vchiq_device_register(&pdev->dev, "bcm2835-audio");
 	bcm2835_camera = vchiq_device_register(&pdev->dev, "bcm2835-camera");
 
 	return 0;
-
-failed_platform_init:
-	dev_err(&pdev->dev, "arm: Could not initialize vchiq platform\n");
-error_exit:
-	return ret;
 }
 
 static void vchiq_remove(struct platform_device *pdev)

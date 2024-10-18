@@ -690,12 +690,12 @@ static int ni_usb_read(gpib_board_t *board, uint8_t *buffer, size_t length,
 		kfree(in_data);
 		return parse_retval;
 	}
-	kfree(in_data);
 	if (actual_length != length - status.count) {
 		pr_err("%s: actual_length=%i expected=%li\n",
 		       __func__, actual_length, (long)(length - status.count));
 		ni_usb_dump_raw_block(in_data, usb_bytes_read);
 	}
+	kfree(in_data);
 	switch (status.error_code) {
 	case NIUSB_NO_ERROR:
 		retval = 0;
@@ -759,7 +759,6 @@ static int ni_usb_write(gpib_board_t *board, uint8_t *buffer, size_t length,
 	if (!out_data)
 		return -ENOMEM;
 	out_data[i++] = 0x0d;
-	complement_count = length;
 	complement_count = length - 1;
 	complement_count = ~complement_count;
 	out_data[i++] = complement_count & 0xff;

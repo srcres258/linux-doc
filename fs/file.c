@@ -26,49 +26,9 @@
 #include "internal.h"
 
 /**
- * __file_ref_get - Slowpath of file_ref_get()
- * @ref:	Pointer to the reference count
- *
- * Invoked when the reference count is outside of the valid zone.
- *
- * Return:
- *	False if the reference count was already marked dead
- *
- *	True if the reference count is saturated, which prevents the
- *	object from being deconstructed ever.
- */
-bool __file_ref_get(file_ref_t *ref)
-{
-	unsigned long cnt;
-
-	/*
-	 * If the reference count was already marked dead, undo the
-	 * increment so it stays in the middle of the dead zone and return
-	 * fail.
-	 */
-	cnt = atomic_long_read(&ref->refcnt);
-	if (cnt >= FILE_REF_RELEASED) {
-		atomic_long_set(&ref->refcnt, FILE_REF_DEAD);
-		return false;
-	}
-
-	/*
-	 * If it was saturated, warn and mark it so. In case the increment
-	 * was already on a saturated value restore the saturation
-	 * marker. This keeps it in the middle of the saturation zone and
-	 * prevents the reference count from overflowing. This leaks the
-	 * object memory, but prevents the obvious reference count overflow
-	 * damage.
-	 */
-	if (WARN_ONCE(cnt > FILE_REF_MAXREF, "leaking memory because file reference count is saturated"))
-		atomic_long_set(&ref->refcnt, FILE_REF_SATURATED);
-	return true;
-}
-EXPORT_SYMBOL_GPL(__file_ref_get);
-
-/**
  * __file_ref_put - Slowpath of file_ref_put()
  * @ref:	Pointer to the reference count
+ * @cnt:	Current reference count
  *
  * Invoked when the reference count is outside of the valid zone.
  *
@@ -82,12 +42,9 @@ EXPORT_SYMBOL_GPL(__file_ref_get);
  *	with a concurrent get()/put() pair. Caller is not allowed to
  *	deconstruct the protected object.
  */
-bool __file_ref_put(file_ref_t *ref)
+bool __file_ref_put(file_ref_t *ref, unsigned long cnt)
 {
-	unsigned long cnt;
-
 	/* Did this drop the last reference? */
-	cnt = atomic_long_read(&ref->refcnt);
 	if (likely(cnt == FILE_REF_NOREF)) {
 		/*
 		 * Carefully try to set the reference count to FILE_REF_DEAD.
