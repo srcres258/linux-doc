@@ -73,13 +73,13 @@ static struct test_suite *generic_tests[] = {
 	&suite__PERF_RECORD,
 	&suite__pmu,
 	&suite__pmu_events,
+	&suite__tool_pmu,
 	&suite__dso_data,
 	&suite__perf_evsel__roundtrip_name_test,
 #ifdef HAVE_LIBTRACEEVENT
 	&suite__perf_evsel__tp_sched_test,
 	&suite__syscall_openat_tp_fields,
 #endif
-	&suite__attr,
 	&suite__hists_link,
 	&suite__python_use,
 	&suite__bp_signal,
