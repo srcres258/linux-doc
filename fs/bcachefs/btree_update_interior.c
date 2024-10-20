@@ -97,9 +97,9 @@ int bch2_btree_node_check_topology(struct btree_trans *trans, struct btree *b)
 			bch2_topology_error(c);
 
 			printbuf_reset(&buf);
-			prt_str(&buf, "end of prev node doesn't match start of next node\n"),
-			prt_printf(&buf, "  in btree %s level %u node ",
-				   bch2_btree_id_str(b->c.btree_id), b->c.level);
+			prt_str(&buf, "end of prev node doesn't match start of next node\n  in ");
+			bch2_btree_id_level_to_text(&buf, b->c.btree_id, b->c.level);
+			prt_str(&buf, " node ");
 			bch2_bkey_val_to_text(&buf, c, bkey_i_to_s_c(&b->key));
 			prt_str(&buf, "\n  prev ");
 			bch2_bkey_val_to_text(&buf, c, bkey_i_to_s_c(prev.k));
@@ -118,9 +118,9 @@ int bch2_btree_node_check_topology(struct btree_trans *trans, struct btree *b)
 		bch2_topology_error(c);
 
 		printbuf_reset(&buf);
-		prt_str(&buf, "empty interior node\n");
-		prt_printf(&buf, "  in btree %s level %u node ",
-			   bch2_btree_id_str(b->c.btree_id), b->c.level);
+		prt_str(&buf, "empty interior node\n  in ");
+		bch2_btree_id_level_to_text(&buf, b->c.btree_id, b->c.level);
+		prt_str(&buf, " node ");
 		bch2_bkey_val_to_text(&buf, c, bkey_i_to_s_c(&b->key));
 
 		need_fsck_err(trans, btree_node_topology_empty_interior_node, "%s", buf.buf);
@@ -129,9 +129,9 @@ int bch2_btree_node_check_topology(struct btree_trans *trans, struct btree *b)
 		bch2_topology_error(c);
 
 		printbuf_reset(&buf);
-		prt_str(&buf, "last child node doesn't end at end of parent node\n");
-		prt_printf(&buf, "  in btree %s level %u node ",
-			   bch2_btree_id_str(b->c.btree_id), b->c.level);
+		prt_str(&buf, "last child node doesn't end at end of parent node\n  in ");
+		bch2_btree_id_level_to_text(&buf, b->c.btree_id, b->c.level);
+		prt_str(&buf, " node ");
 		bch2_bkey_val_to_text(&buf, c, bkey_i_to_s_c(&b->key));
 		prt_str(&buf, "\n  last key ");
 		bch2_bkey_val_to_text(&buf, c, bkey_i_to_s_c(prev.k));
@@ -2239,10 +2239,8 @@ static void async_btree_node_rewrite_work(struct work_struct *work)
 	struct async_btree_rewrite *a =
 		container_of(work, struct async_btree_rewrite, work);
 	struct bch_fs *c = a->c;
-	int ret;
 
-	ret = bch2_trans_do(c, NULL, NULL, 0,
-		      async_btree_node_rewrite_trans(trans, a));
+	int ret = bch2_trans_do(c, async_btree_node_rewrite_trans(trans, a));
 	bch_err_fn_ratelimited(c, ret);
 	bch2_write_ref_put(c, BCH_WRITE_REF_node_rewrite);
 	kfree(a);
@@ -2570,8 +2568,9 @@ static void bch2_btree_update_to_text(struct printbuf *out, struct btree_update 
 	prt_printf(out, "%ps: ", (void *) as->ip_started);
 	bch2_trans_commit_flags_to_text(out, as->flags);
 
-	prt_printf(out, " btree=%s l=%u-%u mode=%s nodes_written=%u cl.remaining=%u journal_seq=%llu\n",
-		   bch2_btree_id_str(as->btree_id),
+	prt_str(out, " ");
+	bch2_btree_id_to_text(out, as->btree_id);
+	prt_printf(out, " l=%u-%u mode=%s nodes_written=%u cl.remaining=%u journal_seq=%llu\n",
 		   as->update_level_start,
 		   as->update_level_end,
 		   bch2_btree_update_modes[as->mode],
