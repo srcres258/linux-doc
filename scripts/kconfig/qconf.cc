@@ -1240,8 +1240,7 @@ ConfigSearchWindow::ConfigSearchWindow(ConfigMainWindow *parent)
 	layout2->addWidget(searchButton);
 	layout1->addLayout(layout2);
 
-	split = new QSplitter(this);
-	split->setOrientation(Qt::Vertical);
+	split = new QSplitter(Qt::Vertical, this);
 	list = new ConfigList(split, "search");
 	list->mode = listMode;
 	info = new ConfigInfoView(split, "search");
@@ -1341,31 +1340,24 @@ ConfigMainWindow::ConfigMainWindow(void)
 	ConfigItem::menubackIcon = QIcon(QPixmap(xpm_menuback));
 
 	QWidget *widget = new QWidget(this);
-	QVBoxLayout *layout = new QVBoxLayout(widget);
 	setCentralWidget(widget);
 
-	split1 = new QSplitter(widget);
-	split1->setOrientation(Qt::Horizontal);
+	QVBoxLayout *layout = new QVBoxLayout(widget);
+
+	split2 = new QSplitter(Qt::Vertical, widget);
+	layout->addWidget(split2);
+	split2->setChildrenCollapsible(false);
+
+	split1 = new QSplitter(Qt::Horizontal, split2);
 	split1->setChildrenCollapsible(false);
 
-	menuList = new ConfigList(widget, "menu");
+	configList = new ConfigList(split1, "config");
 
-	split2 = new QSplitter(widget);
-	split2->setChildrenCollapsible(false);
-	split2->setOrientation(Qt::Vertical);
+	menuList = new ConfigList(split1, "menu");
 
-	// create config tree
-	configList = new ConfigList(widget, "config");
-
-	helpText = new ConfigInfoView(widget, "help");
-
-	layout->addWidget(split2);
-	split2->addWidget(split1);
-	split1->addWidget(configList);
-	split1->addWidget(menuList);
-	split2->addWidget(helpText);
-
+	helpText = new ConfigInfoView(split2, "help");
 	setTabOrder(configList, helpText);
+
 	configList->setFocus();
 
 	backAction = new QAction(QPixmap(xpm_back), "Back", this);
