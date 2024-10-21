@@ -92,6 +92,7 @@ struct bch_inode_unpacked {
 	BCH_INODE_FIELDS_v3()
 #undef  x
 };
+BITMASK(INODE_STR_HASH,	struct bch_inode_unpacked, bi_flags, 20, 24);
 
 struct bkey_inode_buf {
 	struct bkey_i_inode_v3	inode;
@@ -248,7 +249,7 @@ static inline void bch2_inode_nlink_set(struct bch_inode_unpacked *bi,
 int bch2_inode_nlink_inc(struct bch_inode_unpacked *);
 void bch2_inode_nlink_dec(struct btree_trans *, struct bch_inode_unpacked *);
 
-static inline bool bch2_inode_should_have_bp(struct bch_inode_unpacked *inode)
+static inline bool bch2_inode_should_have_single_bp(struct bch_inode_unpacked *inode)
 {
 	bool inode_has_bp = inode->bi_dir || inode->bi_dir_offset;
 
