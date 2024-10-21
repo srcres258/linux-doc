@@ -1160,9 +1160,14 @@ nfsd4_setattr(struct svc_rqst *rqstp, struct nfsd4_compound_state *cstate,
 					      FATTR4_WORD2_TIME_DELEG_MODIFY);
 
 	if (deleg_attrs || (setattr->sa_iattr.ia_valid & ATTR_SIZE)) {
+		int flags = WR_STATE;
+
+		if (setattr->sa_bmval[2] & FATTR4_WORD2_TIME_DELEG_ACCESS)
+			flags |= RD_STATE;
+
 		status = nfs4_preprocess_stateid_op(rqstp, cstate,
 				&cstate->current_fh, &setattr->sa_stateid,
-				WR_STATE, NULL, &st);
+				flags, NULL, &st);
 		if (status)
 			return status;
 	}
@@ -2819,6 +2824,7 @@ nfsd4_proc_compound(struct svc_rqst *rqstp)
 		if (op->opdesc->op_get_currentstateid)
 			op->opdesc->op_get_currentstateid(cstate, &op->u);
 		op->status = op->opdesc->op_func(rqstp, cstate, &op->u);
+		trace_nfsd_compound_op_err(rqstp, op->opnum, op->status);
 
 		/* Only from SEQUENCE */
 		if (cstate->status == nfserr_replay_cache) {

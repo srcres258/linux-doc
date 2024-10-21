@@ -47,6 +47,7 @@ static inline unsigned int CLEAR_INTR_REG(unsigned int irq)
 }
 
 MODULE_LICENSE("GPL");
+MODULE_DESCRIPTION("GPIB driver for PC2/PC2a and compatible devices");
 
 static int pc2_attach(gpib_board_t *board, const gpib_board_config_t *config);
 static int pc2a_attach(gpib_board_t *board, const gpib_board_config_t *config);
@@ -461,8 +462,10 @@ void pc2_detach(gpib_board_t *board)
 
 	if (pc2_priv) {
 		nec_priv = &pc2_priv->nec7210_priv;
+#ifdef PC2_DMA
 		if (nec_priv->dma_channel)
 			free_dma(nec_priv->dma_channel);
+#endif
 		gpib_free_pseudo_irq(board);
 		if (pc2_priv->irq)
 			free_irq(pc2_priv->irq, board);
@@ -595,8 +598,10 @@ static void pc2a_common_detach(gpib_board_t *board, unsigned int num_registers)
 
 	if (pc2_priv) {
 		nec_priv = &pc2_priv->nec7210_priv;
+#ifdef PC2_DMA
 		if (nec_priv->dma_channel)
 			free_dma(nec_priv->dma_channel);
+#endif
 		gpib_free_pseudo_irq(board);
 		if (pc2_priv->irq)
 			free_irq(pc2_priv->irq, board);

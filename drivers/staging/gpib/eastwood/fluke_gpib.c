@@ -18,6 +18,7 @@
 #include <linux/slab.h>
 
 MODULE_LICENSE("GPL");
+MODULE_DESCRIPTION("GPIB Driver for Fluke cda devices");
 
 static int fluke_attach_holdoff_all(gpib_board_t *board, const gpib_board_config_t *config);
 static int fluke_attach_holdoff_end(gpib_board_t *board, const gpib_board_config_t *config);
@@ -536,7 +537,7 @@ static int fluke_accel_write(gpib_board_t *board, uint8_t *buffer, size_t length
 	return 0;
 }
 
-static unsigned int fluke_get_dma_residue(struct dma_chan *chan, dma_cookie_t cookie)
+static int fluke_get_dma_residue(struct dma_chan *chan, dma_cookie_t cookie)
 {
 	struct dma_tx_state state;
 	int result;
@@ -544,7 +545,7 @@ static unsigned int fluke_get_dma_residue(struct dma_chan *chan, dma_cookie_t co
 	result = dmaengine_pause(chan);
 	if (result < 0) {
 		pr_err("fluke_gpib: dma pause failed?\n");
-		return -1;
+		return result;
 	}
 	dmaengine_tx_status(chan, cookie, &state);
 	// hardware doesn't support resume, so dont call this
@@ -559,7 +560,7 @@ static int fluke_dma_read(gpib_board_t *board, uint8_t *buffer,
 	struct nec7210_priv *nec_priv = &e_priv->nec7210_priv;
 	int retval = 0;
 	unsigned long flags;
-	unsigned int residue;
+	int residue;
 	dma_addr_t bus_address;
 	struct dma_async_tx_descriptor *tx_desc;
 	dma_cookie_t dma_cookie;

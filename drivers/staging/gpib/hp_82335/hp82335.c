@@ -17,6 +17,7 @@
 #include <linux/init.h>
 
 MODULE_LICENSE("GPL");
+MODULE_DESCRIPTION("GPIB driver for HP 82335 interface cards");
 
 static int hp82335_attach(gpib_board_t *board, const gpib_board_config_t *config);
 
@@ -201,10 +202,9 @@ return_to_local : hp82335_return_to_local,
 
 int hp82335_allocate_private(gpib_board_t *board)
 {
-	board->private_data = kmalloc(sizeof(struct hp82335_priv), GFP_KERNEL);
+	board->private_data = kzalloc(sizeof(struct hp82335_priv), GFP_KERNEL);
 	if (!board->private_data)
 		return -1;
-	memset(board->private_data, 0, sizeof(struct hp82335_priv));
 	return 0;
 }
 

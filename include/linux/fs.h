@@ -1085,8 +1085,7 @@ struct file_handle {
 
 static inline struct file *get_file(struct file *f)
 {
-	WARN_ONCE(!file_ref_get(&f->f_ref),
-		  "struct file::f_ref incremented from zero; use-after-free condition present!\n");
+	file_ref_inc(&f->f_ref);
 	return f;
 }
 
@@ -3769,6 +3768,6 @@ static inline bool vfs_empty_path(int dfd, const char __user *path)
 	return !c;
 }
 
-bool generic_atomic_write_valid(struct iov_iter *iter, loff_t pos);
+int generic_atomic_write_valid(struct kiocb *iocb, struct iov_iter *iter);
 
 #endif /* _LINUX_FS_H */

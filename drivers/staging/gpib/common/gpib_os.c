@@ -20,6 +20,7 @@
 #include <linux/uaccess.h>
 
 MODULE_LICENSE("GPL");
+MODULE_DESCRIPTION("GPIB base support");
 MODULE_ALIAS_CHARDEV_MAJOR(GPIB_CODE);
 
 static int board_type_ioctl(gpib_file_private_t *file_priv, gpib_board_t *board, unsigned long arg);
@@ -139,6 +140,7 @@ unsigned int readw_wrapper(void *address)
 };
 EXPORT_SYMBOL(readw_wrapper);
 
+#ifdef CONFIG_HAS_IOPORT
 void outb_wrapper(unsigned int value, void *address)
 {
 	outb(value, (unsigned long)(address));
@@ -162,6 +164,7 @@ unsigned int inw_wrapper(void *address)
 	return inw((unsigned long)(address));
 };
 EXPORT_SYMBOL(inw_wrapper);
+#endif
 
 /* this is a function instead of a constant because of Suse
  * defining HZ to be a function call to get_hz()
@@ -522,6 +525,8 @@ int serial_poll_all(gpib_board_t *board, unsigned int usec_timeout)
  * SPD and UNT are sent at the completion of the poll.
  */
 
+static const int gpib_addr_max = 30;	/* max address for primary/secondary gpib addresses */
+
 int dvrsp(gpib_board_t *board, unsigned int pad, int sad,
 	  unsigned int usec_timeout, uint8_t *result)
 {
@@ -594,11 +599,9 @@ int ibopen(struct inode *inode, struct file *filep)
 	GPIB_DPRINTK("pid %i, gpib: opening minor %d\n", current->pid, minor);
 
 	if (board->use_count == 0) {
-		char module_string[32];
 		int retval;
 
-		snprintf(module_string, sizeof(module_string), "gpib%i", minor);
-		retval = request_module(module_string);
+		retval = request_module("gpib%i", minor);
 		if (retval) {
 			GPIB_DPRINTK("pid %i, gpib: request module returned %i\n",
 				     current->pid, retval);

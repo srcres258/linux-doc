@@ -837,7 +837,19 @@ static unsigned long move_vma(struct vm_area_struct *vma,
 	return new_addr;
 }
 
-static int mremap_vma_check(struct vm_area_struct *vma, unsigned long addr,
+/*
+ * resize_is_valid() - Ensure the vma can be resized to the new length at the give
+ * address.
+ *
+ * @vma: The vma to resize
+ * @addr: The old address
+ * @old_len: The current size
+ * @new_len: The desired size
+ * @flags: The vma flags
+ *
+ * Return 0 on success, error otherwise.
+ */
+static int resize_is_valid(struct vm_area_struct *vma, unsigned long addr,
 	unsigned long old_len, unsigned long new_len, unsigned long flags)
 {
 	struct mm_struct *mm = current->mm;
@@ -886,6 +898,20 @@ static int mremap_vma_check(struct vm_area_struct *vma, unsigned long addr,
 	return 0;
 }
 
+/*
+ * mremap_to() - remap a vma to a new location
+ * @addr: The old address
+ * @old_len: The old size
+ * @new_addr: The target address
+ * @new_len: The new size
+ * @locked: If the returned vma is locked (VM_LOCKED)
+ * @flags: the mremap flags
+ * @uf: The mremap userfaultfd context
+ * @uf_unmap_early: The userfaultfd unmap early context
+ * @uf_unmap: The userfaultfd unmap context
+ *
+ * Returns: The new address of the vma or an error.
+ */
 static unsigned long mremap_to(unsigned long addr, unsigned long old_len,
 		unsigned long new_addr, unsigned long new_len, bool *locked,
 		unsigned long flags, struct vm_userfaultfd_ctx *uf,
@@ -946,7 +972,7 @@ static unsigned long mremap_to(unsigned long addr, unsigned long old_len,
 	if (!vma)
 		return -EFAULT;
 
-	ret = mremap_vma_check(vma, addr, old_len, new_len, flags);
+	ret = resize_is_valid(vma, addr, old_len, new_len, flags);
 	if (ret)
 		return ret;
 
@@ -1118,7 +1144,7 @@ SYSCALL_DEFINE5(mremap, unsigned long, addr, unsigned long, old_len,
 	/*
 	 * Ok, we need to grow..
 	 */
-	ret = mremap_vma_check(vma, addr, old_len, new_len, flags);
+	ret = resize_is_valid(vma, addr, old_len, new_len, flags);
 	if (ret)
 		goto out;
 

@@ -18,6 +18,7 @@
 #include <linux/wait.h>
 
 MODULE_LICENSE("GPL");
+MODULE_DESCRIPTION("GPIB driver for Agilent 82350b");
 
 int agilent_82350b_accel_read(gpib_board_t *board, uint8_t *buffer, size_t length, int *end,
 			      size_t *bytes_read)
@@ -518,10 +519,9 @@ void agilent_82350b_return_to_local(gpib_board_t *board)
 int agilent_82350b_allocate_private(gpib_board_t *board)
 
 {
-	board->private_data = kmalloc(sizeof(struct agilent_82350b_priv), GFP_KERNEL);
+	board->private_data = kzalloc(sizeof(struct agilent_82350b_priv), GFP_KERNEL);
 	if (!board->private_data)
 		return -ENOMEM;
-	memset(board->private_data, 0, sizeof(struct agilent_82350b_priv));
 	return 0;
 }
 

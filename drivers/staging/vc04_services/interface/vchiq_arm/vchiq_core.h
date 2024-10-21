@@ -120,6 +120,8 @@ struct vchiq_bulk {
 	void *remote_data;
 	int remote_size;
 	int actual;
+	void *offset;
+	void __user *uoffset;
 };
 
 struct vchiq_bulk_queue {
@@ -499,14 +501,11 @@ vchiq_bulk_xfer_waiting(struct vchiq_instance *instance, unsigned int handle,
 
 extern int
 vchiq_bulk_xfer_blocking(struct vchiq_instance *instance, unsigned int handle,
-			 void *offset, void __user *uoffset, int size,
-			 void __user *userdata, enum vchiq_bulk_dir dir);
+			 struct vchiq_bulk *bulk);
 
 extern int
 vchiq_bulk_xfer_callback(struct vchiq_instance *instance, unsigned int handle,
-			 void *offset, void __user *uoffset, int size,
-			 enum vchiq_bulk_mode mode, void *userdata,
-			 enum vchiq_bulk_dir dir);
+			 struct vchiq_bulk *bulk);
 
 extern void
 vchiq_dump_state(struct seq_file *f, struct vchiq_state *state);

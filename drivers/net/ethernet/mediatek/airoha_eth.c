@@ -1371,7 +1371,8 @@ static int airoha_fe_init(struct airoha_eth *eth)
 	airoha_fe_set(eth, REG_GDM_MISC_CFG,
 		      GDM2_RDM_ACK_WAIT_PREF_MASK |
 		      GDM2_CHN_VLD_MODE_MASK);
-	airoha_fe_rmw(eth, REG_CDM2_FWD_CFG, CDM2_OAM_QSEL_MASK, 15);
+	airoha_fe_rmw(eth, REG_CDM2_FWD_CFG, CDM2_OAM_QSEL_MASK,
+		      FIELD_PREP(CDM2_OAM_QSEL_MASK, 15));
 
 	/* init fragment and assemble Force Port */
 	/* NPU Core-3, NPU Bridge Channel-3 */
@@ -2341,7 +2342,7 @@ static int airoha_dev_stop(struct net_device *dev)
 {
 	struct airoha_gdm_port *port = netdev_priv(dev);
 	struct airoha_qdma *qdma = port->qdma;
-	int err;
+	int i, err;
 
 	netif_tx_disable(dev);
 	err = airoha_set_gdm_ports(qdma->eth, false);
@@ -2351,6 +2352,14 @@ static int airoha_dev_stop(struct net_device *dev)
 	airoha_qdma_clear(qdma, REG_QDMA_GLOBAL_CFG,
 			  GLOBAL_CFG_TX_DMA_EN_MASK |
 			  GLOBAL_CFG_RX_DMA_EN_MASK);
+
+	for (i = 0; i < ARRAY_SIZE(qdma->q_tx); i++) {
+		if (!qdma->q_tx[i].ndesc)
+			continue;
+
+		airoha_qdma_cleanup_tx_queue(&qdma->q_tx[i]);
+		netdev_tx_reset_subqueue(dev, i);
+	}
 
 	return 0;
 }

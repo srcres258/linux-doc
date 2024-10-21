@@ -190,16 +190,15 @@ static __always_inline bool io_fill_cqe_req(struct io_ring_ctx *ctx,
 	if (unlikely(!io_get_cqe(ctx, &cqe)))
 		return false;
 
-	if (trace_io_uring_complete_enabled())
-		trace_io_uring_complete(req->ctx, req, req->cqe.user_data,
-					req->cqe.res, req->cqe.flags,
-					req->big_cqe.extra1, req->big_cqe.extra2);
 
 	memcpy(cqe, &req->cqe, sizeof(*cqe));
 	if (ctx->flags & IORING_SETUP_CQE32) {
 		memcpy(cqe->big_cqe, &req->big_cqe, sizeof(*cqe));
 		memset(&req->big_cqe, 0, sizeof(req->big_cqe));
 	}
+
+	if (trace_io_uring_complete_enabled())
+		trace_io_uring_complete(req->ctx, req, cqe);
 	return true;
 }
 
@@ -285,7 +284,14 @@ static inline bool io_sqring_full(struct io_ring_ctx *ctx)
 {
 	struct io_rings *r = ctx->rings;
 
-	return READ_ONCE(r->sq.tail) - ctx->cached_sq_head == ctx->sq_entries;
+	/*
+	 * SQPOLL must use the actual sqring head, as using the cached_sq_head
+	 * is race prone if the SQPOLL thread has grabbed entries but not yet
+	 * committed them to the ring. For !SQPOLL, this doesn't matter, but
+	 * since this helper is just used for SQPOLL sqring waits (or POLLOUT),
+	 * just read the actual sqring head unconditionally.
+	 */
+	return READ_ONCE(r->sq.tail) - READ_ONCE(r->sq.head) == ctx->sq_entries;
 }
 
 static inline unsigned int io_sqring_entries(struct io_ring_ctx *ctx)
@@ -321,6 +327,7 @@ static inline int io_run_task_work(void)
 		if (current->io_uring) {
 			unsigned int count = 0;
 
+			__set_current_state(TASK_RUNNING);
 			tctx_task_work_run(current->io_uring, UINT_MAX, &count);
 			if (count)
 				ret = true;

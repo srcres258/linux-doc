@@ -1482,8 +1482,7 @@ is_adjacent_block(u32 *addrs, dma_addr_t addr, unsigned int k)
  * cached area.
  */
 static struct vchiq_pagelist_info *
-create_pagelist(struct vchiq_instance *instance, char *buf, char __user *ubuf,
-		size_t count, unsigned short type)
+create_pagelist(struct vchiq_instance *instance, struct vchiq_bulk *bulk)
 {
 	struct vchiq_drv_mgmt *drv_mgmt;
 	struct pagelist *pagelist;
@@ -1497,16 +1496,19 @@ create_pagelist(struct vchiq_instance *instance, char *buf, char __user *ubuf,
 	int dma_buffers;
 	unsigned int cache_line_size;
 	dma_addr_t dma_addr;
+	size_t count = bulk->size;
+	unsigned short type = (bulk->dir == VCHIQ_BULK_RECEIVE)
+			      ? PAGELIST_READ : PAGELIST_WRITE;
 
 	if (count >= INT_MAX - PAGE_SIZE)
 		return NULL;
 
 	drv_mgmt = dev_get_drvdata(instance->state->dev);
 
-	if (buf)
-		offset = (uintptr_t)buf & (PAGE_SIZE - 1);
+	if (bulk->offset)
+		offset = (uintptr_t)bulk->offset & (PAGE_SIZE - 1);
 	else
-		offset = (uintptr_t)ubuf & (PAGE_SIZE - 1);
+		offset = (uintptr_t)bulk->uoffset & (PAGE_SIZE - 1);
 	num_pages = DIV_ROUND_UP(count + offset, PAGE_SIZE);
 
 	if ((size_t)num_pages > (SIZE_MAX - sizeof(struct pagelist) -
@@ -1554,14 +1556,14 @@ create_pagelist(struct vchiq_instance *instance, char *buf, char __user *ubuf,
 	pagelistinfo->scatterlist = scatterlist;
 	pagelistinfo->scatterlist_mapped = 0;
 
-	if (buf) {
+	if (bulk->offset) {
 		unsigned long length = count;
 		unsigned int off = offset;
 
 		for (actual_pages = 0; actual_pages < num_pages;
 		     actual_pages++) {
 			struct page *pg =
-				vmalloc_to_page((buf +
+				vmalloc_to_page(((unsigned int *)bulk->offset +
 						 (actual_pages * PAGE_SIZE)));
 			size_t bytes = PAGE_SIZE - off;
 
@@ -1578,8 +1580,9 @@ create_pagelist(struct vchiq_instance *instance, char *buf, char __user *ubuf,
 		}
 		/* do not try and release vmalloc pages */
 	} else {
-		actual_pages = pin_user_pages_fast((unsigned long)ubuf & PAGE_MASK, num_pages,
-						   type == PAGELIST_READ, pages);
+		actual_pages =
+			pin_user_pages_fast((unsigned long)bulk->uoffset & PAGE_MASK, num_pages,
+					    type == PAGELIST_READ, pages);
 
 		if (actual_pages != num_pages) {
 			dev_dbg(instance->state->dev, "arm: Only %d/%d pages locked\n",
@@ -1739,15 +1742,11 @@ free_pagelist(struct vchiq_instance *instance, struct vchiq_pagelist_info *pagel
 }
 
 static int
-vchiq_prepare_bulk_data(struct vchiq_instance *instance, struct vchiq_bulk *bulk, void *offset,
-			void __user *uoffset, int size, int dir)
+vchiq_prepare_bulk_data(struct vchiq_instance *instance, struct vchiq_bulk *bulk)
 {
 	struct vchiq_pagelist_info *pagelistinfo;
 
-	pagelistinfo = create_pagelist(instance, offset, uoffset, size,
-				       (dir == VCHIQ_BULK_RECEIVE)
-				       ? PAGELIST_READ
-				       : PAGELIST_WRITE);
+	pagelistinfo = create_pagelist(instance, bulk);
 
 	if (!pagelistinfo)
 		return -ENOMEM;
@@ -3023,29 +3022,26 @@ close_service_complete(struct vchiq_service *service, int failstate)
  */
 static int
 vchiq_bulk_xfer_queue_msg_killable(struct vchiq_service *service,
-				   void *offset, void __user *uoffset,
-				   int size, void *userdata,
-				   enum vchiq_bulk_mode mode,
-				   enum vchiq_bulk_dir dir)
+				   struct vchiq_bulk *bulk_params)
 {
 	struct vchiq_bulk_queue *queue;
 	struct bulk_waiter *bulk_waiter = NULL;
 	struct vchiq_bulk *bulk;
 	struct vchiq_state *state = service->state;
-	const char dir_char = (dir == VCHIQ_BULK_TRANSMIT) ? 't' : 'r';
-	const int dir_msgtype = (dir == VCHIQ_BULK_TRANSMIT) ?
+	const char dir_char = (bulk_params->dir == VCHIQ_BULK_TRANSMIT) ? 't' : 'r';
+	const int dir_msgtype = (bulk_params->dir == VCHIQ_BULK_TRANSMIT) ?
 		VCHIQ_MSG_BULK_TX : VCHIQ_MSG_BULK_RX;
 	int status = -EINVAL;
 	int payload[2];
 
-	if (mode == VCHIQ_BULK_MODE_BLOCKING) {
-		bulk_waiter = userdata;
+	if (bulk_params->mode == VCHIQ_BULK_MODE_BLOCKING) {
+		bulk_waiter = bulk_params->userdata;
 		init_completion(&bulk_waiter->event);
 		bulk_waiter->actual = 0;
 		bulk_waiter->bulk = NULL;
 	}
 
-	queue = (dir == VCHIQ_BULK_TRANSMIT) ?
+	queue = (bulk_params->dir == VCHIQ_BULK_TRANSMIT) ?
 		&service->bulk_tx : &service->bulk_rx;
 
 	if (mutex_lock_killable(&service->bulk_mutex))
@@ -3065,13 +3061,16 @@ vchiq_bulk_xfer_queue_msg_killable(struct vchiq_service *service,
 
 	bulk = &queue->bulks[BULK_INDEX(queue->local_insert)];
 
-	bulk->mode = mode;
-	bulk->dir = dir;
-	bulk->userdata = userdata;
-	bulk->size = size;
+	/* Initiliaze the 'bulk' slot with bulk parameters passed in. */
+	bulk->mode = bulk_params->mode;
+	bulk->dir = bulk_params->dir;
+	bulk->userdata = bulk_params->userdata;
+	bulk->size = bulk_params->size;
+	bulk->offset = bulk_params->offset;
+	bulk->uoffset = bulk_params->uoffset;
 	bulk->actual = VCHIQ_BULK_ACTUAL_ABORTED;
 
-	if (vchiq_prepare_bulk_data(service->instance, bulk, offset, uoffset, size, dir))
+	if (vchiq_prepare_bulk_data(service->instance, bulk))
 		goto unlock_error_exit;
 
 	/*
@@ -3082,7 +3081,7 @@ vchiq_bulk_xfer_queue_msg_killable(struct vchiq_service *service,
 
 	dev_dbg(state->dev, "core: %d: bt (%d->%d) %cx %x@%pad %pK\n",
 		state->id, service->localport, service->remoteport,
-		dir_char, size, &bulk->data, userdata);
+		dir_char, bulk->size, &bulk->data, bulk->userdata);
 
 	/*
 	 * The slot mutex must be held when the service is being closed, so
@@ -3470,11 +3469,9 @@ vchiq_remove_service(struct vchiq_instance *instance, unsigned int handle)
 
 int
 vchiq_bulk_xfer_blocking(struct vchiq_instance *instance, unsigned int handle,
-			 void *offset, void __user *uoffset, int size,
-			 void __user *userdata, enum vchiq_bulk_dir dir)
+			 struct vchiq_bulk *bulk_params)
 {
 	struct vchiq_service *service = find_service_by_handle(instance, handle);
-	enum vchiq_bulk_mode mode = VCHIQ_BULK_MODE_BLOCKING;
 	int status = -EINVAL;
 
 	if (!service)
@@ -3483,15 +3480,14 @@ vchiq_bulk_xfer_blocking(struct vchiq_instance *instance, unsigned int handle,
 	if (service->srvstate != VCHIQ_SRVSTATE_OPEN)
 		goto error_exit;
 
-	if (!offset && !uoffset)
+	if (!bulk_params->offset && !bulk_params->uoffset)
 		goto error_exit;
 
 	if (vchiq_check_service(service))
 		goto error_exit;
 
 
-	status = vchiq_bulk_xfer_queue_msg_killable(service, offset, uoffset, size,
-						    userdata, mode, dir);
+	status = vchiq_bulk_xfer_queue_msg_killable(service, bulk_params);
 
 error_exit:
 	vchiq_service_put(service);
@@ -3501,9 +3497,7 @@ error_exit:
 
 int
 vchiq_bulk_xfer_callback(struct vchiq_instance *instance, unsigned int handle,
-			 void *offset, void __user *uoffset, int size,
-			 enum vchiq_bulk_mode mode, void *userdata,
-			 enum vchiq_bulk_dir dir)
+			 struct vchiq_bulk *bulk_params)
 {
 	struct vchiq_service *service = find_service_by_handle(instance, handle);
 	int status = -EINVAL;
@@ -3511,21 +3505,20 @@ vchiq_bulk_xfer_callback(struct vchiq_instance *instance, unsigned int handle,
 	if (!service)
 		return -EINVAL;
 
-	if (mode != VCHIQ_BULK_MODE_CALLBACK &&
-	    mode != VCHIQ_BULK_MODE_NOCALLBACK)
+	if (bulk_params->mode != VCHIQ_BULK_MODE_CALLBACK &&
+	    bulk_params->mode != VCHIQ_BULK_MODE_NOCALLBACK)
 		goto error_exit;
 
 	if (service->srvstate != VCHIQ_SRVSTATE_OPEN)
 		goto error_exit;
 
-	if (!offset && !uoffset)
+	if (!bulk_params->offset && !bulk_params->uoffset)
 		goto error_exit;
 
 	if (vchiq_check_service(service))
 		goto error_exit;
 
-	status = vchiq_bulk_xfer_queue_msg_killable(service, offset, uoffset,
-						    size, userdata, mode, dir);
+	status = vchiq_bulk_xfer_queue_msg_killable(service, bulk_params);
 
 error_exit:
 	vchiq_service_put(service);

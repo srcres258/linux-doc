@@ -107,8 +107,8 @@ struct vchiq_arm_state {
 };
 
 static int
-vchiq_blocking_bulk_transfer(struct vchiq_instance *instance, unsigned int handle, void *data,
-			     unsigned int size, enum vchiq_bulk_dir dir);
+vchiq_blocking_bulk_transfer(struct vchiq_instance *instance, unsigned int handle,
+			     struct vchiq_bulk *bulk_params);
 
 static irqreturn_t
 vchiq_doorbell_irq(int irq, void *dev_id)
@@ -285,7 +285,7 @@ vchiq_platform_init_state(struct vchiq_state *state)
 {
 	struct vchiq_arm_state *platform_state;
 
-	platform_state = kzalloc(sizeof(*platform_state), GFP_KERNEL);
+	platform_state = devm_kzalloc(state->dev, sizeof(*platform_state), GFP_KERNEL);
 	if (!platform_state)
 		return -ENOMEM;
 
@@ -491,18 +491,28 @@ int
 vchiq_bulk_transmit(struct vchiq_instance *instance, unsigned int handle, const void *data,
 		    unsigned int size, void *userdata, enum vchiq_bulk_mode mode)
 {
+	struct vchiq_bulk bulk_params = {};
 	int ret;
 
 	switch (mode) {
 	case VCHIQ_BULK_MODE_NOCALLBACK:
 	case VCHIQ_BULK_MODE_CALLBACK:
-		ret = vchiq_bulk_xfer_callback(instance, handle, (void *)data,
-					       NULL, size, mode, userdata,
-					       VCHIQ_BULK_TRANSMIT);
+
+		bulk_params.offset = (void *)data;
+		bulk_params.mode = mode;
+		bulk_params.size = size;
+		bulk_params.userdata = userdata;
+		bulk_params.dir = VCHIQ_BULK_TRANSMIT;
+
+		ret = vchiq_bulk_xfer_callback(instance, handle, &bulk_params);
 		break;
 	case VCHIQ_BULK_MODE_BLOCKING:
-		ret = vchiq_blocking_bulk_transfer(instance, handle, (void *)data, size,
-						   VCHIQ_BULK_TRANSMIT);
+		bulk_params.offset = (void *)data;
+		bulk_params.mode = mode;
+		bulk_params.size = size;
+		bulk_params.dir = VCHIQ_BULK_TRANSMIT;
+
+		ret = vchiq_blocking_bulk_transfer(instance, handle, &bulk_params);
 		break;
 	default:
 		return -EINVAL;
@@ -516,17 +526,28 @@ int vchiq_bulk_receive(struct vchiq_instance *instance, unsigned int handle,
 		       void *data, unsigned int size, void *userdata,
 		       enum vchiq_bulk_mode mode)
 {
+	struct vchiq_bulk bulk_params = {};
 	int ret;
 
 	switch (mode) {
 	case VCHIQ_BULK_MODE_NOCALLBACK:
 	case VCHIQ_BULK_MODE_CALLBACK:
-		ret = vchiq_bulk_xfer_callback(instance, handle, (void *)data, NULL,
-					       size, mode, userdata, VCHIQ_BULK_RECEIVE);
+
+		bulk_params.offset = (void *)data;
+		bulk_params.mode = mode;
+		bulk_params.size = size;
+		bulk_params.userdata = userdata;
+		bulk_params.dir = VCHIQ_BULK_RECEIVE;
+
+		ret = vchiq_bulk_xfer_callback(instance, handle, &bulk_params);
 		break;
 	case VCHIQ_BULK_MODE_BLOCKING:
-		ret = vchiq_blocking_bulk_transfer(instance, handle, (void *)data, size,
-						   VCHIQ_BULK_RECEIVE);
+		bulk_params.offset = (void *)data;
+		bulk_params.mode = mode;
+		bulk_params.size = size;
+		bulk_params.dir = VCHIQ_BULK_RECEIVE;
+
+		ret = vchiq_blocking_bulk_transfer(instance, handle, &bulk_params);
 		break;
 	default:
 		return -EINVAL;
@@ -537,8 +558,8 @@ int vchiq_bulk_receive(struct vchiq_instance *instance, unsigned int handle,
 EXPORT_SYMBOL(vchiq_bulk_receive);
 
 static int
-vchiq_blocking_bulk_transfer(struct vchiq_instance *instance, unsigned int handle, void *data,
-			     unsigned int size, enum vchiq_bulk_dir dir)
+vchiq_blocking_bulk_transfer(struct vchiq_instance *instance, unsigned int handle,
+			     struct vchiq_bulk *bulk_params)
 {
 	struct vchiq_service *service;
 	struct bulk_waiter_node *waiter = NULL, *iter;
@@ -566,7 +587,8 @@ vchiq_blocking_bulk_transfer(struct vchiq_instance *instance, unsigned int handl
 		if (bulk) {
 			/* This thread has an outstanding bulk transfer. */
 			/* FIXME: why compare a dma address to a pointer? */
-			if ((bulk->data != (dma_addr_t)(uintptr_t)data) || (bulk->size != size)) {
+			if ((bulk->data != (dma_addr_t)(uintptr_t)bulk_params->data) ||
+			    (bulk->size != bulk_params->size)) {
 				/*
 				 * This is not a retry of the previous one.
 				 * Cancel the signal when the transfer completes.
@@ -582,8 +604,9 @@ vchiq_blocking_bulk_transfer(struct vchiq_instance *instance, unsigned int handl
 			return -ENOMEM;
 	}
 
-	ret = vchiq_bulk_xfer_blocking(instance, handle, data, NULL, size,
-				       &waiter->bulk_waiter, dir);
+	bulk_params->userdata = &waiter->bulk_waiter;
+
+	ret = vchiq_bulk_xfer_blocking(instance, handle, bulk_params);
 	if ((ret != -EAGAIN) || fatal_signal_pending(current) || !waiter->bulk_waiter.bulk) {
 		struct vchiq_bulk *bulk = waiter->bulk_waiter.bulk;
 
@@ -1343,7 +1366,7 @@ static int vchiq_probe(struct platform_device *pdev)
 		return -ENOENT;
 	}
 
-	mgmt = kzalloc(sizeof(*mgmt), GFP_KERNEL);
+	mgmt = devm_kzalloc(&pdev->dev, sizeof(*mgmt), GFP_KERNEL);
 	if (!mgmt)
 		return -ENOMEM;
 
@@ -1397,8 +1420,6 @@ static void vchiq_remove(struct platform_device *pdev)
 
 	arm_state = vchiq_platform_get_arm_state(&mgmt->state);
 	kthread_stop(arm_state->ka_thread);
-
-	kfree(mgmt);
 }
 
 static struct platform_driver vchiq_driver = {

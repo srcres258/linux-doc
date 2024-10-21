@@ -100,7 +100,6 @@ static const int atgpib_reg_offset = 2;
 
 // number of ioports used
 static const int atgpib_iosize = 32;
-static const int pcmcia_gpib_iosize = 32;
 
 /* paged io */
 static inline unsigned int tnt_paged_readb(struct tnt4882_priv *priv, unsigned long offset)
@@ -191,6 +190,7 @@ static inline void tnt_writeb(struct tnt4882_priv *priv, unsigned short value, u
 }
 
 MODULE_LICENSE("GPL");
+MODULE_DESCRIPTION("GPIB driver for National Instruments boards using tnt4882 or compatible chips");
 
 int tnt4882_line_status(const gpib_board_t *board)
 {
@@ -1644,10 +1644,9 @@ static int ni_gpib_probe(struct pcmcia_device *link)
 	DEBUG(0, "%s(0x%p)\n", __func__, link);
 
 	/* Allocate space for private device-specific data */
-	info = kmalloc(sizeof(*info), GFP_KERNEL);
+	info = kzalloc(sizeof(*info), GFP_KERNEL);
 	if (!info)
 		return -ENOMEM;
-	memset(info, 0, sizeof(*info));
 
 	info->p_dev = link;
 	link->priv = info;
@@ -1794,6 +1793,8 @@ void __exit exit_ni_gpib_cs(void)
 	DEBUG(0, "ni_gpib_cs: unloading\n");
 	pcmcia_unregister_driver(&ni_gpib_cs_driver);
 }
+
+static const int pcmcia_gpib_iosize = 32;
 
 int ni_pcmcia_attach(gpib_board_t *board, const gpib_board_config_t *config)
 {

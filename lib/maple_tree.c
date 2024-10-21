@@ -3884,6 +3884,7 @@ static inline void mas_wr_slot_store(struct ma_wr_state *wr_mas)
 			mas->offset++; /* Keep mas accurate. */
 		}
 	} else {
+		WARN_ON_ONCE(mt_in_rcu(mas->tree));
 		/*
 		 * Expand the range, only partially overwriting the previous and
 		 * next ranges

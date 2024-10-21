@@ -57,11 +57,9 @@ void mite_init(void)
 	for (pcidev = pci_get_device(PCI_VENDOR_ID_NATINST, PCI_ANY_ID, NULL);
 		pcidev;
 		pcidev = pci_get_device(PCI_VENDOR_ID_NATINST, PCI_ANY_ID, pcidev)) {
-		mite = kmalloc(sizeof(*mite), GFP_KERNEL);
+		mite = kzalloc(sizeof(*mite), GFP_KERNEL);
 		if (!mite)
 			return;
-
-		memset(mite, 0, sizeof(*mite));
 
 		mite->pcidev = pcidev;
 		pci_dev_get(mite->pcidev);
@@ -82,7 +80,7 @@ int mite_setup(struct mite_struct *mite)
 	if (pci_request_regions(mite->pcidev, "mite")) {
 		pr_err("mite: failed to request mite io regions.\n");
 		return -EIO;
-	};
+	}
 	addr = pci_resource_start(mite->pcidev, 0);
 	mite->mite_phys_addr = addr;
 	mite->mite_io_addr = ioremap(addr, pci_resource_len(mite->pcidev, 0));

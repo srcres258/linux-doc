@@ -69,6 +69,7 @@
 #include <linux/io_uring/cmd.h>
 #include <linux/audit.h>
 #include <linux/security.h>
+#include <linux/jump_label.h>
 #include <asm/shmparam.h>
 
 #define CREATE_TRACE_POINTS
@@ -147,6 +148,8 @@ static bool io_uring_try_cancel_requests(struct io_ring_ctx *ctx,
 					 bool cancel_all);
 
 static void io_queue_sqe(struct io_kiocb *req);
+
+static __read_mostly DEFINE_STATIC_KEY_FALSE(io_key_has_sqarray);
 
 struct kmem_cache *req_cachep;
 static struct workqueue_struct *iou_wq __ro_after_init;
@@ -886,8 +889,6 @@ static bool io_fill_cqe_aux(struct io_ring_ctx *ctx, u64 user_data, s32 res,
 	 * the ring.
 	 */
 	if (likely(io_get_cqe(ctx, &cqe))) {
-		trace_io_uring_complete(ctx, NULL, user_data, res, cflags, 0, 0);
-
 		WRITE_ONCE(cqe->user_data, user_data);
 		WRITE_ONCE(cqe->res, res);
 		WRITE_ONCE(cqe->flags, cflags);
@@ -896,6 +897,8 @@ static bool io_fill_cqe_aux(struct io_ring_ctx *ctx, u64 user_data, s32 res,
 			WRITE_ONCE(cqe->big_cqe[0], 0);
 			WRITE_ONCE(cqe->big_cqe[1], 0);
 		}
+
+		trace_io_uring_complete(ctx, NULL, cqe);
 		return true;
 	}
 	return false;
@@ -1143,20 +1146,6 @@ struct llist_node *io_handle_tw_list(struct llist_node *node,
 	return node;
 }
 
-/**
- * io_llist_xchg - swap all entries in a lock-less list
- * @head:	the head of lock-less list to delete all entries
- * @new:	new entry as the head of the list
- *
- * If list is empty, return NULL, otherwise, return the pointer to the first entry.
- * The order of entries returned is from the newest to the oldest added one.
- */
-static inline struct llist_node *io_llist_xchg(struct llist_head *head,
-					       struct llist_node *new)
-{
-	return xchg(&head->first, new);
-}
-
 static __cold void io_fallback_tw(struct io_uring_task *tctx, bool sync)
 {
 	struct llist_node *node = llist_del_all(&tctx->task_list);
@@ -1378,7 +1367,7 @@ again:
 	 * llists are in reverse order, flip it back the right way before
 	 * running the pending items.
 	 */
-	node = llist_reverse_order(io_llist_xchg(&ctx->work_llist, NULL));
+	node = llist_reverse_order(llist_del_all(&ctx->work_llist));
 	while (node) {
 		struct llist_node *next = node->next;
 		struct io_kiocb *req = container_of(node, struct io_kiocb,
@@ -2330,7 +2319,8 @@ static bool io_get_sqe(struct io_ring_ctx *ctx, const struct io_uring_sqe **sqe)
 	unsigned mask = ctx->sq_entries - 1;
 	unsigned head = ctx->cached_sq_head++ & mask;
 
-	if (!(ctx->flags & IORING_SETUP_NO_SQARRAY)) {
+	if (static_branch_unlikely(&io_key_has_sqarray) &&
+	    (!(ctx->flags & IORING_SETUP_NO_SQARRAY))) {
 		head = READ_ONCE(ctx->sq_array[head]);
 		if (unlikely(head >= ctx->sq_entries)) {
 			/* drop invalid entries */
@@ -2836,6 +2826,9 @@ static __cold void io_ring_ctx_free(struct io_ring_ctx *ctx)
 		ctx->mm_account = NULL;
 	}
 	io_rings_free(ctx);
+
+	if (!(ctx->flags & IORING_SETUP_NO_SQARRAY))
+		static_branch_dec(&io_key_has_sqarray);
 
 	percpu_ref_exit(&ctx->refs);
 	free_uid(ctx->user);
@@ -3627,6 +3620,9 @@ static __cold int io_uring_create(unsigned entries, struct io_uring_params *p,
 
 	ctx->clockid = CLOCK_MONOTONIC;
 	ctx->clock_offset = 0;
+
+	if (!(ctx->flags & IORING_SETUP_NO_SQARRAY))
+		static_branch_inc(&io_key_has_sqarray);
 
 	if ((ctx->flags & IORING_SETUP_DEFER_TASKRUN) &&
 	    !(ctx->flags & IORING_SETUP_IOPOLL) &&

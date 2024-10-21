@@ -22,6 +22,7 @@
 #include "tms9914.h"
 
 MODULE_LICENSE("GPL");
+MODULE_DESCRIPTION("GPIB library for tms9914");
 
 static unsigned int update_status_nolock(gpib_board_t *board, struct tms9914_priv *priv);
 
@@ -439,7 +440,7 @@ static int wait_for_read_byte(gpib_board_t *board, struct tms9914_priv *priv)
 				     test_bit(TIMO_NUM, &board->status))) {
 		pr_debug("gpib: pio read wait interrupted\n");
 		return -ERESTARTSYS;
-	};
+	}
 	if (test_bit(TIMO_NUM, &board->status))
 		return -ETIMEDOUT;
 
@@ -473,7 +474,7 @@ static inline uint8_t tms9914_read_data_in(gpib_board_t *board, struct tms9914_p
 	default:
 		pr_err("%s: bug! bad holdoff mode %i\n", __func__, priv->holdoff_mode);
 		break;
-	};
+	}
 	spin_unlock_irqrestore(&board->spinlock, flags);
 
 	return data;
@@ -815,9 +816,6 @@ irqreturn_t tms9914_interrupt_have_status(gpib_board_t *board, struct tms9914_pr
 }
 EXPORT_SYMBOL(tms9914_interrupt_have_status);
 
-// size of modbus pci memory io region
-static const int iomem_size = 0x2000;
-
 void tms9914_board_reset(struct tms9914_priv *priv)
 {
 	/* chip reset */
@@ -864,6 +862,7 @@ void tms9914_online(gpib_board_t *board, struct tms9914_priv *priv)
 }
 EXPORT_SYMBOL_GPL(tms9914_online);
 
+#ifdef CONFIG_HAS_IOPORT
 // wrapper for inb
 uint8_t tms9914_ioport_read_byte(struct tms9914_priv *priv, unsigned int register_num)
 {
@@ -879,6 +878,7 @@ void tms9914_ioport_write_byte(struct tms9914_priv *priv, uint8_t data, unsigned
 		udelay(1);
 }
 EXPORT_SYMBOL_GPL(tms9914_ioport_write_byte);
+#endif
 
 // wrapper for readb
 uint8_t tms9914_iomem_read_byte(struct tms9914_priv *priv, unsigned int register_num)

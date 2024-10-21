@@ -21,6 +21,7 @@
 #include "quancom_pci.h"
 
 MODULE_LICENSE("GPL");
+MODULE_DESCRIPTION("GPIB driver Measurement Computing boards using cb7210.2 and cbi488.2");
 
 static inline int have_fifo_word(const struct cb7210_priv *cb_priv)
 {
@@ -1199,10 +1200,9 @@ static int cb_gpib_probe(struct pcmcia_device *link)
 	DEBUG(0, "%s(0x%p)\n", __func__, link);
 
 	/* Allocate space for private device-specific data */
-	info = kmalloc(sizeof(*info), GFP_KERNEL);
+	info = kzalloc(sizeof(*info), GFP_KERNEL);
 	if (!info)
 		return -ENOMEM;
-	memset(info, 0, sizeof(*info));
 
 	info->p_dev = link;
 	link->priv = info;

@@ -258,12 +258,6 @@ L:	linux-acenic@sunsite.dk
 S:	Maintained
 F:	drivers/net/ethernet/alteon/acenic*
 
-ACER ASPIRE 1 EMBEDDED CONTROLLER DRIVER
-M:	Nikita Travkin <nikita@trvn.ru>
-S:	Maintained
-F:	Documentation/devicetree/bindings/platform/acer,aspire1-ec.yaml
-F:	drivers/platform/arm64/acer-aspire1-ec.c
-
 ACER ASPIRE ONE TEMPERATURE AND FAN DRIVER
 M:	Peter Kaestle <peter@piie.net>
 L:	platform-driver-x86@vger.kernel.org
@@ -888,7 +882,6 @@ F:	drivers/staging/media/sunxi/cedrus/
 
 ALPHA PORT
 M:	Richard Henderson <richard.henderson@linaro.org>
-M:	Ivan Kokshaysky <ink@jurassic.park.msu.ru>
 M:	Matt Turner <mattst88@gmail.com>
 L:	linux-alpha@vger.kernel.org
 S:	Odd Fixes
@@ -2287,12 +2280,6 @@ M:	Lukasz Majewski <lukma@denx.de>
 L:	linux-arm-kernel@lists.infradead.org (moderated for non-subscribers)
 S:	Maintained
 F:	arch/arm/mach-ep93xx/ts72xx.c
-
-ARM/CIRRUS LOGIC CLPS711X ARM ARCHITECTURE
-M:	Alexander Shiyan <shc_work@mail.ru>
-L:	linux-arm-kernel@lists.infradead.org (moderated for non-subscribers)
-S:	Odd Fixes
-N:	clps711x
 
 ARM/CIRRUS LOGIC EP93XX ARM ARCHITECTURE
 M:	Hartley Sweeten <hsweeten@visionengravers.com>
@@ -3787,6 +3774,7 @@ F:	drivers/spi/spi-axi-spi-engine.c
 AXI PWM GENERATOR
 M:	Michael Hennerich <michael.hennerich@analog.com>
 M:	Nuno Sá <nuno.sa@analog.com>
+R:	Trevor Gamblin <tgamblin@baylibre.com>
 L:	linux-pwm@vger.kernel.org
 S:	Supported
 W:	https://ez.analog.com/linux-software-drivers
@@ -3843,14 +3831,6 @@ F:	Documentation/devicetree/bindings/leds/backlight
 F:	drivers/video/backlight/
 F:	include/linux/backlight.h
 F:	include/linux/pwm_backlight.h
-
-BAIKAL-T1 PVT HARDWARE MONITOR DRIVER
-M:	Serge Semin <fancer.lancer@gmail.com>
-L:	linux-hwmon@vger.kernel.org
-S:	Supported
-F:	Documentation/devicetree/bindings/hwmon/baikal,bt1-pvt.yaml
-F:	Documentation/hwmon/bt1-pvt.rst
-F:	drivers/hwmon/bt1-pvt.[ch]
 
 BARCO P50 GPIO DRIVER
 M:	Santosh Kumar Yadav <santoshkumar.yadav@barco.com>
@@ -6528,7 +6508,6 @@ F:	drivers/mtd/nand/raw/denali*
 
 DESIGNWARE EDMA CORE IP DRIVER
 M:	Manivannan Sadhasivam <manivannan.sadhasivam@linaro.org>
-R:	Serge Semin <fancer.lancer@gmail.com>
 L:	dmaengine@vger.kernel.org
 S:	Maintained
 F:	drivers/dma/dw-edma/
@@ -7438,6 +7417,12 @@ M:	Dzmitry Sankouski <dsankouski@gmail.com>
 S:	Maintained
 F:	Documentation/devicetree/bindings/display/panel/samsung,s6e3ha8.yaml
 F:	drivers/gpu/drm/panel/panel-samsung-s6e3ha8.c
+
+DRM DRIVER FOR SHARP MEMORY LCD
+M:	Alex Lanzano <lanzano.alex@gmail.com>
+S:	Maintained
+F:	Documentation/devicetree/bindings/display/sharp,ls010b7dh04.yaml
+F:	drivers/gpu/drm/tiny/sharp-memory.c
 
 DRM DRIVER FOR SITRONIX ST7586 PANELS
 M:	David Lechner <david@lechnology.com>
@@ -9835,14 +9820,6 @@ F:	drivers/gpio/gpiolib-cdev.c
 F:	include/uapi/linux/gpio.h
 F:	tools/gpio/
 
-GRE DEMULTIPLEXER DRIVER
-M:	Dmitry Kozlov <xeb@mail.ru>
-L:	netdev@vger.kernel.org
-S:	Maintained
-F:	include/net/gre.h
-F:	net/ipv4/gre_demux.c
-F:	net/ipv4/gre_offload.c
-
 GRETH 10/100/1G Ethernet MAC device driver
 M:	Andreas Larsson <andreas@gaisler.com>
 L:	netdev@vger.kernel.org
@@ -11362,10 +11339,10 @@ F:	security/integrity/
 F:	security/integrity/ima/
 
 INTEGRITY POLICY ENFORCEMENT (IPE)
-M:	Fan Wu <wufan@linux.microsoft.com>
+M:	Fan Wu <wufan@kernel.org>
 L:	linux-security-module@vger.kernel.org
 S:	Supported
-T:	git https://github.com/microsoft/ipe.git
+T:	git git://git.kernel.org/pub/scm/linux/kernel/git/wufan/ipe.git
 F:	Documentation/admin-guide/LSM/ipe.rst
 F:	Documentation/security/ipe.rst
 F:	scripts/ipe/
@@ -13055,12 +13032,6 @@ S:	Maintained
 F:	drivers/ata/pata_arasan_cf.c
 F:	include/linux/pata_arasan_cf_data.h
 
-LIBATA PATA DRIVERS
-R:	Sergey Shtylyov <s.shtylyov@omp.ru>
-L:	linux-ide@vger.kernel.org
-F:	drivers/ata/ata_*.c
-F:	drivers/ata/pata_*.c
-
 LIBATA PATA FARADAY FTIDE010 AND GEMINI SATA BRIDGE DRIVERS
 M:	Linus Walleij <linus.walleij@linaro.org>
 L:	linux-ide@vger.kernel.org
@@ -13076,14 +13047,6 @@ S:	Maintained
 F:	drivers/ata/ahci_platform.c
 F:	drivers/ata/libahci_platform.c
 F:	include/linux/ahci_platform.h
-
-LIBATA SATA AHCI SYNOPSYS DWC CONTROLLER DRIVER
-M:	Serge Semin <fancer.lancer@gmail.com>
-L:	linux-ide@vger.kernel.org
-S:	Maintained
-F:	Documentation/devicetree/bindings/ata/baikal,bt1-ahci.yaml
-F:	Documentation/devicetree/bindings/ata/snps,dwc-ahci.yaml
-F:	drivers/ata/ahci_dwc.c
 
 LIBATA SATA PROMISE TX2/TX4 CONTROLLER DRIVER
 M:	Mikael Pettersson <mikpelinux@gmail.com>
@@ -14289,16 +14252,6 @@ S:	Maintained
 T:	git git://linuxtv.org/media_tree.git
 F:	drivers/media/platform/nxp/imx-pxp.[ch]
 
-MEDIA DRIVERS FOR ASCOT2E
-M:	Sergey Kozlov <serjk@netup.ru>
-M:	Abylay Ospan <aospan@netup.ru>
-L:	linux-media@vger.kernel.org
-S:	Supported
-W:	https://linuxtv.org
-W:	http://netup.tv/
-T:	git git://linuxtv.org/media_tree.git
-F:	drivers/media/dvb-frontends/ascot2e*
-
 MEDIA DRIVERS FOR CXD2099AR CI CONTROLLERS
 M:	Jasmin Jessich <jasmin@anw.at>
 L:	linux-media@vger.kernel.org
@@ -14306,16 +14259,6 @@ S:	Maintained
 W:	https://linuxtv.org
 T:	git git://linuxtv.org/media_tree.git
 F:	drivers/media/dvb-frontends/cxd2099*
-
-MEDIA DRIVERS FOR CXD2841ER
-M:	Sergey Kozlov <serjk@netup.ru>
-M:	Abylay Ospan <aospan@netup.ru>
-L:	linux-media@vger.kernel.org
-S:	Supported
-W:	https://linuxtv.org
-W:	http://netup.tv/
-T:	git git://linuxtv.org/media_tree.git
-F:	drivers/media/dvb-frontends/cxd2841er*
 
 MEDIA DRIVERS FOR CXD2880
 M:	Yasunari Takiguchi <Yasunari.Takiguchi@sony.com>
@@ -14361,51 +14304,12 @@ F:	drivers/media/platform/nxp/imx-mipi-csis.c
 F:	drivers/media/platform/nxp/imx7-media-csi.c
 F:	drivers/media/platform/nxp/imx8mq-mipi-csi2.c
 
-MEDIA DRIVERS FOR HELENE
-M:	Abylay Ospan <aospan@netup.ru>
-L:	linux-media@vger.kernel.org
-S:	Supported
-W:	https://linuxtv.org
-W:	http://netup.tv/
-T:	git git://linuxtv.org/media_tree.git
-F:	drivers/media/dvb-frontends/helene*
-
-MEDIA DRIVERS FOR HORUS3A
-M:	Sergey Kozlov <serjk@netup.ru>
-M:	Abylay Ospan <aospan@netup.ru>
-L:	linux-media@vger.kernel.org
-S:	Supported
-W:	https://linuxtv.org
-W:	http://netup.tv/
-T:	git git://linuxtv.org/media_tree.git
-F:	drivers/media/dvb-frontends/horus3a*
-
-MEDIA DRIVERS FOR LNBH25
-M:	Sergey Kozlov <serjk@netup.ru>
-M:	Abylay Ospan <aospan@netup.ru>
-L:	linux-media@vger.kernel.org
-S:	Supported
-W:	https://linuxtv.org
-W:	http://netup.tv/
-T:	git git://linuxtv.org/media_tree.git
-F:	drivers/media/dvb-frontends/lnbh25*
-
 MEDIA DRIVERS FOR MXL5XX TUNER DEMODULATORS
 L:	linux-media@vger.kernel.org
 S:	Orphan
 W:	https://linuxtv.org
 T:	git git://linuxtv.org/media_tree.git
 F:	drivers/media/dvb-frontends/mxl5xx*
-
-MEDIA DRIVERS FOR NETUP PCI UNIVERSAL DVB devices
-M:	Sergey Kozlov <serjk@netup.ru>
-M:	Abylay Ospan <aospan@netup.ru>
-L:	linux-media@vger.kernel.org
-S:	Supported
-W:	https://linuxtv.org
-W:	http://netup.tv/
-T:	git git://linuxtv.org/media_tree.git
-F:	drivers/media/pci/netup_unidvb/*
 
 MEDIA DRIVERS FOR NVIDIA TEGRA - VDE
 M:	Dmitry Osipenko <digetx@gmail.com>
@@ -15070,13 +14974,6 @@ F:	drivers/mtd/
 F:	include/linux/mtd/
 F:	include/uapi/mtd/
 
-MEMSENSING MICROSYSTEMS MSA311 DRIVER
-M:	Dmitry Rokosov <ddrokosov@sberdevices.ru>
-L:	linux-iio@vger.kernel.org
-S:	Maintained
-F:	Documentation/devicetree/bindings/iio/accel/memsensing,msa311.yaml
-F:	drivers/iio/accel/msa311.c
-
 MEN A21 WATCHDOG DRIVER
 M:	Johannes Thumshirn <morbidrsa@gmail.com>
 L:	linux-watchdog@vger.kernel.org
@@ -15412,7 +15309,6 @@ F:	drivers/tty/serial/8250/8250_pci1xxxx.c
 
 MICROCHIP POLARFIRE FPGA DRIVERS
 M:	Conor Dooley <conor.dooley@microchip.com>
-R:	Vladimir Georgiev <v.georgiev@metrotek.ru>
 L:	linux-fpga@vger.kernel.org
 S:	Supported
 F:	Documentation/devicetree/bindings/fpga/microchip,mpf-spi-fpga-mgr.yaml
@@ -15668,17 +15564,6 @@ F:	arch/mips/
 F:	drivers/platform/mips/
 F:	include/dt-bindings/mips/
 
-MIPS BAIKAL-T1 PLATFORM
-M:	Serge Semin <fancer.lancer@gmail.com>
-L:	linux-mips@vger.kernel.org
-S:	Supported
-F:	Documentation/devicetree/bindings/bus/baikal,bt1-*.yaml
-F:	Documentation/devicetree/bindings/clock/baikal,bt1-*.yaml
-F:	drivers/bus/bt1-*.c
-F:	drivers/clk/baikal-t1/
-F:	drivers/memory/bt1-l2-ctl.c
-F:	drivers/mtd/maps/physmap-bt1-rom.[ch]
-
 MIPS BOSTON DEVELOPMENT BOARD
 M:	Paul Burton <paulburton@kernel.org>
 L:	linux-mips@vger.kernel.org
@@ -15691,7 +15576,6 @@ F:	include/dt-bindings/clock/boston-clock.h
 
 MIPS CORE DRIVERS
 M:	Thomas Bogendoerfer <tsbogend@alpha.franken.de>
-M:	Serge Semin <fancer.lancer@gmail.com>
 L:	linux-mips@vger.kernel.org
 S:	Supported
 F:	drivers/bus/mips_cdmm.c
@@ -16294,6 +16178,7 @@ M:	"David S. Miller" <davem@davemloft.net>
 M:	Eric Dumazet <edumazet@google.com>
 M:	Jakub Kicinski <kuba@kernel.org>
 M:	Paolo Abeni <pabeni@redhat.com>
+R:	Simon Horman <horms@kernel.org>
 L:	netdev@vger.kernel.org
 S:	Maintained
 P:	Documentation/process/maintainer-netdev.rst
@@ -16336,6 +16221,7 @@ F:	include/uapi/linux/rtnetlink.h
 F:	lib/net_utils.c
 F:	lib/random32.c
 F:	net/
+F:	samples/pktgen/
 F:	tools/net/
 F:	tools/testing/selftests/net/
 X:	Documentation/networking/mac80211-injection.rst
@@ -16659,12 +16545,6 @@ F:	drivers/pci/endpoint/functions/pci-epf-*ntb.c
 F:	include/linux/ntb.h
 F:	include/linux/ntb_transport.h
 F:	tools/testing/selftests/ntb/
-
-NTB IDT DRIVER
-M:	Serge Semin <fancer.lancer@gmail.com>
-L:	ntb@lists.linux.dev
-S:	Supported
-F:	drivers/ntb/hw/idt/
 
 NTB INTEL DRIVER
 M:	Dave Jiang <dave.jiang@intel.com>
@@ -18680,13 +18560,6 @@ F:	drivers/pps/
 F:	include/linux/pps*.h
 F:	include/uapi/linux/pps.h
 
-PPTP DRIVER
-M:	Dmitry Kozlov <xeb@mail.ru>
-L:	netdev@vger.kernel.org
-S:	Maintained
-W:	http://sourceforge.net/projects/accel-pptp
-F:	drivers/net/ppp/pptp.c
-
 PRESSURE STALL INFORMATION (PSI)
 M:	Johannes Weiner <hannes@cmpxchg.org>
 M:	Suren Baghdasaryan <surenb@google.com>
@@ -19533,6 +19406,13 @@ F:	Documentation/devicetree/bindings/media/raspberrypi,pispbe.yaml
 F:	drivers/media/platform/raspberrypi/pisp_be/
 F:	include/uapi/linux/media/raspberrypi/
 
+RASPBERRY PI PISP CAMERA FRONT END
+M:	Tomi Valkeinen <tomi.valkeinen@ideasonboard.com>
+M:	Raspberry Pi Kernel Maintenance <kernel-list@raspberrypi.com>
+S:	Maintained
+F:	Documentation/devicetree/bindings/media/raspberrypi,rp1-cfe.yaml
+F:	drivers/media/platform/raspberrypi/rp1-cfe/
+
 RC-CORE / LIRC FRAMEWORK
 M:	Sean Young <sean@mess.org>
 L:	linux-media@vger.kernel.org
@@ -19667,6 +19547,14 @@ S:	Maintained
 F:	Documentation/tools/rtla/
 F:	tools/tracing/rtla/
 
+Real-time Linux (PREEMPT_RT)
+M:	Sebastian Andrzej Siewior <bigeasy@linutronix.de>
+M:	Clark Williams <clrkwllms@kernel.org>
+M:	Steven Rostedt <rostedt@goodmis.org>
+L:	linux-rt-devel@lists.linux.dev
+S:	Supported
+K:	PREEMPT_RT
+
 REALTEK AUDIO CODECS
 M:	Oder Chiou <oder_chiou@realtek.com>
 S:	Maintained
@@ -19771,15 +19659,6 @@ S:	Supported
 F:	Documentation/devicetree/bindings/i2c/renesas,iic-emev2.yaml
 F:	drivers/i2c/busses/i2c-emev2.c
 
-RENESAS ETHERNET AVB DRIVER
-R:	Sergey Shtylyov <s.shtylyov@omp.ru>
-L:	netdev@vger.kernel.org
-L:	linux-renesas-soc@vger.kernel.org
-F:	Documentation/devicetree/bindings/net/renesas,etheravb.yaml
-F:	drivers/net/ethernet/renesas/Kconfig
-F:	drivers/net/ethernet/renesas/Makefile
-F:	drivers/net/ethernet/renesas/ravb*
-
 RENESAS ETHERNET SWITCH DRIVER
 R:	Yoshihiro Shimoda <yoshihiro.shimoda.uh@renesas.com>
 L:	netdev@vger.kernel.org
@@ -19828,14 +19707,6 @@ F:	Documentation/devicetree/bindings/i2c/renesas,rcar-i2c.yaml
 F:	Documentation/devicetree/bindings/i2c/renesas,rmobile-iic.yaml
 F:	drivers/i2c/busses/i2c-rcar.c
 F:	drivers/i2c/busses/i2c-sh_mobile.c
-
-RENESAS R-CAR SATA DRIVER
-R:	Sergey Shtylyov <s.shtylyov@omp.ru>
-L:	linux-ide@vger.kernel.org
-L:	linux-renesas-soc@vger.kernel.org
-S:	Supported
-F:	Documentation/devicetree/bindings/ata/renesas,rcar-sata.yaml
-F:	drivers/ata/sata_rcar.c
 
 RENESAS R-CAR THERMAL DRIVERS
 M:	Niklas Söderlund <niklas.soderlund@ragnatech.se>
@@ -19911,16 +19782,6 @@ L:	linux-renesas-soc@vger.kernel.org
 S:	Supported
 F:	Documentation/devicetree/bindings/i2c/renesas,rzv2m.yaml
 F:	drivers/i2c/busses/i2c-rzv2m.c
-
-RENESAS SUPERH ETHERNET DRIVER
-R:	Sergey Shtylyov <s.shtylyov@omp.ru>
-L:	netdev@vger.kernel.org
-L:	linux-renesas-soc@vger.kernel.org
-F:	Documentation/devicetree/bindings/net/renesas,ether.yaml
-F:	drivers/net/ethernet/renesas/Kconfig
-F:	drivers/net/ethernet/renesas/Makefile
-F:	drivers/net/ethernet/renesas/sh_eth*
-F:	include/linux/sh_eth.h
 
 RENESAS USB PHY DRIVER
 M:	Yoshihiro Shimoda <yoshihiro.shimoda.uh@renesas.com>
@@ -22572,18 +22433,10 @@ F:	drivers/tty/serial/8250/8250_lpss.c
 
 SYNOPSYS DESIGNWARE APB GPIO DRIVER
 M:	Hoan Tran <hoan@os.amperecomputing.com>
-M:	Serge Semin <fancer.lancer@gmail.com>
 L:	linux-gpio@vger.kernel.org
 S:	Maintained
 F:	Documentation/devicetree/bindings/gpio/snps,dw-apb-gpio.yaml
 F:	drivers/gpio/gpio-dwapb.c
-
-SYNOPSYS DESIGNWARE APB SSI DRIVER
-M:	Serge Semin <fancer.lancer@gmail.com>
-L:	linux-spi@vger.kernel.org
-S:	Supported
-F:	Documentation/devicetree/bindings/spi/snps,dw-apb-ssi.yaml
-F:	drivers/spi/spi-dw*
 
 SYNOPSYS DESIGNWARE AXI DMAC DRIVER
 M:	Eugeniy Paltsev <Eugeniy.Paltsev@synopsys.com>
@@ -23438,7 +23291,7 @@ F:	Documentation/devicetree/bindings/iio/adc/ti,lmp92064.yaml
 F:	drivers/iio/adc/ti-lmp92064.c
 
 TI PCM3060 ASoC CODEC DRIVER
-M:	Kirill Marinushkin <kmarinushkin@birdec.com>
+M:	Kirill Marinushkin <k.marinushkin@gmail.com>
 L:	linux-sound@vger.kernel.org
 S:	Maintained
 F:	Documentation/devicetree/bindings/sound/pcm3060.txt
@@ -23910,12 +23763,6 @@ M:	Bastien Nocera <hadess@hadess.net>
 L:	linux-input@vger.kernel.org
 S:	Maintained
 F:	drivers/hid/hid-udraw-ps3.c
-
-UFS FILESYSTEM
-M:	Evgeniy Dushistov <dushistov@mail.ru>
-S:	Maintained
-F:	Documentation/admin-guide/ufs.rst
-F:	fs/ufs/
 
 UHID USERSPACE HID IO DRIVER
 M:	David Rheinsberg <david@readahead.eu>

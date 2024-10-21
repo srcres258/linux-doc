@@ -19,6 +19,7 @@
 #include "gpib_pci_ids.h"
 
 MODULE_LICENSE("GPL");
+MODULE_DESCRIPTION("GPIB driver for Ines iGPIB 72010");
 
 int ines_line_status(const gpib_board_t *board)
 {
@@ -86,8 +87,6 @@ unsigned int ines_t1_delay(gpib_board_t *board, unsigned int nano_sec)
 
 	return retval;
 }
-
-static const int in_fifo_size = 0xff;
 
 static inline unsigned short num_in_fifo_bytes(struct ines_priv *ines_priv)
 {
@@ -884,6 +883,8 @@ int ines_pci_accel_attach(gpib_board_t *board, const gpib_board_config_t *config
 	return 0;
 }
 
+static const int ines_isa_iosize = 0x20;
+
 int ines_isa_attach(gpib_board_t *board, const gpib_board_config_t *config)
 {
 	struct ines_priv *ines_priv;
@@ -994,6 +995,8 @@ static int pc_debug = PCMCIA_DEBUG;
 #define DEBUG(args...)
 #endif
 
+static const int ines_pcmcia_iosize = 0x20;
+
 /*    The event() function is this driver's Card Services event handler.
  *    It will be called by Card Services when an appropriate card status
  *    event is received.  The config() and release() entry points are
@@ -1063,10 +1066,9 @@ static int ines_gpib_probe(struct pcmcia_device *link)
 	DEBUG(0, "%s(0x%p)\n", __func__ link);
 
 	/* Allocate space for private device-specific data */
-	info = kmalloc(sizeof(*info), GFP_KERNEL);
+	info = kzalloc(sizeof(*info), GFP_KERNEL);
 	if (!info)
 		return -ENOMEM;
-	memset(info, 0, sizeof(*info));
 
 	info->p_dev = link;
 	link->priv = info;
