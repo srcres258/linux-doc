@@ -6779,7 +6779,7 @@ __bpf_kfunc_start_defs();
  * Indicate that the BPF scheduler wants to exit gracefully, and initiate ops
  * disabling.
  */
-__bpf_kfunc void scx_bpf_exit_bstr(s64 exit_code, char *fmt,
+__bpf_kfunc void scx_bpf_exit_bstr(s64 exit_code, char *fmt__str,
 				   unsigned long long *data, u32 data__sz)
 {
 	unsigned long flags;
@@ -6800,7 +6800,7 @@ __bpf_kfunc void scx_bpf_exit_bstr(s64 exit_code, char *fmt,
  * Indicate that the BPF scheduler encountered a fatal error and initiate ops
  * disabling.
  */
-__bpf_kfunc void scx_bpf_error_bstr(char *fmt, unsigned long long *data,
+__bpf_kfunc void scx_bpf_error_bstr(char *fmt__str, unsigned long long *data,
 				    u32 data__sz)
 {
 	unsigned long flags;
@@ -6824,7 +6824,7 @@ __bpf_kfunc void scx_bpf_error_bstr(char *fmt, unsigned long long *data,
  * The extra dump may be multiple lines. A single line may be split over
  * multiple calls. The last line is automatically terminated.
  */
-__bpf_kfunc void scx_bpf_dump_bstr(char *fmt, unsigned long long *data,
+__bpf_kfunc void scx_bpf_dump_bstr(char *fmt__str, unsigned long long *data,
 				   u32 data__sz)
 {
 	struct scx_dump_data *dd = &scx_dump_data;
