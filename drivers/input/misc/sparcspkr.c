@@ -69,7 +69,6 @@ static int bbc_spkr_event(struct input_dev *dev, unsigned int type, unsigned int
 	struct sparcspkr_state *state = dev_get_drvdata(dev->dev.parent);
 	struct bbc_beep_info *info = &state->u.bbc;
 	unsigned int count = 0;
-	unsigned long flags;
 
 	if (type != EV_SND)
 		return -1;
@@ -85,7 +84,7 @@ static int bbc_spkr_event(struct input_dev *dev, unsigned int type, unsigned int
 
 	count = bbc_count_to_reg(info, count);
 
-	spin_lock_irqsave(&state->lock, flags);
+	guard(spinlock_irqsave)(&state->lock);
 
 	if (count) {
 		sbus_writeb(0x01,                 info->regs + 0);
@@ -97,8 +96,6 @@ static int bbc_spkr_event(struct input_dev *dev, unsigned int type, unsigned int
 		sbus_writeb(0x00,                 info->regs + 0);
 	}
 
-	spin_unlock_irqrestore(&state->lock, flags);
-
 	return 0;
 }
 
@@ -107,7 +104,6 @@ static int grover_spkr_event(struct input_dev *dev, unsigned int type, unsigned 
 	struct sparcspkr_state *state = dev_get_drvdata(dev->dev.parent);
 	struct grover_beep_info *info = &state->u.grover;
 	unsigned int count = 0;
-	unsigned long flags;
 
 	if (type != EV_SND)
 		return -1;
@@ -121,7 +117,7 @@ static int grover_spkr_event(struct input_dev *dev, unsigned int type, unsigned 
 	if (value > 20 && value < 32767)
 		count = 1193182 / value;
 
-	spin_lock_irqsave(&state->lock, flags);
+	guard(spinlock_irqsave)(&state->lock);
 
 	if (count) {
 		/* enable counter 2 */
@@ -135,8 +131,6 @@ static int grover_spkr_event(struct input_dev *dev, unsigned int type, unsigned 
 		/* disable counter 2 */
 		sbus_writeb(sbus_readb(info->enable_reg) & 0xFC, info->enable_reg);
 	}
-
-	spin_unlock_irqrestore(&state->lock, flags);
 
 	return 0;
 }
@@ -262,7 +256,7 @@ static struct platform_driver bbc_beep_driver = {
 		.of_match_table = bbc_beep_match,
 	},
 	.probe		= bbc_beep_probe,
-	.remove_new	= bbc_remove,
+	.remove		= bbc_remove,
 	.shutdown	= sparcspkr_shutdown,
 };
 
@@ -340,7 +334,7 @@ static struct platform_driver grover_beep_driver = {
 		.of_match_table = grover_beep_match,
 	},
 	.probe		= grover_beep_probe,
-	.remove_new	= grover_remove,
+	.remove		= grover_remove,
 	.shutdown	= sparcspkr_shutdown,
 };
 
