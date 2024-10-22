@@ -758,7 +758,7 @@ out:
 	return ret;
 }
 
-int bch2_journal_flush_seq(struct journal *j, u64 seq)
+int bch2_journal_flush_seq(struct journal *j, u64 seq, unsigned task_state)
 {
 	u64 start_time = local_clock();
 	int ret, ret2;
@@ -769,7 +769,9 @@ int bch2_journal_flush_seq(struct journal *j, u64 seq)
 	if (seq <= j->flushed_seq_ondisk)
 		return 0;
 
-	ret = wait_event_interruptible(j->wait, (ret2 = bch2_journal_flush_seq_async(j, seq, NULL)));
+	ret = wait_event_state(j->wait,
+			       (ret2 = bch2_journal_flush_seq_async(j, seq, NULL)),
+			       task_state);
 
 	if (!ret)
 		bch2_time_stats_update(j->flush_seq_time, start_time);
@@ -788,7 +790,7 @@ void bch2_journal_flush_async(struct journal *j, struct closure *parent)
 
 int bch2_journal_flush(struct journal *j)
 {
-	return bch2_journal_flush_seq(j, atomic64_read(&j->seq));
+	return bch2_journal_flush_seq(j, atomic64_read(&j->seq), TASK_UNINTERRUPTIBLE);
 }
 
 /*
@@ -829,19 +831,14 @@ out:
 	return ret;
 }
 
-int bch2_journal_meta(struct journal *j)
+static int __bch2_journal_meta(struct journal *j)
 {
-	struct journal_buf *buf;
-	struct journal_res res;
-	int ret;
-
-	memset(&res, 0, sizeof(res));
-
-	ret = bch2_journal_res_get(j, &res, jset_u64s(0), 0);
+	struct journal_res res = {};
+	int ret = bch2_journal_res_get(j, &res, jset_u64s(0), 0);
 	if (ret)
 		return ret;
 
-	buf = j->buf + (res.seq & JOURNAL_BUF_MASK);
+	struct journal_buf *buf = j->buf + (res.seq & JOURNAL_BUF_MASK);
 	buf->must_flush = true;
 
 	if (!buf->flush_time) {
@@ -851,7 +848,19 @@ int bch2_journal_meta(struct journal *j)
 
 	bch2_journal_res_put(j, &res);
 
-	return bch2_journal_flush_seq(j, res.seq);
+	return bch2_journal_flush_seq(j, res.seq, TASK_UNINTERRUPTIBLE);
+}
+
+int bch2_journal_meta(struct journal *j)
+{
+	struct bch_fs *c = container_of(j, struct bch_fs, journal);
+
+	if (!bch2_write_ref_tryget(c, BCH_WRITE_REF_journal))
+		return -EROFS;
+
+	int ret = __bch2_journal_meta(j);
+	bch2_write_ref_put(c, BCH_WRITE_REF_journal);
+	return ret;
 }
 
 /* block/unlock the journal: */
@@ -1191,7 +1200,7 @@ void bch2_fs_journal_stop(struct journal *j)
 	 * Always write a new journal entry, to make sure the clock hands are up
 	 * to date (and match the superblock)
 	 */
-	bch2_journal_meta(j);
+	__bch2_journal_meta(j);
 
 	journal_quiesce(j);
 	cancel_delayed_work_sync(&j->write_work);
