@@ -1535,7 +1535,6 @@ again:
 	buffer_cnt = cpu_buffer->cnt;
 	tmp = head;
 	raw_spin_unlock_irqrestore(&cpu_buffer->reader_lock, flags);
-		return;
 
 	while (true) {
 		raw_spin_lock_irqsave(&cpu_buffer->reader_lock, flags);
@@ -6807,6 +6806,7 @@ int ring_buffer_subbuf_order_set(struct trace_buffer *buffer, int order)
 		cpu_buffer->pages = cpu_buffer->new_pages.next;
 		cpu_buffer->cnt++;
 		list_del_init(&cpu_buffer->new_pages);
+		cpu_buffer->cnt++;
 
 		cpu_buffer->head_page
 			= list_entry(cpu_buffer->pages, struct buffer_page, list);

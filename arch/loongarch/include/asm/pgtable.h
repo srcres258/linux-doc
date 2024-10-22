@@ -327,7 +327,11 @@ extern void paging_init(void);
 static inline void set_pte(pte_t *ptep, pte_t pteval)
 {
 	WRITE_ONCE(*ptep, pteval);
-	DBAR(0b11000); /* o_wrw = 0b11000 */
+
+#ifdef CONFIG_SMP
+	if (pte_val(pteval) & _PAGE_GLOBAL)
+		DBAR(0b11000); /* o_wrw = 0b11000 */
+#endif
 }
 
 static inline void pte_clear(struct mm_struct *mm, unsigned long addr, pte_t *ptep)

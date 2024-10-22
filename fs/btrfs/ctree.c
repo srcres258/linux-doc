@@ -1508,13 +1508,12 @@ static noinline void unlock_up(struct btrfs_path *path, int level,
  */
 static int
 read_block_for_search(struct btrfs_root *root, struct btrfs_path *p,
-		      struct extent_buffer **eb_ret, int level, int slot,
+		      struct extent_buffer **eb_ret, int slot,
 		      const struct btrfs_key *key)
 {
 	struct btrfs_fs_info *fs_info = root->fs_info;
 	struct btrfs_tree_parent_check check = { 0 };
 	u64 blocknr;
-	u64 gen;
 	struct extent_buffer *tmp = NULL;
 	int ret = 0;
 	int parent_level;
@@ -1524,12 +1523,11 @@ read_block_for_search(struct btrfs_root *root, struct btrfs_path *p,
 	bool path_released = false;
 
 	blocknr = btrfs_node_blockptr(*eb_ret, slot);
-	gen = btrfs_node_ptr_generation(*eb_ret, slot);
 	parent_level = btrfs_header_level(*eb_ret);
 	btrfs_node_key_to_cpu(*eb_ret, &check.first_key, slot);
 	check.has_first_key = true;
 	check.level = parent_level - 1;
-	check.transid = gen;
+	check.transid = btrfs_node_ptr_generation(*eb_ret, slot);
 	check.owner_root = btrfs_root_id(root);
 
 	/*
@@ -1542,17 +1540,16 @@ read_block_for_search(struct btrfs_root *root, struct btrfs_path *p,
 	tmp = find_extent_buffer(fs_info, blocknr);
 	if (tmp) {
 		if (p->reada == READA_FORWARD_ALWAYS)
-			reada_for_search(fs_info, p, level, slot, key->objectid);
+			reada_for_search(fs_info, p, parent_level, slot, key->objectid);
 
 		/* first we do an atomic uptodate check */
-		if (btrfs_buffer_uptodate(tmp, gen, 1) > 0) {
+		if (btrfs_buffer_uptodate(tmp, check.transid, 1) > 0) {
 			/*
 			 * Do extra check for first_key, eb can be stale due to
 			 * being cached, read from scrub, or have multiple
 			 * parents (shared tree blocks).
 			 */
-			if (btrfs_verify_level_key(tmp,
-					parent_level - 1, &check.first_key, gen)) {
+			if (btrfs_verify_level_key(tmp, &check)) {
 				ret = -EUCLEAN;
 				goto out;
 			}
@@ -1568,7 +1565,7 @@ read_block_for_search(struct btrfs_root *root, struct btrfs_path *p,
 		}
 
 		if (!p->skip_locking) {
-			btrfs_unlock_up_safe(p, level + 1);
+			btrfs_unlock_up_safe(p, parent_level + 1);
 			tmp_locked = true;
 			btrfs_tree_read_lock(tmp);
 			btrfs_release_path(p);
@@ -1595,12 +1592,12 @@ read_block_for_search(struct btrfs_root *root, struct btrfs_path *p,
 	}
 
 	if (!p->skip_locking) {
-		btrfs_unlock_up_safe(p, level + 1);
+		btrfs_unlock_up_safe(p, parent_level + 1);
 		ret = -EAGAIN;
 	}
 
 	if (p->reada != READA_NONE)
-		reada_for_search(fs_info, p, level, slot, key->objectid);
+		reada_for_search(fs_info, p, parent_level, slot, key->objectid);
 
 	tmp = btrfs_find_create_tree_block(fs_info, blocknr, check.owner_root, check.level);
 	if (IS_ERR(tmp)) {
@@ -2236,7 +2233,7 @@ cow_done:
 			goto done;
 		}
 
-		err = read_block_for_search(root, p, &b, level, slot, key);
+		err = read_block_for_search(root, p, &b, slot, key);
 		if (err == -EAGAIN && !p->nowait)
 			goto again;
 		if (err) {
@@ -2363,7 +2360,7 @@ again:
 			goto done;
 		}
 
-		err = read_block_for_search(root, p, &b, level, slot, key);
+		err = read_block_for_search(root, p, &b, slot, key);
 		if (err == -EAGAIN && !p->nowait)
 			goto again;
 		if (err) {
@@ -4969,8 +4966,7 @@ again:
 		}
 
 		next = c;
-		ret = read_block_for_search(root, path, &next, level,
-					    slot, &key);
+		ret = read_block_for_search(root, path, &next, slot, &key);
 		if (ret == -EAGAIN && !path->nowait)
 			goto again;
 
@@ -5013,8 +5009,7 @@ again:
 		if (!level)
 			break;
 
-		ret = read_block_for_search(root, path, &next, level,
-					    0, &key);
+		ret = read_block_for_search(root, path, &next, 0, &key);
 		if (ret == -EAGAIN && !path->nowait)
 			goto again;
 

@@ -30,7 +30,7 @@ struct posix_acl {
 	refcount_t		a_refcount;
 	unsigned int		a_count;
 	struct rcu_head		a_rcu;
-	struct posix_acl_entry	a_entries[];
+	struct posix_acl_entry	a_entries[] __counted_by(a_count);
 };
 
 #define FOREACH_ACL_ENTRY(pa, acl, pe) \

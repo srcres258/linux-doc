@@ -1406,7 +1406,7 @@ int btrfs_quota_disable(struct btrfs_fs_info *fs_info)
 	fs_info->quota_root = NULL;
 	fs_info->qgroup_flags &= ~BTRFS_QGROUP_STATUS_FLAG_ON;
 	fs_info->qgroup_flags &= ~BTRFS_QGROUP_STATUS_FLAG_SIMPLE_MODE;
-	fs_info->qgroup_drop_subtree_thres = BTRFS_MAX_LEVEL;
+	fs_info->qgroup_drop_subtree_thres = BTRFS_QGROUP_DROP_SUBTREE_THRES_DEFAULT;
 	spin_unlock(&fs_info->qgroup_lock);
 
 	btrfs_free_qgroup_config(fs_info);
@@ -2648,7 +2648,6 @@ int btrfs_qgroup_trace_subtree(struct btrfs_trans_handle *trans,
 
 	if (!extent_buffer_uptodate(root_eb)) {
 		struct btrfs_tree_parent_check check = {
-			.has_first_key = false,
 			.transid = root_gen,
 			.level = root_level
 		};
