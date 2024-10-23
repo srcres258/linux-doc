@@ -2223,6 +2223,18 @@ static int gfx_v9_0_sw_init(struct amdgpu_ip_block *ip_block)
 	}
 
 	switch (amdgpu_ip_version(adev, GC_HWIP, 0)) {
+	case IP_VERSION(9, 4, 2):
+		adev->gfx.cleaner_shader_ptr = gfx_9_4_2_cleaner_shader_hex;
+		adev->gfx.cleaner_shader_size = sizeof(gfx_9_4_2_cleaner_shader_hex);
+		if (adev->gfx.mec_fw_version >= 88) {
+			adev->gfx.enable_cleaner_shader = true;
+			r = amdgpu_gfx_cleaner_shader_sw_init(adev, adev->gfx.cleaner_shader_size);
+			if (r) {
+				adev->gfx.enable_cleaner_shader = false;
+				dev_err(adev->dev, "Failed to initialize cleaner shader\n");
+			}
+		}
+		break;
 	default:
 		adev->gfx.enable_cleaner_shader = false;
 		break;
@@ -7256,10 +7268,6 @@ static int gfx_v9_0_reset_kcq(struct amdgpu_ring *ring,
 	struct amdgpu_ring *kiq_ring = &kiq->ring;
 	unsigned long flags;
 	int i, r;
-
-	if (!adev->debug_exp_resets &&
-	    !adev->gfx.num_gfx_rings)
-		return -EINVAL;
 
 	if (amdgpu_sriov_vf(adev))
 		return -EINVAL;

@@ -39,14 +39,9 @@ int landlock_append_net_rule(struct landlock_ruleset *const ruleset,
 	return err;
 }
 
-static const struct landlock_ruleset *get_current_net_domain(void)
-{
-	const union access_masks any_net = {
-		.net = ~0,
-	};
-
-	return landlock_match_ruleset(landlock_get_current_domain(), any_net);
-}
+static const struct access_masks any_net = {
+	.net = ~0,
+};
 
 static int current_check_access_socket(struct socket *const sock,
 				       struct sockaddr *const address,
@@ -59,7 +54,8 @@ static int current_check_access_socket(struct socket *const sock,
 	struct landlock_id id = {
 		.type = LANDLOCK_KEY_NET_PORT,
 	};
-	const struct landlock_ruleset *const dom = get_current_net_domain();
+	const struct landlock_ruleset *const dom =
+		landlock_match_ruleset(landlock_get_current_domain(), any_net);
 
 	if (!dom)
 		return 0;

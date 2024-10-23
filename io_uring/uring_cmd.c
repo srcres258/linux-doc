@@ -277,15 +277,16 @@ int io_uring_cmd_import_fixed(u64 ubuf, unsigned long len, int rw,
 {
 	struct io_kiocb *req = cmd_to_io_kiocb(ioucmd);
 	struct io_ring_ctx *ctx = req->ctx;
-	struct io_mapped_ubuf *imu;
-	int ret;
 
-	mutex_lock(&ctx->uring_lock);
-	imu = ctx->user_bufs[req->buf_index];
-	ret = io_import_fixed(rw, iter, imu, ubuf, len);
-	mutex_unlock(&ctx->uring_lock);
+	/* Must have had rsrc_node assigned at prep time */
+	if (req->rsrc_node) {
+		struct io_mapped_ubuf *imu;
 
-	return ret;
+		imu = READ_ONCE(ctx->user_bufs[req->buf_index]);
+		return io_import_fixed(rw, iter, imu, ubuf, len);
+	}
+
+	return -EFAULT;
 }
 EXPORT_SYMBOL_GPL(io_uring_cmd_import_fixed);
 

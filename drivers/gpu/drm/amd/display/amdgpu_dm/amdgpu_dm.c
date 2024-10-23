@@ -3407,8 +3407,6 @@ static const struct amd_ip_funcs amdgpu_dm_funcs = {
 	.soft_reset = dm_soft_reset,
 	.set_clockgating_state = dm_set_clockgating_state,
 	.set_powergating_state = dm_set_powergating_state,
-	.dump_ip_state = NULL,
-	.print_ip_state = NULL,
 };
 
 const struct amdgpu_ip_block_version dm_ip_block = {
@@ -8389,7 +8387,8 @@ static void manage_dm_interrupts(struct amdgpu_device *adev,
 		if (amdgpu_ip_version(adev, DCE_HWIP, 0) <
 		    IP_VERSION(3, 5, 0) ||
 		    acrtc_state->stream->link->psr_settings.psr_version <
-		    DC_PSR_VERSION_UNSUPPORTED) {
+		    DC_PSR_VERSION_UNSUPPORTED ||
+		    !(adev->flags & AMD_IS_APU)) {
 			timing = &acrtc_state->stream->timing;
 
 			/* at least 2 frames */

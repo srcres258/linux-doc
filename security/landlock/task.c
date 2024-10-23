@@ -204,22 +204,16 @@ static bool is_abstract_socket(struct sock *const sock)
 	return false;
 }
 
-static const struct landlock_ruleset *get_current_unix_scope_domain(void)
-{
-	const union access_masks unix_scope = {
-		.scope = LANDLOCK_SCOPE_ABSTRACT_UNIX_SOCKET,
-	};
-
-	return landlock_match_ruleset(landlock_get_current_domain(),
-				      unix_scope);
-}
+static const struct access_masks unix_scope = {
+	.scope = LANDLOCK_SCOPE_ABSTRACT_UNIX_SOCKET,
+};
 
 static int hook_unix_stream_connect(struct sock *const sock,
 				    struct sock *const other,
 				    struct sock *const newsk)
 {
-	const struct landlock_ruleset *const dom =
-		get_current_unix_scope_domain();
+	const struct landlock_ruleset *const dom = landlock_match_ruleset(
+		landlock_get_current_domain(), unix_scope);
 
 	/* Quick return for non-landlocked tasks. */
 	if (!dom)
@@ -234,8 +228,8 @@ static int hook_unix_stream_connect(struct sock *const sock,
 static int hook_unix_may_send(struct socket *const sock,
 			      struct socket *const other)
 {
-	const struct landlock_ruleset *const dom =
-		get_current_unix_scope_domain();
+	const struct landlock_ruleset *const dom = landlock_match_ruleset(
+		landlock_get_current_domain(), unix_scope);
 
 	if (!dom)
 		return 0;
@@ -253,7 +247,7 @@ static int hook_unix_may_send(struct socket *const sock,
 	return 0;
 }
 
-static const union access_masks signal_scope = {
+static const struct access_masks signal_scope = {
 	.scope = LANDLOCK_SCOPE_SIGNAL,
 };
 

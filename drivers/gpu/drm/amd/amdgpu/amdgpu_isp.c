@@ -33,16 +33,6 @@
 #include "isp_v4_1_0.h"
 #include "isp_v4_1_1.h"
 
-static int isp_sw_init(struct amdgpu_ip_block *ip_block)
-{
-	return 0;
-}
-
-static int isp_sw_fini(struct amdgpu_ip_block *ip_block)
-{
-	return 0;
-}
-
 /**
  * isp_hw_init - start and test isp block
  *
@@ -74,16 +64,6 @@ static int isp_hw_fini(struct amdgpu_ip_block *ip_block)
 		return isp->funcs->hw_fini(isp);
 
 	return -ENODEV;
-}
-
-static int isp_suspend(struct amdgpu_ip_block *ip_block)
-{
-	return 0;
-}
-
-static int isp_resume(struct amdgpu_ip_block *ip_block)
-{
-	return 0;
 }
 
 static int isp_load_fw_by_psp(struct amdgpu_device *adev)
@@ -148,16 +128,6 @@ static bool isp_is_idle(void *handle)
 	return true;
 }
 
-static int isp_wait_for_idle(struct amdgpu_ip_block *ip_block)
-{
-	return 0;
-}
-
-static int isp_soft_reset(struct amdgpu_ip_block *ip_block)
-{
-	return 0;
-}
-
 static int isp_set_clockgating_state(void *handle,
 				     enum amd_clockgating_state state)
 {
@@ -173,16 +143,9 @@ static int isp_set_powergating_state(void *handle,
 static const struct amd_ip_funcs isp_ip_funcs = {
 	.name = "isp_ip",
 	.early_init = isp_early_init,
-	.late_init = NULL,
-	.sw_init = isp_sw_init,
-	.sw_fini = isp_sw_fini,
 	.hw_init = isp_hw_init,
 	.hw_fini = isp_hw_fini,
-	.suspend = isp_suspend,
-	.resume = isp_resume,
 	.is_idle = isp_is_idle,
-	.wait_for_idle = isp_wait_for_idle,
-	.soft_reset = isp_soft_reset,
 	.set_clockgating_state = isp_set_clockgating_state,
 	.set_powergating_state = isp_set_powergating_state,
 };

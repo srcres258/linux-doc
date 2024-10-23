@@ -50,9 +50,14 @@ union access_masks {
 	u32 all;
 };
 
+union access_masks_all {
+	struct access_masks masks;
+	u32 all;
+};
+
 /* Makes sure all fields are covered. */
-static_assert(sizeof(((union access_masks *)NULL)->all) ==
-	      sizeof(union access_masks));
+static_assert(sizeof(((union access_masks_all *)NULL)->masks) ==
+	      sizeof(((union access_masks_all *)NULL)->all));
 
 typedef u16 layer_mask_t;
 /* Makes sure all layers can be checked. */
@@ -274,16 +279,22 @@ static inline void landlock_get_ruleset(struct landlock_ruleset *const ruleset)
  *
  * Returns: an access_masks result of the OR of all the ruleset's access masks.
  */
-static inline union access_masks
+static inline struct access_masks
 landlock_merge_access_masks(const struct landlock_ruleset *const ruleset)
 {
+	union access_masks_all matches = {};
 	size_t layer_level;
-	union access_masks matches = {};
 
-	for (layer_level = 0; layer_level < ruleset->num_layers; layer_level++)
-		matches.all |= ruleset->access_masks[layer_level].all;
+	for (layer_level = 0; layer_level < ruleset->num_layers;
+	     layer_level++) {
+		union access_masks_all layer = {
+			.masks = ruleset->access_masks[layer_level],
+		};
 
-	return matches;
+		matches.all |= layer.all;
+	}
+
+	return matches.masks;
 }
 
 /**
@@ -296,12 +307,18 @@ landlock_merge_access_masks(const struct landlock_ruleset *const ruleset)
  */
 static inline const struct landlock_ruleset *
 landlock_match_ruleset(const struct landlock_ruleset *const ruleset,
-		       const union access_masks masks)
+		       const struct access_masks masks)
 {
+	const union access_masks_all masks_all = {
+		.masks = masks,
+	};
+	union access_masks_all merge = {};
+
 	if (!ruleset)
 		return NULL;
 
-	if (landlock_merge_access_masks(ruleset).all & masks.all)
+	merge.masks = landlock_merge_access_masks(ruleset);
+	if (merge.all & masks_all.all)
 		return ruleset;
 
 	return NULL;

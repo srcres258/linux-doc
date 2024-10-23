@@ -28,7 +28,7 @@
 
 static int amdgpu_reset_xgmi_reset_on_init_suspend(struct amdgpu_device *adev)
 {
-	int i, r;
+	int i;
 
 	for (i = adev->num_ip_blocks - 1; i >= 0; i--) {
 		if (!adev->ip_blocks[i].status.valid)
@@ -40,14 +40,15 @@ static int amdgpu_reset_xgmi_reset_on_init_suspend(struct amdgpu_device *adev)
 			continue;
 
 		/* XXX handle errors */
-		r = adev->ip_blocks[i].version->funcs->suspend(&adev->ip_blocks[i]);
-		/* XXX handle errors */
-		if (r) {
-			dev_err(adev->dev, "suspend of IP block <%s> failed %d",
-				adev->ip_blocks[i].version->funcs->name, r);
-		}
+		amdgpu_ip_block_suspend(&adev->ip_blocks[i]);
 		adev->ip_blocks[i].status.hw = false;
 	}
+
+	/* VCN FW shared region is in frambuffer, there are some flags
+	 * initialized in that region during sw_init. Make sure the region is
+	 * backed up.
+	 */
+	amdgpu_vcn_save_vcpu_bo(adev);
 
 	return 0;
 }

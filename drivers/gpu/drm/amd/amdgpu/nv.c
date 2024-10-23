@@ -983,11 +983,6 @@ static int nv_common_sw_init(struct amdgpu_ip_block *ip_block)
 	return 0;
 }
 
-static int nv_common_sw_fini(struct amdgpu_ip_block *ip_block)
-{
-	return 0;
-}
-
 static int nv_common_hw_init(struct amdgpu_ip_block *ip_block)
 {
 	struct amdgpu_device *adev = ip_block->adev;
@@ -1042,16 +1037,6 @@ static int nv_common_resume(struct amdgpu_ip_block *ip_block)
 static bool nv_common_is_idle(void *handle)
 {
 	return true;
-}
-
-static int nv_common_wait_for_idle(struct amdgpu_ip_block *ip_block)
-{
-	return 0;
-}
-
-static int nv_common_soft_reset(struct amdgpu_ip_block *ip_block)
-{
-	return 0;
 }
 
 static int nv_common_set_clockgating_state(void *handle,
@@ -1111,17 +1096,12 @@ static const struct amd_ip_funcs nv_common_ip_funcs = {
 	.early_init = nv_common_early_init,
 	.late_init = nv_common_late_init,
 	.sw_init = nv_common_sw_init,
-	.sw_fini = nv_common_sw_fini,
 	.hw_init = nv_common_hw_init,
 	.hw_fini = nv_common_hw_fini,
 	.suspend = nv_common_suspend,
 	.resume = nv_common_resume,
 	.is_idle = nv_common_is_idle,
-	.wait_for_idle = nv_common_wait_for_idle,
-	.soft_reset = nv_common_soft_reset,
 	.set_clockgating_state = nv_common_set_clockgating_state,
 	.set_powergating_state = nv_common_set_powergating_state,
 	.get_clockgating_state = nv_common_get_clockgating_state,
-	.dump_ip_state = NULL,
-	.print_ip_state = NULL,
 };

@@ -705,7 +705,7 @@ static int elevator_change(struct request_queue *q, const char *elevator_name)
 }
 
 void elv_iosched_load_module(struct gendisk *disk, const char *buf,
-			    size_t count)
+			     size_t count)
 {
 	char elevator_name[ELV_NAME_MAX];
 	struct elevator_type *found;

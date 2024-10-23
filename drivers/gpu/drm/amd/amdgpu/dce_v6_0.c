@@ -2843,11 +2843,6 @@ static bool dce_v6_0_is_idle(void *handle)
 	return true;
 }
 
-static int dce_v6_0_wait_for_idle(struct amdgpu_ip_block *ip_block)
-{
-	return 0;
-}
-
 static int dce_v6_0_soft_reset(struct amdgpu_ip_block *ip_block)
 {
 	DRM_INFO("xxxx: dce_v6_0_soft_reset --- no impl!!\n");
@@ -3144,7 +3139,6 @@ static int dce_v6_0_set_powergating_state(void *handle,
 static const struct amd_ip_funcs dce_v6_0_ip_funcs = {
 	.name = "dce_v6_0",
 	.early_init = dce_v6_0_early_init,
-	.late_init = NULL,
 	.sw_init = dce_v6_0_sw_init,
 	.sw_fini = dce_v6_0_sw_fini,
 	.hw_init = dce_v6_0_hw_init,
@@ -3152,12 +3146,9 @@ static const struct amd_ip_funcs dce_v6_0_ip_funcs = {
 	.suspend = dce_v6_0_suspend,
 	.resume = dce_v6_0_resume,
 	.is_idle = dce_v6_0_is_idle,
-	.wait_for_idle = dce_v6_0_wait_for_idle,
 	.soft_reset = dce_v6_0_soft_reset,
 	.set_clockgating_state = dce_v6_0_set_clockgating_state,
 	.set_powergating_state = dce_v6_0_set_powergating_state,
-	.dump_ip_state = NULL,
-	.print_ip_state = NULL,
 };
 
 static void

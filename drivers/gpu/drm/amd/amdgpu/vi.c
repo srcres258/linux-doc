@@ -1699,11 +1699,6 @@ static int vi_common_sw_init(struct amdgpu_ip_block *ip_block)
 	return 0;
 }
 
-static int vi_common_sw_fini(struct amdgpu_ip_block *ip_block)
-{
-	return 0;
-}
-
 static int vi_common_hw_init(struct amdgpu_ip_block *ip_block)
 {
 	struct amdgpu_device *adev = ip_block->adev;
@@ -1744,16 +1739,6 @@ static int vi_common_resume(struct amdgpu_ip_block *ip_block)
 static bool vi_common_is_idle(void *handle)
 {
 	return true;
-}
-
-static int vi_common_wait_for_idle(struct amdgpu_ip_block *ip_block)
-{
-	return 0;
-}
-
-static int vi_common_soft_reset(struct amdgpu_ip_block *ip_block)
-{
-	return 0;
 }
 
 static void vi_update_bif_medium_grain_light_sleep(struct amdgpu_device *adev,
@@ -2043,19 +2028,14 @@ static const struct amd_ip_funcs vi_common_ip_funcs = {
 	.early_init = vi_common_early_init,
 	.late_init = vi_common_late_init,
 	.sw_init = vi_common_sw_init,
-	.sw_fini = vi_common_sw_fini,
 	.hw_init = vi_common_hw_init,
 	.hw_fini = vi_common_hw_fini,
 	.suspend = vi_common_suspend,
 	.resume = vi_common_resume,
 	.is_idle = vi_common_is_idle,
-	.wait_for_idle = vi_common_wait_for_idle,
-	.soft_reset = vi_common_soft_reset,
 	.set_clockgating_state = vi_common_set_clockgating_state,
 	.set_powergating_state = vi_common_set_powergating_state,
 	.get_clockgating_state = vi_common_get_clockgating_state,
-	.dump_ip_state = NULL,
-	.print_ip_state = NULL,
 };
 
 static const struct amdgpu_ip_block_version vi_common_ip_block =

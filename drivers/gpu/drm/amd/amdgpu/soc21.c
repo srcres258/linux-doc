@@ -842,11 +842,6 @@ static int soc21_common_sw_init(struct amdgpu_ip_block *ip_block)
 	return 0;
 }
 
-static int soc21_common_sw_fini(struct amdgpu_ip_block *ip_block)
-{
-	return 0;
-}
-
 static int soc21_common_hw_init(struct amdgpu_ip_block *ip_block)
 {
 	struct amdgpu_device *adev = ip_block->adev;
@@ -932,16 +927,6 @@ static bool soc21_common_is_idle(void *handle)
 	return true;
 }
 
-static int soc21_common_wait_for_idle(struct amdgpu_ip_block *ip_block)
-{
-	return 0;
-}
-
-static int soc21_common_soft_reset(struct amdgpu_ip_block *ip_block)
-{
-	return 0;
-}
-
 static int soc21_common_set_clockgating_state(void *handle,
 					   enum amd_clockgating_state state)
 {
@@ -1000,17 +985,12 @@ static const struct amd_ip_funcs soc21_common_ip_funcs = {
 	.early_init = soc21_common_early_init,
 	.late_init = soc21_common_late_init,
 	.sw_init = soc21_common_sw_init,
-	.sw_fini = soc21_common_sw_fini,
 	.hw_init = soc21_common_hw_init,
 	.hw_fini = soc21_common_hw_fini,
 	.suspend = soc21_common_suspend,
 	.resume = soc21_common_resume,
 	.is_idle = soc21_common_is_idle,
-	.wait_for_idle = soc21_common_wait_for_idle,
-	.soft_reset = soc21_common_soft_reset,
 	.set_clockgating_state = soc21_common_set_clockgating_state,
 	.set_powergating_state = soc21_common_set_powergating_state,
 	.get_clockgating_state = soc21_common_get_clockgating_state,
-	.dump_ip_state = NULL,
-	.print_ip_state = NULL,
 };

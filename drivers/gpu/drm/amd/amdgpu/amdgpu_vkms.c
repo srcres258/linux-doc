@@ -613,7 +613,8 @@ static int amdgpu_vkms_suspend(struct amdgpu_ip_block *ip_block)
 	r = drm_mode_config_helper_suspend(adev_to_drm(adev));
 	if (r)
 		return r;
-	return amdgpu_vkms_hw_fini(ip_block);
+
+	return 0;
 }
 
 static int amdgpu_vkms_resume(struct amdgpu_ip_block *ip_block)
@@ -631,16 +632,6 @@ static bool amdgpu_vkms_is_idle(void *handle)
 	return true;
 }
 
-static int amdgpu_vkms_wait_for_idle(struct amdgpu_ip_block *ip_block)
-{
-	return 0;
-}
-
-static int amdgpu_vkms_soft_reset(struct amdgpu_ip_block *ip_block)
-{
-	return 0;
-}
-
 static int amdgpu_vkms_set_clockgating_state(void *handle,
 					  enum amd_clockgating_state state)
 {
@@ -655,8 +646,6 @@ static int amdgpu_vkms_set_powergating_state(void *handle,
 
 static const struct amd_ip_funcs amdgpu_vkms_ip_funcs = {
 	.name = "amdgpu_vkms",
-	.early_init = NULL,
-	.late_init = NULL,
 	.sw_init = amdgpu_vkms_sw_init,
 	.sw_fini = amdgpu_vkms_sw_fini,
 	.hw_init = amdgpu_vkms_hw_init,
@@ -664,12 +653,8 @@ static const struct amd_ip_funcs amdgpu_vkms_ip_funcs = {
 	.suspend = amdgpu_vkms_suspend,
 	.resume = amdgpu_vkms_resume,
 	.is_idle = amdgpu_vkms_is_idle,
-	.wait_for_idle = amdgpu_vkms_wait_for_idle,
-	.soft_reset = amdgpu_vkms_soft_reset,
 	.set_clockgating_state = amdgpu_vkms_set_clockgating_state,
 	.set_powergating_state = amdgpu_vkms_set_powergating_state,
-	.dump_ip_state = NULL,
-	.print_ip_state = NULL,
 };
 
 const struct amdgpu_ip_block_version amdgpu_vkms_ip_block = {
