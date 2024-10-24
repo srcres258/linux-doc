@@ -479,28 +479,6 @@ ieee80211_sta_rx_bw_to_chan_width(struct link_sta_info *link_sta)
 	}
 }
 
-enum ieee80211_sta_rx_bandwidth
-ieee80211_chan_width_to_rx_bw(enum nl80211_chan_width width)
-{
-	switch (width) {
-	case NL80211_CHAN_WIDTH_20_NOHT:
-	case NL80211_CHAN_WIDTH_20:
-		return IEEE80211_STA_RX_BW_20;
-	case NL80211_CHAN_WIDTH_40:
-		return IEEE80211_STA_RX_BW_40;
-	case NL80211_CHAN_WIDTH_80:
-		return IEEE80211_STA_RX_BW_80;
-	case NL80211_CHAN_WIDTH_160:
-	case NL80211_CHAN_WIDTH_80P80:
-		return IEEE80211_STA_RX_BW_160;
-	case NL80211_CHAN_WIDTH_320:
-		return IEEE80211_STA_RX_BW_320;
-	default:
-		WARN_ON_ONCE(1);
-		return IEEE80211_STA_RX_BW_20;
-	}
-}
-
 /* FIXME: rename/move - this deals with everything not just VHT */
 enum ieee80211_sta_rx_bandwidth
 _ieee80211_sta_cur_vht_bw(struct link_sta_info *link_sta,
@@ -766,8 +744,7 @@ void ieee80211_vht_handle_opmode(struct ieee80211_sub_if_data *sdata,
 
 	if (changed > 0) {
 		ieee80211_recalc_min_chandef(sdata, link_sta->link_id);
-		rate_control_rate_update(local, sband, link_sta->sta,
-					 link_sta->link_id, changed);
+		rate_control_rate_update(local, sband, link_sta, changed);
 	}
 }
 

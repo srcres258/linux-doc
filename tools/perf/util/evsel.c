@@ -24,6 +24,7 @@
 #include <linux/zalloc.h>
 #include <sys/ioctl.h>
 #include <sys/resource.h>
+#include <sys/syscall.h>
 #include <sys/types.h>
 #include <dirent.h>
 #include <stdlib.h>
@@ -638,7 +639,6 @@ static int evsel__add_modifiers(struct evsel *evsel, char *bf, size_t size)
 {
 	int colon = 0, r = 0;
 	struct perf_event_attr *attr = &evsel->core.attr;
-	bool exclude_guest_default = false;
 
 #define MOD_PRINT(context, mod)	do {					\
 		if (!attr->exclude_##context) {				\
@@ -650,17 +650,15 @@ static int evsel__add_modifiers(struct evsel *evsel, char *bf, size_t size)
 		MOD_PRINT(kernel, 'k');
 		MOD_PRINT(user, 'u');
 		MOD_PRINT(hv, 'h');
-		exclude_guest_default = true;
 	}
 
 	if (attr->precise_ip) {
 		if (!colon)
 			colon = ++r;
 		r += scnprintf(bf + r, size - r, "%.*s", attr->precise_ip, "ppp");
-		exclude_guest_default = true;
 	}
 
-	if (attr->exclude_host || attr->exclude_guest == exclude_guest_default) {
+	if (attr->exclude_host || attr->exclude_guest) {
 		MOD_PRINT(host, 'H');
 		MOD_PRINT(guest, 'G');
 	}
@@ -2088,125 +2086,346 @@ int evsel__prepare_open(struct evsel *evsel, struct perf_cpu_map *cpus,
 	return err;
 }
 
-bool evsel__detect_missing_features(struct evsel *evsel)
+static bool has_attr_feature(struct perf_event_attr *attr, unsigned long flags)
 {
+	int fd = syscall(SYS_perf_event_open, attr, /*pid=*/0, /*cpu=*/-1,
+			 /*group_fd=*/-1, flags);
+	close(fd);
+
+	if (fd < 0) {
+		attr->exclude_kernel = 1;
+
+		fd = syscall(SYS_perf_event_open, attr, /*pid=*/0, /*cpu=*/-1,
+			     /*group_fd=*/-1, flags);
+		close(fd);
+	}
+
+	if (fd < 0) {
+		attr->exclude_hv = 1;
+
+		fd = syscall(SYS_perf_event_open, attr, /*pid=*/0, /*cpu=*/-1,
+			     /*group_fd=*/-1, flags);
+		close(fd);
+	}
+
+	if (fd < 0) {
+		attr->exclude_guest = 1;
+
+		fd = syscall(SYS_perf_event_open, attr, /*pid=*/0, /*cpu=*/-1,
+			     /*group_fd=*/-1, flags);
+		close(fd);
+	}
+
+	attr->exclude_kernel = 0;
+	attr->exclude_guest = 0;
+	attr->exclude_hv = 0;
+
+	return fd >= 0;
+}
+
+static void evsel__detect_missing_pmu_features(struct evsel *evsel)
+{
+	struct perf_event_attr attr = {
+		.type = evsel->core.attr.type,
+		.config = evsel->core.attr.config,
+		.disabled = 1,
+	};
+	struct perf_pmu *pmu = evsel->pmu;
+	int old_errno;
+
+	old_errno = errno;
+
+	if (pmu == NULL)
+		pmu = evsel->pmu = evsel__find_pmu(evsel);
+
+	if (pmu == NULL || pmu->missing_features.checked)
+		goto out;
+
 	/*
 	 * Must probe features in the order they were added to the
-	 * perf_event_attr interface.
+	 * perf_event_attr interface.  These are kernel core limitation but
+	 * specific to PMUs with branch stack.  So we can detect with the given
+	 * hardware event and stop on the first one succeeded.
 	 */
-	if (!perf_missing_features.inherit_sample_read &&
-	    evsel->core.attr.inherit && (evsel->core.attr.sample_type & PERF_SAMPLE_READ)) {
-		perf_missing_features.inherit_sample_read = true;
-		pr_debug2("Using PERF_SAMPLE_READ / :S modifier is not compatible with inherit, falling back to no-inherit.\n");
+
+	/* Please add new feature detection here. */
+
+	attr.exclude_guest = 1;
+	if (has_attr_feature(&attr, /*flags=*/0))
+		goto found;
+	pmu->missing_features.exclude_guest = true;
+	pr_debug2("switching off exclude_guest for PMU %s\n", pmu->name);
+
+found:
+	pmu->missing_features.checked = true;
+out:
+	errno = old_errno;
+}
+
+static void evsel__detect_missing_brstack_features(struct evsel *evsel)
+{
+	static bool detection_done = false;
+	struct perf_event_attr attr = {
+		.type = evsel->core.attr.type,
+		.config = evsel->core.attr.config,
+		.disabled = 1,
+		.sample_type = PERF_SAMPLE_BRANCH_STACK,
+		.sample_period = 1000,
+	};
+	int old_errno;
+
+	if (detection_done)
+		return;
+
+	old_errno = errno;
+
+	/*
+	 * Must probe features in the order they were added to the
+	 * perf_event_attr interface.  These are PMU specific limitation
+	 * so we can detect with the given hardware event and stop on the
+	 * first one succeeded.
+	 */
+
+	/* Please add new feature detection here. */
+
+	attr.branch_sample_type = PERF_SAMPLE_BRANCH_COUNTERS;
+	if (has_attr_feature(&attr, /*flags=*/0))
+		goto found;
+	perf_missing_features.branch_counters = true;
+	pr_debug2("switching off branch counters support\n");
+
+	attr.branch_sample_type = PERF_SAMPLE_BRANCH_HW_INDEX;
+	if (has_attr_feature(&attr, /*flags=*/0))
+		goto found;
+	perf_missing_features.branch_hw_idx = true;
+	pr_debug2("switching off branch HW index support\n");
+
+	attr.branch_sample_type = PERF_SAMPLE_BRANCH_NO_CYCLES | PERF_SAMPLE_BRANCH_NO_FLAGS;
+	if (has_attr_feature(&attr, /*flags=*/0))
+		goto found;
+	perf_missing_features.lbr_flags = true;
+	pr_debug2_peo("switching off branch sample type no (cycles/flags)\n");
+
+found:
+	detection_done = true;
+	errno = old_errno;
+}
+
+static bool evsel__detect_missing_features(struct evsel *evsel)
+{
+	static bool detection_done = false;
+	struct perf_event_attr attr = {
+		.type = PERF_TYPE_SOFTWARE,
+		.config = PERF_COUNT_SW_TASK_CLOCK,
+		.disabled = 1,
+	};
+	int old_errno;
+
+	evsel__detect_missing_pmu_features(evsel);
+
+	if (evsel__has_br_stack(evsel))
+		evsel__detect_missing_brstack_features(evsel);
+
+	if (detection_done)
+		goto check;
+
+	old_errno = errno;
+
+	/*
+	 * Must probe features in the order they were added to the
+	 * perf_event_attr interface.  These are kernel core limitation
+	 * not PMU-specific so we can detect with a software event and
+	 * stop on the first one succeeded.
+	 */
+
+	/* Please add new feature detection here. */
+
+	attr.inherit = true;
+	attr.sample_type = PERF_SAMPLE_READ;
+	if (has_attr_feature(&attr, /*flags=*/0))
+		goto found;
+	perf_missing_features.inherit_sample_read = true;
+	pr_debug2("Using PERF_SAMPLE_READ / :S modifier is not compatible with inherit, falling back to no-inherit.\n");
+	attr.inherit = false;
+	attr.sample_type = 0;
+
+	attr.read_format = PERF_FORMAT_LOST;
+	if (has_attr_feature(&attr, /*flags=*/0))
+		goto found;
+	perf_missing_features.read_lost = true;
+	pr_debug2("switching off PERF_FORMAT_LOST support\n");
+	attr.read_format = 0;
+
+	attr.sample_type = PERF_SAMPLE_WEIGHT_STRUCT;
+	if (has_attr_feature(&attr, /*flags=*/0))
+		goto found;
+	perf_missing_features.weight_struct = true;
+	pr_debug2("switching off weight struct support\n");
+	attr.sample_type = 0;
+
+	attr.sample_type = PERF_SAMPLE_CODE_PAGE_SIZE;
+	if (has_attr_feature(&attr, /*flags=*/0))
+		goto found;
+	perf_missing_features.code_page_size = true;
+	pr_debug2_peo("Kernel has no PERF_SAMPLE_CODE_PAGE_SIZE support\n");
+	attr.sample_type = 0;
+
+	attr.sample_type = PERF_SAMPLE_DATA_PAGE_SIZE;
+	if (has_attr_feature(&attr, /*flags=*/0))
+		goto found;
+	perf_missing_features.data_page_size = true;
+	pr_debug2_peo("Kernel has no PERF_SAMPLE_DATA_PAGE_SIZE support\n");
+	attr.sample_type = 0;
+
+	attr.cgroup = 1;
+	if (has_attr_feature(&attr, /*flags=*/0))
+		goto found;
+	perf_missing_features.cgroup = true;
+	pr_debug2_peo("Kernel has no cgroup sampling support\n");
+	attr.cgroup = 0;
+
+	attr.aux_output = 1;
+	if (has_attr_feature(&attr, /*flags=*/0))
+		goto found;
+	perf_missing_features.aux_output = true;
+	pr_debug2_peo("Kernel has no attr.aux_output support\n");
+	attr.aux_output = 0;
+
+	attr.bpf_event = 1;
+	if (has_attr_feature(&attr, /*flags=*/0))
+		goto found;
+	perf_missing_features.bpf = true;
+	pr_debug2_peo("switching off bpf_event\n");
+	attr.bpf_event = 0;
+
+	attr.ksymbol = 1;
+	if (has_attr_feature(&attr, /*flags=*/0))
+		goto found;
+	perf_missing_features.ksymbol = true;
+	pr_debug2_peo("switching off ksymbol\n");
+	attr.ksymbol = 0;
+
+	attr.write_backward = 1;
+	if (has_attr_feature(&attr, /*flags=*/0))
+		goto found;
+	perf_missing_features.write_backward = true;
+	pr_debug2_peo("switching off write_backward\n");
+	attr.write_backward = 0;
+
+	attr.use_clockid = 1;
+	attr.clockid = CLOCK_MONOTONIC;
+	if (has_attr_feature(&attr, /*flags=*/0))
+		goto found;
+	perf_missing_features.clockid = true;
+	pr_debug2_peo("switching off clockid\n");
+	attr.use_clockid = 0;
+	attr.clockid = 0;
+
+	if (has_attr_feature(&attr, /*flags=*/PERF_FLAG_FD_CLOEXEC))
+		goto found;
+	perf_missing_features.cloexec = true;
+	pr_debug2_peo("switching off cloexec flag\n");
+
+	attr.mmap2 = 1;
+	if (has_attr_feature(&attr, /*flags=*/0))
+		goto found;
+	perf_missing_features.mmap2 = true;
+	pr_debug2_peo("switching off mmap2\n");
+	attr.mmap2 = 0;
+
+	/* set this unconditionally? */
+	perf_missing_features.sample_id_all = true;
+	pr_debug2_peo("switching off sample_id_all\n");
+
+	attr.inherit = 1;
+	attr.read_format = PERF_FORMAT_GROUP;
+	if (has_attr_feature(&attr, /*flags=*/0))
+		goto found;
+	perf_missing_features.group_read = true;
+	pr_debug2_peo("switching off group read\n");
+	attr.inherit = 0;
+	attr.read_format = 0;
+
+found:
+	detection_done = true;
+	errno = old_errno;
+
+check:
+	if (evsel->core.attr.inherit &&
+	    (evsel->core.attr.sample_type & PERF_SAMPLE_READ) &&
+	    perf_missing_features.inherit_sample_read)
 		return true;
-	} else if (!perf_missing_features.branch_counters &&
-	    (evsel->core.attr.branch_sample_type & PERF_SAMPLE_BRANCH_COUNTERS)) {
-		perf_missing_features.branch_counters = true;
-		pr_debug2("switching off branch counters support\n");
+
+	if ((evsel->core.attr.branch_sample_type & PERF_SAMPLE_BRANCH_COUNTERS) &&
+	    perf_missing_features.branch_counters)
 		return true;
-	} else if (!perf_missing_features.read_lost &&
-	    (evsel->core.attr.read_format & PERF_FORMAT_LOST)) {
-		perf_missing_features.read_lost = true;
-		pr_debug2("switching off PERF_FORMAT_LOST support\n");
+
+	if ((evsel->core.attr.read_format & PERF_FORMAT_LOST) &&
+	    perf_missing_features.read_lost)
 		return true;
-	} else if (!perf_missing_features.weight_struct &&
-	    (evsel->core.attr.sample_type & PERF_SAMPLE_WEIGHT_STRUCT)) {
-		perf_missing_features.weight_struct = true;
-		pr_debug2("switching off weight struct support\n");
+
+	if ((evsel->core.attr.sample_type & PERF_SAMPLE_WEIGHT_STRUCT) &&
+	    perf_missing_features.weight_struct)
 		return true;
-	} else if (!perf_missing_features.code_page_size &&
-	    (evsel->core.attr.sample_type & PERF_SAMPLE_CODE_PAGE_SIZE)) {
-		perf_missing_features.code_page_size = true;
-		pr_debug2_peo("Kernel has no PERF_SAMPLE_CODE_PAGE_SIZE support, bailing out\n");
-		return false;
-	} else if (!perf_missing_features.data_page_size &&
-	    (evsel->core.attr.sample_type & PERF_SAMPLE_DATA_PAGE_SIZE)) {
-		perf_missing_features.data_page_size = true;
-		pr_debug2_peo("Kernel has no PERF_SAMPLE_DATA_PAGE_SIZE support, bailing out\n");
-		return false;
-	} else if (!perf_missing_features.cgroup && evsel->core.attr.cgroup) {
-		perf_missing_features.cgroup = true;
-		pr_debug2_peo("Kernel has no cgroup sampling support, bailing out\n");
-		return false;
-	} else if (!perf_missing_features.branch_hw_idx &&
-	    (evsel->core.attr.branch_sample_type & PERF_SAMPLE_BRANCH_HW_INDEX)) {
-		perf_missing_features.branch_hw_idx = true;
-		pr_debug2("switching off branch HW index support\n");
-		return true;
-	} else if (!perf_missing_features.aux_output && evsel->core.attr.aux_output) {
-		perf_missing_features.aux_output = true;
-		pr_debug2_peo("Kernel has no attr.aux_output support, bailing out\n");
-		return false;
-	} else if (!perf_missing_features.bpf && evsel->core.attr.bpf_event) {
-		perf_missing_features.bpf = true;
-		pr_debug2_peo("switching off bpf_event\n");
-		return true;
-	} else if (!perf_missing_features.ksymbol && evsel->core.attr.ksymbol) {
-		perf_missing_features.ksymbol = true;
-		pr_debug2_peo("switching off ksymbol\n");
-		return true;
-	} else if (!perf_missing_features.write_backward && evsel->core.attr.write_backward) {
-		perf_missing_features.write_backward = true;
-		pr_debug2_peo("switching off write_backward\n");
-		return false;
-	} else if (!perf_missing_features.clockid_wrong && evsel->core.attr.use_clockid) {
+
+	if (evsel->core.attr.use_clockid && evsel->core.attr.clockid != CLOCK_MONOTONIC &&
+	    !perf_missing_features.clockid) {
 		perf_missing_features.clockid_wrong = true;
-		pr_debug2_peo("switching off clockid\n");
 		return true;
-	} else if (!perf_missing_features.clockid && evsel->core.attr.use_clockid) {
-		perf_missing_features.clockid = true;
-		pr_debug2_peo("switching off use_clockid\n");
-		return true;
-	} else if (!perf_missing_features.cloexec && (evsel->open_flags & PERF_FLAG_FD_CLOEXEC)) {
-		perf_missing_features.cloexec = true;
-		pr_debug2_peo("switching off cloexec flag\n");
-		return true;
-	} else if (!perf_missing_features.mmap2 && evsel->core.attr.mmap2) {
-		perf_missing_features.mmap2 = true;
-		pr_debug2_peo("switching off mmap2\n");
-		return true;
-	} else if (evsel->core.attr.exclude_guest || evsel->core.attr.exclude_host) {
-		if (evsel->pmu == NULL)
-			evsel->pmu = evsel__find_pmu(evsel);
-
-		if (evsel->pmu)
-			evsel->pmu->missing_features.exclude_guest = true;
-		else {
-			/* we cannot find PMU, disable attrs now */
-			evsel->core.attr.exclude_host = false;
-			evsel->core.attr.exclude_guest = false;
-		}
-
-		if (evsel->exclude_GH) {
-			pr_debug2_peo("PMU has no exclude_host/guest support, bailing out\n");
-			return false;
-		}
-		if (!perf_missing_features.exclude_guest) {
-			perf_missing_features.exclude_guest = true;
-			pr_debug2_peo("switching off exclude_guest, exclude_host\n");
-		}
-		return true;
-	} else if (!perf_missing_features.sample_id_all) {
-		perf_missing_features.sample_id_all = true;
-		pr_debug2_peo("switching off sample_id_all\n");
-		return true;
-	} else if (!perf_missing_features.lbr_flags &&
-			(evsel->core.attr.branch_sample_type &
-			 (PERF_SAMPLE_BRANCH_NO_CYCLES |
-			  PERF_SAMPLE_BRANCH_NO_FLAGS))) {
-		perf_missing_features.lbr_flags = true;
-		pr_debug2_peo("switching off branch sample type no (cycles/flags)\n");
-		return true;
-	} else if (!perf_missing_features.group_read &&
-		    evsel->core.attr.inherit &&
-		   (evsel->core.attr.read_format & PERF_FORMAT_GROUP) &&
-		   evsel__is_group_leader(evsel)) {
-		perf_missing_features.group_read = true;
-		pr_debug2_peo("switching off group read\n");
-		return true;
-	} else {
-		return false;
 	}
+
+	if (evsel->core.attr.use_clockid && perf_missing_features.clockid)
+		return true;
+
+	if ((evsel->open_flags & PERF_FLAG_FD_CLOEXEC) &&
+	    perf_missing_features.cloexec)
+		return true;
+
+	if (evsel->core.attr.mmap2 && perf_missing_features.mmap2)
+		return true;
+
+	if ((evsel->core.attr.branch_sample_type & (PERF_SAMPLE_BRANCH_NO_FLAGS |
+						    PERF_SAMPLE_BRANCH_NO_CYCLES)) &&
+	    perf_missing_features.lbr_flags)
+		return true;
+
+	if (evsel->core.attr.inherit && (evsel->core.attr.read_format & PERF_FORMAT_GROUP) &&
+	    perf_missing_features.group_read)
+		return true;
+
+	if (evsel->core.attr.ksymbol && perf_missing_features.ksymbol)
+		return true;
+
+	if (evsel->core.attr.bpf_event && perf_missing_features.bpf)
+		return true;
+
+	if ((evsel->core.attr.branch_sample_type & PERF_SAMPLE_BRANCH_HW_INDEX) &&
+	    perf_missing_features.branch_hw_idx)
+		return true;
+
+	if (evsel->core.attr.sample_id_all && perf_missing_features.sample_id_all)
+		return true;
+
+	return false;
+}
+
+static bool evsel__handle_error_quirks(struct evsel *evsel, int error)
+{
+	/*
+	 * AMD core PMU tries to forward events with precise_ip to IBS PMU
+	 * implicitly.  But IBS PMU has more restrictions so it can fail with
+	 * supported event attributes.  Let's forward it back to the core PMU
+	 * by clearing precise_ip only if it's from precise_max (:P).
+	 */
+	if ((error == -EINVAL || error == -ENOENT) && x86__is_amd_cpu() &&
+	    evsel->core.attr.precise_ip && evsel->precise_max) {
+		evsel->core.attr.precise_ip = 0;
+		pr_debug2_peo("removing precise_ip on AMD\n");
+		display_attr(&evsel->core.attr);
+		return true;
+	}
+
+	return false;
 }
 
 static int evsel__open_cpu(struct evsel *evsel, struct perf_cpu_map *cpus,
@@ -2327,9 +2546,6 @@ retry_open:
 	return 0;
 
 try_fallback:
-	if (evsel__precise_ip_fallback(evsel))
-		goto retry_open;
-
 	if (evsel__ignore_missing_thread(evsel, perf_cpu_map__nr(cpus),
 					 idx, threads, thread, err)) {
 		/* We just removed 1 thread, so lower the upper nthreads limit. */
@@ -2346,11 +2562,15 @@ try_fallback:
 	if (err == -EMFILE && rlimit__increase_nofile(&set_rlimit))
 		goto retry_open;
 
-	if (err != -EINVAL || idx > 0 || thread > 0)
-		goto out_close;
+	if (err == -EOPNOTSUPP && evsel__precise_ip_fallback(evsel))
+		goto retry_open;
 
-	if (evsel__detect_missing_features(evsel))
+	if (err == -EINVAL && evsel__detect_missing_features(evsel))
 		goto fallback_missing_features;
+
+	if (evsel__handle_error_quirks(evsel, err))
+		goto retry_open;
+
 out_close:
 	if (err)
 		threads->err_thread = thread;
@@ -3155,6 +3375,27 @@ bool evsel__fallback(struct evsel *evsel, struct target *target, int err,
 			  " samples", paranoid);
 		evsel->core.attr.exclude_kernel = 1;
 		evsel->core.attr.exclude_hv     = 1;
+
+		return true;
+	} else if (err == EOPNOTSUPP && !evsel->core.attr.exclude_guest &&
+		   !evsel->exclude_GH) {
+		const char *name = evsel__name(evsel);
+		char *new_name;
+		const char *sep = ":";
+
+		/* Is there already the separator in the name. */
+		if (strchr(name, '/') ||
+		    (strchr(name, ':') && !evsel->is_libpfm_event))
+			sep = "";
+
+		if (asprintf(&new_name, "%s%sH", name, sep) < 0)
+			return false;
+
+		free(evsel->name);
+		evsel->name = new_name;
+		/* Apple M1 requires exclude_guest */
+		scnprintf(msg, msgsize, "trying to fall back to excluding guest samples");
+		evsel->core.attr.exclude_guest = 1;
 
 		return true;
 	}

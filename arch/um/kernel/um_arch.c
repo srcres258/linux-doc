@@ -167,19 +167,6 @@ __uml_setup("root=", uml_root_setup,
 "        root=/dev/ubd5\n\n"
 );
 
-static int __init no_skas_debug_setup(char *line, int *add)
-{
-	os_warn("'debug' is not necessary to gdb UML in skas mode - run\n");
-	os_warn("'gdb linux'\n");
-
-	return 0;
-}
-
-__uml_setup("debug", no_skas_debug_setup,
-"debug\n"
-"    this flag is not needed to run gdb on UML in skas mode\n\n"
-);
-
 static int __init uml_console_setup(char *line, int *add)
 {
 	have_console = 1;
@@ -414,6 +401,8 @@ int __init linux_main(int argc, char **argv, char **envp)
 	if (virtmem_size < physmem_size)
 		os_info("Kernel virtual memory size shrunk to %lu bytes\n",
 			virtmem_size);
+
+	arch_task_struct_size = sizeof(struct task_struct) + host_fp_size;
 
 	os_flush_stdout();
 

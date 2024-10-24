@@ -1346,11 +1346,18 @@ static int io_send_zc_import(struct io_kiocb *req, unsigned int issue_flags)
 		struct io_mapped_ubuf *imu;
 		int idx;
 
-		if (unlikely(sr->buf_index >= ctx->nr_user_bufs))
-			return -EFAULT;
-		idx = array_index_nospec(sr->buf_index, ctx->nr_user_bufs);
-		imu = READ_ONCE(ctx->user_bufs[idx]);
-		io_req_set_rsrc_node(sr->notif, ctx, issue_flags);
+		ret = -EFAULT;
+		io_ring_submit_lock(ctx, issue_flags);
+		if (sr->buf_index < ctx->nr_user_bufs) {
+			idx = array_index_nospec(sr->buf_index, ctx->nr_user_bufs);
+			imu = READ_ONCE(ctx->user_bufs[idx]);
+			io_req_set_rsrc_node(sr->notif, ctx);
+			ret = 0;
+		}
+		io_ring_submit_unlock(ctx, issue_flags);
+
+		if (unlikely(ret))
+			return ret;
 
 		ret = io_import_fixed(ITER_SOURCE, &kmsg->msg.msg_iter, imu,
 					(u64)(uintptr_t)sr->buf, sr->len);
